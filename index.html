@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="page-title">College Management System</title>
+    <link rel="stylesheet" href="css/theme.css?v=127">
+    <link rel="stylesheet" href="css/main.css?v=127">
+    <link rel="stylesheet" href="css/components.css?v=127">
+    <link rel="preload" href="js/bundle.js?v=163" as="script">
+</head>
+<body>
+    <div id="login-screen" class="login-screen">
+        <div class="login-card">
+            <div id="login-logo" class="login-logo-placeholder">CM</div>
+            <h1 id="login-school-name">College Management System</h1>
+            <p class="login-subtitle">Sign in to continue</p>
+            <div class="login-form">
+                <div class="form-group"><label>Username / Phone Number</label><input type="text" id="login-user" placeholder="Phone number (students) or username (staff)"></div>
+                <div class="form-group" style="display:none;"><input type="text" name="fakeuser" autocomplete="off"></div>
+                <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
+                <button class="btn btn-primary btn-full" onclick="login()">Sign In</button>
+                <p id="login-error" class="login-error" style="display:none;"></p>
+                <p class="login-hint" style="margin-top:12px;font-size:11px;color:var(--text-muted);">Don't have an account? <a href="#" onclick="showSignupForm(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">Request Registration</a></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="app" style="display:none;">
+        <header id="main-header">
+            <div class="header-main-row">
+                <div class="header-left">
+                    <button id="menu-toggle" class="btn-icon menu-toggle" onclick="toggleSidebar()" title="Menu">☰</button>
+                    <div id="school-logo" class="logo-container">
+                        <img id="header-logo-img" src="" alt="Logo" style="display:none;">
+                        <div id="header-logo-placeholder" class="logo-placeholder">CM</div>
+                    </div>
+                    <div class="header-info">
+                        <h1 id="school-name">College Management System</h1>
+                        <p id="school-tagline" class="tagline">Academic Excellence</p>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div id="smart-search-container" class="smart-search-container">
+                        <input type="text" id="smart-search" class="smart-search-input" placeholder="🔍 Search anything... (Ctrl+K)" autocomplete="off">
+                        <div id="smart-search-results" class="smart-search-results"></div>
+                    </div>
+                    <div class="header-date" id="header-date"></div>
+                    <button class="btn-icon" id="notif-bell" onclick="showScreen('tickets')" title="Tickets" style="position:relative;">🎫<span id="notif-badge" class="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;">0</span></button>
+                    <div class="user-badge" id="user-badge">
+                        <span id="user-role-badge" class="badge badge-info">Admin</span>
+                        <span id="user-name-display">Admin</span>
+                        <button class="btn-icon" onclick="logout()" title="Logout">⏻</button>
+                    </div>
+                </div>
+            </div>
+            <div class="header-credit">Designed by: David Wafula</div>
+        </header>
+
+        <nav id="main-nav" class="sidebar"></nav>
+
+        <main id="main-content">
+            <section id="screen-dashboard" class="screen active">
+                <div class="screen-header"><h2>Dashboard</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="showQuickEnroll()">+ Quick Enroll</button>
+                    <button class="btn btn-outline" onclick="sendBulkWhatsApp()">📱 WhatsApp Blast</button>
+                </div></div>
+                <div class="dashboard-grid">
+                    <div id="dash-pending-banner" style="display:none;"></div>
+                    <div id="dash-stats" class="stats-row"></div>
+                    <div class="dashboard-cards">
+                        <div class="card"><h3>Recent Students</h3><div id="dash-recent-students"></div></div>
+                        <div class="card"><h3>Today's Schedule</h3><div id="dash-today-schedule"></div></div>
+                        <div class="card"><h3>Upcoming Events</h3><div id="dash-upcoming-events"></div></div>
+                        <div class="card"><h3>Finance Overview</h3><div id="dash-finance"></div></div>
+                        <div class="card"><h3>Notifications</h3><div id="dash-alerts"></div></div>
+                        <div class="card"><h3>Tickets & Complaints</h3><div id="dash-tickets"></div></div>
+                        <div class="card"><h3>Attendance Alerts</h3><div id="dash-attendance-alerts"></div></div>
+                        <div class="card"><h3>Low Stock Alerts</h3><div id="dash-stock-alerts"></div></div>
+                        <div class="card"><h3>Online Users</h3><div id="dash-online" style="font-size:12px;color:var(--text-secondary);"></div></div>
+                        <div class="card"><h3>Server Health</h3><div id="dash-server-health" style="font-size:12px;color:var(--text-secondary);"></div></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="screen-students" class="screen">
+                <div class="screen-header"><h2>Students</h2><div class="screen-actions">
+                    <input type="text" id="student-search" placeholder="Search students..." class="search-input">
+                    <select id="student-filter-status" class="filter-select"><option value="">All Status</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="graduated">Graduated</option><option value="suspended">Suspended</option><option value="dropped">Dropped</option><option value="alumni">Alumni</option></select>
+                    <select id="student-filter-campus" class="filter-select"><option value="">All Centers</option></select>
+                    <select id="student-filter-program" class="filter-select"><option value="">All Programs</option></select>
+                    <button class="btn btn-outline" onclick="showProgramAssignment()">📋 Enroll in Program</button>
+                    <button class="btn btn-primary" onclick="showStudentForm()">+ Add Student</button>
+                    <button class="btn btn-outline" onclick="showStudentDirectory()">🖨 Print Directory</button>
+                    <button class="btn btn-outline" onclick="exportStudentsCSV()">Export CSV</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Admission #</th><th>Student</th><th>Study Center</th><th>Program</th><th>Year</th><th>Status</th><th>Balance</th><th>Actions</th></tr></thead><tbody id="students-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-courses" class="screen">
+                <div class="screen-header"><h2>Courses & Classes</h2><div class="screen-actions">
+                    <input type="text" id="course-search" placeholder="Search courses..." class="search-input">
+                    <button class="btn btn-primary" onclick="showCourseForm()">+ Add Course</button>
+                    <button class="btn btn-outline" onclick="exportCoursesCSV()">Export CSV</button>
+                </div></div>
+                <div class="tabs" id="course-tabs"><button class="tab-btn active" data-tab="course-list">Courses</button><button class="tab-btn" data-tab="class-schedule">Schedule</button></div>
+                <div id="tab-course-list" class="tab-content active"><div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Code</th><th>Course Name</th><th>Credits</th><th>Department</th><th>Campus</th><th>Instructor</th><th>Students</th><th>Actions</th></tr></thead><tbody id="courses-body"></tbody></table></div></div></div>
+                <div id="tab-class-schedule" class="tab-content"><div class="card"><div id="schedule-grid" class="schedule-grid"></div></div></div>
+            </section>
+
+            <section id="screen-attendance" class="screen">
+                <div class="screen-header"><h2>Attendance</h2><div class="screen-actions">
+                    <select id="attendance-type" class="filter-select" onchange="populateAttendanceCourses()"><option value="class">Class Attendance</option><option value="chapel">Chapel Attendance</option></select>
+                    <input type="date" id="attendance-date" class="date-input">
+                    <select id="attendance-center" class="filter-select"><option value="">All Centers</option></select>
+                    <select id="attendance-course" class="filter-select"><option value="">Select Course/Service...</option></select>
+                    <button class="btn btn-primary" onclick="loadAttendance()">Load Attendance</button>
+                    <button class="btn btn-outline" onclick="printAttendance()" id="btn-print-att" style="display:none">🖨 Print</button>
+                </div></div>
+                <div class="card"><div id="attendance-sheet" class="attendance-sheet"></div></div>
+            </section>
+
+            <section id="screen-grades" class="screen">
+                <div class="screen-header"><h2>Grades & Transcripts</h2><div class="screen-actions">
+                    <select id="grades-course" class="filter-select"><option value="">Select Course...</option></select>
+                    <select id="grades-semester" class="filter-select"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select>
+                    <button class="btn btn-primary" onclick="loadGrades()">Load Grades</button>
+                    <button class="btn btn-success" onclick="computeAndSaveAllGrades()">Compute Weighted</button>
+                    <button class="btn btn-outline" onclick="showTranscriptForm()">Generate Transcript</button>
+                    <button class="btn btn-outline" onclick="showFinalTranscriptForm()">Final Transcript</button>
+                </div></div>
+                <div class="card"><div id="grades-sheet" class="grades-sheet"></div></div>
+            </section>
+
+            <section id="screen-exams" class="screen">
+                <div class="screen-header"><h2>Examinations</h2><div class="screen-actions">
+                    <select id="exam-semester" class="filter-select"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select>
+                    <button class="btn btn-primary" onclick="showExamForm()">+ Schedule Exam</button>
+                    <button class="btn btn-outline" onclick="showSeatingPlan()">Seating Plan</button>
+                    <button class="btn btn-outline" onclick="showModerationReport()">Moderation Report</button>
+                    <button class="btn btn-success" onclick="showExamNotifyForm()">📱 Notify</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Date</th><th>Time</th><th>Venue</th><th>Students</th><th>Invigilator</th><th>Status</th><th>Actions</th></tr></thead><tbody id="exams-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-manuals" class="screen">
+                <div class="screen-header"><h2>Student Manuals</h2></div>
+            </section>
+
+            <section id="screen-staff" class="screen">
+                <div class="screen-header"><h2>Staff & Faculty</h2><div class="screen-actions">
+                    <input type="text" id="staff-search" placeholder="Search staff..." class="search-input">
+                    <button class="btn btn-primary" onclick="showStaffForm()">+ Add Staff</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Department</th><th>Campus</th><th>Contact</th><th>Status</th><th>Actions</th></tr></thead><tbody id="staff-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-finance" class="screen">
+                <div class="screen-header"><h2>Finance</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="showInstallmentForm()">Payment Plans</button>
+                    <button class="btn btn-outline" onclick="showFeeStructureForm()">Fee Structure</button>
+                    <button class="btn btn-outline" onclick="exportFinanceCSV()">Export CSV</button>
+                    <span id="printer-status" class="badge badge-secondary" style="font-size:10px;cursor:default;">🖨️ Disconnected</span>
+                    <button class="btn btn-outline btn-sm" id="connect-printer-btn" onclick="connectBluetoothPrinter()">Connect Printer</button>
+                </div></div>
+                <div class="dashboard-grid">
+                    <div id="finance-stats" class="stats-row"></div>
+                    <div class="tabs" id="finance-tabs">
+                        <button class="tab-btn active" data-tab="finance-payments">Fee Payments</button>
+                        <button class="tab-btn" data-tab="finance-income">Other Income</button>
+                        <button class="tab-btn" data-tab="finance-payroll">Expenses</button>
+                        <button class="tab-btn" data-tab="finance-payroll-new">Payroll</button>
+                        <button class="tab-btn" data-tab="finance-installments">Installments</button>
+                        <button class="tab-btn" data-tab="finance-balances">Balances</button>
+                        <button class="tab-btn" data-tab="finance-statements">Statements</button>
+                        <button class="tab-btn" data-tab="finance-mpesa">M-Pesa</button>
+                    </div>
+                    <div id="tab-finance-payments" class="tab-content active"><div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Receipt #</th><th>Date</th><th>Student</th><th>Amount</th><th>Method</th><th>ACTIONS / RECEIPTS</th></tr></thead><tbody id="payments-body"></tbody></table></div></div></div>
+                    <div id="tab-finance-income" class="tab-content">
+                        <div class="dashboard-grid"><div id="income-summary" class="stats-row"></div></div>
+                        <div class="card" style="margin-top:12px;"><div id="income-categories-list"></div></div>
+                        <div class="card" style="margin-top:12px;"><div id="income-records-list"></div></div>
+                    </div>
+                    <div id="tab-finance-payroll" class="tab-content">
+                        <div class="card" style="margin-bottom:12px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;">
+                                <h3 style="margin:0;">Expense Categories</h3>
+                                <button class="btn btn-primary btn-sm" onclick="showExpenseCategoryForm()">+ Add Category</button>
+                            </div>
+                            <div id="expense-categories-list"></div>
+                        </div>
+                        <div class="card">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                                <h3 style="margin:0;">Expenses</h3>
+                            </div>
+                            <div id="expenses-list"></div>
+                        </div>
+                    </div>
+                    <div id="tab-finance-payroll-new" class="tab-content">
+                        <div class="card" style="margin-bottom:12px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                                <h3 style="margin:0;">💰 Payroll Management</h3>
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn btn-outline btn-sm" onclick="showDeductionForm()">⚙️ Deductions</button>
+                                    <button class="btn btn-primary btn-sm" onclick="showPayrollRunForm()">+ Run Payroll</button>
+                                </div>
+                            </div>
+                            <div class="form-row" style="margin-bottom:12px;">
+                                <div class="form-group"><label>Month</label><input type="month" id="payroll-month" value=""></div>
+                                <div class="form-group"><label>Staff</label><select id="payroll-staff"><option value="">All Staff</option></select></div>
+                                <div class="form-group" style="display:flex;align-items:flex-end;"><button class="btn btn-primary" onclick="renderPayrollList()">Load Payroll</button></div>
+                            </div>
+                            <div id="deductions-summary" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:var(--radius);"></div>
+                        </div>
+                        <div class="card" style="margin-bottom:12px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                                <h4 style="margin:0;">🏦 Deduction Destinations</h4>
+                                <button class="btn btn-outline btn-sm" onclick="showDeductionAccountForm()">+ Add Account</button>
+                            </div>
+                            <div id="deduction-accounts-list" style="background:#1e293b;color:#fff;padding:12px;border-radius:8px;"></div>
+                        </div>
+                        <div class="card" style="margin-bottom:12px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                                <h4 style="margin:0;">📊 Disbursement Report</h4>
+                                <button class="btn btn-primary btn-sm" onclick="generateDisbursementReport()">Generate Report</button>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h4 style="margin-bottom:8px;">Payslips</h4>
+                            <div id="payroll-list"></div>
+                        </div>
+                    </div>
+                    <div id="tab-finance-installments" class="tab-content"><div class="card"><div id="installments-list"></div></div></div>
+                    <div id="tab-finance-balances" class="tab-content"><div class="card"><div id="balances-list"></div></div></div>
+                    <div id="tab-finance-mpesa" class="tab-content">
+                        <div class="card" style="margin-bottom:12px;">
+                            <div class="form-row">
+                                <div class="form-group"><label>Student</label><select id="mpesa-student"><option value="">Select student...</option></select></div>
+                                <div class="form-group"><label>Phone (254XXXXXXXXX)</label><input type="text" id="mpesa-phone" placeholder="254712345678"></div>
+                                <div class="form-group"><label>Amount (KES)</label><input type="number" id="mpesa-amount" min="1"></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
+                                    <button class="btn btn-primary" onclick="sendMpesaSTKPush()">📱 Send STK Push</button>
+                                    <button class="btn btn-outline" onclick="checkMpesaStatus()">🔄 Check Status</button>
+                                </div>
+                            </div>
+                            <div id="mpesa-health" style="margin-top:8px;font-size:13px;"></div>
+                            <div id="mpesa-result" style="margin-top:8px;font-size:13px;"></div>
+                        </div>
+                        <div class="card">
+                            <h4 style="margin-bottom:8px;">M-Pesa Transaction Log</h4>
+                            <div id="mpesa-transactions-list"></div>
+                        </div>
+                    </div>
+                    <div id="tab-finance-statements" class="tab-content">
+                        <div class="card" style="margin-bottom:12px;">
+                            <h3>Financial Statements</h3>
+                            <div class="form-row" style="margin-bottom:8px;">
+                                <div class="form-group"><label>Statement Type</label><select id="stmt-type" onchange="onStatementTypeChange()">
+                                    <option value="fee">Student Fee Statement</option>
+                                    <option value="income">Income Statement</option>
+                                    <option value="expense">Expense Statement</option>
+                                    <option value="summary">Financial Summary (Income vs Expenses)</option>
+                                    <option value="cashbook">Cash Book</option>
+                                    <option value="ledger">Ledger (All Accounts)</option>
+                                </select></div>
+                                <div class="form-group"><label>From Date</label><input type="date" id="stmt-from"></div>
+                                <div class="form-group"><label>To Date</label><input type="date" id="stmt-to"></div>
+                            </div>
+                            <div id="stmt-student-select" class="form-row" style="margin-bottom:8px;">
+                                <div class="form-group"><label>Student</label><select id="stmt-student"><option value="">Select student...</option></select></div>
+                            </div>
+                            <div class="form-row" style="margin-bottom:8px;">
+                                <div class="form-group" style="display:flex;align-items:flex-end;"><button class="btn btn-primary" onclick="generateStatement()">Generate Statement</button></div>
+                            </div>
+                            <div class="form-row" style="margin-bottom:8px;">
+                                <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
+                                    <button class="btn btn-success" onclick="printStatement()">Print</button>
+                                    <button class="btn btn-outline" onclick="downloadStatementPDF()">Download</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="statement-output" style="background:#fff;color:#000;padding:0;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="screen-chapel" class="screen">
+                <div class="screen-header"><h2>Chapel & Spiritual Formation</h2><div class="screen-actions">
+                    <input type="date" id="chapel-date" class="date-input">
+                    <select id="chapel-service" class="filter-select"><option value="morning">Morning Chapel</option><option value="evening">Evening Chapel</option><option value="sunday">Sunday Service</option><option value="prayer">Prayer Meeting</option></select>
+                    <button class="btn btn-primary" onclick="loadChapelAttendance()">Load Chapel</button>
+                    <button class="btn btn-outline" onclick="showChapelReport()">Spiritual Report</button>
+                </div></div>
+                <div class="card"><div id="chapel-sheet" class="attendance-sheet"></div></div>
+            </section>
+
+            <section id="screen-graduation" class="screen">
+                <div class="screen-header"><h2>Graduation Requirements</h2><div class="screen-actions">
+                    <select id="grad-program" class="filter-select" onchange="checkGraduation()"><option value="">Select Program...</option></select>
+                    <select id="grad-year" class="filter-select" onchange="checkGraduation()"><option value="">Select Year...</option></select>
+                    <button class="btn btn-primary" onclick="checkGraduation()">Check Eligibility</button>
+                    <button class="btn btn-success" onclick="generateGraduationList()">📋 Generate List</button>
+                    <button class="btn btn-outline" onclick="showGraduationRequirements()">Manage Requirements</button>
+                    <button class="btn btn-outline" onclick="showBrochureDesigner()">📰 Brochure</button>
+                    <button class="btn btn-outline" onclick="showInvitationDesigner()">💌 Invitation</button>
+                    <button class="btn btn-outline" onclick="showDiplomaDesigner()">🎓 Diploma</button>
+                    <button class="btn btn-outline" onclick="generateGraduationSeating()">🪑 Seating</button>
+                </div></div>
+                <div class="card"><div id="graduation-list"></div></div>
+            </section>
+
+            <section id="screen-hostel" class="screen">
+                <div class="screen-header"><h2>Hostel & Dormitory</h2><div class="screen-actions">
+                    <select id="hostel-filter" class="filter-select"><option value="">All Hostels</option></select>
+                    <button class="btn btn-primary" onclick="showHostelForm()">+ Add Hostel/Room</button>
+                    <button class="btn btn-outline" onclick="showRoomAssignment()">Assign Room</button>
+                </div></div>
+                <div class="tabs" id="hostel-tabs"><button class="tab-btn active" data-tab="hostel-list">Hostels</button><button class="tab-btn" data-tab="hostel-occupancy">Occupancy</button></div>
+                <div id="tab-hostel-list" class="tab-content active"><div class="card"><div id="hostel-list-content"></div></div></div>
+                <div id="tab-hostel-occupancy" class="tab-content"><div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Room</th><th>Occupant</th><th>Program</th><th>Check-in</th><th>Status</th><th>Actions</th></tr></thead><tbody id="hostel-occupancy-body"></tbody></table></div></div></div>
+            </section>
+
+            <section id="screen-library" class="screen">
+                <div class="screen-header"><h2>Library</h2><div class="screen-actions">
+                    <input type="text" id="library-search" placeholder="Search books..." class="search-input">
+                    <button class="btn btn-primary" onclick="showBookForm()">+ Add Book</button>
+                </div></div>
+                <div class="tabs" id="library-tabs"><button class="tab-btn active" data-tab="library-books">Books</button><button class="tab-btn" data-tab="library-borrowed">Borrowed</button></div>
+                <div id="tab-library-books" class="tab-content active"><div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>ISBN</th><th>Title</th><th>Author</th><th>Category</th><th>Copies</th><th>Available</th><th>Actions</th></tr></thead><tbody id="books-body"></tbody></table></div></div></div>
+                <div id="tab-library-borrowed" class="tab-content"><div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Student</th><th>Book</th><th>Borrowed</th><th>Due Date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="borrowed-body"></tbody></table></div></div></div>
+            </section>
+
+            <section id="screen-inventory" class="screen">
+                <div class="screen-header"><h2>Inventory & Assets</h2><div class="screen-actions">
+                    <input type="text" id="inventory-search" placeholder="Search items..." class="search-input">
+                    <button class="btn btn-primary" onclick="showInventoryForm()">+ Add Item</button>
+                    <button class="btn btn-outline" onclick="showInventoryReport()">Stock Report</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Asset #</th><th>Item Name</th><th>Category</th><th>Quantity</th><th>Location</th><th>Status</th><th>Value</th><th>Actions</th></tr></thead><tbody id="inventory-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-alumni" class="screen">
+                <div class="screen-header"><h2>Alumni Registry</h2><div class="screen-actions">
+                    <input type="text" id="alumni-search" placeholder="Search alumni..." class="search-input">
+                    <button class="btn btn-outline" onclick="showAlumniForm()">+ Add Alumni</button>
+                    <button class="btn btn-outline" onclick="sendBulkWhatsApp('alumni')">📱 WhatsApp Alumni</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Program</th><th>Grad Year</th><th>Ministry/Work</th><th>Contact</th><th>WhatsApp</th><th>Actions</th></tr></thead><tbody id="alumni-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-certificates" class="screen">
+                <div class="screen-header"><h2>Certificates & Documents</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="showCertificateForm()">+ Generate Document</button>
+                </div></div>
+                <div class="card"><div id="certificates-list"><p style="color:var(--text-muted);text-align:center;padding:40px;">No documents generated yet</p></div></div>
+            </section>
+
+            <section id="screen-events" class="screen">
+                <div class="screen-header"><h2>Events & Academic Calendar</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="showEventForm()">+ Add Event</button>
+                </div></div>
+                <div class="card"><div id="events-calendar" class="calendar"></div><div id="events-list" class="events-list"></div></div>
+            </section>
+
+            <section id="screen-whatsapp" class="screen">
+                <div class="screen-header"><h2>WhatsApp Messaging</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="sendBulkWhatsApp()">📱 Broadcast Message</button>
+                </div></div>
+                <div class="dashboard-grid">
+                    <div class="card" id="whatsapp-test-config-card"><h3>Test Configuration</h3>
+                        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                            <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0;">
+                                <label>Test Phone Number</label>
+                                <input type="text" id="wa-test-phone" placeholder="e.g., 254712345678" style="width:100%;">
+                                <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Test messages will be sent to this number. Use your own number to verify templates before sending to students.</div>
+                            </div>
+                            <button class="btn btn-primary" onclick="saveTestPhone()" style="margin-bottom:0;">Save</button>
+                        </div>
+                    </div>
+                    <div class="card"><h3>Message Templates</h3><div id="whatsapp-templates"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showTemplateForm()">+ Add Template</button></div>
+                    <div class="card"><h3>Message Log</h3><div id="whatsapp-log"></div></div>
+                </div>
+            </section>
+
+            <section id="screen-communication" class="screen">
+                <div class="screen-header"><h2>📱 Communication Center</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="sendBulkWhatsApp()">📱 Broadcast Message</button>
+                </div></div>
+                <div id="communication-content"></div>
+            </section>
+
+            <section id="screen-sms" class="screen">
+                <div class="screen-header"><h2>SMS Messaging</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="showSMSBroadcast()">📨 Bulk SMS</button>
+                </div></div>
+                <div class="dashboard-grid">
+                    <div class="card"><h3>SMS Templates</h3><div id="sms-templates"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showSMSTemplateForm()">+ Add Template</button></div>
+                    <div class="card"><h3>SMS Log</h3><div id="sms-log"></div></div>
+                </div>
+            </section>
+
+            <section id="screen-audit" class="screen">
+                <div class="screen-header"><h2>Audit Trail <span id="audit-count" style="font-size:12px;font-weight:normal;color:var(--text-muted);"></span></h2><div class="screen-actions">
+                    <input type="date" id="audit-from" class="date-input">
+                    <input type="date" id="audit-to" class="date-input">
+                    <select id="audit-user" class="filter-select"><option value="">All Users</option></select>
+                    <button class="btn btn-outline" onclick="renderAudit()">Filter</button>
+                    <button class="btn btn-outline" onclick="exportAudit()">Export</button>
+                    <button class="btn btn-outline" onclick="pruneAudit()">Prune</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Date/Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody id="audit-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-verify" class="screen">
+                <div class="screen-header"><h2>Verify Document</h2></div>
+                <div class="card" style="max-width:600px;margin:0 auto;">
+                    <div class="form-group"><label>Document ID</label><input type="text" id="verify-docid" placeholder="e.g. FTR-1712345678" style="width:100%;"></div>
+                    <div class="form-group"><label>Verification Code</label><input type="text" id="verify-vcode" placeholder="e.g. V-A7K2-M9B3" style="width:100%;"></div>
+                    <button class="btn btn-primary btn-full" onclick="verifyDocument()">🔍 Verify</button>
+                    <div id="verify-result" style="margin-top:16px;"></div>
+                </div>
+            </section>
+
+            <section id="screen-reprint" class="screen">
+                <div class="screen-header"><h2>Reprint Lost Document</h2></div>
+                <div class="card" style="max-width:650px;margin:0 auto;">
+                    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Enter the Document ID and Verification Code printed on the document to retrieve and reprint it.</p>
+                    <div class="form-group"><label>Document ID</label><input type="text" id="reprint-docid" placeholder="e.g. FTR-1712345678 or TRX-..." style="width:100%;"></div>
+                    <div class="form-group"><label>Verification Code</label><input type="text" id="reprint-vcode" placeholder="e.g. V-A7K2-M9B3" style="width:100%;"></div>
+                    <button class="btn btn-primary btn-full" onclick="reprintDocument()">🔍 Retrieve Document</button>
+                    <div id="reprint-result" style="margin-top:16px;"></div>
+                </div>
+            </section>
+
+            <section id="screen-idcards" class="screen">
+                <div class="screen-header"><h2>ID Card Generation</h2><div class="screen-actions">
+                    <select id="idcard-type" class="filter-select"><option value="student">Student ID</option><option value="staff">Staff ID</option></select>
+                    <input type="text" id="idcard-search" placeholder="Search..." class="search-input">
+                    <button class="btn btn-primary" onclick="generateIDCards()">Generate Cards</button>
+                </div></div>
+                <div class="card" style="margin-bottom:12px;">
+                    <div style="padding:10px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                        <span style="font-size:12px;font-weight:600;">Registrar Signature:</span>
+                        <input type="file" id="idcard-sig-upload" accept="image/*" style="font-size:11px;">
+                        <button class="btn btn-outline btn-sm" onclick="uploadRegistrarSignature()">Upload</button>
+                        <div id="idcard-sig-preview" style="display:inline-block;"></div>
+                    </div>
+                </div>
+                <div class="card"><div id="idcards-preview"></div></div>
+            </section>
+
+            <section id="screen-lessons" class="screen">
+                <div class="screen-header"><h2>Lessons & Topics</h2><div class="screen-actions">
+                    <select id="lesson-course" class="filter-select"><option value="">All Courses...</option></select>
+                    <select id="lesson-status-filter" class="filter-select"><option value="all">All Status</option><option value="published">Published Only</option><option value="draft">Draft Only</option></select>
+                    <button class="btn btn-primary" onclick="showLessonForm()">+ Add Lesson</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>#</th><th>Title</th><th>Description</th><th>Notes</th><th>Questions</th><th>Files</th><th>Actions</th></tr></thead><tbody id="lessons-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-questions" class="screen">
+                <div class="screen-header"><h2>Question Bank</h2><div class="screen-actions">
+                    <select id="qb-course" class="filter-select"><option value="">All Courses</option></select>
+                    <select id="qb-type" class="filter-select"><option value="">All Types</option><option value="mcq">Multiple Choice</option><option value="essay">Essay</option><option value="truefalse">True/False</option><option value="matching">🔗 Matching</option></select>
+                    <button class="btn btn-primary" onclick="showQuestionForm()">+ Add Question</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Lesson</th><th>Type</th><th>Question</th><th>Answer</th><th>Points</th><th>Actions</th></tr></thead><tbody id="questions-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-quizzes" class="screen">
+                <div class="screen-header"><h2>Quizzes & Assessments</h2><div class="screen-actions">
+                    <select id="quiz-course" class="filter-select"><option value="">All Courses</option></select>
+                    <button class="btn btn-primary" onclick="showQuizForm()">+ Create Quiz</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Quiz</th><th>Course</th><th>Lesson</th><th>Questions</th><th>Points</th><th>Pass Mark</th><th>Submissions</th><th>Actions</th></tr></thead><tbody id="quizzes-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-progress" class="screen">
+                <div class="screen-header"><h2>Student Progress</h2><div class="screen-actions">
+                    <div class="progress-search-wrapper" style="position:relative;width:320px;">
+                        <input type="text" id="progress-student-search" class="smart-search-input" placeholder="🔍 Search student..." autocomplete="off">
+                        <div id="progress-student-dropdown" class="smart-search-results"></div>
+                        <input type="hidden" id="progress-student" value="">
+                    </div>
+                    <select id="progress-course" class="filter-select"><option value="">All Courses</option></select>
+                    <button class="btn btn-outline" onclick="renderProgress()">Refresh</button>
+                </div></div>
+                <div id="progress-overview-stats" class="stats-row"></div>
+                <div class="card"><div id="progress-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Select a student to view progress</p></div></div>
+            </section>
+
+            <section id="screen-submissions" class="screen">
+                <div class="screen-header"><h2>Quiz Results</h2><div class="screen-actions">
+                    <select id="sub-quiz" class="filter-select"><option value="">All Quizzes</option></select>
+                    <select id="sub-status" class="filter-select"><option value="">All</option><option value="pass">Passed</option><option value="fail">Failed</option><option value="pending_review">Pending Review</option></select>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Student</th><th>Quiz</th><th>Score</th><th>Points</th><th>Grade</th><th>Status</th><th>Attempts</th><th>Date</th><th>Actions</th></tr></thead><tbody id="submissions-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-notes" class="screen">
+                <div class="screen-header"><h2>Study Notes</h2><div class="screen-actions">
+                    <select id="notes-course" class="filter-select"><option value="">All Courses</option></select>
+                    <button class="btn btn-primary" onclick="showNoteForm()">+ Add Note</button>
+                </div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Lesson</th><th>Title</th><th>Preview</th><th>Created</th><th>Actions</th></tr></thead><tbody id="notes-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-portal" class="screen">
+                <div class="screen-header"><h2>Student Portal</h2><div class="screen-actions">
+                    <div class="portal-search-wrapper" style="position:relative;width:320px;">
+                        <input type="text" id="portal-student-search" class="smart-search-input" placeholder="🔍 Search student by name, admission #, email..." autocomplete="off">
+                        <div id="portal-student-dropdown" class="smart-search-results"></div>
+                        <input type="hidden" id="portal-student" value="">
+                    </div>
+                    <button class="btn btn-outline" onclick="showTicketForm()">🎫 Submit Ticket</button>
+                    <button class="btn btn-outline" onclick="viewPortalTranscript()">View Transcript</button>
+                </div></div>
+                <div class="dashboard-grid">
+                    <div id="portal-overview" class="stats-row"></div>
+                    <div class="dashboard-cards">
+                        <div class="card"><h3>📝 Active Quizzes</h3><div id="portal-quizzes"></div></div>
+                        <div class="card"><h3>📚 Study Notes</h3><div id="portal-notes"></div></div>
+                        <div class="card"><h3>📊 Recent Grades</h3><div id="portal-grades"></div></div>
+                        <div class="card"><h3>💰 Fee Status</h3><div id="portal-finance"></div></div>
+                        <div class="card"><h3>📋 Attendance</h3><div id="portal-attendance"></div></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="screen-student-hub" class="screen">
+                <div class="screen-header"><h2>🎓 My Student Hub</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="renderStudentHub()">🔄 Refresh</button>
+                </div></div>
+                <div id="student-hub-content"></div>
+            </section>
+
+            <section id="screen-pending" class="screen">
+                <div class="screen-header"><h2>Pending Registrations</h2><div class="screen-actions"></div></div>
+                <div class="card" style="max-width:900px;margin:0 auto;">
+                    <div id="pending-stats" style="display:flex;gap:16px;margin-bottom:16px;"></div>
+                    <div id="pending-list"></div>
+                </div>
+            </section>
+
+            <section id="screen-discussions" class="screen">
+                <div class="screen-header"><h2>💬 Discussions</h2><div class="screen-actions">
+                    <select id="disc-course-filter" class="filter-select" onchange="renderDiscussions()"><option value="">All Courses</option></select>
+                    <button class="btn btn-primary" onclick="showNewDiscussionModal()">+ New Discussion</button>
+                </div></div>
+                <div id="discussions-list" class="discussions-container"></div>
+            </section>
+
+            <section id="screen-tickets" class="screen">
+                <div class="screen-header"><h2>Tickets & Complaints</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="showTicketForm()">+ New Ticket</button>
+                </div></div>
+                <div id="ticket-stats" class="stats-row"></div>
+                <div class="card"><div id="tickets-list"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading tickets...</p></div></div>
+            </section>
+
+            <section id="screen-settings" class="screen">
+                <div class="screen-header"><h2>Settings & Configuration</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="downloadBackup()">⬇ Backup</button>
+                    <button class="btn btn-outline" onclick="document.getElementById('restore-input').click()">Restore</button>
+                    <input type="file" id="restore-input" style="display:none" accept=".json" onchange="handleRestoreFile(event)">
+                </div></div>
+                <div class="settings-grid">
+                    <div class="card"><h3>Branding</h3>
+                        <div class="form-group"><label>Institution Name</label><input type="text" id="settings-school-name"></div>
+                        <div class="form-group"><label>Tagline</label><input type="text" id="settings-tagline"></div>
+                        <div class="form-group"><label>College Initials</label><input type="text" id="settings-initials" placeholder="e.g., NF" maxlength="5" style="text-transform:uppercase;"></div>
+                        <div class="form-group"><label>KRA PIN</label><input type="text" id="settings-kra-pin" placeholder="e.g., P051234567Z"></div>
+                        <div class="form-group"><label>Logo</label><div class="logo-upload"><img id="settings-logo-preview" style="display:none;"><div id="settings-logo-placeholder" class="logo-placeholder">Upload</div><input type="file" id="settings-logo" accept="image/*" onchange="handleLogoUpload(event)"></div></div>
+                        <div class="form-group"><label>Receipt Logo (B&W)</label><div class="logo-upload"><img id="settings-receipt-logo-preview" style="display:none;"><div id="settings-receipt-logo-placeholder" class="logo-placeholder">Upload</div><input type="file" id="settings-receipt-logo" accept="image/*" onchange="handleReceiptLogoUpload(event)"></div></div>
+                        <div class="form-row"><div class="form-group"><label>Accent Color</label><input type="color" id="settings-accent-color" value="#f59e0b"></div><div class="form-group"><label>Theme</label><select id="settings-theme"><option value="dark">Dark</option><option value="light">Light</option></select></div></div>
+                        <div class="form-group"><label>Receipt Footer</label><textarea id="settings-receipt-footer" rows="2" placeholder="e.g., Thank you for your payment! E&OE"></textarea></div>
+                        <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
+                        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Address Details (shown on official documents)</div>
+                        <div class="form-group"><label>Postal Address</label><textarea id="settings-postalAddress" rows="2" placeholder="e.g., P.O. Box 12345"></textarea></div>
+                        <div class="form-group"><label>City</label><input type="text" id="settings-city" placeholder="e.g., Nairobi"></div>
+                        <div class="form-row"><div class="form-group"><label>Phone</label><input type="text" id="settings-phone" placeholder="e.g., +254 712 345 678"></div><div class="form-group"><label>Email</label><input type="email" id="settings-email" placeholder="info@school.edu"></div></div>
+                        <div class="form-group"><label>Website</label><input type="text" id="settings-website" placeholder="https://www.school.edu"></div>
+                        <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
+                        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Collaborating Organizations (shown on certificates)</div>
+                        <div class="form-row">
+                            <div class="form-group"><label>Partner Org 1 Name</label><input type="text" id="settings-partner1-name" placeholder="e.g., Ministry of Education"></div>
+                            <div class="form-group"><label>Partner Org 1 Logo</label><div class="logo-upload"><img id="settings-partner1-preview" style="display:none;max-height:50px;"><div id="settings-partner1-placeholder" class="logo-placeholder" style="width:50px;height:50px;font-size:10px;">Logo</div><input type="file" id="settings-partner1-logo" accept="image/*" onchange="handlePartnerLogoUpload(event, 'partner1')"></div></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label>Partner Org 2 Name</label><input type="text" id="settings-partner2-name" placeholder="e.g., National Commission for Education"></div>
+                            <div class="form-group"><label>Partner Org 2 Logo</label><div class="logo-upload"><img id="settings-partner2-preview" style="display:none;max-height:50px;"><div id="settings-partner2-placeholder" class="logo-placeholder" style="width:50px;height:50px;font-size:10px;">Logo</div><input type="file" id="settings-partner2-logo" accept="image/*" onchange="handlePartnerLogoUpload(event, 'partner2')"></div></div>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveBranding()">Save Branding</button>
+                    </div>
+                    <div class="card"><h3>Digital Signatures</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload signature images for document signing (PNG with transparent background recommended)</div>
+                        <div class="form-group"><label>Registrar</label><div class="sig-upload"><img id="sig-registrar-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('registrar', event)"></div></div>
+                        <div class="form-group"><label>Academic Dean</label><div class="sig-upload"><img id="sig-dean-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('dean', event)"></div></div>
+                        <div class="form-group"><label>Director / Principal</label><div class="sig-upload"><img id="sig-director-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('director', event)"></div></div>
+                        <div class="form-group"><label>Finance Officer</label><div class="sig-upload"><img id="sig-finance-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('finance', event)"></div></div>
+                        <button class="btn btn-primary" onclick="saveSignatures()">Save Signatures</button>
+                    </div>
+                    <div class="card"><h3>Study Centers</h3>
+                        <div id="campuses-list"></div>
+                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showStudyCenterForm()">+ Add Study Center</button>
+                    </div>
+                    <div class="card"><h3>Admission Numbers</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Sequence number is continuous across months/years. Set the last sequence number to control where auto-generation continues. Lower this value to reuse a freed slot after a student is deleted.</div>
+                        <div class="form-group"><label>Last Sequence Number Used</label><input type="number" id="settings-admission-last-seq" min="0" placeholder="e.g., 47" oninput="previewAdmissionNext()"></div>
+                        <div id="settings-admission-info" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"></div>
+                        <div id="settings-admission-live" style="font-size:12px;background:var(--bg-input);padding:8px 10px;border-radius:6px;border-left:3px solid var(--accent);margin-bottom:8px;">Type a number to preview the next admission number.</div>
+                        <div id="settings-admission-centers" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"></div>
+                        <div style="border-top:1px solid var(--border);margin:10px 0;padding-top:10px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                                <div style="font-size:12px;font-weight:600;color:var(--accent);">Available (Reusable) Sequence Numbers</div>
+                                <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:10px;" onclick="loadAdmissionLastSeqSetting()">↻ Refresh</button>
+                            </div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Gaps in the current sequence. Click any number to set it as the next admission number.</div>
+                            <div id="settings-admission-available" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px;"></div>
+                            <div id="settings-admission-available-info" style="font-size:10px;color:var(--text-muted);margin-top:6px;"></div>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <button class="btn btn-primary btn-sm" onclick="saveAdmissionLastSeq()">Save</button>
+                            <button class="btn btn-outline btn-sm" onclick="rescanAdmissionLastSeq()">Re-scan from existing students</button>
+                            <button class="btn btn-outline btn-sm" onclick="resetAdmissionLastSeq()">Reset to 0</button>
+                        </div>
+                    </div>
+                    <div class="card"><h3>Academic Settings</h3>
+                        <div class="form-group"><label>Current Academic Year</label><input type="text" id="settings-academic-year"></div>
+                        <div class="form-row"><div class="form-group"><label>Semester</label><select id="settings-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select></div><div class="form-group"><label>Grading Scale</label><select id="settings-grading"><option value="standard">Standard (A-F, B+, B-)</option><option value="gpa4">GPA 4.0 Scale</option><option value="gpa5">GPA 5.0 Scale</option><option value="ects">ECTS (A-F)</option><option value="percent">Percentage Only</option></select></div></div>
+                        <div class="form-row"><div class="form-group"><label>Currency Code</label><input type="text" id="settings-currency-code" value="KES" maxlength="3" style="text-transform:uppercase;"></div><div class="form-group"><label>Currency Symbol</label><input type="text" id="settings-currency-symbol" value="KES" maxlength="10"></div><div class="form-group"><label>Decimals</label><select id="settings-currency-decimals"><option value="0">0</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></div></div>
+                        <div class="form-group"><label>Programs (comma separated)</label><textarea id="settings-programs" rows="2" oninput="onProgramsChanged()"></textarea></div>
+                        <div id="program-fees-container" style="margin-bottom:12px;"></div>
+                        <div class="form-group"><label>Departments (comma separated)</label><textarea id="settings-departments" rows="2"></textarea></div>
+                        <div class="form-group"><label>Min. Attendance % (exam eligibility)</label><input type="number" id="settings-attendance-min" value="75"></div>
+                        <button class="btn btn-primary" onclick="saveAcademicSettings()">Save Settings</button>
+                    </div>
+                    <div class="card"><h3>WhatsApp Settings</h3>
+                        <div class="form-group"><label>Default Country Code</label><input type="text" id="settings-whatsapp-code" value="254" placeholder="e.g., 254 for Kenya"></div>
+                        <div class="form-group"><label>Admin WhatsApp Number</label><input type="text" id="settings-whatsapp-admin" placeholder="e.g., 254712345678"></div>
+                        <button class="btn btn-primary" onclick="saveWhatsAppSettings()">Save</button>
+                    </div>
+
+                    <div class="card"><h3>SMS Settings (Africa's Talking)</h3>
+                        <div class="form-group"><label>API Key</label><input type="password" id="settings-sms-apikey" placeholder="Your Africa's Talking API key" autocomplete="off"></div>
+                        <div class="form-group"><label>Username</label><input type="text" id="settings-sms-username" placeholder="e.g., sandbox or your AT username"></div>
+                        <div class="form-group"><label>Sender ID</label><input type="text" id="settings-sms-senderid" placeholder="e.g., NETCMS (optional)"></div>
+                        <button class="btn btn-primary" onclick="saveSMSSettings()">Save SMS Settings</button>
+                    </div>
+
+                    <div class="card"><h3>M-Pesa Integration</h3>
+                        <div class="form-group"><label>Business Shortcode (Paybill/Till)</label><input type="text" id="settings-mpesa-shortcode" placeholder="e.g., 174379"></div>
+                        <div class="form-group"><label>Business Name</label><input type="text" id="settings-mpesa-name" placeholder="e.g., NET FOUNDATION SEMINARY"></div>
+                        <div class="form-row"><div class="form-group"><label>Consumer Key (API)</label><input type="text" id="settings-mpesa-key" placeholder="Daraja consumer key"></div><div class="form-group"><label>Consumer Secret</label><input type="password" id="settings-mpesa-secret" placeholder="Daraja consumer secret" autocomplete="off"></div></div>
+                        <div class="form-group"><label>Passkey (STK Push)</label><input type="text" id="settings-mpesa-passkey" placeholder="Lipa Na M-Pesa online passkey"></div>
+                        <div class="form-row"><div class="form-group"><label>Environment</label><select id="settings-mpesa-env"><option value="sandbox">Sandbox (Test)</option><option value="production">Production (Live)</option></select></div><div class="form-group"><label>Transaction Type</label><select id="settings-mpesa-type"><option value="paybill">Paybill (Customer Paybill)</option><option value="till">Till Number (Buy Goods)</option></select></div></div>
+                        <button class="btn btn-primary" onclick="saveMpesaSettings()">Save M-Pesa Settings</button>
+                    </div>
+
+                    <div class="card"><h3>User Accounts</h3>
+                        <input type="text" id="users-search" placeholder="Search by name, username, or role..." class="search-input" style="width:100%;margin-bottom:8px;" oninput="renderUsers()">
+                        <div id="users-list"></div>
+                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showUserForm()">+ Add User</button>
+                    </div>
+                    <div class="card"><h3>Graduation Requirements</h3>
+                        <div id="grad-req-list"></div>
+                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showGradReqForm()">+ Add Requirement</button>
+                    </div>
+                    <div class="card"><h3>Data Management</h3>
+                        <div class="form-group"><label>Export Students</label><button class="btn btn-outline" onclick="exportStudentsCSV()">Export CSV</button></div>
+                        <div class="form-group"><label>Export Grades</label><button class="btn btn-outline" onclick="exportGradesPDF()">Export PDF</button></div>
+                        <div class="form-group" style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px;">
+                            <label>Database Stats</label>
+                            <div id="db-stats" style="font-size:11px;color:var(--text-muted);">Loading...</div>
+                        </div>
+                        <div class="form-group"><label>Download Backup</label><button class="btn btn-primary" onclick="downloadBackup()">⬇ Download .json</button></div>
+                        <div class="form-group"><label>Restore Backup</label><input type="file" id="restore-file-input" accept=".json" onchange="restoreData(event)" style="font-size:11px;"> <button class="btn btn-warning" onclick="uploadRestore()">Restore</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">⚠ Overwrites all current data with the backup file.</div></div>
+                        <div class="form-group"><label>Migrate From Browser Storage</label><button class="btn btn-warning" onclick="migrateIndexedDB()">Migrate Now</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Copies all data from your old browser storage (IndexedDB) to the server. Run this once from the PC where you originally entered data.</div></div>
+                        <div class="form-group"><label>Clear All Data</label><button class="btn btn-danger" onclick="clearAllData()">Clear All Data</button></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay" onclick="closeModal(event)"><div id="modal-content" class="modal-content" onclick="event.stopPropagation()"></div></div>
+    <div id="toast" class="toast"></div>
+
+    <script src="js/bundle.js?v=163"></script>
+    <script src="js/auth.js?v=1"></script>
+    <script src="js/utils.js?v=1"></script>
+    <script src="js/whatsapp.js?v=1"></script>
+    <script src="js/students.js?v=1"></script>
+    <script src="js/exams.js?v=1"></script>
+    <script src="js/app.js?v=1"></script>
+    <script src="js/pending.js?v=1"></script>
+    <script src="js/communication.js?v=1"></script>
+    <script src="js/dashboard.js?v=1"></script>
+    <script src="js/student-hub.js?v=4"></script>
+    <script src="js/discussions.js?v=3"></script>
+    <script>
+    if (typeof login === 'undefined') {
+        window.login = function() {
+            try {
+                var input = document.getElementById('login-user').value.trim();
+                var password = document.getElementById('login-pass').value;
+                if (!input || !password) { showLoginError('Enter username and password'); return; }
+                fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input:input, password:password}) })
+                .then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d}})})
+                .then(function(res){
+                    if (!res.ok) { showLoginError(res.data.error||'Login failed'); return; }
+                    var u=res.data.user; if(!u){showLoginError('Login failed');return;}
+                    sessionStorage.setItem('currentUser', JSON.stringify(u));
+                    document.getElementById('login-pass').value='';
+                    location.reload();
+                }).catch(function(e){showLoginError('Cannot reach server: ' + e.message)});
+            } catch(e) { showLoginError('Error: ' + e.message); }
+        };
+        function showLoginError(m){var el=document.getElementById('login-error');if(m){el.textContent=m;el.style.display='block';}else{el.style.display='none';}}
+    }
+    </script>
+</body>
+</html>

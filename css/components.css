@@ -1,0 +1,1156 @@
+.login-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+.login-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 40px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: var(--shadow-lg);
+    text-align: center;
+}
+
+.login-logo-placeholder {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: 800;
+    font-size: 28px;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+#login-logo img {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+}
+
+.login-card h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.login-subtitle {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 24px;
+}
+
+.login-form {
+    text-align: left;
+}
+
+.login-error {
+    color: var(--danger);
+    font-size: 12px;
+    margin-top: 8px;
+    text-align: center;
+}
+
+.login-hint {
+    text-align: center;
+}
+
+.login-hint a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+.login-hint a:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+.signup-footer {
+    text-align: center;
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.signup-footer a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.signup-footer a:hover {
+    text-decoration: underline;
+}
+
+.btn-full {
+    width: 100%;
+    padding: 12px;
+    font-size: 14px;
+}
+
+.user-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-input);
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+}
+
+.user-badge #user-name-display {
+    font-weight: 600;
+}
+
+.btn-icon {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 16px;
+    transition: var(--transition);
+}
+
+.btn-icon:hover {
+    background: var(--bg-hover);
+    color: var(--danger);
+}
+
+.id-card-preview {
+    display: inline-block;
+    border: 2px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    background: var(--bg-card);
+    width: 350px;
+    margin: 8px;
+    position: relative;
+}
+
+.id-card-preview .id-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.id-card-preview .id-card-header img {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--accent);
+}
+
+.id-card-preview .id-card-header .id-placeholder {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: var(--bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: var(--text-muted);
+}
+
+.id-card-preview .id-card-info {
+    font-size: 12px;
+}
+
+.id-card-preview .id-card-info .id-name {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.id-card-preview .id-card-barcode {
+    margin-top: 12px;
+    height: 30px;
+    background: repeating-linear-gradient(90deg, var(--text) 0px, var(--text) 2px, transparent 2px, transparent 4px);
+    opacity: 0.3;
+}
+
+.certificate-preview {
+    padding: 20px;
+    text-align: center;
+    background: var(--bg-card);
+    margin: 16px 0;
+}
+
+.certificate-preview .cert-border {
+    padding: 20px;
+}
+
+.certificate-preview h1 {
+    font-size: 28px;
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+
+.certificate-preview h2 {
+    font-size: 20px;
+    font-weight: 400;
+    margin-bottom: 20px;
+}
+
+.certificate-preview .cert-name {
+    font-size: 24px;
+    font-weight: 700;
+    border-bottom: 2px solid var(--accent);
+    display: inline-block;
+    padding-bottom: 4px;
+    margin: 16px 0;
+}
+
+.certificate-preview .cert-body {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    margin: 20px 0;
+}
+
+.certificate-preview .cert-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 40px;
+    padding-top: 20px;
+}
+
+.certificate-preview .cert-signature {
+    text-align: center;
+}
+
+.certificate-preview .cert-signature .line {
+    width: 150px;
+    border-top: 1px solid var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.certificate-preview .cert-signature .label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.doc-container { max-width: 210mm; margin: 0 auto; padding: 30px 40px; color: #1a1a2e; background: #fff; font-family: Georgia, serif; }
+.doc-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e2e8f0; }
+.doc-logo { max-height: 60px; max-width: 60px; object-fit: contain; }
+.doc-logo-placeholder { width: 50px; height: 50px; border-radius: 50%; background: var(--accent, #1e40af); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
+.doc-header-text { flex: 1; }
+.doc-school-name { font-size: 20px; font-weight: 800; color: #1a1a2e; margin: 0; text-align: left; }
+.doc-tagline { font-size: 10px; color: #64748b; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; margin: 2px 0 0; text-align: left; }
+.doc-address { font-size: 9px; color: #64748b; margin-top: 4px; }
+.doc-title { text-align: center; font-size: 16px; font-weight: 700; color: var(--accent, #1e40af); margin: 20px 0; text-transform: uppercase; letter-spacing: 1px; }
+.doc-ref { text-align: right; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+.doc-body-text { font-size: 14px; line-height: 1.8; margin: 20px 0; text-align: left; }
+.doc-signatures { display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; }
+.doc-sig-block { text-align: center; }
+.doc-sig-block .sig-line { width: 150px; border-top: 1px solid #333; margin: 0 auto 4px; }
+.doc-sig-block .sig-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+.doc-sig-img { max-height: 40px; display: block; margin: 0 auto 4px; }
+.doc-student-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; padding: 12px; background: #f8fafc; border-radius: 6px; margin-bottom: 16px; }
+.doc-fee-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; text-align: center; }
+.fee-item { padding: 8px; background: #f8fafc; border-radius: 6px; }
+.fee-label { display: block; font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 600; }
+.fee-value { display: block; font-weight: 700; font-size: 14px; color: #1a1a2e; margin-top: 2px; }
+.doc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.doc-table th { background: #f1f5f9; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+.doc-table td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+
+.hostel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.hostel-block {
+    background: var(--bg-input);
+    border-radius: var(--radius);
+    padding: 12px;
+}
+
+.hostel-block h4 {
+    font-size: 13px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.room-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 12px;
+}
+
+.room-item .room-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.room-item .room-status.occupied {
+    background: var(--success);
+}
+
+.room-item .room-status.vacant {
+    background: var(--text-muted);
+}
+
+.room-item .room-status.maintenance {
+    background: var(--warning);
+}
+
+.inventory-low {
+    color: var(--danger);
+    font-weight: 700;
+}
+
+.whatsapp-template {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.whatsapp-template:hover {
+    background: var(--bg-input);
+    padding-left: 8px;
+}
+
+.whatsapp-template:last-child {
+    border-bottom: none;
+}
+
+.whatsapp-log-entry {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.whatsapp-log-entry:last-child {
+    border-bottom: none;
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--bg-input);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.progress-bar .progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.progress-bar .progress-fill.success {
+    background: var(--success);
+}
+
+.progress-bar .progress-fill.warning {
+    background: var(--warning);
+}
+
+.progress-bar .progress-fill.danger {
+    background: var(--danger);
+}
+
+.seat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 4px;
+    margin: 16px 0;
+}
+
+.seat-item {
+    padding: 8px;
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 11px;
+    background: var(--bg-card);
+}
+
+.seat-item.occupied {
+    border-color: var(--accent);
+}
+
+.seat-item .seat-number {
+    font-weight: 700;
+    font-size: 12px;
+}
+
+.seat-item .seat-name {
+    color: var(--text-muted);
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.audit-action-created { color: var(--success); }
+.audit-action-updated { color: var(--primary-light); }
+.audit-action-deleted { color: var(--danger); }
+.audit-action-login { color: var(--accent); }
+
+.statement-document {
+    max-width: 210mm;
+    margin: 0 auto;
+    font-size: 12px;
+}
+
+.statement-header {
+    text-align: center;
+    padding-bottom: 16px;
+    border-bottom: 3px solid var(--accent);
+    margin-bottom: 20px;
+}
+
+.statement-school-name {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+}
+
+.statement-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 4px;
+}
+
+.statement-period {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.statement-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 12px;
+    background: var(--bg-input);
+    border-radius: var(--radius);
+}
+
+.statement-summary-item {
+    text-align: center;
+}
+
+.statement-summary-item .label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+
+.statement-summary-item .value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.statement-summary-item .value.collected {
+    color: var(--success);
+}
+
+.statement-summary-item .value.outstanding {
+    color: var(--danger);
+}
+
+.statement-student-info {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-input);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+}
+
+.statement-student-info .info-row {
+    display: flex;
+    flex-direction: column;
+}
+
+.statement-student-info .info-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.statement-student-info .info-value {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.statement-section {
+    margin-bottom: 20px;
+}
+
+.statement-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 8px;
+}
+
+.statement-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.statement-table th {
+    background: var(--bg-input);
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    font-weight: 700;
+    border-bottom: 2px solid var(--border);
+}
+
+.statement-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.statement-table tr:nth-child(even) {
+    background: var(--bg);
+}
+
+.statement-total-row {
+    background: var(--bg-input) !important;
+    font-weight: 700;
+}
+
+.statement-footer {
+    margin-top: 20px;
+    padding: 8px;
+    background: var(--text);
+    color: var(--bg-card);
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+}
+
+.statement-footer span:last-child {
+    color: var(--accent);
+}
+
+#statement-type-selector {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+#statement-output {
+    margin-top: 16px;
+}
+
+@media print {
+    @page {
+        margin: 10mm;
+        size: A4;
+    }
+    .statement-document {
+        max-width: none;
+    }
+    .statement-footer {
+        background: #1a1a2e !important;
+        color: #fff !important;
+    }
+    .statement-footer span:last-child {
+        color: #f59e0b !important;
+    }
+}
+
+/* Alert Bell & Dropdown */
+.alert-bell {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    transition: var(--transition);
+}
+.alert-bell .bell-icon {
+    width: 20px;
+    height: 20px;
+}
+.alert-bell:hover {
+    background: var(--bg-hover);
+    color: var(--accent);
+}
+.alert-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    box-shadow: 0 0 0 2px var(--bg-card);
+}
+.alert-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 360px;
+    max-width: calc(100vw - 20px);
+    max-height: 480px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    overflow: hidden;
+    margin-top: 4px;
+}
+.alert-dropdown-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 600;
+}
+.alert-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    align-items: flex-start;
+}
+.alert-item:hover {
+    background: var(--bg-hover);
+}
+.alert-item:last-child {
+    border-bottom: none;
+}
+.alert-item-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.alert-item-content {
+    flex: 1;
+    min-width: 0;
+}
+.alert-item-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+.alert-item-details {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+.alert-item-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+.alert-item-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.alert-action-btn {
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+.alert-action-btn:hover {
+    background: var(--accent-light);
+}
+.alert-dismiss-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px;
+    line-height: 1;
+}
+.alert-dismiss-btn:hover {
+    color: var(--danger);
+}
+.alert-item.alert-danger { border-left: 3px solid var(--danger); }
+.alert-item.alert-warning { border-left: 3px solid var(--warning); }
+.alert-item.alert-success { border-left: 3px solid var(--success); }
+.alert-item.alert-info { border-left: 3px solid var(--primary-light); }
+
+/* ============================================
+   Professional ID Cards (dual-sided)
+   ============================================ */
+
+.idcard-print-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    padding: 8px;
+}
+
+/* ================= ATM-CARD STYLE IDs ================= */
+/* Standard ID-1 (CR-80) ATM card size: 85.60 × 53.98 mm.
+   Screen preview uses same mm so the layout is 1:1 with print. */
+.atm-card {
+    width: 85.6mm;
+    height: 53.98mm;
+    border-radius: 3mm;
+    overflow: hidden;
+    position: relative;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, var(--atm-accent, #1e40af) 0%, color-mix(in srgb, var(--atm-accent, #1e40af) 60%, #000) 100%);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    page-break-inside: avoid;
+    break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    display: flex;
+    flex-direction: column;
+    padding: 3mm 4mm;
+    box-sizing: border-box;
+}
+
+/* Decorative pattern overlay */
+.atm-bg-pattern {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 85% 15%, rgba(255,255,255,0.18) 0%, transparent 35%),
+        radial-gradient(circle at 15% 95%, rgba(0,0,0,0.18) 0%, transparent 40%),
+        repeating-linear-gradient(45deg, transparent 0 6mm, rgba(255,255,255,0.025) 6mm 6.1mm);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.atm-card > * { position: relative; z-index: 1; }
+
+/* --- Top row: brand + chip --- */
+.atm-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 3mm;
+}
+.atm-brand {
+    display: flex;
+    align-items: center;
+    gap: 2mm;
+    flex: 1;
+    min-width: 0;
+}
+.atm-logo {
+    height: 8mm;
+    width: auto;
+    border-radius: 1mm;
+    background: #fff;
+    padding: 0.6mm;
+    flex-shrink: 0;
+}
+.atm-logo-placeholder {
+    width: 8mm;
+    height: 8mm;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+    font-weight: 800;
+    font-size: 4mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 0.5mm solid rgba(255,255,255,0.4);
+}
+.atm-school {
+    flex: 1;
+    min-width: 0;
+}
+.atm-school-name {
+    font-size: 3mm;
+    font-weight: 800;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.2mm;
+    text-shadow: 0 0.3mm 0.5mm rgba(0,0,0,0.25);
+}
+.atm-tagline {
+    font-size: 2.1mm;
+    opacity: 0.85;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.atm-chip {
+    width: 9mm;
+    height: 7mm;
+    border-radius: 1mm;
+    background:
+        linear-gradient(135deg, #f5d76e 0%, #c9a227 50%, #f5d76e 100%);
+    position: relative;
+    flex-shrink: 0;
+    box-shadow: inset 0 0 1mm rgba(0,0,0,0.2);
+}
+.atm-chip::before, .atm-chip::after {
+    content: '';
+    position: absolute;
+    background: rgba(0,0,0,0.25);
+}
+.atm-chip::before {
+    top: 30%; left: 10%; right: 10%; height: 0.4mm;
+}
+.atm-chip::after {
+    top: 60%; left: 10%; right: 10%; height: 0.4mm;
+}
+
+/* --- Middle row: photo + info --- */
+.atm-mid-row {
+    display: flex;
+    align-items: center;
+    gap: 3mm;
+    margin-top: 2mm;
+    flex: 1;
+}
+
+/* Standardized passport photo: 22mm × 28mm (international ID/passport ratio) */
+.atm-photo {
+    width: 22mm;
+    height: 28mm;
+    border-radius: 1mm;
+    overflow: hidden;
+    background: rgba(255,255,255,0.95);
+    border: 0.6mm solid #fff;
+    box-shadow: 0 0.5mm 1mm rgba(0,0,0,0.25);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.atm-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.atm-photo-placeholder {
+    color: var(--atm-accent, #1e40af);
+    font-size: 12mm;
+    font-weight: 800;
+    text-transform: uppercase;
+    background: #fff;
+}
+
+.atm-info {
+    flex: 1;
+    min-width: 0;
+    color: #fff;
+}
+.atm-name {
+    font-size: 4mm;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 1.2mm;
+    text-shadow: 0 0.3mm 0.5mm rgba(0,0,0,0.3);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+.atm-idline {
+    font-size: 2.4mm;
+    line-height: 1.5;
+    display: flex;
+    gap: 1mm;
+    align-items: baseline;
+}
+.atm-label {
+    font-weight: 700;
+    font-size: 2.1mm;
+    opacity: 0.75;
+    letter-spacing: 0.3mm;
+    text-transform: uppercase;
+    min-width: 9mm;
+    flex-shrink: 0;
+}
+.atm-value {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+/* --- Bottom row: validity + role badge --- */
+.atm-bottom-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 1.5mm;
+    border-top: 0.3mm solid rgba(255,255,255,0.25);
+    padding-top: 1.5mm;
+}
+.atm-valid-label {
+    font-size: 2mm;
+    font-weight: 700;
+    opacity: 0.75;
+    letter-spacing: 0.5mm;
+}
+.atm-valid-dates {
+    font-size: 2.4mm;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    margin-top: 0.5mm;
+}
+.atm-role-badge {
+    font-size: 2.4mm;
+    font-weight: 800;
+    background: rgba(255,255,255,0.95);
+    color: var(--atm-accent, #1e40af);
+    padding: 0.8mm 2.5mm;
+    border-radius: 1mm;
+    letter-spacing: 0.6mm;
+    box-shadow: 0 0.3mm 0.6mm rgba(0,0,0,0.2);
+}
+
+/* ==================== Back card ==================== */
+.atm-back {
+    background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+    color: #fff;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.atm-back-top {
+    background: linear-gradient(180deg, rgba(0,0,0,0.4) 0%, transparent 100%);
+    padding: 1.5mm 0;
+}
+.atm-stripe {
+    height: 9mm;
+    background:
+        repeating-linear-gradient(90deg,
+            rgba(255,255,255,0.06) 0 1mm,
+            rgba(0,0,0,0.4) 1mm 1.2mm);
+    border-top: 0.3mm solid rgba(255,255,255,0.1);
+    border-bottom: 0.3mm solid rgba(255,255,255,0.1);
+}
+.atm-back-body {
+    padding: 2.5mm 4mm;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5mm;
+    color: #fff;
+}
+.atm-back-school {
+    font-size: 2.6mm;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 0.5mm;
+    letter-spacing: 0.3mm;
+    opacity: 0.95;
+}
+.atm-back-cardno-row {
+    background: rgba(255,255,255,0.92);
+    color: #111;
+    padding: 1.5mm 2.5mm;
+    border-radius: 0.8mm;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.atm-back-cardno-label {
+    font-size: 2mm;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5mm;
+    color: #6b7280;
+}
+.atm-back-cardno {
+    font-size: 3.2mm;
+    font-weight: 800;
+    font-family: 'Courier New', monospace;
+    color: #111;
+    letter-spacing: 0.5mm;
+}
+.atm-back-sig-area {
+    text-align: right;
+    padding: 0.5mm 0;
+}
+.atm-sig-img {
+    max-height: 8mm;
+    max-width: 30mm;
+    display: inline-block;
+    object-fit: contain;
+}
+.atm-sig-line {
+    display: inline-block;
+    width: 28mm;
+    border-bottom: 0.4mm solid rgba(255,255,255,0.6);
+    height: 8mm;
+    vertical-align: bottom;
+}
+.atm-sig-label {
+    font-size: 1.8mm;
+    text-transform: uppercase;
+    letter-spacing: 0.6mm;
+    opacity: 0.7;
+    margin-top: 0.4mm;
+}
+.atm-back-dates {
+    display: flex;
+    justify-content: space-between;
+    font-size: 2.3mm;
+    padding: 1mm 0;
+    border-top: 0.3mm solid rgba(255,255,255,0.15);
+    border-bottom: 0.3mm solid rgba(255,255,255,0.15);
+}
+.atm-back-lbl {
+    font-weight: 700;
+    opacity: 0.7;
+    font-size: 2mm;
+    text-transform: uppercase;
+    letter-spacing: 0.3mm;
+    margin-right: 1mm;
+}
+.atm-back-val {
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+}
+.atm-barcode {
+    text-align: center;
+    margin-top: auto;
+}
+.atm-barcode-visual {
+    height: 7mm;
+    background: repeating-linear-gradient(90deg,
+        #fff 0 0.4mm,
+        transparent 0.4mm 0.7mm,
+        #fff 0.7mm 1mm,
+        transparent 1mm 1.4mm,
+        #fff 1.4mm 1.6mm,
+        transparent 1.6mm 2.0mm,
+        #fff 2.0mm 2.4mm,
+        transparent 2.4mm 2.6mm,
+        #fff 2.6mm 2.9mm,
+        transparent 2.9mm 3.3mm,
+        #fff 3.3mm 3.5mm,
+        transparent 3.5mm 3.8mm
+    );
+    border-radius: 0.5mm;
+}
+.atm-barcode-text {
+    font-family: 'Courier New', monospace;
+    font-size: 2.2mm;
+    letter-spacing: 0.6mm;
+    margin-top: 0.5mm;
+    opacity: 0.9;
+}
+.atm-back-footer {
+    background: rgba(0,0,0,0.5);
+    color: rgba(255,255,255,0.85);
+    text-align: center;
+    font-size: 1.9mm;
+    padding: 1.2mm 3mm;
+    letter-spacing: 0.3mm;
+}
+
+/* Print styles */
+@media print {
+    body * { visibility: hidden; }
+    .idcard-print-area, .idcard-print-area * { visibility: visible; }
+    .idcard-print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6mm;
+        justify-content: center;
+        padding: 8mm;
+    }
+    .atm-card {
+        box-shadow: none;
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+    .atm-card, .atm-card * {
+        print-color-adjust: exact !important;
+        -webkit-print-color-adjust: exact !important;
+    }
+    #idcard-print-btn, .screen-header, .card > :not(#idcards-preview) {
+        display: none !important;
+    }
+    @page {
+        size: A4;
+        margin: 5mm;
+    }
+}
