@@ -121,6 +121,8 @@ function loadDB() {
     return { mpesaSettings: {}, mpesaTransactions: [] };
 }
 
+// Copy database from volume if app path doesn't exist
+try { if (!fs.existsSync(DB_FILE) && fs.existsSync(DB_VOLUME_PATH)) fs.copyFileSync(DB_VOLUME_PATH, DB_FILE); } catch {}
 // On startup, create a safety backup of whatever file exists
 ensureBackupDir();
 try {
