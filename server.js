@@ -25,6 +25,7 @@ const wsClients = new Map(); // courseId -> Set of { ws, userId, userName, userR
 
 // ---- Crash-safe data layer with auto-backup ----
 const DB_FILE = path.join(DATA_ROOT, 'server-data.json');
+const DB_VOLUME_PATH = '/data/server-data.json'; // Railway volume path
 const DB_TEMP = DB_FILE + '.tmp';
 const DB_BACKUP = path.join(DATA_ROOT, 'server-data.backup.json');
 const DB_BACKUP_DIR = path.join(DATA_ROOT, 'server-data-backups');
@@ -87,6 +88,7 @@ function safeWriteJSON(data) {
 function loadDB() {
     const sources = [
         { file: DB_FILE, label: 'main' },
+        { file: DB_VOLUME_PATH, label: 'volume' },
         { file: DB_BACKUP, label: 'backup' },
     ];
     // Add timestamped backups (most recent first)
