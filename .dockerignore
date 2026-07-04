@@ -1,0 +1,7 @@
+node_modules
+.git
+.gitignore
+*.md
+*.exe
+server-data.backup.json
+server-data-backups
