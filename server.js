@@ -91,8 +91,8 @@ function safeWriteJSON(data) {
 // Load DB with multi-level fallback
 function loadDB() {
     const sources = [
-        { file: DB_FILE, label: 'main' },
         { file: DB_VOLUME_PATH, label: 'volume' },
+        { file: DB_FILE, label: 'main' },
         { file: DB_BACKUP, label: 'backup' },
     ];
     // Add timestamped backups (most recent first)
@@ -125,18 +125,17 @@ function loadDB() {
     return { mpesaSettings: {}, mpesaTransactions: [] };
 }
 
-// Copy database from volume if app path doesn't exist (non-blocking)
-setTimeout(() => {
-    try { if (!fs.existsSync(DB_FILE) && fs.existsSync(DB_VOLUME_PATH)) fs.copyFileSync(DB_VOLUME_PATH, DB_FILE); } catch {}
-    try {
-        ensureBackupDir();
-        if (fs.existsSync(DB_FILE)) {
-            const content = fs.readFileSync(DB_FILE, 'utf8');
-            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-            fs.writeFileSync(path.join(DB_BACKUP_DIR, 'boot-' + stamp + '.json'), content, 'utf8');
-        }
-    } catch {}
-}, 1000);
+// Copy database from volume before first load
+try { if (fs.existsSync(DB_VOLUME_PATH)) { fs.copyFileSync(DB_VOLUME_PATH, DB_FILE); process.stderr.write('DB_COPIED_FROM_VOLUME\n'); } } catch (e) { process.stderr.write('DB_VOLUME_COPY_FAILED: ' + e.message + '\n'); }
+// On startup, create a safety backup of whatever file exists
+try {
+    ensureBackupDir();
+    if (fs.existsSync(DB_FILE)) {
+        const content = fs.readFileSync(DB_FILE, 'utf8');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        fs.writeFileSync(path.join(DB_BACKUP_DIR, 'boot-' + stamp + '.json'), content, 'utf8');
+    }
+} catch {}
 
 // ---- End crash-safe data layer ----
 function broadcastEvent(event, data) {
