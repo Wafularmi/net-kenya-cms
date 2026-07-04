@@ -2,6 +2,9 @@
   "$schema": "https://schema.railpack.com",
   "provider": "node",
   "deploy": {
-    "startCommand": "node server.js"
+    "startCommand": "node server.js",
+    "variables": {
+      "RAILPACK_NO_SPA": "1"
+    }
   }
 }
