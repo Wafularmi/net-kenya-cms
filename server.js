@@ -678,7 +678,7 @@ function handleAPI(req, res) {
                 delete safeUser.warned2;
 
                 json(res, 200, { user: safeUser });
-            } catch (e) { json(res, 500, { error: 'Login failed' }); }
+            } catch (e) { process.stderr.write('LOGIN_ERROR: ' + (e && e.stack || e) + '\n'); json(res, 500, { error: 'Login failed' }); }
         });
         return true;
     }
