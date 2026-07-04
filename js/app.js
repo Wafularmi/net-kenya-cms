@@ -241,4 +241,19 @@ function onDBChange(store, record) {
     try { renderAlertBell(); } catch (e) {}
 }
 
+function adjustHeaderPadding() {
+    const header = document.getElementById('main-header');
+    const app = document.getElementById('app');
+    if (header && app) {
+        const h = header.offsetHeight;
+        app.style.paddingTop = h + 'px';
+        document.querySelectorAll('.sidebar').forEach(s => {
+            s.style.top = h + 'px';
+            s.style.height = 'calc(100vh - ' + h + 'px)';
+        });
+    }
+}
+
+window.addEventListener('resize', adjustHeaderPadding);
+adjustHeaderPadding();
 init();
