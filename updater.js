@@ -181,8 +181,8 @@ async function runUpdateCheck() {
     }
 }
 
-// Run immediately, then every 6 hours
-runUpdateCheck();
+// First check after 30s (allows server to start), then every 6 hours
+setTimeout(runUpdateCheck, 30000);
 setInterval(runUpdateCheck, 6 * 60 * 60 * 1000);
 
 module.exports = { checkForUpdates, applyUpdate };

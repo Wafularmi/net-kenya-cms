@@ -1,0 +1,6 @@
+{
+  "provider": "node",
+  "deploy": {
+    "startCommand": "node server.js"
+  }
+}

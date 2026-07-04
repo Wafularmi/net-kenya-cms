@@ -9,6 +9,10 @@ const zlib = require('zlib');
 const QRCode = require('qrcode');
 const WebSocket = require('ws');
 
+process.on('uncaughtException', e => { try { process.stderr.write('UNCAUGHT: ' + (e && e.stack || e) + '\n'); } catch {} });
+process.on('unhandledRejection', (reason) => { try { process.stderr.write('UNHANDLED: ' + (reason && reason.stack || reason) + '\n'); } catch {} });
+process.stderr.write('SERVER_STARTING\n');
+
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = parseInt(process.env.HTTPS_PORT) || 3443;
 const ROOT = __dirname;
@@ -121,17 +125,18 @@ function loadDB() {
     return { mpesaSettings: {}, mpesaTransactions: [] };
 }
 
-// Copy database from volume if app path doesn't exist
-try { if (!fs.existsSync(DB_FILE) && fs.existsSync(DB_VOLUME_PATH)) fs.copyFileSync(DB_VOLUME_PATH, DB_FILE); } catch {}
-// On startup, create a safety backup of whatever file exists
-ensureBackupDir();
-try {
-    if (fs.existsSync(DB_FILE)) {
-        const content = fs.readFileSync(DB_FILE, 'utf8');
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        fs.writeFileSync(path.join(DB_BACKUP_DIR, 'boot-' + stamp + '.json'), content, 'utf8');
-    }
-} catch {}
+// Copy database from volume if app path doesn't exist (non-blocking)
+setTimeout(() => {
+    try { if (!fs.existsSync(DB_FILE) && fs.existsSync(DB_VOLUME_PATH)) fs.copyFileSync(DB_VOLUME_PATH, DB_FILE); } catch {}
+    try {
+        ensureBackupDir();
+        if (fs.existsSync(DB_FILE)) {
+            const content = fs.readFileSync(DB_FILE, 'utf8');
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            fs.writeFileSync(path.join(DB_BACKUP_DIR, 'boot-' + stamp + '.json'), content, 'utf8');
+        }
+    } catch {}
+}, 1000);
 
 // ---- End crash-safe data layer ----
 function broadcastEvent(event, data) {
