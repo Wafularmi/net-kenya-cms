@@ -3305,24 +3305,26 @@ async function refreshVoucherNo() {    const refDate = document.getElementById(
         ? `<img src="${sigs.paidSignature}" style="max-height:36px;border:1px solid var(--border);border-radius:4px;margin:4px 0;">`
         : `<div style="height:36px;border:1px dashed var(--border);border-radius:4px;margin:4px 0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-muted);">No signature uploaded</div>`;
     const sigSection = `
-        <details style="margin-bottom:8px;font-size:11px;">
-            <summary style="cursor:pointer;font-weight:600;color:var(--accent);padding:4px 0;">✍️ Signatures (click to manage)</summary>
-            <div style="padding:8px;background:var(--bg-input);border-radius:6px;margin-top:4px;">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                    <div>
-                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);">Received By</label>
-                        <div id="pv-v-recv-preview">${recvSigHtml}</div>
-                        <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:9px;padding:2px 8px;">Upload<input type="file" accept="image/*" style="display:none;" onchange="handleVoucherSigUpload(this, 'received')"></label>
-                    </div>
-                    <div>
-                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);">Authorized By</label>
-                        <div id="pv-v-paid-preview">${paidSigHtml}</div>
-                        <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:9px;padding:2px 8px;">Upload<input type="file" accept="image/*" style="display:none;" onchange="handleVoucherSigUpload(this, 'paid')"></label>
+        <div style="margin-bottom:8px;padding:8px;background:var(--bg-input);border-radius:6px;border:1px solid var(--border);font-size:11px;">
+            <div style="font-weight:600;color:var(--accent);margin-bottom:6px;">✍️ Signatures on Voucher</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                    <label style="font-size:10px;font-weight:600;color:var(--text-muted);">Received By</label>
+                    <div id="pv-v-recv-preview" style="margin:4px 0;">${recvSigHtml}</div>
+                    <div style="display:flex;gap:4px;">
+                        <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:9px;padding:2px 8px;">Upload <input type="file" accept="image/*" style="display:none;" onchange="handleVoucherSigUpload(this, 'received')"></label>
                     </div>
                 </div>
-                <div style="font-size:9px;color:var(--text-muted);margin-top:6px;">Uploaded signatures apply to all future vouchers.</div>
+                <div>
+                    <label style="font-size:10px;font-weight:600;color:var(--text-muted);">Authorized By</label>
+                    <div id="pv-v-paid-preview" style="margin:4px 0;">${paidSigHtml}</div>
+                    <div style="display:flex;gap:4px;">
+                        <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:9px;padding:2px 8px;">Upload <input type="file" accept="image/*" style="display:none;" onchange="handleVoucherSigUpload(this, 'paid')"></label>
+                    </div>
+                </div>
             </div>
-        </details>`;
+            <div style="font-size:9px;color:var(--text-muted);margin-top:6px;">Signatures are saved globally and apply to all vouchers. Changes take effect immediately.</div>
+        </div>`;
     const paperSize = window._voucherPaperSize || 'A4';
     const paperOptions = ['A4','A5','A6'].map(s =>
         `<option value="${s}"${s === paperSize ? ' selected' : ''}>${s}</option>`
