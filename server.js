@@ -1145,6 +1145,8 @@ const server = http.createServer((req, res) => {
     if (handleAPI(req, res)) return;
 
     let url = req.url.split('?')[0];
+    // Cache-busting: serve versioned paths like /css/main.132.css as /css/main.css
+    url = url.replace(/\.\d+\.(css|js)$/i, '.$1');
 
     if (url === '/api/qr') {
         const searchParams = new URL(req.url, 'http://localhost').searchParams;
