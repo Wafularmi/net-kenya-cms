@@ -11439,12 +11439,16 @@ async function loadBranding() {
         if (settings.logo) {
             if (headerImg) { headerImg.src = settings.logo; headerImg.style.display = 'block'; headerPlaceholder.style.display = 'none'; }
             if (loginLogo) { loginLogo.innerHTML = ''; loginLogo.style.background = `transparent url("${settings.logo}") no-repeat center / cover`; }
+            const termsLogo = document.querySelector('.terms-logo');
+            if (termsLogo) { termsLogo.innerHTML = ''; termsLogo.style.background = `transparent url("${settings.logo}") no-repeat center / cover`; }
             const logoPreview = document.getElementById('settings-logo-preview');
             const logoPlaceholder = document.getElementById('settings-logo-placeholder');
             if (logoPreview) { logoPreview.src = settings.logo; logoPreview.style.display = 'block'; if (logoPlaceholder) logoPlaceholder.style.display = 'none'; }
         } else if (settings.initials) {
             if (headerPlaceholder) headerPlaceholder.textContent = settings.initials;
             if (loginLogo) loginLogo.textContent = settings.initials;
+            const termsLogoText = document.querySelector('.terms-logo-text');
+            if (termsLogoText) termsLogoText.textContent = settings.initials;
         }
         if (settings.accentColor) {
             document.documentElement.style.setProperty('--accent', settings.accentColor);
