@@ -991,8 +991,17 @@ body {
         display: none;
     }
 
+    #user-role-badge {
+        display: none;
+    }
+
     .header-right {
         gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .user-badge {
+        padding: 2px 6px;
     }
 
     .dashboard-grid .dashboard-cards {
@@ -1135,6 +1144,7 @@ body {
 
     .header-right {
         gap: 4px;
+        flex-wrap: wrap;
     }
 
     .btn-icon {
@@ -1142,6 +1152,31 @@ body {
         height: 32px;
         font-size: 14px;
     }
+}
+
+/* Alert bell hidden — merged into notification bell */
+#alert-bell { display: none !important; }
+
+/* Notification dropdown */
+.notif-dropdown {
+    position: fixed; top: 56px; right: 12px; width: 360px; max-height: 70vh; overflow-y: auto;
+    background: var(--bg-card,#fff); border: 1px solid var(--border,#e2e8f0); border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15); z-index: 9999; font-size: 12px;
+    animation: notifFadeIn 0.2s ease;
+}
+@keyframes notifFadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.notif-dropdown .notif-header { padding: 10px 14px; border-bottom: 1px solid var(--border,#e2e8f0); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.notif-dropdown .notif-empty { padding: 30px; text-align: center; color: var(--text-muted,#94a3b8); }
+.notif-dropdown .notif-item { padding: 10px 14px; border-bottom: 1px solid var(--border,#e2e8f0); cursor: pointer; display: flex; gap: 10px; align-items: start; transition: background 0.15s; }
+.notif-dropdown .notif-item:hover { background: var(--bg-hover,#f1f5f9); }
+.notif-dropdown .notif-item:last-child { border-bottom: none; }
+.notif-dropdown .notif-icon { font-size: 18px; width: 28px; text-align: center; flex-shrink: 0; }
+.notif-dropdown .notif-body { flex: 1; min-width: 0; }
+.notif-dropdown .notif-body .notif-title { font-weight: 600; font-size: 12px; }
+.notif-dropdown .notif-body .notif-desc { font-size: 11px; color: var(--text-muted,#94a3b8); margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.notif-dropdown .notif-time { font-size: 10px; color: var(--text-muted,#94a3b8); white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 480px) {
+    .notif-dropdown { width: calc(100% - 24px); right: 12px; top: 52px; }
 }
 
 .sig-upload { display: flex; align-items: center; gap: 8px; }

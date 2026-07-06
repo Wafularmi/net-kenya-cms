@@ -8759,9 +8759,137 @@ function extractKeyPhrases(text, lang) {
                 if (!seen.has(key) && phrase.length > 4) {
                     seen.add(key);
                     phrases.push(phrase);
-                }
-            }
         }
+    }
+}
+
+// ===== UNIFIED NOTIFICATION SYSTEM =====
+let notifDropdownOpen = false;
+
+async function updateNotificationBadge() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const isStudent = currentUser.role === 'student';
+    const tickets = await dbGetAll('tickets');
+    const alerts = await dbGetAll('alerts').catch(() => []);
+    let count = 0;
+    if (isStudent) {
+        count = tickets.filter(t => t.studentId === currentUser.id && (t.status === 'open' || t.status === 'in-progress')).length;
+        count += alerts.filter(a => a.status === 'active').length;
+    } else {
+        count = tickets.filter(t => t.status === 'open' || t.status === 'in-progress').length;
+        count += alerts.filter(a => a.status === 'active').length;
+    }
+    const badge = document.getElementById('notif-badge');
+    if (badge) {
+        if (count > 0) {
+            badge.style.display = 'flex';
+            badge.textContent = count > 99 ? '99+' : count;
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+async function toggleNotificationDropdown() {
+    const existing = document.querySelector('.notif-dropdown');
+    if (existing) { existing.remove(); notifDropdownOpen = false; return; }
+    notifDropdownOpen = true;
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const isStudent = currentUser.role === 'student';
+    const tickets = await dbGetAll('tickets');
+    const alerts = await dbGetAll('alerts').catch(() => []);
+    let items = [];
+    // Tickets
+    const myTickets = isStudent ? tickets.filter(t => t.studentId === currentUser.id && (t.status === 'open' || t.status === 'in-progress')) : tickets.filter(t => t.status === 'open' || t.status === 'in-progress');
+    myTickets.forEach(t => {
+        items.push({ icon: '🎫', title: 'Ticket: ' + (t.subject || 'No subject'), desc: (t.details || '').substring(0, 80), time: timeAgo(t.createdAt), action: () => { closeNotifDropdown(); showScreen('tickets'); setTimeout(() => viewTicket(t.id), 300); }, deleteAfter: false });
+    });
+    // Alerts
+    alerts.filter(a => a.status === 'active').forEach(a => {
+        items.push({ icon: a.severity === 'danger' ? '🔴' : a.severity === 'warning' ? '🟡' : '🔵', title: a.title || 'Alert', desc: (a.details || '').substring(0, 80), time: timeAgo(a.createdAt), action: () => { closeNotifDropdown(); dismissAlert(a.id).then(() => updateNotificationBadge()); if (a.action && a.action.screen) showScreen(a.action.screen); }, deleteAfter: true });
+    });
+    // Student: upcoming exams
+    if (isStudent) {
+        try {
+            const exams = await dbGetAll('exams');
+            const now = new Date();
+            const weekFromNow = new Date(now.getTime() + 7 * 86400000);
+            const upcoming = exams.filter(e => e.date && new Date(e.date) >= now && new Date(e.date) <= weekFromNow);
+            upcoming.forEach(e => {
+                items.push({ icon: '📝', title: 'Exam: ' + (e.name || 'Upcoming Exam'), desc: 'Date: ' + formatDate(e.date) + (e.time ? ' at ' + e.time : ''), time: formatDate(e.date), action: () => { closeNotifDropdown(); showScreen('exams'); }, deleteAfter: true });
+            });
+            const events = await dbGetAll('events').catch(() => []);
+            const upcomingEvents = events.filter(ev => ev.date && new Date(ev.date) >= now && new Date(ev.date) <= weekFromNow);
+            upcomingEvents.forEach(ev => {
+                items.push({ icon: '📅', title: 'Event: ' + (ev.title || 'Upcoming Event'), desc: ev.description || '', time: formatDate(ev.date), action: () => { closeNotifDropdown(); showScreen('events'); }, deleteAfter: true });
+            });
+        } catch {}
+    }
+    // Admin: pending registrations
+    if (!isStudent) {
+        try {
+            const students = await dbGetAll('students');
+            const pending = students.filter(s => s.status === 'pending');
+            if (pending.length > 0) {
+                items.push({ icon: '👤', title: pending.length + ' Pending Registration(s)', desc: 'Review and approve new student registrations.', time: '', action: () => { closeNotifDropdown(); showScreen('pending'); }, deleteAfter: false });
+            }
+        } catch {}
+    }
+    // Sort by time (most recent first)
+    items.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+    renderNotifDropdown(items);
+    updateNotificationBadge();
+}
+
+function closeNotifDropdown() {
+    const el = document.querySelector('.notif-dropdown');
+    if (el) el.remove();
+    notifDropdownOpen = false;
+}
+
+function renderNotifDropdown(items) {
+    const existing = document.querySelector('.notif-dropdown');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.className = 'notif-dropdown';
+    const header = `<div class="notif-header"><span>🔔 Notifications</span><span style="font-size:11px;font-weight:400;cursor:pointer;color:var(--accent);" onclick="closeNotifDropdown()">✕ Close</span></div>`;
+    let body = '';
+    if (!items.length) {
+        body = '<div class="notif-empty">✨ No new notifications</div>';
+    } else {
+        body = items.map((item, i) => {
+            const clickHandler = `window._notifClick(${i})`;
+            return `<div class="notif-item" onclick="${clickHandler}">
+                <div class="notif-icon">${item.icon}</div>
+                <div class="notif-body">
+                    <div class="notif-title">${item.title}</div>
+                    <div class="notif-desc">${item.desc}</div>
+                </div>
+                ${item.time ? '<div class="notif-time">' + item.time + '</div>' : ''}
+            </div>`;
+        }).join('');
+    }
+    div.innerHTML = header + body;
+    document.body.appendChild(div);
+    window._notifItems = items;
+    window._notifClick = function(idx) {
+        const item = window._notifItems[idx];
+        if (item) item.action();
+    };
+}
+
+function timeAgo(dateStr) {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+    return new Date(dateStr).toLocaleDateString();
+}
+
+// Override updateTicketBadge to use unified system
+async function updateTicketBadge() { await updateNotificationBadge(); }
     }
     phrases.sort((a, b) => b.length - a.length);
     return phrases.slice(0, 25);
@@ -10861,23 +10989,8 @@ function handleAlertAction(alertId, screen, studentId) {
     }
 }
 async function dismissAlert(id) {
-    const alert = await dbGet('alerts', id);
-    if (alert) {
-        alert.status = 'dismissed';
-        alert.dismissedAt = new Date().toISOString();
-        await dbPut('alerts', alert);
-    }
-    const remaining = (await dbGetAll('alerts')).filter(a => a.status === 'active');
-    const badge = document.getElementById('alert-badge');
-    if (badge) {
-        if (remaining.length > 0) {
-            badge.textContent = remaining.length;
-            badge.style.display = 'flex';
-        } else {
-            badge.textContent = '0';
-            badge.style.display = 'none';
-        }
-    }
+    await dbDelete('alerts', id).catch(() => {});
+    updateNotificationBadge();
     renderAlertDropdown();
 }
 async function restoreAlert(id) {
@@ -13235,4 +13348,14 @@ async function generateLedgerStatement(fromDate, toDate) {
 }
 document.addEventListener('DOMContentLoaded', function() {
     loadPayrollStaffSelect();
+    document.getElementById('notif-bell')?.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof toggleNotificationDropdown === 'function') toggleNotificationDropdown();
+    });
+    document.addEventListener('click', function(e) {
+        if (notifDropdownOpen && !e.target.closest('.notif-dropdown') && e.target.id !== 'notif-bell') {
+            closeNotifDropdown();
+        }
+    });
 });
