@@ -545,6 +545,22 @@ async function initAuth() {
             const dbUser = await dbGet('users', user.username);
             if (dbUser && dbUser.status !== 'locked') {
                 sessionStorage.setItem('currentUser', JSON.stringify(dbUser));
+                // Terms & Conditions check
+                const key = 'terms_accepted_' + (dbUser.username || dbUser.id);
+                if (localStorage.getItem(key) !== 'true') {
+                    try {
+                        const existing = await dbGet('users', dbUser.username || dbUser.id);
+                        if (existing && existing.termsAccepted) {
+                            localStorage.setItem(key, 'true');
+                        } else {
+                            showTermsModalApp(dbUser);
+                            return;
+                        }
+                    } catch {
+                        showTermsModalApp(dbUser);
+                        return;
+                    }
+                }
                 return showApp(dbUser);
             }
         }
@@ -1081,11 +1097,34 @@ async function init() {
             sessionStorage.removeItem('currentUser');
             showToast('Session expired. Please login again.', { type: 'warning', duration: 5000 });
         }
+        const session = sessionStorage.getItem('currentUser');
+        if (session) {
+            const user = JSON.parse(session);
+            const dbUser = await dbGet('users', user.username);
+            if (dbUser && dbUser.status !== 'locked') {
+                sessionStorage.setItem('currentUser', JSON.stringify(dbUser));
+                const key = 'terms_accepted_' + (dbUser.username || dbUser.id);
+                if (localStorage.getItem(key) !== 'true') {
+                    try {
+                        const existing = await dbGet('users', dbUser.username || dbUser.id);
+                        if (existing && existing.termsAccepted) {
+                            localStorage.setItem(key, 'true');
+                        } else {
+                            showTermsModalApp(dbUser);
+                            return;
+                        }
+                    } catch {
+                        showTermsModalApp(dbUser);
+                        return;
+                    }
+                }
+            }
+        }
         await initAuth();
         startAutoRefresh();
     } catch (err) {
         console.error('App initialization failed:', err);
-        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;"><div style="text-align:center;padding:40px;"><h2 style="color:var(--danger);">Failed to Load Application</h2><p style="color:var(--text-muted);">' + (err.message || err) + '</p><p style="font-size:12px;color:var(--text-muted);margin-top:4px;">Please clear your browser data (IndexedDB) and refresh the page.</p><button onclick="location.reload()" style="padding:8px 24px;margin-top:12px;cursor:pointer;">Refresh</button></div></div>';
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;"><div style="text-align:center;padding:40px;"><h2 style="color:var(--danger);">Failed to Load Application</h2><p style="font-size:12px;color:var(--text-muted);margin-top:4px;">Please clear your browser data (IndexedDB) and refresh the page.</p><button onclick="location.reload()" style="padding:8px 24px;margin-top:12px;cursor:pointer;">Refresh</button></div></div>';
     }
 }
 let _refreshTimers = [];
@@ -1233,7 +1272,51 @@ function onDBChange(store, record) {
     }
     try { renderAlertBell(); } catch (e) {}
 }
-// init() is now called from auth.js after T&C functions are defined
+
+// Fallback T&C functions (used if auth.js fails to load)
+function showTermsModalApp(user) {
+    window._termsUser = user;
+    const modal = document.getElementById('terms-modal');
+    if (!modal) { showApp(user); return; }
+    const checkbox = document.getElementById('terms-agree-check');
+    const acceptBtn = document.getElementById('terms-accept-btn');
+    if (checkbox) checkbox.checked = false;
+    if (acceptBtn) acceptBtn.disabled = true;
+    modal.style.display = 'flex';
+    const scroll = document.getElementById('terms-scroll');
+    if (scroll) scroll.scrollTop = 0;
+    if (checkbox) checkbox.onchange = function() { if (acceptBtn) acceptBtn.disabled = !this.checked; };
+}
+window.acceptTerms = window.acceptTerms || async function() {
+    const user = window._termsUser;
+    if (!user) return;
+    const key = 'terms_accepted_' + (user.username || user.id);
+    localStorage.setItem(key, 'true');
+    try {
+        const existing = await dbGet('users', user.username || user.id);
+        if (existing) {
+            existing.termsAccepted = true;
+            existing.termsAcceptedAt = new Date().toISOString();
+            await dbPut('users', existing);
+        }
+    } catch {}
+    const modal = document.getElementById('terms-modal');
+    if (modal) modal.style.display = 'none';
+    showApp(user);
+};
+window.declineTerms = window.declineTerms || function() {
+    const modal = document.getElementById('terms-modal');
+    if (modal) modal.style.display = 'none';
+    const key = 'terms_accepted_' + (window._termsUser?.username || window._termsUser?.id || '');
+    localStorage.removeItem(key);
+    var el = document.getElementById('login-error');
+    if (el) { el.textContent = 'You must accept the Terms and Conditions to use the System.'; el.style.display = 'block'; }
+    var user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    var uName = user.username || '';
+    logAudit('logout', 'user', { username: uName });
+    sessionStorage.removeItem('currentUser');
+    setTimeout(function(){ location.reload(); }, 2000);
+};
 
 async function renderDashboard() {
     try {
