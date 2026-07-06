@@ -175,7 +175,34 @@ const H = {
   'report-card-comments': 'Teacher and principal comments on student performance.',
 };
 
-// ===== TOUR STEPS =====
+// ===== STUDENT-SPECIFIC HELP TEXT (overrides for student role) =====
+const H_STUDENT = {
+  'dashboard': 'View your personal academic summary: courses, grades, attendance, fee balance, and upcoming exams.',
+  'portal': 'View your fee statements, grades, attendance records, and personal academic information.',
+  'grades': 'View your grades and academic performance across all your enrolled courses.',
+  'attendance': 'View your attendance record for classes and sessions.',
+  'quizzes': 'Attempt quizzes assigned to you and view your scores.',
+  'submissions': 'View your quiz results, scores, and feedback on submissions.',
+  'notes': 'Access study notes shared by your instructors for each course.',
+  'discussions': 'Participate in class discussions and interact with instructors.',
+  'finance': 'View your fee statement, payment history, and outstanding balance.',
+  'students': 'View your personal profile and academic information.',
+  'courses': 'Browse your enrolled courses and view course materials.',
+  'lessons': 'Access lesson content, topics, and resources for your courses.',
+  'screen-dashboard': 'Your personal dashboard showing your academic progress, fees, and upcoming exams.',
+  'dash-finance': 'Your fee summary: total fees charged, amount paid, and remaining balance.',
+};
+
+// ===== GET CURRENT USER ROLE =====
+function getRole() {
+  try {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    return u.role || 'admin';
+  } catch { return 'admin'; }
+}
+function isStudent() { return getRole() === 'student'; }
+
+// ===== TOUR STEPS (Admin/Staff) =====
 const TOUR_STEPS = [
   { target: '#school-name', title: 'Welcome!', text: 'Welcome to the NET Foundation Kenya College Management System. This quick tour will show you the main features to get you started.', side: 'bottom' },
   { target: '#main-nav', title: 'Sidebar Navigation', text: 'The sidebar gives you access to all modules: Dashboard, Students, Finance, Exams, Transcripts, and more. Click any item to jump to that section.', side: 'right' },
@@ -187,6 +214,22 @@ const TOUR_STEPS = [
   { target: '#user-badge', title: 'Your Account', text: 'Your role and username are shown here. Click the power icon to sign out when done.', side: 'bottom' },
   { target: '#school-name', title: 'You\'re Ready!', text: 'You\'re all set! Explore the system at your own pace. Remember: click the ? button anytime you need help with a feature.', side: 'bottom' }
 ];
+
+// ===== TOUR STEPS (Student) =====
+const TOUR_STEPS_STUDENT = [
+  { target: '#school-name', title: 'Welcome!', text: 'Welcome to the NET Foundation Kenya Student Portal. This quick tour will help you navigate your academic experience.', side: 'bottom' },
+  { target: '#main-nav', title: 'Your Navigation', text: 'The sidebar shows the sections available to you: Dashboard, Student Hub, Portal, Grades, Attendance, and more.', side: 'right' },
+  { target: '.nav-tab[data-screen="student-hub"]', title: 'My Hub', text: 'Your personal hub shows your courses, upcoming exams, quizzes, notes, and discussions all in one place.', side: 'right' },
+  { target: '.nav-tab[data-screen="portal"]', title: 'Student Portal', text: 'View your fee statements, academic grades, attendance records, and personal information.', side: 'right' },
+  { target: '.nav-tab[data-screen="grades"]', title: 'My Grades', text: 'View your academic performance, grades for each course, and overall progress.', side: 'right' },
+  { target: '#btn-help', title: 'Help System', text: 'Click this ? button anytime to enter Help Mode. Then click any button, field, or tab to see a description of what it does.', side: 'bottom' },
+  { target: '#smart-search', title: 'Quick Search', text: 'Search for courses, notes, and other information across the portal.', side: 'bottom' },
+  { target: '#user-badge', title: 'Your Account', text: 'Your role and name are shown here. Click the power icon to sign out.', side: 'bottom' },
+  { target: '#school-name', title: 'You\'re Ready!', text: 'You\'re all set! Explore the student portal at your own pace. Click the ? button anytime you need help.', side: 'bottom' }
+];
+
+// ===== GET TOUR STEPS FOR CURRENT ROLE =====
+function getTourSteps() { return isStudent() ? TOUR_STEPS_STUDENT : TOUR_STEPS; }
 
 // ===== CREATE TOOLTIP ELEMENT =====
 let tooltipEl = null;
@@ -289,16 +332,22 @@ function hideTooltip() {
   if (tooltipEl) { tooltipEl.remove(); tooltipEl = null; }
 }
 
+// ===== GET HELP MAP FOR CURRENT ROLE =====
+function getHelpMap() {
+  return isStudent() ? Object.assign({}, H, H_STUDENT) : H;
+}
+
 // ===== FIND HELP TEXT =====
 function findHelpText(el) {
   if (!el) return null;
+  const M = getHelpMap();
   // Check data-help attribute
   if (el.dataset && el.dataset.help) return { text: el.dataset.help, source: 'data-help' };
   // Check ID
-  if (el.id && H[el.id]) return { text: H[el.id], title: '', source: 'id' };
+  if (el.id && M[el.id]) return { text: M[el.id], title: '', source: 'id' };
   // Check className
   for (const cls of el.classList) {
-    if (H[cls]) return { text: H[cls], title: '', source: 'class' };
+    if (M[cls]) return { text: M[cls], title: '', source: 'class' };
   }
   // Check onclick attribute for known function names
   const onclick = el.getAttribute && el.getAttribute('onclick');
@@ -306,7 +355,7 @@ function findHelpText(el) {
     const match = onclick.match(/(show|open|edit|delete|print|save|record|generate|toggle|add)(\w+)/i);
     if (match) {
       const key = match[0].toLowerCase();
-      for (const [k, v] of Object.entries(H)) {
+      for (const [k, v] of Object.entries(M)) {
         if (k.toLowerCase().includes(key) || key.includes(k.toLowerCase())) return { text: v, title: '', source: 'onclick' };
       }
     }
@@ -314,9 +363,9 @@ function findHelpText(el) {
   // Check parent elements (walk up to 3 levels)
   let parent = el.parentElement;
   for (let i = 0; i < 3 && parent; i++) {
-    if (parent.id && H[parent.id]) return { text: H[parent.id], title: '', source: 'parent-id' };
+    if (parent.id && M[parent.id]) return { text: M[parent.id], title: '', source: 'parent-id' };
     for (const cls of parent.classList) {
-      if (H[cls]) return { text: H[cls], title: '', source: 'parent-class' };
+      if (M[cls]) return { text: M[cls], title: '', source: 'parent-class' };
     }
     parent = parent.parentElement;
   }
@@ -324,7 +373,7 @@ function findHelpText(el) {
   const label = el.closest('.form-group')?.querySelector('label');
   if (label) {
     const labelText = label.textContent.trim().replace(/[✕✍️*]/g, '').trim();
-    for (const [k, v] of Object.entries(H)) {
+    for (const [k, v] of Object.entries(M)) {
       if (labelText.toLowerCase().includes(k.replace(/-/g, ' ').toLowerCase()) || k.toLowerCase().includes(labelText.toLowerCase())) return { text: v, title: '', source: 'label' };
     }
   }
@@ -371,10 +420,11 @@ function handleHelpClick(e) {
     // Try to find any matching help text from parent elements
     let walk = el;
     let text = null;
+    const M = getHelpMap();
     while (walk && walk !== document.body) {
       if (walk.textContent) {
         const t = walk.textContent.trim().substring(0, 30);
-        for (const [k, v] of Object.entries(H)) {
+        for (const [k, v] of Object.entries(M)) {
           if (t.toLowerCase().includes(k.replace(/-/g, ' ').toLowerCase())) { text = v; break; }
         }
         if (text) break;
@@ -401,7 +451,8 @@ function createTourOverlay() {
 
 function showTourStep(index) {
   if (!tourActive) return;
-  const step = TOUR_STEPS[index];
+  const steps = getTourSteps();
+  const step = steps[index];
   if (!step) { endTour(); return; }
   tourCurrentStep = index;
 
@@ -430,7 +481,7 @@ function showTourStep(index) {
   // Build card
   const card = document.createElement('div');
   card.className = 'tour-card';
-  const total = TOUR_STEPS.length;
+  const total = steps.length;
   card.innerHTML = `
     <div class="tour-progress">Step ${index + 1} of ${total}</div>
     <div class="tour-title">${step.title}</div>

@@ -1386,8 +1386,8 @@ async function renderStudentDashboard(currentUser) {
         return `<div class="event-item"><span><b>📄 ${e.title || course?.code || e.courseId}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''} — ${formatDate(e.date)} ${e.time || ''}</span></span></div>`;
     }).join('') : '<div style="color:var(--text-muted);padding:10px;">No upcoming exams</div>';
     document.getElementById('dash-tickets').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">📋 Upcoming Exams</h4>${examHtml}</div>`;
-    document.getElementById('dash-server-health') && (document.getElementById('dash-server-health').innerHTML = '');
-    document.getElementById('dash-online') && (document.getElementById('dash-online').innerHTML = '');
+    document.getElementById('dash-server-health')?.closest('.card')?.style ? (document.getElementById('dash-server-health').closest('.card').style.display = 'none') : 0;
+    document.getElementById('dash-online')?.closest('.card')?.style ? (document.getElementById('dash-online').closest('.card').style.display = 'none') : 0;
     document.querySelector('#dash-finance')?.closest('.card')?.querySelector('h3') && (document.querySelector('#dash-finance').closest('.card').querySelector('h3').textContent = '💰 My Fees');
     document.querySelector('#dash-stock-alerts')?.closest('.card')?.querySelector('h3') && (document.querySelector('#dash-stock-alerts').closest('.card').querySelector('h3').textContent = '📊 Recent Grades');
     document.querySelector('#dash-tickets')?.closest('.card')?.querySelector('h3') && (document.querySelector('#dash-tickets').closest('.card').querySelector('h3').textContent = '📋 Upcoming Exams');
@@ -9323,6 +9323,8 @@ async function selectPortalStudent(studentId) {
     renderPortalContent(studentId, data, currentUser && currentUser.role === 'student');
 }
 function renderPortalContent(studentId, data, isStudentUser) {
+    const transcriptBtn = document.querySelector('#screen-portal .screen-actions [onclick*="viewPortalTranscript"]');
+    if (transcriptBtn) transcriptBtn.style.display = isStudentUser ? 'none' : '';
     const student = data.students.find(s => s.id === studentId);
     if (!student) return;
     if (isStudentUser) {
