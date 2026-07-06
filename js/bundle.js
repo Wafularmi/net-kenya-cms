@@ -1,4 +1,4 @@
-/* CMS Bundle v173 2026-07-06T14:45:00.000Z */
+/* CMS Bundle v174 2026-07-06T15:00:00.000Z */
 const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -625,6 +625,21 @@ async function login() {
         sessionStorage.setItem('currentUser', JSON.stringify(user));
         showLoginError('');
         document.getElementById('login-pass').value = '';
+        var key = 'terms_accepted_' + (user.username || user.id);
+        if (localStorage.getItem(key) !== 'true') {
+            try {
+                var existing = await dbGet('users', user.username || user.id);
+                if (existing && existing.termsAccepted) {
+                    localStorage.setItem(key, 'true');
+                } else {
+                    showTermsModalApp(user);
+                    return;
+                }
+            } catch (e) {
+                showTermsModalApp(user);
+                return;
+            }
+        }
         showApp(user);
         logAudit('login', 'user', { username: user.username });
     } catch (err) {
