@@ -409,6 +409,8 @@ window._toggleHelp = toggleHelpMode;
 // ===== HELP CLICK HANDLER =====
 function handleHelpClick(e) {
   if (!helpActive) return;
+  // If clicking inside the help-mode bar or the exit span, let the click pass through
+  if (e.target.closest('#help-mode-bar') || e.target.closest('#btn-help')) return;
   e.preventDefault();
   e.stopPropagation();
   const el = e.target;
