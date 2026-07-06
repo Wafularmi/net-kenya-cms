@@ -1233,7 +1233,7 @@ function onDBChange(store, record) {
     }
     try { renderAlertBell(); } catch (e) {}
 }
-init();
+// init() is now called from auth.js after T&C functions are defined
 
 async function renderDashboard() {
     try {

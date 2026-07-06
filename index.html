@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="page-title">College Management System</title>
     <link rel="stylesheet" href="css/theme.css?v=127">
-    <link rel="stylesheet" href="css/main.css?v=130">
+    <link rel="stylesheet" href="css/main.css?v=131">
     <link rel="stylesheet" href="css/components.css?v=128">
     <link rel="preload" href="js/bundle.js?v=168" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -690,41 +690,7 @@
     <div id="modal-overlay" class="modal-overlay" onclick="closeModal(event)"><div id="modal-content" class="modal-content" onclick="event.stopPropagation()"></div></div>
     <div id="toast" class="toast"></div>
 
-    <script src="js/bundle.js?v=168"></script>
-    <script src="js/auth.js?v=3"></script>
-    <script src="js/utils.js?v=1"></script>
-    <script src="js/whatsapp.js?v=1"></script>
-    <script src="js/students.js?v=1"></script>
-    <script src="js/exams.js?v=1"></script>
-    <script src="js/app.js?v=1"></script>
-    <script src="js/pending.js?v=1"></script>
-    <script src="js/communication.js?v=1"></script>
-    <script src="js/dashboard.js?v=1"></script>
-    <script src="js/student-hub.js?v=4"></script>
-    <script src="js/discussions.js?v=3"></script>
-    <script src="js/help.js?v=2"></script>
-    <script>
-    if (typeof login === 'undefined') {
-        window.login = function() {
-            try {
-                var input = document.getElementById('login-user').value.trim();
-                var password = document.getElementById('login-pass').value;
-                if (!input || !password) { showLoginError('Enter username and password'); return; }
-                fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input:input, password:password}) })
-                .then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d}})})
-                .then(function(res){
-                    if (!res.ok) { showLoginError(res.data.error||'Login failed'); return; }
-                    var u=res.data.user; if(!u){showLoginError('Login failed');return;}
-                    sessionStorage.setItem('currentUser', JSON.stringify(u));
-                    document.getElementById('login-pass').value='';
-                    location.reload();
-                }).catch(function(e){showLoginError('Cannot reach server: ' + e.message)});
-            } catch(e) { showLoginError('Error: ' + e.message); }
-        };
-        function showLoginError(m){var el=document.getElementById('login-error');if(m){el.textContent=m;el.style.display='block';}else{el.style.display='none';}}
-    }
-    </script>
-<div id="terms-modal" class="terms-overlay" style="display:none;">
+    <div id="terms-modal" class="terms-overlay" style="display:none;">
     <div class="terms-card">
         <div class="terms-header">
             <div class="terms-logo"><span class="terms-logo-text">NET</span></div>
@@ -808,5 +774,40 @@
         </div>
     </div>
 </div>
+
+    <script src="js/bundle.js?v=168"></script>
+    <script src="js/auth.js?v=3"></script>
+    <script src="js/utils.js?v=1"></script>
+    <script src="js/whatsapp.js?v=1"></script>
+    <script src="js/students.js?v=1"></script>
+    <script src="js/exams.js?v=1"></script>
+    <script src="js/app.js?v=1"></script>
+    <script src="js/pending.js?v=1"></script>
+    <script src="js/communication.js?v=1"></script>
+    <script src="js/dashboard.js?v=1"></script>
+    <script src="js/student-hub.js?v=4"></script>
+    <script src="js/discussions.js?v=3"></script>
+    <script src="js/help.js?v=2"></script>
+    <script>
+    if (typeof login === 'undefined') {
+        window.login = function() {
+            try {
+                var input = document.getElementById('login-user').value.trim();
+                var password = document.getElementById('login-pass').value;
+                if (!input || !password) { showLoginError('Enter username and password'); return; }
+                fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input:input, password:password}) })
+                .then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d}})})
+                .then(function(res){
+                    if (!res.ok) { showLoginError(res.data.error||'Login failed'); return; }
+                    var u=res.data.user; if(!u){showLoginError('Login failed');return;}
+                    sessionStorage.setItem('currentUser', JSON.stringify(u));
+                    document.getElementById('login-pass').value='';
+                    location.reload();
+                }).catch(function(e){showLoginError('Cannot reach server: ' + e.message)});
+            } catch(e) { showLoginError('Error: ' + e.message); }
+        };
+        function showLoginError(m){var el=document.getElementById('login-error');if(m){el.textContent=m;el.style.display='block';}else{el.style.display='none';}}
+    }
+    </script>
 </body>
 </html>

@@ -555,3 +555,4 @@ async function refreshTicketsBadge() {
 function initManuals() {
     renderManuals();
 }
+init();
