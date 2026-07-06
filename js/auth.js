@@ -381,9 +381,9 @@ async function checkStartupAlerts() {
     showAlertCarousel(alerts);
 }
 
-let _carouselTimer = null;
-let _carouselIndex = 0;
-let _carouselAlerts = [];
+var _carouselTimer;
+var _carouselIndex;
+var _carouselAlerts;
 
 async function showAlertCarousel(alerts) {
     _carouselAlerts = alerts.sort((a, b) => {
@@ -518,7 +518,7 @@ function closeAlertCarousel() {
     if (overlay) overlay.remove();
 }
 
-let bgRefreshTimer = null;
+var bgRefreshTimer;
 function initBackgroundRefresh() {
     if (bgRefreshTimer) clearInterval(bgRefreshTimer);
     bgRefreshTimer = setInterval(async () => {

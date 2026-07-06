@@ -316,8 +316,9 @@ async function showExamRegistrationModal(studentId) {
     const available = exams.filter(e => !registeredIds.has(e.id));
     if (!available.length) return showToast('No available exams to register for');
     let html = `<div style="margin-bottom:8px;"><b>${escapeHtml(student.name)}</b></div>`;
+    const allCourses = await dbGetAll('courses');
     html += available.map(e => {
-        const course = (await dbGetAll('courses')).find(c => c.id === e.courseId);
+        const course = allCourses.find(c => c.id === e.courseId);
         return `<label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
             <input type="checkbox" value="${e.id}" class="enroll-exam-chk">
             <div><b>${e.title || course?.code || e.courseId}</b><br><span style="font-size:11px;color:var(--text-muted);">${formatDate(e.date)} ${e.time || ''} — ${e.venue || 'TBA'}</span></div>

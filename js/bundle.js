@@ -1,4 +1,4 @@
-/* CMS Bundle v171 2026-07-06T10:35:00.000Z */
+/* CMS Bundle v172 2026-07-06T12:30:00.000Z */
 const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');

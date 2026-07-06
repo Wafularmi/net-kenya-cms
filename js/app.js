@@ -88,9 +88,9 @@ async function init() {
     }
 }
 
-let _refreshTimers = [];
-let _sseConnection = null;
-let _sseConnected = false;
+var _refreshTimers;
+var _sseConnection;
+var _sseConnected;
 function startAutoRefresh() {
     stopAutoRefresh();
     if (!document.getElementById('screen-dashboard')) return;
@@ -146,7 +146,7 @@ function stopAutoRefresh() {
     if (_sseConnection) { _sseConnection.close(); _sseConnection = null; }
 }
 
-let _lastTicketCount = -1;
+var _lastTicketCount;
 async function pollTickets() {
     try {
         const tickets = await dbGetAll('tickets');
@@ -168,7 +168,7 @@ async function pollAlerts() {
     } catch {}
 }
 
-let _dashTimer = 0;
+var _dashTimer;
 async function pollDashboard() {
     try {
         const dash = document.getElementById('screen-dashboard');
@@ -203,8 +203,8 @@ function refreshPortal(store, record) {
         renderStudentPortal();
     }
 }
-const isScreenActive = (id) => document.getElementById('screen-' + id)?.classList.contains('active');
-const _refreshMap = {
+var isScreenActive = (id) => document.getElementById('screen-' + id)?.classList.contains('active');
+var _refreshMap = {
     payments: (r) => { refreshPortal('payments', r); if (isScreenActive('finance')) renderFinance(); },
     expenses: (r) => { refreshPortal('expenses', r); if (isScreenActive('finance')) renderFinance(); },
     income: (r) => { refreshPortal('income', r); if (isScreenActive('finance')) renderFinance(); },

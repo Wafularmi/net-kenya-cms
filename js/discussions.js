@@ -1,4 +1,4 @@
-let _discussionsCache = {};
+var _discussionsCache;
 const BASE = '/api/discussions';
 var esc = window.escapeHtml || function(s) { return s == null ? '' : String(s); };
 

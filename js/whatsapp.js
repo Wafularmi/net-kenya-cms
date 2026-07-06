@@ -1,10 +1,10 @@
-let waQueue = [];
-let waQueueIndex = 0;
-let waQueueRunning = false;
-let waQueueAutoAdvance = false;
-let waQueueDelay = 2000;
-let waSentCount = 0;
-let waFailedCount = 0;
+var waQueue = [];
+var waQueueIndex = 0;
+var waQueueRunning = false;
+var waQueueAutoAdvance = false;
+var waQueueDelay = 2000;
+var waSentCount;
+var waFailedCount;
 
 async function renderWhatsAppTemplates() {
     const templates = await dbGetAll('whatsappTemplates');

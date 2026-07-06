@@ -20,7 +20,7 @@ function formatCurrency(amount) {
     return s.symbol + ' ' + val;
 }
 
-let _currencyCache = null;
+var _currencyCache;
 function setCurrencyCache(cfg) { _currencyCache = cfg; }
 
 function showToast(msg, options = {}) {
@@ -151,7 +151,7 @@ async function hashPassword(password) {
 }
 
 // --- Session Timeout (24h) ---
-const SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 function updateActivity() {
     sessionStorage.setItem('lastActivity', Date.now());
@@ -214,7 +214,7 @@ async function getProgramsList() {
     return [];
 }
 
-let _academicCache = null;
+var _academicCache;
 
 async function initAcademicCache() {
     _academicCache = await dbGet('settings', 'academic');

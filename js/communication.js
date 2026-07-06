@@ -174,7 +174,7 @@ function clearCommFilters() {
     applyCommFilters();
 }
 
-let commSearchTimer;
+var commSearchTimer;
 function debounceCommSearch() {
     clearTimeout(commSearchTimer);
     commSearchTimer = setTimeout(applyCommFilters, 200);

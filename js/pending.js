@@ -98,7 +98,7 @@ async function saveRegistrationEdit() {
 //          Admin clicks "Close" to dismiss the modal.
 // ============================================================================
 
-let _approvalState = {};
+var _approvalState;
 
 async function openApproveModal(studentId) {
     if (typeof seedWhatsAppTemplates === 'function') {
