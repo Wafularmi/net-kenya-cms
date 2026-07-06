@@ -1046,14 +1046,6 @@ body {
         width: auto;
     }
 
-    .alert-dropdown {
-        position: fixed;
-        left: 10px;
-        right: 10px;
-        width: auto;
-        max-width: none;
-    }
-
     .user-badge {
         padding: 4px 8px;
     }
@@ -1147,6 +1139,10 @@ body {
         flex-wrap: wrap;
     }
 
+    .user-badge #user-name-display {
+        display: none;
+    }
+
     .btn-icon {
         width: 32px;
         height: 32px;
@@ -1155,7 +1151,7 @@ body {
 }
 
 /* Alert bell hidden — merged into notification bell */
-#alert-bell { display: none !important; }
+/* alert-bell removed — unified into notif-bell */
 
 /* Notification dropdown */
 .notif-dropdown {

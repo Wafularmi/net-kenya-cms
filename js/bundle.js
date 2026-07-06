@@ -10886,92 +10886,10 @@ async function checkAbsent2WeeksAlert() {
     return alerts;
 }
 async function renderAlertBell() {
-    const alerts = (await dbGetAll('alerts')).filter(a => a.status === 'active');
-    const count = alerts.length;
-    let bell = document.getElementById('alert-bell');
-    if (!bell) {
-        bell = document.createElement('div');
-        bell.id = 'alert-bell';
-        bell.className = 'alert-bell';
-        bell.innerHTML = `<svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="alert-badge" id="alert-badge" style="display:none;">0</span>`;
-        bell.onclick = toggleAlertDropdown;
-        const userBadge = document.getElementById('user-badge');
-        if (userBadge) userBadge.parentNode.insertBefore(bell, userBadge);
-    }
-    const badge = document.getElementById('alert-badge');
-    if (badge) {
-        if (count > 0) {
-            badge.textContent = count;
-            badge.style.display = 'flex';
-        } else {
-            badge.textContent = '0';
-            badge.style.display = 'none';
-        }
-    }
-}
-function toggleAlertDropdown() {
-    let dropdown = document.getElementById('alert-dropdown');
-    if (dropdown) {
-        dropdown.remove();
-        return;
-    }
-    dropdown = document.createElement('div');
-    dropdown.id = 'alert-dropdown';
-    dropdown.className = 'alert-dropdown';
-    dropdown.innerHTML = '<div class="alert-dropdown-header"><b>Notifications</b><button class="btn btn-outline btn-sm" onclick="dismissAllAlerts()">Dismiss All</button></div><div id="alert-dropdown-body"></div>';
-    const bell = document.getElementById('alert-bell');
-    bell.style.position = 'relative';
-    bell.appendChild(dropdown);
-    renderAlertDropdown();
-}
-async function renderAlertDropdown() {
-    const allAlerts = await dbGetAll('alerts');
-    const active = allAlerts.filter(a => a.status === 'active').sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const dismissed = allAlerts.filter(a => a.status === 'dismissed').sort((a, b) => new Date(b.dismissedAt || b.createdAt) - new Date(a.dismissedAt || a.createdAt)).slice(0, 20);
-    const body = document.getElementById('alert-dropdown-body');
-    if (!body) return;
-    if (!active.length && !dismissed.length) {
-        body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No notifications</div>';
-        return;
-    }
-    let html = '';
-    if (active.length) {
-        html += active.map(a => `
-            <div class="alert-item alert-${a.severity}">
-                <div class="alert-item-icon">${a.icon}</div>
-                <div class="alert-item-content">
-                    <div class="alert-item-title">${a.title}</div>
-                    <div class="alert-item-details">${a.details}</div>
-                    <div class="alert-item-time">${timeAgo(a.createdAt)}</div>
-                </div>
-                <div class="alert-item-actions">
-                    ${a.action ? `<button class="alert-action-btn" onclick="handleAlertAction('${a.id}', '${a.action.screen}', '${a.action.studentId || ''}')">${a.action.label}</button>` : ''}
-                    <button class="alert-dismiss-btn" onclick="dismissAlert('${a.id}')">&times;</button>
-                </div>
-            </div>
-        `).join('');
-    }
-    if (dismissed.length) {
-        html += `<div style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);border-top:1px solid var(--border);">Recently Dismissed</div>`;
-        html += dismissed.map(a => `
-            <div class="alert-item alert-${a.severity}" style="opacity:0.5;">
-                <div class="alert-item-icon">${a.icon}</div>
-                <div class="alert-item-content">
-                    <div class="alert-item-title">${a.title}</div>
-                    <div class="alert-item-details">${a.details}</div>
-                    <div class="alert-item-time">${a.dismissedAt ? timeAgo(a.dismissedAt) : timeAgo(a.createdAt)}</div>
-                </div>
-                <div class="alert-item-actions">
-                    <button class="alert-dismiss-btn" onclick="restoreAlert('${a.id}')" title="Restore">&check;</button>
-                </div>
-            </div>
-        `).join('');
-    }
-    body.innerHTML = html;
+    // Replaced by unified notification #notif-bell
 }
 function handleAlertAction(alertId, screen, studentId) {
     dismissAlert(alertId);
-    toggleAlertDropdown();
     if (screen === 'finance' && studentId) {
         showScreen(screen);
         setTimeout(() => {
@@ -10991,42 +10909,7 @@ function handleAlertAction(alertId, screen, studentId) {
 async function dismissAlert(id) {
     await dbDelete('alerts', id).catch(() => {});
     updateNotificationBadge();
-    renderAlertDropdown();
-}
-async function restoreAlert(id) {
-    const alert = await dbGet('alerts', id);
-    if (alert) {
-        alert.status = 'active';
-        delete alert.dismissedAt;
-        await dbPut('alerts', alert);
-    }
-    renderAlertDropdown();
-    renderAlertBell();
-}
-async function dismissAllAlerts() {
-    const alerts = (await dbGetAll('alerts')).filter(a => a.status === 'active');
-    for (const a of alerts) {
-        a.status = 'dismissed';
-        a.dismissedAt = new Date().toISOString();
-        await dbPut('alerts', a);
-    }
-    const dropdown = document.getElementById('alert-dropdown');
-    if (dropdown) dropdown.remove();
-    const badge = document.getElementById('alert-badge');
-    if (badge) {
-        badge.textContent = '0';
-        badge.style.display = 'none';
-    }
-    showToast('All notifications dismissed');
-}
-async function cleanupOldAlerts() {
-    const allAlerts = await dbGetAll('alerts');
-    const sevenDaysAgo = Date.now() - 7 * 86400000;
-    for (const a of allAlerts) {
-        if (a.status === 'dismissed' && a.dismissedAt && new Date(a.dismissedAt).getTime() < sevenDaysAgo) {
-            await dbDelete('alerts', a.id);
-        }
-    }
+    renderAlertDashboard();
 }
 async function renderAlertDashboard() {
     const alerts = (await dbGetAll('alerts')).filter(a => a.status === 'active');
