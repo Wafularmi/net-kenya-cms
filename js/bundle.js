@@ -1,4 +1,4 @@
-/* CMS Bundle v174 2026-07-06T15:00:00.000Z */
+/* CMS Bundle v175 2026-07-06T17:00:00.000Z */
 const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -1298,8 +1298,27 @@ function showTermsModalApp(user) {
     const acceptBtn = document.getElementById('terms-accept-btn');
     if (checkbox) checkbox.checked = false;
     if (acceptBtn) acceptBtn.disabled = true;
-    modal.style.display = 'flex';
     const scroll = document.getElementById('terms-scroll');
+    const dateEl = document.getElementById('terms-updated-date');
+    dbGet('settings', 'branding').then(function(settings) {
+        if (settings && settings.termsContent) {
+            if (scroll) scroll.innerHTML = settings.termsContent;
+        }
+        if (settings && settings.termsUpdated && dateEl) {
+            var parts = settings.termsUpdated.split('-');
+            if (parts.length === 3) {
+                var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+                dateEl.textContent = 'Last Updated: ' + d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+            } else {
+                dateEl.textContent = '';
+            }
+        } else if (dateEl) {
+            dateEl.textContent = '';
+        }
+    }).catch(function() {
+        if (dateEl) dateEl.textContent = '';
+    });
+    modal.style.display = 'flex';
     if (scroll) scroll.scrollTop = 0;
     if (checkbox) checkbox.onchange = function() { if (acceptBtn) acceptBtn.disabled = !this.checked; };
 }
@@ -11477,10 +11496,14 @@ async function loadBranding() {
             const el = document.getElementById('settings-' + f);
             if (el) el.value = settings[f] || '';
         });
+        const termsContentInput = document.getElementById('settings-terms-content');
+        if (termsContentInput) termsContentInput.value = settings.termsContent || '';
+        const termsUpdatedInput = document.getElementById('settings-terms-updated');
+        if (termsUpdatedInput) termsUpdatedInput.value = settings.termsUpdated || '';
     }
 }
 async function saveBranding() {
-    const branding = { key: 'branding', schoolName: document.getElementById('settings-school-name').value.trim(), tagline: document.getElementById('settings-tagline').value.trim(), initials: document.getElementById('settings-initials').value.trim().toUpperCase(), accentColor: document.getElementById('settings-accent-color').value, theme: document.getElementById('settings-theme').value, kraPin: document.getElementById('settings-kra-pin').value.trim(), receiptFooter: document.getElementById('settings-receipt-footer').value.trim(), postalAddress: document.getElementById('settings-postalAddress').value.trim(), city: document.getElementById('settings-city').value.trim(), phone: document.getElementById('settings-phone').value.trim(), email: document.getElementById('settings-email').value.trim(), website: document.getElementById('settings-website').value.trim() };
+    const branding = { key: 'branding', schoolName: document.getElementById('settings-school-name').value.trim(), tagline: document.getElementById('settings-tagline').value.trim(), initials: document.getElementById('settings-initials').value.trim().toUpperCase(), accentColor: document.getElementById('settings-accent-color').value, theme: document.getElementById('settings-theme').value, kraPin: document.getElementById('settings-kra-pin').value.trim(), receiptFooter: document.getElementById('settings-receipt-footer').value.trim(), postalAddress: document.getElementById('settings-postalAddress').value.trim(), city: document.getElementById('settings-city').value.trim(), phone: document.getElementById('settings-phone').value.trim(), email: document.getElementById('settings-email').value.trim(), website: document.getElementById('settings-website').value.trim(), termsContent: document.getElementById('settings-terms-content').value, termsUpdated: document.getElementById('settings-terms-updated').value };
     const readFile = (input) => new Promise(resolve => {
         if (!input || !input.files || !input.files[0]) return resolve(null);
         const reader = new FileReader();

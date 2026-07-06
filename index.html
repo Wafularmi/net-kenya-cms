@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="page-title">College Management System</title>
     <link rel="stylesheet" href="css/theme.css?v=127">
-    <link rel="stylesheet" href="css/main.132.css">
+    <link rel="stylesheet" href="css/main.133.css">
     <link rel="stylesheet" href="css/components.css?v=128">
     <link rel="preload" href="js/bundle.js?v=174" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -629,6 +629,15 @@
                             <button class="btn btn-outline btn-sm" onclick="resetAdmissionLastSeq()">Reset to 0</button>
                         </div>
                     </div>
+                    <div class="card"><h3>Terms &amp; Conditions</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Edit the content shown to users when they first log in. Supports HTML. Changes apply on next login for new users.</div>
+                        <div class="form-row">
+                            <div class="form-group"><label>Last Updated</label><input type="date" id="settings-terms-updated"></div>
+                            <div class="form-group" style="align-self:flex-end;"><button class="btn btn-outline" onclick="var d=new Date();document.getElementById('settings-terms-updated').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')">Set to Today</button></div>
+                        </div>
+                        <div class="form-group"><label>Content (HTML)</label><textarea id="settings-terms-content" rows="16" style="font-family:monospace;font-size:12px;line-height:1.5;" placeholder="Leave empty to use the default Terms &amp; Conditions content."></textarea></div>
+                        <button class="btn btn-primary" onclick="saveBranding()">Save T&amp;C</button>
+                    </div>
                     <div class="card"><h3>Academic Settings</h3>
                         <div class="form-group"><label>Current Academic Year</label><input type="text" id="settings-academic-year"></div>
                         <div class="form-row"><div class="form-group"><label>Semester</label><select id="settings-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select></div><div class="form-group"><label>Grading Scale</label><select id="settings-grading"><option value="standard">Standard (A-F, B+, B-)</option><option value="gpa4">GPA 4.0 Scale</option><option value="gpa5">GPA 5.0 Scale</option><option value="ects">ECTS (A-F)</option><option value="percent">Percentage Only</option></select></div></div>
@@ -697,6 +706,7 @@
             <div class="terms-logo"><span class="terms-logo-text">NET</span></div>
             <h2>Terms &amp; Conditions of Use</h2>
             <p class="terms-subtitle">NET Foundation Kenya — College Management System</p>
+            <p class="terms-updated" id="terms-updated-date"></p>
         </div>
         <div class="terms-scroll" id="terms-scroll">
             <div class="terms-section">
