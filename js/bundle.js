@@ -666,10 +666,10 @@ function showApp(user) {
     document.getElementById('user-role-badge').textContent = user.role.charAt(0).toUpperCase() + user.role.slice(1);
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
     buildNavigation(user);
-    adjustHeaderPadding();
     updateHeaderDate();
     setInterval(updateHeaderDate, 60000);
     loadBranding();
+    adjustHeaderPadding();
     loadAcademicSettings();
     initTabs();
     document.getElementById('attendance-date').value = new Date().toISOString().split('T')[0];
@@ -702,6 +702,7 @@ function showApp(user) {
     document.getElementById('login-user').value = '';
     window.removeEventListener('resize', adjustHeaderPadding);
     window.addEventListener('resize', adjustHeaderPadding);
+    setTimeout(adjustHeaderPadding, 100);
 }
 function logout() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -11809,6 +11810,31 @@ async function resetAdmissionLastSeq() {
 async function saveWhatsAppSettings() {
     const settings = { key: 'whatsapp', countryCode: document.getElementById('settings-whatsapp-code').value.trim(), adminNumber: document.getElementById('settings-whatsapp-admin').value.trim() };
     await dbPut('settings', settings); showToast('WhatsApp settings saved!'); logAudit('updated', 'whatsapp-settings', settings);
+}
+async function changePassword() {
+    const status = document.getElementById('settings-pw-status');
+    const currentPw = document.getElementById('settings-current-pw').value;
+    const newPw = document.getElementById('settings-new-pw').value;
+    const confirmPw = document.getElementById('settings-confirm-pw').value;
+    if (!currentPw || !newPw || !confirmPw) { status.textContent = 'Fill all fields'; status.style.color = 'var(--danger)'; return; }
+    if (newPw !== confirmPw) { status.textContent = 'New passwords do not match'; status.style.color = 'var(--danger)'; return; }
+    if (newPw.length < 6) { status.textContent = 'Password must be at least 6 characters'; status.style.color = 'var(--danger)'; return; }
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!currentUser.username) { status.textContent = 'Not logged in'; status.style.color = 'var(--danger)'; return; }
+    const user = await dbGet('users', currentUser.username);
+    if (!user) { status.textContent = 'User not found'; status.style.color = 'var(--danger)'; return; }
+    const currentHash = await hashPassword(currentPw);
+    if (user.password !== currentHash && user.password !== currentPw) { status.textContent = 'Current password is incorrect'; status.style.color = 'var(--danger)'; return; }
+    user.password = await hashPassword(newPw);
+    await dbPut('users', user);
+    sessionStorage.setItem('currentUser', JSON.stringify({ ...currentUser, password: user.password }));
+    document.getElementById('settings-current-pw').value = '';
+    document.getElementById('settings-new-pw').value = '';
+    document.getElementById('settings-confirm-pw').value = '';
+    status.textContent = 'Password updated successfully!';
+    status.style.color = 'var(--success)';
+    logAudit('updated', 'password', { username: currentUser.username });
+    setTimeout(() => { status.textContent = ''; }, 3000);
 }
 function updateProgramFilter() {
     const settingsEl = document.getElementById('settings-programs');
