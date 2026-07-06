@@ -31,3 +31,6 @@ certs/*.crt
 dist/
 build/
 *.exe
+
+# Pre-compressed gzip (regenerated at runtime if needed)
+*.gz

@@ -204,9 +204,17 @@ function serveCachedFile(res, filePath, url, req) {
     const acceptEncoding = (req && req.headers) ? req.headers['accept-encoding'] || '' : '';
     const wantsGzip = acceptEncoding.includes('gzip');
     
-    // Serve pre-compressed .gz if available (avoids runtime gzip cost)
+    // Serve pre-compressed .gz if available and fresh (avoids runtime gzip cost)
     const gzPath = filePath + '.gz';
+    let gzFresh = false;
     if (wantsGzip && !skipGzip && fs.existsSync(gzPath)) {
+        try {
+            const srcMtime = fs.statSync(filePath).mtimeMs;
+            const gzMtime = fs.statSync(gzPath).mtimeMs;
+            gzFresh = gzMtime >= srcMtime;
+        } catch { gzFresh = false; }
+    }
+    if (gzFresh) {
         res.setHeader('Content-Type', mime);
         res.setHeader('Content-Encoding', 'gzip');
         if (isBundle || ext === '.css' || ext === '.js') {
