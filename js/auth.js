@@ -19,6 +19,7 @@ async function initAuth() {
             const dbUser = await dbGet('users', user.username);
             if (dbUser && dbUser.status !== 'locked') {
                 sessionStorage.setItem('currentUser', JSON.stringify(dbUser));
+                if (!await checkTermsAccepted(dbUser)) return;
                 return showApp(dbUser);
             }
         }
