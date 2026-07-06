@@ -1146,6 +1146,11 @@ body {
         height: 32px;
         font-size: 14px;
     }
+    .user-badge .btn-icon {
+        width: 28px;
+        height: 28px;
+        font-size: 12px;
+    }
 }
 
 /* Alert bell hidden — merged into notification bell */
