@@ -1,4 +1,4 @@
-/* CMS Bundle v165 2026-06-13T08:08:21.990Z */
+/* CMS Bundle v170 2026-07-06T10:30:00.000Z */
 const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -1093,6 +1093,7 @@ function updateHeaderDate() {
 async function init() {
     try {
         await openDB();
+        try { await loadBranding(); } catch (e) { console.error('init loadBranding:', e); }
         if (sessionStorage.getItem('currentUser') && isSessionExpired()) {
             sessionStorage.removeItem('currentUser');
             showToast('Session expired. Please login again.', { type: 'warning', duration: 5000 });
@@ -11422,7 +11423,7 @@ async function loadBranding() {
         const headerPlaceholder = document.getElementById('header-logo-placeholder');
         if (settings.logo) {
             if (headerImg) { headerImg.src = settings.logo; headerImg.style.display = 'block'; headerPlaceholder.style.display = 'none'; }
-            if (loginLogo) { loginLogo.innerHTML = `<img src="${settings.logo}" alt="Logo">`; loginLogo.className = ''; }
+            if (loginLogo) { loginLogo.innerHTML = `<img src="${settings.logo}" alt="Logo">`; loginLogo.style.background = 'transparent'; }
             const logoPreview = document.getElementById('settings-logo-preview');
             const logoPlaceholder = document.getElementById('settings-logo-placeholder');
             if (logoPreview) { logoPreview.src = settings.logo; logoPreview.style.display = 'block'; if (logoPlaceholder) logoPlaceholder.style.display = 'none'; }
