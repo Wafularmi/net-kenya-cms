@@ -659,7 +659,7 @@ function adjustHeaderPadding() {
         document.documentElement.style.setProperty('--header-height', h + 'px');
     }
 }
-function showApp(user) {
+async function showApp(user) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     document.getElementById('user-name-display').textContent = user.name || user.username;
@@ -668,7 +668,7 @@ function showApp(user) {
     buildNavigation(user);
     updateHeaderDate();
     setInterval(updateHeaderDate, 60000);
-    loadBranding();
+    await loadBranding();
     adjustHeaderPadding();
     loadAcademicSettings();
     initTabs();
