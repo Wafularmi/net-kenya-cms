@@ -209,7 +209,7 @@ function serveCachedFile(res, filePath, url, req) {
     if (wantsGzip && !skipGzip && fs.existsSync(gzPath)) {
         res.setHeader('Content-Type', mime);
         res.setHeader('Content-Encoding', 'gzip');
-        if (isBundle) {
+        if (isBundle || ext === '.css' || ext === '.js') {
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
@@ -231,7 +231,7 @@ function serveCachedFile(res, filePath, url, req) {
         if (res.headersSent) return;
         res.setHeader('Content-Type', mime);
         
-        if (isBundle) {
+        if (isBundle || ext === '.css' || ext === '.js') {
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
