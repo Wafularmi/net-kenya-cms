@@ -90,6 +90,8 @@ async function login() {
         sessionStorage.setItem('currentUser', JSON.stringify(user));
         showLoginError('');
         document.getElementById('login-pass').value = '';
+        // Check terms and conditions acceptance
+        if (!await checkTermsAccepted(user)) return;
         showApp(user);
         logAudit('login', 'user', { username: user.username });
     } catch (err) {
@@ -147,6 +149,56 @@ function showApp(user) {
     initBackgroundRefresh();
     document.getElementById('login-user').value = '';
 }
+
+async function checkTermsAccepted(user) {
+    const key = 'terms_accepted_' + (user.username || user.id);
+    if (localStorage.getItem(key) === 'true') return true;
+    try {
+        const existing = await dbGet('users', user.username || user.id);
+        if (existing && existing.termsAccepted) {
+            localStorage.setItem(key, 'true');
+            return true;
+        }
+    } catch {}
+    showTermsModal(user);
+    return false;
+}
+
+function showTermsModal(user) {
+    window._termsUser = user;
+    const checkbox = document.getElementById('terms-agree-check');
+    const acceptBtn = document.getElementById('terms-accept-btn');
+    checkbox.checked = false;
+    acceptBtn.disabled = true;
+    document.getElementById('terms-modal').style.display = 'flex';
+    document.getElementById('terms-scroll').scrollTop = 0;
+    checkbox.onchange = function() { acceptBtn.disabled = !this.checked; };
+}
+
+window.acceptTerms = async function() {
+    const user = window._termsUser;
+    if (!user) return;
+    const key = 'terms_accepted_' + (user.username || user.id);
+    localStorage.setItem(key, 'true');
+    try {
+        const existing = await dbGet('users', user.username || user.id);
+        if (existing) {
+            existing.termsAccepted = true;
+            existing.termsAcceptedAt = new Date().toISOString();
+            await dbPut('users', existing);
+        }
+    } catch {}
+    document.getElementById('terms-modal').style.display = 'none';
+    showApp(user);
+};
+
+window.declineTerms = function() {
+    document.getElementById('terms-modal').style.display = 'none';
+    const key = 'terms_accepted_' + (window._termsUser?.username || window._termsUser?.id || '');
+    localStorage.removeItem(key);
+    showLoginError('You must accept the Terms and Conditions to use the System.');
+    setTimeout(() => logout(), 2000);
+};
 
 function logout() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="page-title">College Management System</title>
     <link rel="stylesheet" href="css/theme.css?v=127">
-    <link rel="stylesheet" href="css/main.css?v=129">
+    <link rel="stylesheet" href="css/main.css?v=130">
     <link rel="stylesheet" href="css/components.css?v=128">
     <link rel="preload" href="js/bundle.js?v=168" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -691,7 +691,7 @@
     <div id="toast" class="toast"></div>
 
     <script src="js/bundle.js?v=168"></script>
-    <script src="js/auth.js?v=1"></script>
+    <script src="js/auth.js?v=2"></script>
     <script src="js/utils.js?v=1"></script>
     <script src="js/whatsapp.js?v=1"></script>
     <script src="js/students.js?v=1"></script>
@@ -724,5 +724,89 @@
         function showLoginError(m){var el=document.getElementById('login-error');if(m){el.textContent=m;el.style.display='block';}else{el.style.display='none';}}
     }
     </script>
+<div id="terms-modal" class="terms-overlay" style="display:none;">
+    <div class="terms-card">
+        <div class="terms-header">
+            <div class="terms-logo"><span class="terms-logo-text">NET</span></div>
+            <h2>Terms &amp; Conditions of Use</h2>
+            <p class="terms-subtitle">NET Foundation Kenya — College Management System</p>
+        </div>
+        <div class="terms-scroll" id="terms-scroll">
+            <div class="terms-section">
+                <h3>1. Acceptance of Terms</h3>
+                <p>By accessing and using the NET Foundation Kenya College Management System ("the System"), you agree to be bound by these Terms and Conditions. If you do not agree, you must not use the System.</p>
+            </div>
+            <div class="terms-section">
+                <h3>2. Data Protection (Kenyan Data Protection Act, 2019)</h3>
+                <p>In compliance with the <strong>Kenya Data Protection Act No. 24 of 2019</strong>, the General Data Protection Regulation (GDPR), and other applicable data protection and privacy laws:</p>
+                <ul>
+                    <li><strong>Lawful Processing:</strong> Your personal data is processed solely for educational administration, academic record-keeping, and institutional management purposes.</li>
+                    <li><strong>Purpose Limitation:</strong> Data collected shall <strong>only</strong> be used within this System for the legitimate interests of NET Foundation Kenya and shall <strong>not</strong> be shared, sold, leased, or otherwise transferred to any third party except as required by law.</li>
+                    <li><strong>Data Minimisation:</strong> Only data necessary for academic and administrative purposes is collected and processed.</li>
+                    <li><strong>Data Subject Rights:</strong> You have the right to access, correct, update, or request deletion of your personal data, subject to the institution's record-keeping obligations.</li>
+                    <li><strong>Data Security:</strong> Reasonable technical and organisational measures are implemented to safeguard your personal data against unauthorised access, loss, or destruction.</li>
+                </ul>
+            </div>
+            <div class="terms-section">
+                <h3>3. Use of Personal Information</h3>
+                <p>Your personal information — including but not limited to your full name, photograph, date of birth, admission number, national ID number, academic records, attendance records, and examination results — shall appear on official academic documents issued by NET Foundation Kenya, including:</p>
+                <ul>
+                    <li>Transcripts of academic records</li>
+                    <li>Graduation certificates and diplomas</li>
+                    <li>Student identification cards</li>
+                    <li>Progress reports and result slips</li>
+                    <li>Letters of recommendation or verification</li>
+                </ul>
+                <p>By accepting these terms, you consent to the inclusion of your personal information on the above documents for the purposes of academic verification, certification, and identification.</p>
+            </div>
+            <div class="terms-section">
+                <h3>4. Data Sharing and Disclosure</h3>
+                <p>NET Foundation Kenya shall <strong>not</strong> share, disclose, or transfer your personal data to any external organisation, government body, or individual except:</p>
+                <ul>
+                    <li>Where required by Kenyan law or a valid court order;</li>
+                    <li>To accredited educational bodies for verification of academic credentials; or</li>
+                    <li>With your explicit written consent.</li>
+                </ul>
+            </div>
+            <div class="terms-section">
+                <h3>5. Data Retention</h3>
+                <p>Your personal data and academic records will be retained for the duration of your enrolment and for a period thereafter in accordance with the institution's data retention policy and legal obligations under Kenyan law.</p>
+            </div>
+            <div class="terms-section">
+                <h3>6. Consent and Withdrawal</h3>
+                <p>By accepting these terms, you provide your explicit consent to the processing of your personal data as described herein. You may withdraw consent at any time by providing written notice to the institution. However, withdrawal of consent may affect your ability to access certain services or receive official academic documents.</p>
+            </div>
+            <div class="terms-section">
+                <h3>7. System Usage Rules</h3>
+                <ul>
+                    <li>You are responsible for maintaining the confidentiality of your login credentials.</li>
+                    <li>You must not share your account with any other person.</li>
+                    <li>You must not use the System for any unlawful purpose or in violation of these terms.</li>
+                    <li>The institution reserves the right to suspend or terminate access for violation of these terms.</li>
+                </ul>
+            </div>
+            <div class="terms-section">
+                <h3>8. Contact and Queries</h3>
+                <p>For questions regarding these Terms and Conditions or your data protection rights, please contact:<br>
+                <strong>NET Foundation Kenya</strong><br>
+                Data Protection Officer<br>
+                Email: info@netfoundation.ke</p>
+            </div>
+            <div class="terms-section">
+                <h3>9. Governing Law</h3>
+                <p>These Terms and Conditions shall be governed by and construed in accordance with the laws of the Republic of Kenya. Any disputes arising hereunder shall be subject to the exclusive jurisdiction of the courts of Kenya.</p>
+            </div>
+        </div>
+        <div class="terms-footer">
+            <label class="terms-checkbox">
+                <input type="checkbox" id="terms-agree-check"> I have read and agree to the Terms and Conditions of Use
+            </label>
+            <div class="terms-buttons">
+                <button class="btn btn-outline" onclick="declineTerms()" id="terms-decline-btn">Decline</button>
+                <button class="btn btn-primary" onclick="acceptTerms()" id="terms-accept-btn" disabled>Accept &amp; Continue</button>
+            </div>
+        </div>
+    </div>
+</div>
 </body>
 </html>
