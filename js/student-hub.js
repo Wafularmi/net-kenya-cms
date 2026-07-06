@@ -52,7 +52,7 @@ function hubSkeleton() {
 function _hubBuildComputed(data, me) {
     const studentId = me.id;
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me.admissionNumber, me.phone, me.email].filter(Boolean));
+    const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me.id, me.admissionNumber, me.phone, me.email].filter(Boolean));
     const enrolledIds = new Set((data.enrollments || []).filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
     const myCourses = (data.courses || []).filter(c => enrolledIds.has(c.id));
     const availableCourses = (data.courses || []).filter(c => c.published !== false && !enrolledIds.has(c.id));

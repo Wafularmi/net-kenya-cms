@@ -681,6 +681,12 @@ function handleAPI(req, res) {
                 user.lastLogin = new Date().toISOString();
                 safeWriteJSON(db);
 
+                // Ensure studentId is present for student users
+                if (user.role === 'student' && !user.studentId) {
+                    const student = students.find(s => s.phone === user.username || s.id === user.username || s.email === user.username);
+                    if (student) user.studentId = student.id;
+                }
+
                 // Strip password before sending to client
                 const safeUser = { ...user };
                 delete safeUser.password;

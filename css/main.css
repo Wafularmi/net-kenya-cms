@@ -11,7 +11,7 @@ body {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
-    padding-top: 60px;
+    padding-top: var(--header-height, 60px);
 }
 
 #main-header {
@@ -115,9 +115,9 @@ body {
 .sidebar {
     position: fixed;
     left: 0;
-    top: 78px;
+    top: var(--header-height, 78px);
     width: 165px;
-    height: calc(100vh - 78px);
+    height: calc(100vh - var(--header-height, 78px));
     background: var(--bg-card);
     border-right: 1px solid var(--border);
     overflow-y: auto;

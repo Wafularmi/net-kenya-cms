@@ -652,6 +652,13 @@ function showLoginError(msg) {
     const el = document.getElementById('login-error');
     if (msg) { el.textContent = msg; el.style.display = 'block'; } else { el.style.display = 'none'; }
 }
+function adjustHeaderPadding() {
+    const header = document.getElementById('main-header');
+    if (header) {
+        const h = header.offsetHeight;
+        document.documentElement.style.setProperty('--header-height', h + 'px');
+    }
+}
 function showApp(user) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
@@ -659,6 +666,7 @@ function showApp(user) {
     document.getElementById('user-role-badge').textContent = user.role.charAt(0).toUpperCase() + user.role.slice(1);
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
     buildNavigation(user);
+    adjustHeaderPadding();
     updateHeaderDate();
     setInterval(updateHeaderDate, 60000);
     loadBranding();
@@ -692,6 +700,8 @@ function showApp(user) {
     renderAlertBell();
     initBackgroundRefresh();
     document.getElementById('login-user').value = '';
+    window.removeEventListener('resize', adjustHeaderPadding);
+    window.addEventListener('resize', adjustHeaderPadding);
 }
 function logout() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -1466,7 +1476,7 @@ async function renderStudentDashboard(currentUser) {
         const batch = await dbGetBatch(['students','courses','lessons','quizzes','submissions','grades','attendance','payments','events','exams','enrollments']);
         const students = batch.students, courses = batch.courses, lessons = batch.lessons, quizzes = batch.quizzes, submissions = batch.submissions, grades = batch.grades, attendance = batch.attendance, payments = batch.payments, events = batch.events, exams = batch.exams, enrollments = batch.enrollments;
     const today = new Date().toISOString().split('T')[0];
-    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username);
+    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || (currentUser.username && s.phone === currentUser.username));
     if (!me) {
         document.getElementById('dash-stats').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Profile not found</div>';
         return;
@@ -1483,9 +1493,11 @@ async function renderStudentDashboard(currentUser) {
     const avgGrade = studentGrades.length ? Math.round(studentGrades.reduce((s, g) => s + g.score, 0) / studentGrades.length) : 0;
     const studentSubmissions = submissions.filter(s => s.studentId === studentId);
     const quizzesPassed = studentSubmissions.filter(s => s.status === 'pass').length;
-    const publishedCourses = courses.filter(c => c.status !== 'inactive' && lessons.some(l => l.courseId === c.id && l.published));
-    document.getElementById('dash-stats').innerHTML = `<div class="stat-card"><div class="stat-label">Welcome</div><div class="stat-value" style="font-size:16px;">${escapeHtml(me.name)}</div></div><div class="stat-card"><div class="stat-label">Admission #</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.admissionNumber || '--')}</div></div><div class="stat-card"><div class="stat-label">Program</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.program || '--')}</div></div><div class="stat-card"><div class="stat-label">Avg Grade</div><div class="stat-value" style="color:${avgGrade >= 70 ? 'var(--success)' : avgGrade >= 50 ? 'var(--warning)' : 'var(--danger)'};">${avgGrade}%</div></div><div class="stat-card"><div class="stat-label">Attendance</div><div class="stat-value" style="color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div></div><div class="stat-card"><div class="stat-label">Fee Balance</div><div class="stat-value" style="color:${balance <= 0 ? 'var(--success)' : 'var(--warning)'};">${formatCurrency(balance)}</div></div><div class="stat-card"><div class="stat-label">Quizzes Passed</div><div class="stat-value" style="color:var(--success);">${quizzesPassed}</div></div><div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${publishedCourses.length}</div></div>`;
-    document.getElementById('dash-recent-students').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">Your Courses</h4>${publishedCourses.length ? publishedCourses.slice(0, 5).map(c => `<div class="event-item"><span><b>${escapeHtml(c.code)}</b> — ${escapeHtml(c.name)}</span><span class="badge badge-success">Published</span></div>`).join('') : '<div style="color:var(--text-muted);padding:10px;">No published courses yet</div>'}</div>`;
+    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
+    const myCourses = courses.filter(c => enrolledCourseIds.has(c.id) && c.status !== 'inactive');
+    document.getElementById('dash-stats').innerHTML = `<div class="stat-card"><div class="stat-label">Welcome</div><div class="stat-value" style="font-size:16px;">${escapeHtml(me.name)}</div></div><div class="stat-card"><div class="stat-label">Admission #</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.admissionNumber || '--')}</div></div><div class="stat-card"><div class="stat-label">Program</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.program || '--')}</div></div><div class="stat-card"><div class="stat-label">Avg Grade</div><div class="stat-value" style="color:${avgGrade >= 70 ? 'var(--success)' : avgGrade >= 50 ? 'var(--warning)' : 'var(--danger)'};">${avgGrade}%</div></div><div class="stat-card"><div class="stat-label">Attendance</div><div class="stat-value" style="color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div></div><div class="stat-card"><div class="stat-label">Fee Balance</div><div class="stat-value" style="color:${balance <= 0 ? 'var(--success)' : 'var(--warning)'};">${formatCurrency(balance)}</div></div><div class="stat-card"><div class="stat-label">Quizzes Passed</div><div class="stat-value" style="color:var(--success);">${quizzesPassed}</div></div><div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${myCourses.length}</div></div>`;
+    document.getElementById('dash-recent-students').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">Your Courses</h4>${myCourses.length ? myCourses.slice(0, 5).map(c => `<div class="event-item"><span><b>${escapeHtml(c.code)}</b> — ${escapeHtml(c.name)}</span><span class="badge badge-success">Enrolled</span></div>`).join('') : '<div style="color:var(--text-muted);padding:10px;">You are not enrolled in any courses. <a href="#" onclick="showScreen(\'student-hub\');return false;" style="color:var(--accent);">Browse courses →</a></div>'}</div>`;
     const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     document.getElementById('dash-today-schedule').innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:10px;"><p><b>Today</b></p><p style="font-size:12px;margin-top:4px;">${todayStr}</p></div>`;
     const upcomingEvents = events.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
@@ -1496,8 +1508,6 @@ async function renderStudentDashboard(currentUser) {
         const course = courses.find(c => c.id === g.courseId);
         return `<div class="event-item"><span><b>${course ? course.name : g.courseId}</b></span><span class="badge badge-${g.score >= 70 ? 'success' : g.score >= 50 ? 'warning' : 'danger'}">${g.score}% (${g.grade})</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);padding:10px;">No grades recorded yet</div>'}</div>`;
-    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-    const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
     const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => a.date.localeCompare(b.date));
     const examHtml = myExams.length ? myExams.slice(0, 5).map(e => {
         const course = courses.find(c => c.id === e.courseId);
