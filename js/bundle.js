@@ -1,4 +1,4 @@
-/* CMS Bundle v170 2026-07-06T10:30:00.000Z */
+/* CMS Bundle v171 2026-07-06T10:35:00.000Z */
 const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -11423,7 +11423,7 @@ async function loadBranding() {
         const headerPlaceholder = document.getElementById('header-logo-placeholder');
         if (settings.logo) {
             if (headerImg) { headerImg.src = settings.logo; headerImg.style.display = 'block'; headerPlaceholder.style.display = 'none'; }
-            if (loginLogo) { loginLogo.innerHTML = `<img src="${settings.logo}" alt="Logo">`; loginLogo.style.background = 'transparent'; }
+            if (loginLogo) { loginLogo.innerHTML = ''; loginLogo.style.background = `transparent url("${settings.logo}") no-repeat center / cover`; }
             const logoPreview = document.getElementById('settings-logo-preview');
             const logoPlaceholder = document.getElementById('settings-logo-placeholder');
             if (logoPreview) { logoPreview.src = settings.logo; logoPreview.style.display = 'block'; if (logoPlaceholder) logoPlaceholder.style.display = 'none'; }
