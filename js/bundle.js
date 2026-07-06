@@ -1,4 +1,4 @@
-/* CMS Bundle v172 2026-07-06T12:30:00.000Z */
+/* CMS Bundle v173 2026-07-06T14:45:00.000Z */
 const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -13313,6 +13313,10 @@ async function generateLedgerStatement(fromDate, toDate) {
         console.error('generateLedgerStatement error:', err);
     }
 }
+// Bootstrap: auth.js and app.js both throw SyntaxErrors (let redeclarations) preventing their init() calls,
+// so we call init() directly here instead.
+init().catch(function(e) { console.error('init bootstrap failed:', e); });
+
 document.addEventListener('DOMContentLoaded', function() {
     loadPayrollStaffSelect();
     document.getElementById('notif-bell')?.addEventListener('click', function(e) {
