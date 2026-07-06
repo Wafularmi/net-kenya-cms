@@ -210,6 +210,7 @@ function serveCachedFile(res, filePath, url, req) {
         res.setHeader('Content-Type', mime);
         res.setHeader('Content-Encoding', 'gzip');
         if (isBundle || ext === '.css' || ext === '.js') {
+            res.setHeader('CDN-Cache-Control', 'no-store');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
@@ -232,6 +233,7 @@ function serveCachedFile(res, filePath, url, req) {
         res.setHeader('Content-Type', mime);
         
         if (isBundle || ext === '.css' || ext === '.js') {
+            res.setHeader('CDN-Cache-Control', 'no-store');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
