@@ -805,8 +805,10 @@ async function checkAllAccountActivity() {
 }
 async function showSignupForm() {
     try {
-        const centers = await dbGetAll('studyCenters');
-        const programs = await getProgramsList();
+        const [centers, programs] = await Promise.all([
+            dbGetAll('studyCenters').catch(() => []),
+            getProgramsList().catch(() => [])
+        ]);
         const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
         showModal('Request Registration', content, `<button class="btn btn-primary" onclick="registerStudent()">Submit Request</button>`);
     } catch (e) {
@@ -825,43 +827,17 @@ async function registerStudent() {
         if (!phone) return showToast('Phone number required!');
         if (!program) return showToast('Program required!');
         if (email && !validateEmail(email)) return showToast('Invalid email format!');
-        const normalizePhone = (p) => (p || '').replace(/[^0-9]/g, '');
-        const phoneDigits = normalizePhone(phone);
-        const allStudents = await dbGetAll('students');
-        const existing = allStudents.find(s => {
-            const sd = normalizePhone(s.phone);
-            return sd && sd === phoneDigits && s.status !== 'rejected';
+        const res = await fetch('/api/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, phone, program, studyCenterId: centerId || '' })
         });
-        if (existing) return showToast('A registration with this phone number already exists.');
-        if (email) {
-            const existingEmail = allStudents.find(s => s.email && s.email.toLowerCase() === email.toLowerCase() && s.status !== 'rejected');
-            if (existingEmail) return showToast('Email already registered under: ' + escapeHtml(existingEmail.name));
+        const data = await res.json();
+        if (!res.ok) {
+            return showToast(data.error || 'Registration failed', { type: 'danger' });
         }
-        const studentId = 'PREG-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-        const student = {
-            id: studentId, name, email, phone, program, studyCenterId: centerId || '',
-            status: 'pending', admissionNumber: '', year: 1, feeAmount: 0,
-            enrollDate: '', createdAt: new Date().toISOString(),
-            registrationRequestedAt: new Date().toISOString(),
-            source: 'public-signup'
-        };
-        const result = await dbPut('students', student);
-        console.log('[registerStudent] Saved student:', studentId, 'server response:', result);
-        const verify = await dbGet('students', studentId);
-        if (!verify) {
-            showToast('Save failed — server did not confirm. Please try again or contact admin.', { type: 'danger', duration: 6000 });
-            console.error('[registerStudent] Verification failed: record not found after save');
-            return;
-        }
-        try {
-            await addManualAlert('warning', 'info',
-                `New Registration Request`,
-                `${student.name} has requested registration. Phone: ${student.phone}, Program: ${student.program}. Please review and approve or reject.`
-            );
-        } catch (e) { console.error('Signup alert error:', e); }
         closeModal();
-        showToast('Registration request submitted! You will be notified once approved.', { type: 'success' });
-        logAudit('requested', 'registration', { studentId, name, phone });
+        showToast(`Registration request submitted! Admission#: ${data.admissionNumber}. You will be notified once approved.`, { type: 'success', duration: 6000 });
     } catch (err) {
         showToast('Request failed: ' + err.message, { type: 'danger' });
         console.error('Registration error:', err);

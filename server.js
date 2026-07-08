@@ -896,6 +896,78 @@ function handleAPI(req, res) {
     }
 
     // -----------------------------------------------------------
+    // Public signup endpoint — /api/signup  (POST)
+    // -----------------------------------------------------------
+    if (parts.length === 2 && parts[1] === 'signup' && req.method === 'POST') {
+        try {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    const { name, email, phone, program: prog, studyCenterId } = data;
+                    if (!name || !phone || !prog) return json(res, 400, { error: 'Name, phone, and program are required' });
+                    // Check duplicate phone
+                    if (!db.students) db.students = [];
+                    const existing = db.students.find(s => s.phone && s.phone.replace(/[^0-9]/g,'') === phone.replace(/[^0-9]/g,'') && s.status !== 'rejected');
+                    if (existing) return json(res, 409, { error: 'Phone already registered' });
+                    // Generate admission number using system counter
+                    let admSeq = 0;
+                    const admSetting = db.settings ? db.settings.find(s => s.key === 'admissionLastSeq') : null;
+                    if (admSetting && typeof admSetting.value === 'number') admSeq = admSetting.value;
+                    // Find max seq from existing student admission numbers
+                    let maxSeq = 0;
+                    db.students.forEach(s => {
+                        if (s.admissionNumber && typeof s.admissionNumber === 'string') {
+                            const parts2 = s.admissionNumber.split('/');
+                            const last = parts2[parts2.length - 1];
+                            const n = parseInt(last, 10);
+                            if (!isNaN(n) && n > maxSeq) maxSeq = n;
+                        }
+                    });
+                    const nextSeq = Math.max(admSeq, maxSeq) + 1;
+                    // Save sequence
+                    if (!db.settings) db.settings = [];
+                    const idx = db.settings.findIndex(s => s.key === 'admissionLastSeq');
+                    if (idx >= 0) db.settings[idx] = { key: 'admissionLastSeq', value: nextSeq };
+                    else db.settings.push({ key: 'admissionLastSeq', value: nextSeq });
+                    // Build admission number
+                    const center = studyCenterId ? db.studyCenters?.find(c => c.id === studyCenterId) : null;
+                    const centerCode = center ? center.code : 'GEN';
+                    const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
+                    const initials = branding && branding.initials ? branding.initials : 'STU';
+                    const year = new Date().getFullYear().toString().slice(-2);
+                    const month = String(new Date().getMonth() + 1);
+                    const seqStr = String(nextSeq).padStart(3, '0');
+                    const admissionNumber = `${initials}/${centerCode}/${month}-${year}/${seqStr}`;
+                    const studentId = 'STU-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                    const student = {
+                        id: studentId, name, email, phone, program: prog, studyCenterId: studyCenterId || '',
+                        admissionNumber, status: 'pending', year: 1, feeAmount: 0,
+                        enrollDate: '', createdAt: new Date().toISOString(),
+                        registrationRequestedAt: new Date().toISOString(), source: 'public-signup'
+                    };
+                    db.students.push(student);
+                    saveDB();
+                    broadcastEvent('db-change', { store: 'students', record: student });
+                    // Create admin alert
+                    if (!db.alerts) db.alerts = [];
+                    db.alerts.push({
+                        id: 'ALERT-' + Date.now(), type: 'warning', severity: 'info',
+                        title: 'New Registration Request',
+                        message: `${name} has requested registration. Phone: ${phone}, Program: ${prog}. Admission#: ${admissionNumber}. Please review and approve or reject.`,
+                        createdAt: new Date().toISOString(), read: false
+                    });
+                    saveDB();
+                    broadcastEvent('db-change', { store: 'alerts' });
+                    json(res, 200, { success: true, student, admissionNumber });
+                } catch (e) { json(res, 400, { error: 'Invalid request body: ' + e.message }); }
+            });
+        } catch (e) { json(res, 500, { error: e.message || e }); }
+        return true;
+    }
+
+    // -----------------------------------------------------------
     // Generic DB CRUD endpoints — /api/db/:store[/:key]
     // -----------------------------------------------------------
     // GET /api/db/batch?stores=users,students,courses  — batch fetch multiple stores
