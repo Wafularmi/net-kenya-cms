@@ -582,7 +582,7 @@ body {
     border-radius: var(--radius-lg);
     border-left: 4px solid var(--accent);
     box-shadow: var(--shadow-lg);
-    z-index: 300;
+    z-index: 10002;
     transform: translateY(100px);
     opacity: 0;
     transition: all 0.3s ease;
