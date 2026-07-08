@@ -332,8 +332,8 @@ function getRequestUser(req) {
 
 // Check if user can access a store
 function canAccessStore(user, store, method) {
-    // Allow unauthenticated reads of settings (branding, academic config) for login screen
-    if (!user && store === 'settings' && method === 'GET') return true;
+    // Allow unauthenticated reads for login screen / registration
+    if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters')) return true;
     if (!user) return false;
     if (FINANCE_ADMIN_ROLES.has(user.role)) return true;
     if (!FINANCIAL_STORES.has(store)) return true;
