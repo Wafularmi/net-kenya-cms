@@ -1211,6 +1211,27 @@ const server = http.createServer((req, res) => {
         return res.end('Forbidden');
     }
 
+    // Inject branding into index.html at serve-time for zero-flash rendering
+    if (filePath.endsWith('index.html')) {
+        fs.readFile(filePath, 'utf8', (err, html) => {
+            if (err) {
+                res.writeHead(500);
+                return res.end('Server error');
+            }
+            const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
+            const schoolName = branding && branding.schoolName ? branding.schoolName : 'College Management System';
+            const initials = branding && branding.initials ? branding.initials : 'CM';
+            html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName).replace(/\{\{INITIALS\}\}/g, initials);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            if (url.includes('bundle.js') || url.includes('.css') || url.includes('.js')) {
+                res.setHeader('CDN-Cache-Control', 'no-store');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            }
+            res.end(html);
+        });
+        return;
+    }
+
     serveCachedFile(res, filePath, url, req);
 });
 
