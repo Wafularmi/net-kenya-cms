@@ -1221,7 +1221,11 @@ const server = http.createServer((req, res) => {
             const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
             const schoolName = branding && branding.schoolName ? branding.schoolName : 'College Management System';
             const initials = branding && branding.initials ? branding.initials : 'CM';
-            html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName).replace(/\{\{INITIALS\}\}/g, initials);
+            let logoCss = '';
+            if (branding && branding.logo) {
+                logoCss = '<style>#login-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover;text-indent:-9999px}#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover}</style>';
+            }
+            html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName).replace(/\{\{INITIALS\}\}/g, initials).replace(/\{\{LOGO_CSS\}\}/g, logoCss);
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             if (url.includes('bundle.js') || url.includes('.css') || url.includes('.js')) {
                 res.setHeader('CDN-Cache-Control', 'no-store');
