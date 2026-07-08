@@ -11457,6 +11457,10 @@ async function loadBranding() {
             if (loginName) loginName.textContent = settings.schoolName;
             const nameInput = document.getElementById('settings-school-name');
             if (nameInput) nameInput.value = settings.schoolName;
+            try { localStorage.setItem('_sc', settings.schoolName); } catch(e) {}
+        }
+        if (settings.initials) {
+            try { localStorage.setItem('_si', settings.initials); } catch(e) {}
         }
         if (settings.tagline) {
             document.getElementById('school-tagline').textContent = settings.tagline;
@@ -11536,6 +11540,8 @@ async function saveBranding() {
         if (existing && existing.receiptLogo) branding.receiptLogo = existing.receiptLogo;
     }
     await dbPut('settings', branding);
+    if (branding.schoolName) try { localStorage.setItem('_sc', branding.schoolName); } catch(e) {}
+    if (branding.initials) try { localStorage.setItem('_si', branding.initials); } catch(e) {}
     loadBranding();
     showToast('Branding saved!');
     logAudit('updated', 'branding', branding);
