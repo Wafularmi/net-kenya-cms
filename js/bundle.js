@@ -336,19 +336,40 @@ async function resolveStudentId(currentUser) {
     return found ? found.id : (currentUser.studentId || currentUser.username);
 }
 function getRoleColor(role) {
-    const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success' };
+    const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning' };
     return colors[role] || 'info';
 }
 function getRolePermissions(role) {
     const perms = {
-        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions'],
+        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         student: ['dashboard','portal','student-hub','courses','quizzes','exams','library','tickets','discussions'],
-        librarian: ['dashboard','library']
+        librarian: ['dashboard','library'],
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','discussions']
     };
     return perms[role] || [];
+}
+function isCoordinator() {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    return u.role === 'coordinator';
+}
+function getCoordinatorRegionId() {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    return u.regionId || '';
+}
+async function getRegionCenterIds(regionId) {
+    if (!regionId) return [];
+    const centers = await dbGetAll('studyCenters');
+    return centers.filter(c => c.regionId === regionId).map(c => c.id);
+}
+async function filterByRegion(arr, getCenterId) {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (u.role !== 'coordinator' || !u.regionId) return arr;
+    const centerIds = await getRegionCenterIds(u.regionId);
+    const cidSet = new Set(centerIds);
+    return arr.filter(item => cidSet.has(getCenterId(item)));
 }
 function getRoleSignature(title, branding) {
     if (!branding) return null;
@@ -718,7 +739,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -803,13 +824,22 @@ async function checkAllAccountActivity() {
         await dbPut('users', user);
     }
 }
+function signupFilterCenters() {
+    const region = document.getElementById('signup-region').value;
+    document.querySelectorAll('#signup-center option').forEach(opt => {
+        if (!opt.value) return;
+        opt.style.display = region && opt.dataset.region !== region ? 'none' : '';
+    });
+    document.getElementById('signup-center').value = '';
+}
 async function showSignupForm() {
     try {
-        const [centers, programs] = await Promise.all([
+        const [centers, programs, regions] = await Promise.all([
             dbGetAll('studyCenters').catch(() => []),
-            getProgramsList().catch(() => [])
+            getProgramsList().catch(() => []),
+            dbGetAll('regions').catch(() => [])
         ]);
-        const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
+        const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Region</label><select id="signup-region" onchange="signupFilterCenters()"><option value="">Select region...</option>${regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}" data-region="${c.regionId || ''}">${c.name} (${c.code})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
         showModal('Request Registration', content, `<button class="btn btn-primary" onclick="registerStudent()">Submit Request</button>`);
     } catch (e) {
         console.error('showSignupForm error:', e);
@@ -823,6 +853,7 @@ async function registerStudent() {
         const phone = sanitizeInput(document.getElementById('signup-phone').value.trim());
         const program = document.getElementById('signup-program').value;
         const centerId = document.getElementById('signup-center').value;
+        const regionId = document.getElementById('signup-region').value;
         if (!name) return showToast('Full name required!');
         if (!phone) return showToast('Phone number required!');
         if (!program) return showToast('Program required!');
@@ -830,7 +861,7 @@ async function registerStudent() {
         const res = await fetch('/api/signup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, phone, program, studyCenterId: centerId || '' })
+            body: JSON.stringify({ name, email, phone, program, studyCenterId: centerId || '', regionId: regionId || '' })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -1077,7 +1108,8 @@ function showScreen(id) {
         case 'discussions': renderDiscussions(); break;
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
-        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); break;
+        case 'regions': renderRegions(); break;
+        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); break;
     }
 }
 function initTabs() {
@@ -8874,7 +8906,7 @@ function extractKeyPhrases(text, lang) {
 }
 
 // ===== UNIFIED NOTIFICATION SYSTEM =====
-let notifDropdownOpen = false;
+if (typeof window.notifDropdownOpen === 'undefined') { window.notifDropdownOpen = false; }
 
 async function updateNotificationBadge() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -8902,8 +8934,8 @@ async function updateNotificationBadge() {
 
 async function toggleNotificationDropdown() {
     const existing = document.querySelector('.notif-dropdown');
-    if (existing) { existing.remove(); notifDropdownOpen = false; return; }
-    notifDropdownOpen = true;
+    if (existing) { existing.remove(); window.notifDropdownOpen = false; return; }
+    window.notifDropdownOpen = true;
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudent = currentUser.role === 'student';
     const tickets = await dbGetAll('tickets');
@@ -8954,7 +8986,7 @@ async function toggleNotificationDropdown() {
 function closeNotifDropdown() {
     const el = document.querySelector('.notif-dropdown');
     if (el) el.remove();
-    notifDropdownOpen = false;
+    window.notifDropdownOpen = false;
 }
 
 function renderNotifDropdown(items) {
@@ -11903,9 +11935,11 @@ async function renderStudyCenters() {
     const options = centers.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
     if (filter) filter.innerHTML = '<option value="">All Centers</option>' + options;
     if (hostelFilter) hostelFilter.innerHTML = '<option value="">All Hostels</option>' + centers.map(c => `<option value="${c.id}">${c.name} Hostels</option>`).join('');
+    const regionMap = {};
+    (await dbGetAll('regions').catch(() => [])).forEach(r => regionMap[r.id] = r.name);
     document.getElementById('campuses-list').innerHTML = centers.length ? centers.map(c => {
         const admPreview = `${initials}/${c.code}/${month}-${year}/001`;
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span></span><button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span>${c.regionId && regionMap[c.regionId] ? `<span class="badge badge-warning">${regionMap[c.regionId]}</span>` : ''}</span><button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);font-size:12px;">No study centers added</div>';
 }
 async function showStudyCenterForm(center = null) {
@@ -11914,8 +11948,16 @@ async function showStudyCenterForm(center = null) {
 <div class="form-group"><label>Center Name *</label><input type="text" id="sc-name" value="${center ? center.name : ''}" placeholder="e.g., Kitale Net Study Center" oninput="suggestSCCode()"></div>
 <div class="form-group"><label>Center Code * (short, used in admission numbers)</label><input type="text" id="sc-code" value="${center ? center.code : ''}" placeholder="e.g., KNSC" maxlength="8" style="text-transform:uppercase;font-weight:600;letter-spacing:1px;" oninput="updateSCAdmissionPreview()"><div id="sc-code-suggestion" style="margin-top:4px;font-size:11px;color:var(--text-muted);"></div><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">ⓘ This <b>short code</b> (not the full name) is what appears in admission numbers like <b>EMA/KNSC/1-26/001</b>. Maximum 8 characters.</div></div>
 <div class="form-group"><label>Address</label><input type="text" id="sc-address" value="${center ? center.address || '' : ''}"></div>
+<div class="form-group"><label>Region</label><select id="sc-region"><option value="">No region</option></select></div>
 <div class="form-group"><label>Admission Number Preview</label><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">Format: <b>SCHOOL-INITIALS / [CENTER CODE] / MONTH-YEAR / SEQ</b></div><div id="sc-adm-preview" style="padding:12px;background:var(--bg-input);border-radius:var(--radius);font-weight:700;color:var(--accent);font-size:18px;text-align:center;letter-spacing:0.5px;"></div><div id="sc-adm-preview-detail" style="font-size:10px;color:var(--text-muted);margin-top:4px;text-align:center;"></div></div>`;
     showModal(isEdit ? 'Edit Study Center' : 'Add Study Center', content, `<button class="btn btn-primary" onclick="saveStudyCenter()">${isEdit ? 'Update' : 'Save'}</button>`);
+    (async () => {
+        if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
+        const sel = document.getElementById('sc-region');
+        if (sel) {
+            sel.innerHTML = '<option value="">No region</option>' + window._regionsCache.map(r => `<option value="${r.id}" ${center && center.regionId === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
+        }
+    })();
     const nameEl = document.getElementById('sc-name');
     if (nameEl) {
         nameEl.oninput = suggestSCCode;
@@ -11989,7 +12031,7 @@ async function saveStudyCenter() {
     }
     const editId = document.getElementById('sc-edit-id').value;
     const id = editId || 'SC-' + code;
-    const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
+    const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), regionId: document.getElementById('sc-region').value || '', createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
     await dbPut('studyCenters', center); closeModal(); renderStudyCenters(); showToast(editId ? 'Study Center updated!' : 'Study Center added!'); logAudit(editId ? 'updated' : 'created', 'study-center', center);
 }
 async function editStudyCenter(id) { const c = await dbGet('studyCenters', id); if (!c) return; showStudyCenterForm(c); }
@@ -12034,7 +12076,12 @@ async function renderUsers() {
                 statusBadge += ` <span class="badge badge-warning">${student.status}</span>`;
             }
         }
-        return `<div class="event-item"><div><b>${u.username}</b> ${statusBadge}${extraInfo}</div>${u.username === 'admin' ? '' : `<button class="btn btn-outline btn-sm" onclick="resetUserPassword('${u.username}')">🔑 Pwd</button> <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.username}')">Del</button>`}</div>`;
+        let regionInfo = '';
+        if (u.role === 'coordinator' && u.regionId) {
+            const r = window._regionsCache ? window._regionsCache.find(rr => rr.id === u.regionId) : null;
+            regionInfo = `<br><span style="font-size:10px;color:var(--warning);">Region: ${r ? r.name : u.regionId}</span>`;
+        }
+        return `<div class="event-item"><div><b>${u.username}</b> ${statusBadge}${regionInfo}${extraInfo}</div>${u.username === 'admin' ? '' : `<button class="btn btn-outline btn-sm" onclick="resetUserPassword('${u.username}')">🔑 Pwd</button> <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.username}')">Del</button>`}</div>`;
     }).join('');
     document.getElementById('users-list').innerHTML = html || `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">${q ? 'No users match "' + q + '"' : 'No users'}</div>`;
     if (auditFilter) auditFilter.innerHTML = '<option value="">All Users</option>' + users.map(u => `<option value="${u.username}">${u.username}</option>`).join('');
@@ -12042,7 +12089,9 @@ async function renderUsers() {
 async function showUserForm() {
     const students = await dbGetAll('students');
     const studentOpts = students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.admissionNumber || s.id})${s.program ? ' — ' + s.program : ''}</option>`).join('');
-    const content = `<div class="form-group"><label>Full Name</label><input type="text" id="user-fullname"></div><div class="form-group"><label>Username *</label><input type="text" id="user-username"></div><div class="form-group"><label>Password *</label><input type="password" id="user-password"></div><div class="form-group"><label>Role</label><select id="user-role" onchange="toggleUserStudentSelect()"><option value="lecturer">Lecturer</option><option value="registrar">Registrar</option><option value="finance">Finance Officer</option><option value="admin">Admin</option><option value="student">Student</option></select></div><div id="user-student-section" style="display:none;" class="form-group"><label>Link to Student</label><select id="user-student-id"><option value="">— Select student record —</option>${studentOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Link this user account to an existing student record for course enrollment access.</div></div>`;
+    if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
+    const regionOpts = window._regionsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    const content = `<div class="form-group"><label>Full Name</label><input type="text" id="user-fullname"></div><div class="form-group"><label>Username *</label><input type="text" id="user-username"></div><div class="form-group"><label>Password *</label><input type="password" id="user-password"></div><div class="form-group"><label>Role</label><select id="user-role" onchange="toggleUserStudentSelect()"><option value="lecturer">Lecturer</option><option value="registrar">Registrar</option><option value="finance">Finance Officer</option><option value="admin">Admin</option><option value="coordinator">Coordinator</option><option value="student">Student</option></select></div><div id="user-student-section" style="display:none;" class="form-group"><label>Link to Student</label><select id="user-student-id"><option value="">— Select student record —</option>${studentOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Link this user account to an existing student record for course enrollment access.</div></div><div id="user-region-section" style="display:none;" class="form-group"><label>Region</label><select id="user-region"><option value="">— Select region —</option>${regionOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Assign this coordinator to a region. Required for coordinator role.</div></div>`;
     showModal('Add User', content, `<button class="btn btn-primary" onclick="saveUser()">Save</button>`);
     toggleUserStudentSelect();
 }
@@ -12050,6 +12099,8 @@ window.toggleUserStudentSelect = function() {
     const role = document.getElementById('user-role').value;
     const section = document.getElementById('user-student-section');
     if (section) section.style.display = role === 'student' ? 'block' : 'none';
+    const regionSection = document.getElementById('user-region-section');
+    if (regionSection) regionSection.style.display = role === 'coordinator' ? 'block' : 'none';
 };
 async function saveUser() {
     const username = document.getElementById('user-username').value.trim();
@@ -12059,7 +12110,8 @@ async function saveUser() {
     const studentId = document.getElementById('user-student-id') ? document.getElementById('user-student-id').value : '';
     if (role === 'student' && !studentId) return showToast('Select a student record to link this user account!');
     const pwHash = await hashPassword(password);
-    const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim(), role, studentId: studentId || undefined, createdAt: new Date().toISOString() };
+    if (role === 'coordinator' && !document.getElementById('user-region').value) return showToast('Please select a region for this coordinator!');
+    const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim(), role, studentId: studentId || undefined, regionId: role === 'coordinator' ? document.getElementById('user-region').value : undefined, createdAt: new Date().toISOString() };
     await dbPut('users', user); closeModal(); renderUsers(); showToast('User created!'); logAudit('created', 'user', { username, role });
 }
 async function resetUserPassword(username) {
@@ -13372,20 +13424,109 @@ async function generateLedgerStatement(fromDate, toDate) {
         console.error('generateLedgerStatement error:', err);
     }
 }
+async function renderRegions() {
+    const regions = await dbGetAll('regions');
+    const centers = await dbGetAll('studyCenters');
+    const users = await dbGetAll('users');
+    const students = await dbGetAll('students');
+    document.getElementById('regions-overview').innerHTML = regions.length ? regions.map(r => {
+        const regionCenters = centers.filter(c => c.regionId === r.id);
+        const coordinators = users.filter(u => u.role === 'coordinator' && u.regionId === r.id);
+        const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => s.campus === c.id));
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:10px;color:var(--accent);">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => u.name || u.username).join(', ')}</div>` : ''}</div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
+    const settingsList = document.getElementById('regions-list');
+    if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
+}
+
+async function showRegionForm(region = null) {
+    const isEdit = !!region;
+    const content = `<input type="hidden" id="region-edit-id" value="${region ? region.id : ''}">
+<div class="form-group"><label>Region Name *</label><input type="text" id="region-name" value="${region ? region.name : ''}" placeholder="e.g., Coast Region"></div>
+<div class="form-group"><label>Region ID * (short code, no spaces)</label><input type="text" id="region-code" value="${region ? region.id.replace('REG-', '') : ''}" placeholder="e.g., COAST" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>`;
+    showModal(isEdit ? 'Edit Region' : 'Add Region', content, `<button class="btn btn-primary" onclick="saveRegion()">${isEdit ? 'Update' : 'Save'}</button>`);
+}
+
+async function saveRegion() {
+    const name = document.getElementById('region-name').value.trim();
+    const code = document.getElementById('region-code').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!name) return showToast('Region name required!');
+    if (!code) return showToast('Region code required!');
+    const editId = document.getElementById('region-edit-id').value;
+    const id = editId || 'REG-' + code;
+    const region = { id, name, createdAt: editId ? (await dbGet('regions', id)).createdAt : new Date().toISOString() };
+    await dbPut('regions', region); closeModal(); await renderRegions(); showToast(editId ? 'Region updated!' : 'Region added!'); logAudit(editId ? 'updated' : 'created', 'region', region);
+}
+
+async function editRegion(id) {
+    const r = await dbGet('regions', id);
+    if (!r) return;
+    showRegionForm(r);
+}
+
+async function deleteRegion(id) {
+    if (!await showConfirm('Confirm', 'Delete region? This will NOT delete its study centers or users.')) return;
+    await dbDelete('regions', id); await renderRegions(); showToast('Region deleted'); logAudit('deleted', 'region', { id });
+}
+
+async function manageRegionCenters(regionId) {
+    const region = await dbGet('regions', regionId);
+    if (!region) return showToast('Region not found');
+    const allCenters = await dbGetAll('studyCenters');
+    const regionCenters = allCenters.filter(c => c.regionId === regionId);
+    const unassigned = allCenters.filter(c => !c.regionId);
+    const otherRegionCenters = allCenters.filter(c => c.regionId && c.regionId !== regionId);
+    let html = `<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">Assign or unassign centers to <b>${region.name}</b></div>`;
+    if (regionCenters.length) {
+        html += `<div style="font-weight:700;font-size:11px;margin-bottom:4px;color:var(--accent);">Assigned (${regionCenters.length})</div>`;
+        html += regionCenters.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span></span><button class="btn btn-danger btn-sm" onclick="unassignCenterFromRegion('${c.id}','${regionId}')">Remove</button></div>`).join('');
+    }
+    if (unassigned.length) {
+        html += `<div style="font-weight:700;font-size:11px;margin:8px 0 4px;color:var(--warning);">Unassigned (${unassigned.length})</div>`;
+        html += unassigned.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span></span><button class="btn btn-success btn-sm" onclick="assignCenterToRegion('${c.id}','${regionId}')">Assign</button></div>`).join('');
+    }
+    if (!regionCenters.length && !unassigned.length) html += '<div style="color:var(--text-muted);font-size:12px;">No study centers exist. Create one in Settings first.</div>';
+    if (otherRegionCenters.length) {
+        html += `<div style="font-weight:700;font-size:11px;margin:8px 0 4px;color:var(--text-muted);">Assigned to Other Regions (${otherRegionCenters.length})</div>`;
+        html += otherRegionCenters.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span></span><button class="btn btn-outline btn-sm" onclick="assignCenterToRegion('${c.id}','${regionId}')">Move Here</button></div>`).join('');
+    }
+    showModal(`Centers — ${region.name}`, html);
+}
+
+async function assignCenterToRegion(centerId, regionId) {
+    const center = await dbGet('studyCenters', centerId);
+    if (!center) return;
+    center.regionId = regionId;
+    await dbPut('studyCenters', center);
+    showToast(`${center.name} assigned to region`);
+    manageRegionCenters(regionId);
+    renderRegions();
+}
+
+async function unassignCenterFromRegion(centerId, regionId) {
+    const center = await dbGet('studyCenters', centerId);
+    if (!center) return;
+    center.regionId = '';
+    await dbPut('studyCenters', center);
+    showToast(`${center.name} unassigned`);
+    manageRegionCenters(regionId);
+    renderRegions();
+}
+
 // Bootstrap: auth.js and app.js both throw SyntaxErrors (let redeclarations) preventing their init() calls,
 // so we call init() directly here instead.
 init().catch(function(e) { console.error('init bootstrap failed:', e); });
 
 document.addEventListener('DOMContentLoaded', function() {
-    loadPayrollStaffSelect();
+    if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect();
     document.getElementById('notif-bell')?.addEventListener('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
         if (typeof toggleNotificationDropdown === 'function') toggleNotificationDropdown();
     });
     document.addEventListener('click', function(e) {
-        if (notifDropdownOpen && !e.target.closest('.notif-dropdown') && e.target.id !== 'notif-bell') {
-            closeNotifDropdown();
+        if (window.notifDropdownOpen && !e.target.closest('.notif-dropdown') && e.target.id !== 'notif-bell') {
+            if (typeof closeNotifDropdown === 'function') closeNotifDropdown();
         }
     });
 });

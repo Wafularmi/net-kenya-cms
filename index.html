@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="page-title">{{SCHOOL_NAME}} - Management System</title>
     <link rel="stylesheet" href="css/theme.css?v=127">
-    <link rel="stylesheet" href="css/main.144.css">
+    <link rel="stylesheet" href="css/main.145.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=178" as="script">
+    <link rel="preload" href="js/bundle.js?v=179" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
@@ -563,6 +563,13 @@
                 <div class="card"><div id="tickets-list"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading tickets...</p></div></div>
             </section>
 
+            <section id="screen-regions" class="screen">
+                <div class="screen-header"><h2>🗺 Regions Overview</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="showRegionForm()">+ Add Region</button>
+                </div></div>
+                <div id="regions-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;"></div>
+            </section>
+
             <section id="screen-settings" class="screen">
                 <div class="screen-header"><h2>Settings & Configuration</h2><div class="screen-actions">
                     <button class="btn btn-outline" onclick="downloadBackup()">⬇ Backup</button>
@@ -608,6 +615,11 @@
                     <div class="card"><h3>Study Centers</h3>
                         <div id="campuses-list"></div>
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showStudyCenterForm()">+ Add Study Center</button>
+                    </div>
+                    <div class="card"><h3>Regions</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Group study centers under regions. Coordinators manage centers within their assigned region.</div>
+                        <div id="regions-list"></div>
+                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showRegionForm()">+ Add Region</button>
                     </div>
                     <div class="card"><h3>Admission Numbers</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Sequence number is continuous across months/years. Set the last sequence number to control where auto-generation continues. Lower this value to reuse a freed slot after a student is deleted.</div>
@@ -794,7 +806,7 @@
     </div>
 </div>
 
-    <script src="js/bundle.js?v=178"></script>
+    <script src="js/bundle.js?v=179"></script>
     <script src="js/student-hub.js?v=5"></script>
     <script src="js/discussions.js?v=4"></script>
     <script src="js/help.js?v=3"></script>

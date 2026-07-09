@@ -333,7 +333,7 @@ function getRequestUser(req) {
 // Check if user can access a store
 function canAccessStore(user, store, method) {
     // Allow unauthenticated reads for login screen / registration
-    if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters')) return true;
+    if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
     if (FINANCE_ADMIN_ROLES.has(user.role)) return true;
     if (!FINANCIAL_STORES.has(store)) return true;
@@ -341,6 +341,12 @@ function canAccessStore(user, store, method) {
     // Students can only read their own payment records
     if (user.role === 'student' && store === 'payments' && method === 'GET') {
         return true; // Filtering happens in the handler
+    }
+    // Coordinator: sub-admin scoped to their region
+    if (user.role === 'coordinator') {
+        if (['settings','regions','users','counters'].includes(store)) return false;
+        if (['courses','exams','quizzes','questionBank','lessons'].includes(store) && method !== 'GET') return false;
+        return true;
     }
     return false;
 }
@@ -905,7 +911,7 @@ function handleAPI(req, res) {
             req.on('end', () => {
                 try {
                     const data = JSON.parse(body);
-                    const { name, email, phone, program: prog, studyCenterId } = data;
+                    const { name, email, phone, program: prog, studyCenterId, regionId } = data;
                     if (!name || !phone || !prog) return json(res, 400, { error: 'Name, phone, and program are required' });
                     // Check duplicate phone
                     if (!db.students) db.students = [];
@@ -942,7 +948,7 @@ function handleAPI(req, res) {
                     const admissionNumber = `${initials}/${centerCode}/${month}-${year}/${seqStr}`;
                     const studentId = 'STU-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                     const student = {
-                        id: studentId, name, email, phone, program: prog, studyCenterId: studyCenterId || '',
+                        id: studentId, name, email, phone, program: prog, studyCenterId: studyCenterId || '', regionId: regionId || '',
                         admissionNumber, status: 'pending', year: 1, feeAmount: 0,
                         enrollDate: '', createdAt: new Date().toISOString(),
                         registrationRequestedAt: new Date().toISOString(), source: 'public-signup'

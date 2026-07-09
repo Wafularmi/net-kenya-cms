@@ -1,4 +1,4 @@
-# Session Summary — July 5, 2026
+# Session Summary — July 8, 2026
 
 ## What's Working
 - **Live site**: https://netfoundation.ke (CNAME: hcfq1dgb.up.railway.app)
@@ -8,14 +8,74 @@
 - **HTTPS**: Auto-provisioned via Railway
 - **www**: CNAME added in Cloudflare, needs Railway domain config
 
-## Recent Fixes
+## Recent Fixes (so far)
 - Dockerfile replaced Railpack/Procfile (Node wasn't installed)
 - Volume DB copy runs before loadDB() on startup
 - Header overlap fixed: dynamic padding via JS (adjustHeaderPadding in app.js)
 - Sidebar top/height follows header dynamically
+- **Logo flash fix**: server injects inline `<style>` with logo as CSS `background-image` via `{{LOGO_CSS}}` placeholder
+- **Toast z-index**: raised to `10002` (above modal overlays at `10001`)
+- **Registration fix**: `canAccessStore` whitelisted `studyCenters` + `regions` for unauthenticated GET (registration form)
+- **Server-side branding injection**: `{{SCHOOL_NAME}}`, `{{INITIALS}}`, `{{LOGO_CSS}}` replaced at serve-time in `server.js`
+- **Cloudflare override**: CSS `Cache-Control: max-age=14400` bypassed via versioned URL (`main.144.css`)
+- **T&C acceptance**: localStorage key `terms_accepted_<username>`
+
+## Features Added
+### Regions & Coordinators (new)
+- **New role: `coordinator`** — sub-admin permissions minus creating courses/exams/quizzes; no access to notes, settings, staff, audit, inventory, idcards, whatsapp
+- **Coordinator permissions**: dashboard, students, attendance, grades, manuals, chapel, graduation, hostel, library, alumni, certificates, events, finance, portal, pending, tickets, progress, reprint, discussions
+- **Region scoping**: coordinators only see students/centers within their assigned `regionId`
+- **`regions` store**: CRUD via `renderRegions()`, `showRegionForm()`, `saveRegion()`, `deleteRegion()`, `editRegion()`
+- **Regions overview screen**: admin nav tab "🗺 Regions" with counts (centers/coordinators/students)
+- **Settings Regions card**: compact list with edit buttons
+- **Study Center form**: region dropdown + `regionId` saved to DB
+- **User form**: `coordinator` role option; region dropdown appears when coordinator selected; validates region selection
+- **Server `canAccessStore`**: handles coordinator role — blocks settings/regions/users/counters, read-only for courses/exams/quizzes/questionBank/lessons, full CRUD for other stores
+
+### Admission Number System
+- **`/api/signup` endpoint**: generates admission numbers from `admissionLastSeq` counter in system settings
+- **Registration form**: region dropdown filters study centers; sends `regionId` to signup endpoint
+- **Admission number format**: `SCHOOL-INITIALS / CENTER_CODE / MONTH-YEAR / SEQ`
+
+### Helper Functions (in bundle.js)
+- `isCoordinator()` — checks current user role
+- `getCoordinatorRegionId()` — returns coordinator's regionId
+- `getRegionCenterIds(regionId)` — returns center IDs for a region
+- `filterByRegion(arr, getCenterId)` — filters any array by coordinator's region
+- `getRoleColor('coordinator')` → `'warning'`
+- `getRolePermissions('coordinator')` → full screen list (see above)
+- `renderRegions()` — populates both overview screen and settings card
+- `signupFilterCenters()` — called on region change in registration form
+
+## Current State
+### Committed (in git, on GitHub, live on Railway)
+```
+93f1a69 fix: raise toast z-index above modal overlay
+e5610ba feat: public signup endpoint with system admission numbers
+c895f5f fix: allow unauthenticated studyCenters reads for registration form
+05ce913 perf: inline logo CSS at server level for instant logo display
+b75ede1 perf: server-side branding injection into HTML for zero-flash login screen
+```
+
+### NOT committed (local only, NOT on live server)
+- Region dropdown in study center form
+- Coordinator role in user form + region assignment
+- `renderRegions()`, `showRegionForm()`, `saveRegion()`, `deleteRegion()`, `editRegion()`
+- Updated `renderStudyCenters` (region badge)
+- Updated `renderUsers` (coordinator region display)
+- Switch `case 'regions'` in `showScreen()`
+- Settings card wiring for regions
+- `toggleUserStudentSelect()` region section show/hide
+- `saveUser()` coordinator validation + regionId
+
+### Files modified (unstaged):
+- `M index.html` — Regions screen section, Regions card in settings
+- `M js/bundle.js` — all above functions
+- `M server.js` — canAccessStore, signup endpoint
 
 ## Credentials
 - Admin: username=`admin`, password=`admin123` (SHA-256: `240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9`)
+- Coordinators: create via Settings → Users → +Add User → role=Coordinator
 - Other users: WAFULARMI, MANONO EZEL AFANDI, etc.
 
 ## File Locations
@@ -27,7 +87,19 @@
 - Railway volume: `fe778515-088d-48e6-9b3f-b967bbaef675` at /data (41MB used)
 - Railway CLI token: stored at `~/.railway/config.json`
 
+## Shell / Terminal Status
+- **Broken**: PowerShell on this Windows machine times out on every command (both direct and via subagent)
+- **Workaround**: git operations done via subagent task tool; app testing must be manual via browser
+
+## Key Architecture Notes
+- **Database**: all data in `server-data.json` (single JSON file), loaded via `loadDB()`; stores: studyCenters, regions, users, students, courses, etc.
+- **Auth**: SHA-256 password hashing; session in sessionStorage
+- **Server**: Express on PORT env var (default 3000); Dockerfile-based deploy on Railway
+- **Frontend**: Single-page app in `index.html` + `js/bundle.js` (all-in-one bundled JS); `js/utils.js` has duplicate/shared functions
+- **Registration flow**: Login page has "Sign Up" link → `showSignupForm()` → region selects → center filters → submits to `/api/signup` → generates admission number → saves as pending student → admin approves in Pending screen
+
 ## Remaining
 - Add `www.netfoundation.ke` as custom domain in Railway for SSL
 - Switch Cloudflare proxy to orange cloud for CDN speed
+- **Commit and push the uncommitted regions/coordinator changes to go live**
 - Any other design/feature requests
