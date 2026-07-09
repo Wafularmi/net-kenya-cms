@@ -3830,6 +3830,14 @@ async function checkGraduation() {
     const requirements = await dbGetAll('gradRequirements');
     const payments = await dbGetAll('payments');
     let html = `<h4 style="color:var(--accent);margin-bottom:12px;">Graduation Eligibility: ${program || 'All Programs'} ${year || ''}</h4>`;
+    if (!requirements.length) {
+        html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius);color:var(--text-muted);font-size:13px;">No graduation requirements defined — all students are eligible by default. Add requirements in Settings &gt; Graduation Requirements to enforce conditions.</div>';
+        for (const s of students) {
+            html += `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><b>${s.name}</b> <span class="badge badge-success">ELIGIBLE</span></div></div>`;
+        }
+        document.getElementById('graduation-list').innerHTML = html || '<p style="color:var(--text-muted);text-align:center;padding:40px;">No students found matching criteria</p>';
+        return;
+    }
     html += '<div style="margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:var(--radius);"><b>Checking:</b> Credits, GPA, Attendance, Chapel, Fees</div>';
     for (const s of students) {
         const studentGrades = grades.filter(g => g.studentId === s.id);
@@ -3858,7 +3866,7 @@ async function checkGraduation() {
         if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(`Attendance ${attendancePct}% below ${reqAttendance.minimum}%`);
         const reqChapel = programReqs.find(r => r.requirement === 'chapel');
         if (reqChapel && studentChapel < reqChapel.minimum) issues.push(`Chapel ${studentChapel} below ${reqChapel.minimum}`);
-        if (!feesClear) issues.push(`Fee balance: ${formatCurrency(feeBalance)}`);
+        if (programReqs.length && !feesClear) issues.push(`Fee balance: ${formatCurrency(feeBalance)}`);
         const eligible = issues.length === 0;
         html += `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;">
             <div style="display:flex;justify-content:space-between;width:100%;"><b>${s.name}</b> <span class="badge badge-${eligible ? 'success' : 'danger'}">${eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}</span></div>
@@ -3910,7 +3918,7 @@ async function generateGraduationList() {
         if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(true);
         const reqChapel = programReqs.find(r => r.requirement === 'chapel');
         if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
-        if (feeBalance > 0) issues.push(true);
+        if (programReqs.length && feeBalance > 0) issues.push(true);
         if (issues.length === 0) {
             const classification = getClassification(cgpa);
             const center = centers.find(c => c.id === s.studyCenterId);
@@ -3921,6 +3929,10 @@ async function generateGraduationList() {
     if (!eligible.length) {
         document.getElementById('graduation-list').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);"><b>No eligible graduates</b><br>All students have outstanding requirements.</div>';
         return;
+    }
+    if (!requirements.length && eligible.length === students.length) {
+        const noReqBanner = '<div style="margin-bottom:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius);color:var(--text-muted);font-size:13px;">No graduation requirements defined — all students are shown as eligible. Add requirements in Settings &gt; Graduation Requirements to enforce conditions.</div>';
+        document.getElementById('graduation-list').innerHTML = noReqBanner;
     }
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
