@@ -156,7 +156,8 @@ async function renderStudentDashboard(currentUser) {
 
     const enrolledCourseIds = new Set((enrollments || []).filter(e => e.studentId === studentId).map(e => e.courseId));
     const myEnrolledCourses = courses.filter(c => enrolledCourseIds.has(c.id));
-    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+    const today = new Date().toISOString().split('T')[0];
+    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId) && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
     
     const activeQuizzes = (quizzes || []).filter(q => enrolledCourseIds.has(q.courseId) && q.published);
     const mySubmissions = (submissions || []).filter(s => s.studentId === studentId);

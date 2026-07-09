@@ -62,7 +62,12 @@ function _hubBuildComputed(data, me) {
         (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)
     );
     const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const today = new Date().toISOString().split('T')[0];
+    const upcomingRegisteredExams = myRegisteredExams.filter(e => e.date >= today);
+    const pastRegisteredExams = myRegisteredExams.filter(e => e.date < today);
     const availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const upcomingAvailableExams = availableExams.filter(e => e.date >= today);
+    const pastAvailableExams = availableExams.filter(e => e.date < today);
     const activeQuizzes = (data.quizzes || []).filter(q => enrolledIds.has(q.courseId) && q.published);
     const allGrades = (data.grades || []).filter(g => allStudentIds.has(g.studentId));
     const allSubs = (data.submissions || []).filter(s => allStudentIds.has(s.studentId));
@@ -97,7 +102,7 @@ function _hubBuildComputed(data, me) {
     allScores.sort((a, b) => (b.submission?.submittedAt || b.grade?.gradedAt || '').localeCompare(a.submission?.submittedAt || a.grade?.gradedAt || ''));
     const myLessons = (data.lessons || []).filter(l => enrolledIds.has(l.courseId) && l.published !== false);
     const myNotes = (data.notes || []).filter(n => enrolledIds.has(n.courseId));
-    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes };
+    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes };
 }
 
 
@@ -184,7 +189,7 @@ async function renderStudentHub() {
                 <button class="hub-tab" data-tab="discussions" onclick="switchHubTab('discussions',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">💬 Discussions</button>
             </div>
 
-            <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.myRegisteredExams, c.pendingQuizzes, c.completedQuizzes, c.data)}</div>
+            <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.upcomingRegisteredExams, c.pendingQuizzes, c.completedQuizzes, c.data)}</div>
             <div id="hub-tab-courses" style="display:none;"></div>
             <div id="hub-tab-exams" style="display:none;"></div>
             <div id="hub-tab-quizzes" style="display:none;"></div>
@@ -245,7 +250,7 @@ async function switchHubTab(tab, btn) {
         }
         try {
             if (tab === 'courses') container.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data);
-            else if (tab === 'exams') container.innerHTML = renderHubExams(c.me, c.myRegisteredExams, c.availableExams, c.data);
+            else if (tab === 'exams') container.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
             else if (tab === 'quizzes') container.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores);
             else if (tab === 'notes') container.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
             else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(c.me, c.data); return; }
@@ -437,92 +442,92 @@ function _hubExamStatus(exam) {
     return { status: 'upcoming', label: `${days} day${days !== 1 ? 's' : ''} away`, color: days <= 7 ? 'var(--danger)' : days <= 30 ? 'var(--warning)' : 'var(--text-muted)', examStart, examEnd };
 }
 
-function renderHubExams(me, registeredExams, availableExams, data) {
+function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, data) {
     const myCourses = (data.courses || []);
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
     const myRetakeRequests = (data.retakeRequests || []).filter(r => r.studentId === me.id);
     const approvedSuppIds = new Set(myRetakeRequests.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => r.supplementaryExamId));
-    const displayExams = registeredExams.filter(e => !(e.type === 'supplementary' && approvedSuppIds.has(e.id)));
-    const rejectedRequests = myRetakeRequests.filter(r => r.status === 'rejected');
+    const displayUpcomingReg = upcomingRegisteredExams.filter(e => !(e.type === 'supplementary' && approvedSuppIds.has(e.id)));
+    const pendingReqExamIds = new Set(myRetakeRequests.filter(r => r.status === 'pending').map(r => r.examId));
+
+    function examCard(e, isRegistered, extra) {
+        const course = myCourses.find(c => c.id === e.courseId);
+        const exam = _hubExamStatus(e);
+        const mySub = isRegistered ? mySubmissions.find(s => s.quizId === e.id || (e.linkedQuizId && s.quizId === e.linkedQuizId)) : null;
+        const passed = mySub && mySub.status === 'pass';
+        const typeLabel = e.type === 'final' ? '📄 Final' : e.type === 'supplementary' ? '🔄 Supplementary' : '📝 Midterm';
+        const pendingRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'pending');
+        const approvedRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'approved');
+        const rejectedRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'rejected');
+        const suppExam = approvedRequest && approvedRequest.supplementaryExamId ? (data.exams || []).find(ex => ex.id === approvedRequest.supplementaryExamId) : null;
+        const hasActiveSupp = suppExam && !passed;
+        const canRequestRetake = exam.status === 'ended' && (!mySub || (mySub && !passed));
+        let actionBtn = '';
+        let borderColor = extra?.borderColor || 'var(--accent)';
+        if (hasActiveSupp) {
+            const suppStatus = _hubExamStatus(suppExam);
+            borderColor = 'var(--success)';
+            actionBtn = `<button class="btn btn-success btn-sm" onclick="startExam('${suppExam.id}')" style="font-size:13px;padding:8px 16px;font-weight:600;">🔄 Take Supplementary Exam</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">📅 ${formatDate(suppExam.date)} ${esc(suppExam.time || '')} · ${suppStatus.label}</div>`;
+        } else if (pendingRequest) {
+            actionBtn = `<span class="badge badge-warning" style="font-size:11px;padding:4px 10px;">⏳ Request Pending</span>`;
+        } else if (rejectedRequest) {
+            actionBtn = `<span class="badge badge-danger" style="font-size:11px;padding:4px 10px;">❌ Re-take Rejected${rejectedRequest.adminNote ? ': ' + esc(rejectedRequest.adminNote) : ''}</span>`;
+        } else if (isRegistered && canRequestRetake) {
+            borderColor = 'var(--warning)';
+            actionBtn = `<button class="btn btn-outline btn-sm" onclick="hubRequestRetake('${e.id}')" style="font-size:12px;border-color:var(--warning);color:var(--warning);">📋 Request Re-take</button>`;
+        } else if (isRegistered && mySub) {
+            borderColor = passed ? 'var(--success)' : 'var(--danger)';
+            actionBtn = `<span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:12px;padding:6px 12px;">${passed ? '✅ Passed' : '❌ Failed'} — ${mySub.score || 0}%</span>`;
+        } else if (isRegistered) {
+            if (exam.status === 'active') borderColor = 'var(--success)';
+            actionBtn = `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:12px;">📝 Take Exam</button>`;
+        } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
+            borderColor = 'var(--warning)';
+            actionBtn = `<button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:12px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>`;
+        } else if (!isRegistered) {
+            actionBtn = `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')">Register</button>`;
+        }
+        return `<div class="card" style="margin-bottom:10px;border-left:4px solid ${borderColor};">
+            <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;">
+                <div style="flex:1;">
+                    <div style="font-weight:700;font-size:15px;">${esc(e.title || course?.code || 'Exam')} <span class="badge badge-info" style="font-size:9px;">${typeLabel}</span></div>
+                    <div style="color:var(--text);font-size:13px;margin-top:4px;">${course ? esc(course.name) : ''}</div>
+                    <div style="display:flex;gap:12px;margin-top:8px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;">
+                        <span>📅 ${formatDate(e.date)}</span>
+                        <span>🕐 ${esc(e.time || 'TBA')}</span>
+                        <span>📍 ${esc(e.venue || 'TBA')}</span>
+                        ${e.duration ? `<span>⏱ ${e.duration} min</span>` : ''}
+                        <span style="color:${exam.color};font-weight:600;">${exam.label}</span>
+                    </div>
+                </div>
+                <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                    ${actionBtn}
+                    ${isRegistered && !mySub && !hasActiveSupp ? `<button class="btn btn-outline btn-sm" onclick="hubDropExam('${e.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);font-size:11px;">Drop</button>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }
+
     return `
         <div style="margin-bottom:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">📝 My Registered Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${displayExams.length})</span></h3>
-            ${displayExams.length ? displayExams.map(e => {
-                const course = myCourses.find(c => c.id === e.courseId);
-                const exam = _hubExamStatus(e);
-                const mySub = mySubmissions.find(s => s.quizId === e.id || (e.linkedQuizId && s.quizId === e.linkedQuizId));
-                const passed = mySub && mySub.status === 'pass';
-                const typeLabel = e.type === 'final' ? '📄 Final' : e.type === 'supplementary' ? '🔄 Supplementary' : '📝 Midterm';
-                const pendingRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'pending');
-                const approvedRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'approved');
-                const rejectedRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'rejected');
-                const suppExam = approvedRequest && approvedRequest.supplementaryExamId ? (data.exams || []).find(ex => ex.id === approvedRequest.supplementaryExamId) : null;
-                const hasActiveSupp = suppExam && !passed;
-                const canRequestRetake = exam.status === 'ended' && (!mySub || (mySub && !passed));
-                let actionBtn = '';
-                let borderColor = 'var(--accent)';
-                if (hasActiveSupp) {
-                    const suppStatus = _hubExamStatus(suppExam);
-                    borderColor = 'var(--success)';
-                    actionBtn = `<button class="btn btn-success btn-sm" onclick="startExam('${suppExam.id}')" style="font-size:13px;padding:8px 16px;font-weight:600;">🔄 Take Supplementary Exam</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">📅 ${formatDate(suppExam.date)} ${esc(suppExam.time || '')} · ${suppStatus.label}</div>`;
-                } else if (pendingRequest) {
-                    actionBtn = `<span class="badge badge-warning" style="font-size:11px;padding:4px 10px;">⏳ Request Pending</span>`;
-                } else if (rejectedRequest) {
-                    actionBtn = `<span class="badge badge-danger" style="font-size:11px;padding:4px 10px;">❌ Re-take Rejected${rejectedRequest.adminNote ? ': ' + esc(rejectedRequest.adminNote) : ''}</span>`;
-                } else if (canRequestRetake) {
-                    borderColor = 'var(--warning)';
-                    actionBtn = `<button class="btn btn-outline btn-sm" onclick="hubRequestRetake('${e.id}')" style="font-size:12px;border-color:var(--warning);color:var(--warning);">📋 Request Re-take</button>`;
-                } else if (mySub) {
-                    borderColor = passed ? 'var(--success)' : 'var(--danger)';
-                    actionBtn = `<span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:12px;padding:6px 12px;">${passed ? '✅ Passed' : '❌ Failed'} — ${mySub.score || 0}%</span>`;
-                } else {
-                    if (exam.status === 'active') borderColor = 'var(--success)';
-                    actionBtn = `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:12px;">📝 Take Exam</button>`;
-                }
-                return `<div class="card" style="margin-bottom:10px;border-left:4px solid ${borderColor};">
-                    <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;">
-                        <div style="flex:1;">
-                            <div style="font-weight:700;font-size:15px;">${esc(e.title || course?.code || 'Exam')} <span class="badge badge-info" style="font-size:9px;">${typeLabel}</span></div>
-                            <div style="color:var(--text);font-size:13px;margin-top:4px;">${course ? esc(course.name) : ''}</div>
-                            <div style="display:flex;gap:12px;margin-top:8px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;">
-                                <span>📅 ${formatDate(e.date)}</span>
-                                <span>🕐 ${esc(e.time || 'TBA')}</span>
-                                <span>📍 ${esc(e.venue || 'TBA')}</span>
-                                ${e.duration ? `<span>⏱ ${e.duration} min</span>` : ''}
-                                <span style="color:${exam.color};font-weight:600;">${exam.label}</span>
-                            </div>
-                        </div>
-                        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-                            ${actionBtn}
-                            ${!mySub && !hasActiveSupp ? `<button class="btn btn-outline btn-sm" onclick="hubDropExam('${e.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);font-size:11px;">Drop</button>` : ''}
-                        </div>
-                    </div>
-                </div>`;
-            }).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No exams registered yet.</div>'}
+            <h3 style="color:var(--accent);margin-bottom:12px;">📝 Upcoming Registered Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${displayUpcomingReg.length})</span></h3>
+            ${displayUpcomingReg.length ? displayUpcomingReg.map(e => examCard(e, true)).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No upcoming registered exams.</div>'}
         </div>
 
-        <div>
-            <h3 style="color:var(--accent);margin-bottom:12px;">➕ Available Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${availableExams.length})</span></h3>
-            ${availableExams.length ? availableExams.map(e => {
-                const course = myCourses.find(c => c.id === e.courseId);
-                const exam = _hubExamStatus(e);
-                const typeLabel = e.type === 'final' ? '📄 Final' : e.type === 'supplementary' ? '🔄 Supplementary' : '📝 Midterm';
-                return `<div class="card" style="margin-bottom:10px;border-left:4px solid var(--accent);">
-                    <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;">
-                        <div style="flex:1;">
-                            <div style="font-weight:700;font-size:15px;">${esc(e.title || course?.code || 'Exam')} <span class="badge badge-info" style="font-size:9px;">${typeLabel}</span></div>
-                            <div style="color:var(--text);font-size:13px;margin-top:4px;">${course ? esc(course.name) : ''}</div>
-                            <div style="display:flex;gap:12px;margin-top:8px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;">
-                                <span>📅 ${formatDate(e.date)}</span>
-                                <span>🕐 ${esc(e.time || 'TBA')}</span>
-                                <span>📍 ${esc(e.venue || 'TBA')}</span>
-                                <span style="color:${exam.color};font-weight:600;">${exam.label}</span>
-                            </div>
-                        </div>
-                        <button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')">Register</button>
-                    </div>
-                </div>`;
-            }).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No exams available for registration. Register for courses first to see their exams here.</div>'}
+        <div style="margin-bottom:24px;">
+            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Past Registered Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${pastRegisteredExams.length})</span></h3>
+            ${pastRegisteredExams.length ? pastRegisteredExams.map(e => examCard(e, true)).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No past registered exams.</div>'}
+        </div>
+
+        <div style="margin-bottom:24px;">
+            <h3 style="color:var(--accent);margin-bottom:12px;">➕ Upcoming Available Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${upcomingAvailableExams.length})</span></h3>
+            ${upcomingAvailableExams.length ? upcomingAvailableExams.map(e => examCard(e, false)).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No upcoming exams available for registration.</div>'}
+        </div>
+
+        <div style="margin-bottom:24px;">
+            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Missed Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${pastAvailableExams.length})</span></h3>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.</div>
+            ${pastAvailableExams.length ? pastAvailableExams.map(e => examCard(e, false, { today: new Date().toISOString().split('T')[0] })).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No missed exams.</div>'}
         </div>
 
         ${renderHubRetakeRequests(myRetakeRequests)}
@@ -556,6 +561,47 @@ async function hubDropExam(examId, studentName) {
     if (reg) { await dbDelete('examRegistrations', reg.id); _hubCacheRemove('examRegistrations', reg.id); }
     showToast('Exam dropped');
     logAudit('deleted', 'examRegistration', { studentId: me.id, examId });
+    renderStudentHub();
+}
+
+async function hubRequestMissedExam(examId) {
+    const me = _hubGetMe();
+    if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
+    const data = studentHubCache || await loadStudentHubData();
+    const exam = (data.exams || []).find(e => e.id === examId);
+    if (!exam) return showToast('Exam not found', { type: 'danger' });
+    const course = (data.courses || []).find(c => c.id === exam.courseId);
+    const existing = (data.retakeRequests || []).find(r => r.studentId === me.id && r.examId === examId && r.status === 'pending');
+    if (existing) return showToast('You already have a pending request for this exam', { type: 'warning' });
+    const content = `
+        <div style="margin-bottom:16px;">
+            <div style="padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:16px;">
+                <div style="font-weight:600;font-size:14px;margin-bottom:4px;">📝 ${esc(exam.title || course?.code || 'Exam')}</div>
+                <div style="font-size:12px;color:var(--text-muted);">${formatDate(exam.date)} ${esc(exam.time || '')} · ${course ? esc(course.name) : ''}</div>
+            </div>
+            <div class="form-group">
+                <label>Reason *</label>
+                <textarea id="missed-reason" rows="4" placeholder="Explain why you missed the exam or registered late..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical;"></textarea>
+            </div>
+        </div>
+    `;
+    showModal('Request Exam', content, `<button class="btn btn-primary" onclick="hubSubmitMissedRequest('${examId}')">Submit Request</button>`);
+}
+
+async function hubSubmitMissedRequest(examId) {
+    const reason = document.getElementById('missed-reason')?.value.trim();
+    if (!reason) return showToast('Please provide a reason', { type: 'danger' });
+    const me = _hubGetMe();
+    if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
+    const data = studentHubCache || await loadStudentHubData();
+    const existing = (data.retakeRequests || []).find(r => r.studentId === me.id && r.examId === examId && r.status === 'pending');
+    if (existing) return showToast('You already have a pending request for this exam', { type: 'warning' });
+    const record = { id: `RET-${examId}-${me.id}`, examId, studentId: me.id, reason, status: 'pending', requestType: 'missed', createdAt: new Date().toISOString() };
+    await dbPut('retakeRequests', record);
+    _hubCachePush('retakeRequests', record);
+    closeModal();
+    showToast('✅ Request submitted. Awaiting admin approval.');
+    logAudit('created', 'retakeRequest', { studentId: me.id, examId, requestType: 'missed' });
     renderStudentHub();
 }
 

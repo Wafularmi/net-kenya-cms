@@ -1562,7 +1562,7 @@ async function renderStudentDashboard(currentUser) {
         const course = courses.find(c => c.id === g.courseId);
         return `<div class="event-item"><span><b>${course ? course.name : g.courseId}</b></span><span class="badge badge-${g.score >= 70 ? 'success' : g.score >= 50 ? 'warning' : 'danger'}">${g.score}% (${g.grade})</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);padding:10px;">No grades recorded yet</div>'}</div>`;
-    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId) && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
     const examHtml = myExams.length ? myExams.slice(0, 5).map(e => {
         const course = courses.find(c => c.id === e.courseId);
         return `<div class="event-item"><span><b>📄 ${e.title || course?.code || e.courseId}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''} — ${formatDate(e.date)} ${e.time || ''}</span></span></div>`;
@@ -2836,7 +2836,12 @@ async function renderExams() {
         const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
-        const filtered = exams.filter(e => e.published !== false && e.semester == semester && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const sorted = exams.filter(e => e.published !== false && e.semester == semester && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const today = new Date().toISOString().split('T')[0];
+        const upcoming = sorted.filter(e => e.date >= today);
+        const past = sorted.filter(e => e.date < today);
+        const retakeRequests = await dbGetAll('retakeRequests');
+        const myRetakeExamIds = new Set(retakeRequests.filter(r => r.studentId === studentId && r.status !== 'rejected').map(r => r.examId));
         const submissions = await dbGetAll('submissions');
         const tbody = document.getElementById('exams-body');
         const tableContainer = tbody.closest('.table-container');
@@ -2849,15 +2854,18 @@ async function renderExams() {
             const tabContent = tbody.closest('.tab-content') || document.getElementById('screen-exams');
             tabContent.appendChild(container);
         }
-        container.innerHTML = filtered.length ? filtered.map(e => {
+        function examCard(e) {
             const course = courses.find(c => c.id === e.courseId);
             const center = centers.find(x => x.id === e.studyCenterId);
             const myReg = registrations.find(r => r.examId === e.id);
-            const examSub = submissions.find(s => s.quizId === e.id && s.studentId === studentId);
+            const examCheckIds = [e.id];
+            if (e.linkedQuizId) examCheckIds.push(e.linkedQuizId);
+            const examSub = submissions.find(s => examCheckIds.includes(s.quizId) && s.studentId === studentId);
             const isRegistered = !!myReg;
             const passed = examSub && examSub.status === 'pass';
             const typeIcon = e.type === 'final' ? '📄' : e.type === 'supplementary' ? '🔄' : '📝';
             const typeLabel = e.type === 'final' ? 'Final' : e.type === 'supplementary' ? 'Supplementary' : 'Midterm';
+            const hasPendingRequest = myRetakeExamIds.has(e.id);
             return `<div style="padding:16px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                     <div>
@@ -2880,9 +2888,20 @@ async function renderExams() {
                 </div>
                 <div style="margin-top:8px;">
                     ${examSub ? `<span>Score: <b style="color:${passed ? 'var(--success)' : 'var(--danger)'};">${examSub.score}%</b></span>` : isRegistered ? `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')">📝 Take Exam</button>` : `<span style="font-size:11px;color:var(--text-muted);">Not registered</span>`}
+                    ${!passed && hasPendingRequest ? '<br><span class="badge badge-warning" style="margin-top:6px;">⏳ Request Pending</span>' : ''}
+                    ${!passed && !hasPendingRequest && e.date < today ? `<br><button class="btn btn-outline btn-sm" onclick="requestMissedExam('${e.id}')" style="margin-top:6px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>` : ''}
                 </div>
             </div>`;
-        }).join('') : '<div style="text-align:center;padding:40px;color:var(--text-muted);">No exams scheduled for your enrolled courses this semester.</div>';
+        }
+        const upcomingHtml = upcoming.length ? upcoming.map(examCard).join('') : '<div style="text-align:center;padding:20px;color:var(--text-muted);">No upcoming exams.</div>';
+        const pastHtml = past.length ? past.map(examCard).join('') : '<div style="text-align:center;padding:20px;color:var(--text-muted);">No past exams.</div>';
+        container.innerHTML = `
+            <h3 style="color:var(--accent);margin-bottom:12px;">📝 Upcoming Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${upcoming.length})</span></h3>
+            ${upcomingHtml}
+            <h3 style="color:var(--accent);margin-bottom:12px;margin-top:24px;">📋 Past Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${past.length})</span></h3>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.</div>
+            ${pastHtml}
+        `;
     } else {
         const addBtn = document.querySelector('#screen-exams .btn-primary');
         if (addBtn) addBtn.style.display = '';
@@ -3038,6 +3057,50 @@ async function deleteExam(id) {
     if (!await showConfirm('Confirm', 'Delete exam?')) return;
     await dbDelete('exams', id); renderExams(); showToast('Exam deleted'); logAudit('deleted', 'exam', { id });
 }
+
+async function requestMissedExam(examId) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const students = await dbGetAll('students');
+    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
+    const exams = await dbGetAll('exams');
+    const exam = exams.find(e => e.id === examId);
+    if (!exam) return showToast('Exam not found', { type: 'danger' });
+    const courses = await dbGetAll('courses');
+    const course = courses.find(c => c.id === exam.courseId);
+    const existing = (await dbGetAll('retakeRequests')).find(r => r.studentId === me.id && r.examId === examId && r.status === 'pending');
+    if (existing) return showToast('You already have a pending request for this exam', { type: 'warning' });
+    const content = `
+        <div style="margin-bottom:16px;">
+            <div style="padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:16px;">
+                <div style="font-weight:600;font-size:14px;margin-bottom:4px;">📝 ${esc(exam.title || course?.code || 'Exam')}</div>
+                <div style="font-size:12px;color:var(--text-muted);">${formatDate(exam.date)} ${esc(exam.time || '')} · ${course ? esc(course.name) : ''}</div>
+            </div>
+            <div class="form-group">
+                <label>Reason *</label>
+                <textarea id="missed-reason" rows="4" placeholder="Explain why you missed the exam or registered late..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical;"></textarea>
+            </div>
+        </div>
+    `;
+    showModal('Request Exam', content, `<button class="btn btn-primary" onclick="submitMissedExamRequest('${examId}')">Submit Request</button>`);
+}
+
+async function submitMissedExamRequest(examId) {
+    const reason = document.getElementById('missed-reason')?.value.trim();
+    if (!reason) return showToast('Please provide a reason', { type: 'danger' });
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const students = await dbGetAll('students');
+    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
+    const record = { id: `RET-${examId}-${me.id}`, examId, studentId: me.id, reason, status: 'pending', requestType: 'missed', createdAt: new Date().toISOString() };
+    await dbPut('retakeRequests', record);
+    closeModal();
+    showToast('✅ Request submitted. Awaiting admin approval.');
+    logAudit('created', 'retakeRequest', { studentId: me.id, examId, requestType: 'missed' });
+    renderExams();
+    invalidateStudentHubCache();
+}
+
 async function toggleExamPublished(id) {
     const exam = await dbGet('exams', id);
     if (!exam) return;
@@ -11902,6 +11965,12 @@ function updateProgramFilter() {
     if (select) select.innerHTML = '<option value="">All Programs</option>' + programs.map(p => `<option value="${p}">${p}</option>`).join('');
     if (select) select.value = current;
     if (gradProgram) gradProgram.innerHTML = '<option value="">Select Program...</option>' + programs.map(p => `<option value="${p}">${p}</option>`).join('');
+}
+async function downloadBackup() {
+    return backupData();
+}
+function uploadRestore() {
+    document.getElementById('restore-file-input')?.click();
 }
 async function backupData() {
     const stores = ['settings','students','courses','enrollments','attendance','chapel','grades','staff','payments','feeStructure','installments','exams','seating','books','borrows','events','hostels','alumni','inventory','certificates','whatsappLog','campuses','studyCenters','gradRequirements','whatsappTemplates','users','audit','idCards','counters','lessons','notes','questionBank','quizzes','quizRegistrations','submissions','alerts','tickets','lessonFiles','expenseCategories','expenses','incomeCategories','income','mpesaTransactions'];

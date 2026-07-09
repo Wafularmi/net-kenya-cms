@@ -23,7 +23,12 @@ async function renderExams() {
         const me = students.find(s => s.id === studentId);
         const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-        const filtered = exams.filter(e => e.published !== false && e.semester == semester && enrolledCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const sorted = exams.filter(e => e.published !== false && e.semester == semester && enrolledCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const today = new Date().toISOString().split('T')[0];
+        const upcoming = sorted.filter(e => e.date >= today);
+        const past = sorted.filter(e => e.date < today);
+        const retakeRequests = await dbGetAll('retakeRequests');
+        const myRetakeExamIds = new Set(retakeRequests.filter(r => r.studentId === studentId && r.status !== 'rejected').map(r => r.examId));
         const submissions = await dbGetAll('submissions');
 
         const tbody = document.getElementById('exams-body');
@@ -39,7 +44,7 @@ async function renderExams() {
             tabContent.appendChild(container);
         }
 
-        container.innerHTML = filtered.length ? filtered.map(e => {
+        function examCard(e) {
             const course = courses.find(c => c.id === e.courseId);
             const center = centers.find(x => x.id === e.studyCenterId);
             const myReg = registrations.find(r => r.examId === e.id);
@@ -50,6 +55,7 @@ async function renderExams() {
             const passed = examSub && examSub.status === 'pass';
             const typeIcon = e.type === 'final' ? '📄' : e.type === 'supplementary' ? '🔄' : '📝';
             const typeLabel = e.type === 'final' ? 'Final' : e.type === 'supplementary' ? 'Supplementary' : 'Midterm';
+            const hasPendingRequest = myRetakeExamIds.has(e.id);
             return `<div style="padding:16px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                     <div>
@@ -72,9 +78,22 @@ async function renderExams() {
                 </div>
                 <div style="margin-top:8px;">
                     ${examSub ? `<span>Score: <b style="color:${passed ? 'var(--success)' : 'var(--danger)'};">${examSub.score}%</b></span>` : isRegistered ? `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')">📝 Take Exam</button>` : `<span style="font-size:11px;color:var(--text-muted);">Not registered</span>`}
+                    ${!passed && hasPendingRequest ? '<br><span class="badge badge-warning" style="margin-top:6px;">⏳ Request Pending</span>' : ''}
+                    ${!passed && !hasPendingRequest && e.date < today ? `<br><button class="btn btn-outline btn-sm" onclick="requestMissedExam('${e.id}')" style="margin-top:6px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>` : ''}
                 </div>
             </div>`;
-        }).join('') : '<div style="text-align:center;padding:40px;color:var(--text-muted);">No exams scheduled for your enrolled courses this semester.</div>';
+        }
+
+        const upcomingHtml = upcoming.length ? upcoming.map(examCard).join('') : '<div style="text-align:center;padding:20px;color:var(--text-muted);">No upcoming exams.</div>';
+        const pastHtml = past.length ? past.map(examCard).join('') : '<div style="text-align:center;padding:20px;color:var(--text-muted);">No past exams.</div>';
+
+        container.innerHTML = `
+            <h3 style="color:var(--accent);margin-bottom:12px;">📝 Upcoming Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${upcoming.length})</span></h3>
+            ${upcomingHtml}
+            <h3 style="color:var(--accent);margin-bottom:12px;margin-top:24px;">📋 Past Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${past.length})</span></h3>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.</div>
+            ${pastHtml}
+        `;
     } else {
         const addBtn = document.querySelector('#screen-exams .btn-primary');
         if (addBtn) addBtn.style.display = '';
@@ -127,6 +146,7 @@ async function renderRetakeRequests() {
                         <div style="flex:1;">
                             <div style="font-weight:700;font-size:14px;">${escapeHtml(st?.name || r.studentId)} <span style="font-size:11px;color:var(--text-muted);">(${escapeHtml(st?.admissionNumber || '')})</span></div>
                             <div style="font-size:12px;color:var(--text);margin-top:4px;"><b>Exam:</b> ${escapeHtml(ex?.title || co?.code || r.examId)} — ${ex ? formatDate(ex.date) + ' ' + (ex.time || '') : ''}</div>
+                            ${r.requestType ? `<span class="badge badge-info" style="font-size:10px;margin-top:4px;">${r.requestType === 'missed' ? 'Missed Exam' : 'Retake'}</span>` : ''}
                             <div style="font-size:12px;color:var(--text-muted);margin-top:4px;"><b>Reason:</b> ${escapeHtml(r.reason)}</div>
                             <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Requested: ${formatDate(r.createdAt)}</div>
                         </div>
@@ -178,7 +198,7 @@ async function approveRetake(requestId) {
             <div class="form-group"><label>Admin Note (optional)</label><input type="text" id="supp-note" placeholder="Note for the student..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);"></div>
         </div>
     `;
-    showModal('Approve Retake — Schedule Supplementary', content, `<button class="btn btn-success" onclick="confirmApproveRetake('${requestId}')">Approve & Schedule</button>`);
+    showModal(request.requestType === 'missed' ? 'Approve Missed Exam — Schedule' : 'Approve Retake — Schedule Supplementary', content, `<button class="btn btn-success" onclick="confirmApproveRetake('${requestId}')">Approve & Schedule</button>`);
 }
 
 async function confirmApproveRetake(requestId) {
@@ -397,6 +417,49 @@ async function editExam(id) {
 async function deleteExam(id) {
     if (!await showConfirm('Confirm', 'Delete exam?')) return;
     await dbDelete('exams', id); renderExams(); showToast('Exam deleted'); logAudit('deleted', 'exam', { id });
+}
+
+async function requestMissedExam(examId) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const students = await dbGetAll('students');
+    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
+    const exams = await dbGetAll('exams');
+    const exam = exams.find(e => e.id === examId);
+    if (!exam) return showToast('Exam not found', { type: 'danger' });
+    const courses = await dbGetAll('courses');
+    const course = courses.find(c => c.id === exam.courseId);
+    const existing = (await dbGetAll('retakeRequests')).find(r => r.studentId === me.id && r.examId === examId && r.status === 'pending');
+    if (existing) return showToast('You already have a pending request for this exam', { type: 'warning' });
+    const content = `
+        <div style="margin-bottom:16px;">
+            <div style="padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:16px;">
+                <div style="font-weight:600;font-size:14px;margin-bottom:4px;">📝 ${esc(exam.title || course?.code || 'Exam')}</div>
+                <div style="font-size:12px;color:var(--text-muted);">${formatDate(exam.date)} ${esc(exam.time || '')} · ${course ? esc(course.name) : ''}</div>
+            </div>
+            <div class="form-group">
+                <label>Reason *</label>
+                <textarea id="missed-reason" rows="4" placeholder="Explain why you missed the exam or registered late..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical;"></textarea>
+            </div>
+        </div>
+    `;
+    showModal('Request Exam', content, `<button class="btn btn-primary" onclick="submitMissedExamRequest('${examId}')">Submit Request</button>`);
+}
+
+async function submitMissedExamRequest(examId) {
+    const reason = document.getElementById('missed-reason')?.value.trim();
+    if (!reason) return showToast('Please provide a reason', { type: 'danger' });
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const students = await dbGetAll('students');
+    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
+    const record = { id: `RET-${examId}-${me.id}`, examId, studentId: me.id, reason, status: 'pending', requestType: 'missed', createdAt: new Date().toISOString() };
+    await dbPut('retakeRequests', record);
+    closeModal();
+    showToast('✅ Request submitted. Awaiting admin approval.');
+    logAudit('created', 'retakeRequest', { studentId: me.id, examId, requestType: 'missed' });
+    renderExams();
+    invalidateStudentHubCache();
 }
 
 async function toggleExamPublished(id) {
