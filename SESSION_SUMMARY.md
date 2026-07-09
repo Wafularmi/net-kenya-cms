@@ -45,33 +45,39 @@
 - `getRoleColor('coordinator')` → `'warning'`
 - `getRolePermissions('coordinator')` → full screen list (see above)
 - `renderRegions()` — populates both overview screen and settings card
+- `showRegionDetail(regionId)` — Region drill-down: per-center KPI cards (students, avg attendance, outstanding fees, problem count), click a center to open it
+- `showCenterDetail(centerId)` — Center drill-down: learner list with attendance% + balance + problem flags (low att <70%, outstanding fee, non-active status); click learner → `viewStudent()` full profile
+- `_canAccessRegion(regionId)` — coordinator region-scoping guard for drill-downs
+- `_attendanceRate(att, studentId)` — computes attendance % from `attendance` store
+- `manageRegionCenters(regionId)` / `assignCenterToRegion` / `unassignCenterFromRegion` — assign centers to regions
 - `signupFilterCenters()` — called on region change in registration form
 
-## Current State
-### Committed (in git, on GitHub, live on Railway)
-```
-93f1a69 fix: raise toast z-index above modal overlay
-e5610ba feat: public signup endpoint with system admission numbers
-c895f5f fix: allow unauthenticated studyCenters reads for registration form
-05ce913 perf: inline logo CSS at server level for instant logo display
-b75ede1 perf: server-side branding injection into HTML for zero-flash login screen
-```
+### Data model note
+- Students link to centers via `studyCenterId` (rest of app) AND legacy `campus`. Drill-downs use `studyCenterId` (fallback to `campus`). `renderRegions` student count now uses `s.studyCenterId || s.campus`.
+- Coordinator scoping: `getCoordinatorRegionId()` returns `currentUser.regionId`. Drill-downs block access to other regions.
 
-### NOT committed (local only, NOT on live server)
-- Region dropdown in study center form
+## Current State
+### Committed & LIVE on Railway (after commit 654c6a2)
+- Regions & coordinators full feature set
+- Region dropdown in study center form + `regionId` saved
 - Coordinator role in user form + region assignment
 - `renderRegions()`, `showRegionForm()`, `saveRegion()`, `deleteRegion()`, `editRegion()`
-- Updated `renderStudyCenters` (region badge)
-- Updated `renderUsers` (coordinator region display)
-- Switch `case 'regions'` in `showScreen()`
-- Settings card wiring for regions
-- `toggleUserStudentSelect()` region section show/hide
-- `saveUser()` coordinator validation + regionId
+- `manageRegionCenters()` center assignment modal
+- Updated `renderStudyCenters` (region badge), `renderUsers` (coordinator region)
+- Switch `case 'regions'` in `showScreen()`, settings card wiring
+- `toggleUserStudentSelect()` region section, `saveUser()` coordinator validation
 
-### Files modified (unstaged):
-- `M index.html` — Regions screen section, Regions card in settings
-- `M js/bundle.js` — all above functions
-- `M server.js` — canAccessStore, signup endpoint
+### NOT committed (local only, NOT on live server)
+- **DRILL-DOWN system**: `showRegionDetail(regionId)`, `showCenterDetail(centerId)`, `_canAccessRegion()`, `_attendanceRate()`
+- Region card "🔍 Drill Down" button; Study Center card "🔍 Open" button
+- Student problem-flagging (low attendance <70%, outstanding fee, non-active status)
+- `renderRegions` student count uses `studyCenterId || campus`
+- `dbGetBatch` hardened with 3-attempt retry (fixes startup race during init/syncUserAccounts)
+
+### Files modified (unstaged, pre-commit):
+- `M index.html` — version bumped to v=180 / main.145.css
+- `M js/bundle.js` — drill-down functions + region/card buttons + dbGetBatch retry
+- `M SESSION_SUMMARY.md`
 
 ## Credentials
 - Admin: username=`admin`, password=`admin123` (SHA-256: `240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9`)

@@ -23,9 +23,18 @@ async function dbGetAll(store) {
     return res.json();
 }
 async function dbGetBatch(stores) {
-    const res = await fetch(`${API_BASE}/batch?stores=${stores.map(encodeURIComponent).join(',')}`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error('dbGetBatch failed');
-    return res.json();
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const res = await fetch(`${API_BASE}/batch?stores=${stores.map(encodeURIComponent).join(',')}`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error('dbGetBatch failed: ' + res.status);
+            return res.json();
+        } catch (e) {
+            lastErr = e;
+            if (attempt < 2) await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+        }
+    }
+    throw lastErr || new Error('dbGetBatch failed');
 }
 async function dbGet(store, key) {
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}`, { headers: getAuthHeaders() });
@@ -11939,7 +11948,7 @@ async function renderStudyCenters() {
     (await dbGetAll('regions').catch(() => [])).forEach(r => regionMap[r.id] = r.name);
     document.getElementById('campuses-list').innerHTML = centers.length ? centers.map(c => {
         const admPreview = `${initials}/${c.code}/${month}-${year}/001`;
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span>${c.regionId && regionMap[c.regionId] ? `<span class="badge badge-warning">${regionMap[c.regionId]}</span>` : ''}</span><button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span>${c.regionId && regionMap[c.regionId] ? `<span class="badge badge-warning">${regionMap[c.regionId]}</span>` : ''}</span><button class="btn btn-primary btn-sm" onclick="showCenterDetail('${c.id}')">🔍 Open</button> <button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);font-size:12px;">No study centers added</div>';
 }
 async function showStudyCenterForm(center = null) {
@@ -13424,6 +13433,115 @@ async function generateLedgerStatement(fromDate, toDate) {
         console.error('generateLedgerStatement error:', err);
     }
 }
+
+// ===== REGION / CENTER / STUDENT DRILL-DOWN =====
+function _canAccessRegion(regionId) {
+    if (isCoordinator()) {
+        const myRegion = getCoordinatorRegionId();
+        if (myRegion && myRegion !== regionId) return false;
+    }
+    return true;
+}
+
+function _attendanceRate(att, studentId) {
+    const recs = att.filter(a => a.studentId === studentId);
+    if (!recs.length) return null;
+    const attended = recs.filter(a => a.status === 'present' || a.status === 'late').length;
+    return Math.round((attended / recs.length) * 100);
+}
+
+async function showRegionDetail(regionId) {
+    try {
+    if (!_canAccessRegion(regionId)) return showToast('Access denied: this region is outside your scope.', { type: 'danger' });
+    const region = await dbGet('regions', regionId);
+    if (!region) return showToast('Region not found');
+    const centers = await dbGetAll('studyCenters');
+    const students = await dbGetAll('students');
+    const attendance = await dbGetAll('attendance');
+    const payments = await dbGetAll('payments');
+    const regionCenters = centers.filter(c => c.regionId === regionId);
+    const allStudents = students.filter(s => s.studyCenterId && regionCenters.some(c => c.id === s.studyCenterId));
+    let html = `<div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">Drill-down of <b>${region.name}</b>. Click a center to see its students, attendance and fee status.</div>`;
+    html += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Centers</div><div class="stat-value" style="color:var(--accent)">${regionCenters.length}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Students</div><div class="stat-value">${allStudents.length}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Outstanding Fees</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(allStudents.reduce((s, st) => s + (getCachedStudentFee(st) - payments.filter(p => p.studentId === st.id).reduce((a, p) => a + p.amount, 0)), 0))}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Problem Learners</div><div class="stat-value" style="color:var(--danger)">${allStudents.filter(s => s.status !== 'active' || (getCachedStudentFee(s) - payments.filter(p => p.studentId === s.id).reduce((a, p) => a + p.amount, 0)) > 0).length}</div></div>
+    </div>`;
+    if (!regionCenters.length) {
+        html += '<div style="color:var(--text-muted);font-size:12px;padding:10px;">No study centers assigned to this region yet. Edit the region to add centers.</div>';
+    } else {
+        html += regionCenters.map(c => {
+            const cStudents = students.filter(s => s.studyCenterId === c.id);
+            const active = cStudents.filter(s => s.status === 'active');
+            const rates = cStudents.map(s => _attendanceRate(attendance, s.id)).filter(r => r !== null);
+            const avgAtt = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : null;
+            const outstanding = cStudents.reduce((s, st) => s + (getCachedStudentFee(st) - payments.filter(p => p.studentId === st.id).reduce((a, p) => a + p.amount, 0)), 0);
+            const problems = cStudents.filter(s => s.status !== 'active' || (getCachedStudentFee(s) - payments.filter(p => p.studentId === s.id).reduce((a, p) => a + p.amount, 0)) > 0).length;
+            const lowAtt = cStudents.filter(s => { const r = _attendanceRate(attendance, s.id); return r !== null && r < 70; }).length;
+            return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:center;"><span><b>${escapeHtml(c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code)}</span></span><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();showCenterDetail('${c.id}')">🔍 Open</button></div>
+                <div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;">
+                    <span>👥 ${active.length}/${cStudents.length} active</span>
+                    <span>📊 Att: ${avgAtt !== null ? avgAtt + '%' : '—'}</span>
+                    <span>💰 ${formatCurrency(outstanding)} due</span>
+                    ${lowAtt ? `<span style="color:var(--danger);">⚠️ ${lowAtt} low att</span>` : ''}
+                    ${problems ? `<span style="color:var(--danger);">🔴 ${problems} issues</span>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+    showModal('Region: ' + region.name, html, null, { maxWidth: '680px' });
+    } catch (err) {
+        console.error('showRegionDetail error:', err);
+        showToast('Could not open region view: ' + err.message, { type: 'danger' });
+    }
+}
+
+async function showCenterDetail(centerId) {
+    try {
+    const center = await dbGet('studyCenters', centerId);
+    if (!center) return showToast('Center not found');
+    if (!_canAccessRegion(center.regionId || '')) return showToast('Access denied: this center is outside your region scope.', { type: 'danger' });
+    const region = center.regionId ? await dbGet('regions', center.regionId) : null;
+    const students = await dbGetAll('students');
+    const attendance = await dbGetAll('attendance');
+    const payments = await dbGetAll('payments');
+        const cStudents = students.filter(s => (s.studyCenterId || s.campus) === centerId);
+        const paidByStudent = {};
+        payments.forEach(p => { if (p.studentId) paidByStudent[p.studentId] = (paidByStudent[p.studentId] || 0) + (p.amount || 0); });
+        const balOf = (st) => getCachedStudentFee(st) - (paidByStudent[st.id] || 0);
+        let html = `<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">${region ? 'Region: <b>' + escapeHtml(region.name) + '</b> · ' : ''}${escapeHtml(center.name)} (${escapeHtml(center.code)})</div>`;
+        const allOutstanding = cStudents.reduce((s, st) => s + balOf(st), 0);
+        html += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+            <div class="stat-card" style="flex:1;min-width:110px;"><div class="stat-label">Learners</div><div class="stat-value">${cStudents.length}</div></div>
+            <div class="stat-card" style="flex:1;min-width:110px;"><div class="stat-label">Outstanding</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(allOutstanding)}</div></div>
+            <div class="stat-card" style="flex:1;min-width:110px;"><div class="stat-label">Issues</div><div class="stat-value" style="color:var(--danger)">${cStudents.filter(s => s.status !== 'active' || balOf(s) > 0).length}</div></div>
+        </div>`;
+        if (!cStudents.length) {
+            html += '<div style="color:var(--text-muted);font-size:12px;padding:10px;">No learners enrolled at this center.</div>';
+        } else {
+            html += `<div style="font-weight:700;font-size:11px;margin-bottom:6px;color:var(--accent);">Learners (click to open full profile)</div>`;
+            html += `<div style="max-height:340px;overflow-y:auto;">` + cStudents.map(s => {
+                const balance = balOf(s);
+                const rate = _attendanceRate(attendance, s.id);
+                const flags = [];
+                if (s.status !== 'active') flags.push(`<span class="badge badge-warning">${s.status}</span>`);
+                if (balance > 0) flags.push(`<span class="badge badge-danger">${formatCurrency(balance)} due</span>`);
+                if (rate !== null && rate < 70) flags.push(`<span class="badge badge-danger">${rate}% att</span>`);
+                return `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;" onclick="event.stopPropagation();viewStudent('${s.id}')">
+                    <div style="min-width:0;"><b>${escapeHtml(s.name)}</b><br><span style="font-size:10px;color:var(--text-muted);">${escapeHtml(s.admissionNumber || s.id)} · ${escapeHtml(s.program || '—')}${rate !== null ? ' · Att ' + rate + '%' : ''}</span></div>
+                    <div style="display:flex;gap:4px;flex-shrink:0;">${flags.join('') || '<span class="badge badge-success">ok</span>'}</div>
+                </div>`;
+            }).join('') + `</div>`;
+        }
+    showModal('Center: ' + center.name, html, null, { maxWidth: '640px' });
+    } catch (err) {
+        console.error('showCenterDetail error:', err);
+        showToast('Could not open center view: ' + err.message, { type: 'danger' });
+    }
+}
+
 async function renderRegions() {
     const regions = await dbGetAll('regions');
     const centers = await dbGetAll('studyCenters');
@@ -13432,8 +13550,8 @@ async function renderRegions() {
     document.getElementById('regions-overview').innerHTML = regions.length ? regions.map(r => {
         const regionCenters = centers.filter(c => c.regionId === r.id);
         const coordinators = users.filter(u => u.role === 'coordinator' && u.regionId === r.id);
-        const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => s.campus === c.id));
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:10px;color:var(--accent);">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => u.name || u.username).join(', ')}</div>` : ''}</div>`;
+        const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => (s.studyCenterId || s.campus) === c.id));
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:10px;color:var(--accent);">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => u.name || u.username).join(', ')}</div>` : ''}</div>`;
     }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
     const settingsList = document.getElementById('regions-list');
     if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
