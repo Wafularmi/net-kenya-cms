@@ -418,8 +418,32 @@ function timeAgo(dateStr) {
     if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
     return Math.floor(diff / 86400000) + 'd ago';
 }
+function resolveRefMaps() {
+    if (window.__centerMap && window.__regionMap) return;
+    if (!window.__centerMap) window.__centerMap = {};
+    if (!window.__regionMap) window.__regionMap = {};
+    try {
+        const centers = (window._regionsCache && window._allCentersCache) ? window._allCentersCache : null;
+    } catch (e) {}
+}
+function _centerName(id) {
+    if (!id) return '';
+    if (window.__centerMap && window.__centerMap[id]) return window.__centerMap[id];
+    return '';
+}
+function _regionNameFromStudent(student) {
+    if (!student) return '';
+    let regionId = student.regionId;
+    if (!regionId && student.studyCenterId && window.__centerMap && window.__centerMap[student.studyCenterId]) {
+        regionId = window.__centerMap[student.studyCenterId].regionId;
+    }
+    if (regionId && window.__regionMap && window.__regionMap[regionId]) return window.__regionMap[regionId];
+    return '';
+}
 function applyTemplateVars(message, student, schoolName, balance, admissionNumber, phone) {
     const admno = admissionNumber || (student && student.admissionNumber) || (student && student.id) || '';
+    const centerName = (student && student.studyCenterId) ? (_centerName(student.studyCenterId) || (student.studyCenterId ? 'Study Center' : 'Main Campus')) : 'Main Campus';
+    const regionName = (student && _regionNameFromStudent(student)) || '';
     return message
         .replace(/{{name}}/g, student.name)
         .replace(/{{school}}/g, schoolName)
@@ -432,7 +456,8 @@ function applyTemplateVars(message, student, schoolName, balance, admissionNumbe
         .replace(/{{password}}/g, admno)
         .replace(/{{email}}/g, student.email || '')
         .replace(/{{year}}/g, student.year || '1')
-        .replace(/{{center}}/g, student.studyCenterId ? 'Study Center' : 'Main Campus')
+        .replace(/{{region}}/g, regionName)
+        .replace(/{{center}}/g, centerName)
         .replace(/{{type}}/g, '')
         .replace(/{{event}}/g, '')
         .replace(/{{course}}/g, '')
@@ -1142,6 +1167,12 @@ async function init() {
     try {
         await openDB();
         try { await loadBranding(); } catch (e) { console.error('init loadBranding:', e); }
+        try {
+            const [cMap, rMap] = await Promise.all([dbGetAll('studyCenters'), dbGetAll('regions')]);
+            window.__centerMap = {}; cMap.forEach(c => { window.__centerMap[c.id] = c; });
+            window.__regionMap = {}; rMap.forEach(r => { window.__regionMap[r.id] = r.name; });
+            window._allCentersCache = cMap;
+        } catch (e) { console.error('init ref maps:', e); }
         if (sessionStorage.getItem('currentUser') && isSessionExpired()) {
             sessionStorage.removeItem('currentUser');
             showToast('Session expired. Please login again.', { type: 'warning', duration: 5000 });
@@ -6317,7 +6348,7 @@ const WHATSAPP_DEFAULT_TEMPLATES = [
     { id: 'tpl-attendance', name: '⚠️ Attendance Warning', message: 'Dear {{name}},\n\nYour class attendance is currently below the required minimum ({{min}}%). Please attend all remaining classes to be eligible for exams.\n\nContact your course lecturer if you have any concerns.\n\n{{school}}', category: 'academic' },
     { id: 'tpl-exam', name: '📄 Exam Schedule', message: 'Dear {{name}},\n\nYour {{type}} exam for {{course}} is scheduled:\n📅 Date: {{date}}\n⏰ Time: {{time}}\n📍 Venue: {{venue}}\n\nPlease be on time and bring your student ID.\n\n{{school}}', category: 'academic' },
     { id: 'tpl-event', name: '📢 Event Notification', message: 'Dear {{name}},\n\nYou are invited to:\n📌 {{event}}\n📅 Date: {{date}}\n📍 Venue: {{venue}}\n\nYour presence is required.\n\n{{school}}', category: 'general' },
-    { id: 'tpl-welcome', name: 'Welcome Message', message: 'Dear {{name}},\n\nWelcome to {{school}}! Your registration has been approved.\n\nBelow are your login details:\n\nProgram: {{program}}\nUsername: {{phone}}\nAdmission Number: {{admissionNumber}}\nPassword: {{admissionNumber}}\n\nPlease use the Username and Password above to log in to the student portal where you will access your courses, quizzes, and more.\n\nFor any questions, contact the administration office.\n\n{{school}} Administration', category: 'general' },
+    { id: 'tpl-welcome', name: 'Welcome Message', message: 'Dear {{name}},\n\nWelcome to {{school}}! Your registration has been approved.\n\nBelow are your login details:\n\nProgram: {{program}}\nRegion: {{region}}\nStudy Center: {{center}}\nUsername: {{phone}}\nAdmission Number: {{admissionNumber}}\nPassword: {{admissionNumber}}\n\nPlease use the Username and Password above to log in to the student portal where you will access your courses, quizzes, and more.\n\nFor any questions, contact the administration office.\n\n{{school}} Administration', category: 'general' },
     { id: 'tpl-graduation', name: '🎓 Graduation Notice', message: 'Dear {{name}},\n\nCongratulations! You have been cleared for graduation from the {{program}} program.\n\n📅 Ceremony Date: {{date}}\n📍 Venue: {{venue}}\n\nPlease confirm your attendance at the Registrar\'s office.\n\n{{school}}', category: 'general' },
     { id: 'tpl-inactivity1', name: '⏰ Inactivity Warning 1', message: 'Dear {{name}},\n\nWe noticed you haven\'t logged in for 20 working days. Your account is still active, but please log in soon to stay on track.\n\nIf you\'re experiencing difficulties, please reach out to administration.\n\n{{school}}', category: 'academic' },
     { id: 'tpl-inactivity2', name: '🔒 Inactivity Warning 2', message: 'Dear {{name}},\n\nURGENT: Your account will be LOCKED in 3 working days due to inactivity (27 working days without login). Please log in immediately to keep your account active.\n\nContact {{school}} Administration for assistance.\n\n{{school}}', category: 'academic' }
@@ -10423,6 +10454,8 @@ async function finalizeApproval() {
         student.email = email;
         student.program = program;
         student.studyCenterId = centerId;
+        const _center = centerId ? await dbGet('studyCenters', centerId) : null;
+        student.regionId = (_center && _center.regionId) ? _center.regionId : (student.regionId || '');
         student.year = year;
         student.admissionNumber = admissionNumber;
         student.status = 'active';
@@ -10464,7 +10497,9 @@ async function finalizeApproval() {
                 '{{password}}': admissionNumber, '{{username}}': phone, '{{phone}}': phone,
                 '{{name}}': name, '{{email}}': email, '{{program}}': program,
                 '{{school}}': _approvalState.schoolName, '{{balance}}': '0',
-                '{{year}}': String(year), '{{min}}': '75'
+                '{{year}}': String(year), '{{min}}': '75',
+                '{{center}}': (_center && _center.name) ? _center.name : 'Study Center',
+                '{{region}}': (_center && _center.regionId && window.__regionMap && window.__regionMap[_center.regionId]) ? window.__regionMap[_center.regionId] : ''
             };
             leftoverPlaceholders.forEach(ph => {
                 if (knownSubs[ph] !== undefined) finalMessage = finalMessage.split(ph).join(knownSubs[ph]);
