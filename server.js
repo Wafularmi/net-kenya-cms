@@ -43,6 +43,15 @@ function readJSON(file) {
     try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
+// Always mirror the live DB back to the Railway volume so it never goes stale.
+function syncToVolume() {
+    try {
+        if (fs.existsSync(DB_FILE)) {
+            fs.copyFileSync(DB_FILE, DB_VOLUME_PATH);
+        }
+    } catch (e) { process.stderr.write('DB_VOLUME_SYNC_FAILED: ' + e.message + '\n'); }
+}
+
 // Atomic write: write to temp file, then rename (atomic on same filesystem)
 function safeWriteJSON(data) {
     const json = JSON.stringify(data, null, 2);
@@ -60,6 +69,8 @@ function safeWriteJSON(data) {
             }
         }
         if (!renamed) { console.error('safeWriteJSON: rename failed after 15 retries'); try { if (fs.existsSync(DB_TEMP)) fs.unlinkSync(DB_TEMP); } catch {} return false; }
+        // Keep the Railway volume in sync so data is never lost on redeploy
+        syncToVolume();
         // Create timestamped backup asynchronously (non-blocking)
         ensureBackupDir();
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -109,6 +120,12 @@ function loadDB() {
     if (process.pkg && ROOT !== DATA_ROOT) {
         sources.push({ file: path.join(ROOT, 'server-data.json'), label: 'snapshot' });
     }
+    // Final fallback: shipped seed template (never real data) so a fresh deploy
+    // without a volume starts empty instead of overwriting with a stale snapshot.
+    try {
+        const seedPath = path.join(DATA_ROOT, 'server-data.seed.json');
+        if (fs.existsSync(seedPath)) sources.push({ file: seedPath, label: 'seed' });
+    } catch {}
     // Try each source
     for (const { file, label } of sources) {
         const data = readJSON(file);

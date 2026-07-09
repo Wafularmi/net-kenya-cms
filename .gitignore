@@ -2,6 +2,7 @@
 node_modules/
 
 # Database & backups
+server-data.json
 server-data.backup.json
 server-data-backups/
 
