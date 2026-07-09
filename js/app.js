@@ -38,6 +38,7 @@ function showScreen(id) {
         case 'events': renderEvents(); break;
         case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); break;
         case 'communication': loadCommunicationPage(); break;
+        case 'messages': renderMessages(); break;
         case 'audit': renderAudit(); renderUsers(); break;
         case 'idcards': break;
         case 'questions': renderQuestionBank(); break;

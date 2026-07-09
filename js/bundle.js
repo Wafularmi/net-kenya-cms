@@ -350,13 +350,13 @@ function getRoleColor(role) {
 }
 function getRolePermissions(role) {
     const perms = {
-        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
-        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
-        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions'],
-        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
+        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
+        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
+        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','messages','discussions'],
+        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
         student: ['dashboard','portal','student-hub','courses','quizzes','exams','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','discussions']
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions']
     };
     return perms[role] || [];
 }
@@ -773,7 +773,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -2217,7 +2217,8 @@ async function viewStudentCourse(courseId) {
             const lessonFiles = files.filter(f => f.lessonId === lesson.id);
             html += `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
                 <b style="font-size:13px;">${lesson.order || ''}. ${lesson.title}</b>
-                ${lesson.description ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${lesson.description}</div>` : ''}`;
+                ${lesson.description ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${lesson.description}</div>` : ''}
+                ${lesson.videoUrl ? `<div style="margin-top:8px;">${embedVideo(lesson.videoUrl)}</div>` : ''}`;
             if (lessonNotes.length) {
                 html += `<div style="margin-top:8px;"><span style="font-size:11px;color:var(--text-muted);">📚 Notes:</span>`;
                 lessonNotes.forEach(n => {
@@ -5327,7 +5328,7 @@ function printInvitation() {
     w.document.close();
     w.print();
 }
-const DIPLOMA_CERT_TYPES = ['Certificate of Achievement', 'Certificate of Completion', 'Certificate of Participation', 'Certificate of Attendance', 'Certificate of Excellence', 'Certificate of Appreciation', 'Diploma', 'Certificate'];
+const DIPLOMA_CERT_TYPES = ['Diploma Certificate', 'Certificate of Achievement', 'Certificate of Completion', 'Certificate of Participation', 'Certificate of Attendance', 'Certificate of Excellence', 'Certificate of Appreciation', 'Diploma', 'Certificate'];
 const DIPLOMA_VARIATIONS = [
     { id: 1, name: 'Classic Double', desc: 'Double border + gold corners + seal' },
     { id: 2, name: 'Elegant Gold', desc: 'Thick gold border, vintage feel' },
@@ -5337,7 +5338,7 @@ const DIPLOMA_VARIATIONS = [
     { id: 6, name: 'Parchment Classic', desc: 'Vintage parchment with ornate edges' },
     { id: 7, name: 'Dark Plaque', desc: 'Dark background, gold lettering' },
     { id: 8, name: 'Academic Diplôme', desc: 'Large emblem, formal academic style' },
-    { id: 9, name: 'Gold Filigree', desc: 'Ornamental scrollwork, elegant flourishes' },
+    { id: 9, name: 'NET Diploma', desc: 'NET Foundation diploma, gold seal, navy accents' },
     { id: 10, name: 'Contemporary Crest', desc: 'Modern crest, clean lines, bold colors' }
 ];
 async function showDiplomaDesigner() {
@@ -5659,35 +5660,51 @@ ${awardBlock}
                 </div>
             </div>`; break;
         case 9:
-            innerContent = `<div style="max-width:750px;margin:0 auto;font-family:'Georgia','Times New Roman',serif;background:#fefcf7;text-align:center;position:relative;overflow:hidden;">
-                <div style="position:absolute;top:-20px;left:-20px;width:120px;height:120px;border:2px solid ${gold}44;border-radius:50%;"></div>
-                <div style="position:absolute;top:-10px;left:-10px;width:80px;height:80px;border:2px solid ${gold}33;border-radius:50%;"></div>
-                <div style="position:absolute;bottom:-20px;right:-20px;width:120px;height:120px;border:2px solid ${gold}44;border-radius:50%;"></div>
-                <div style="position:absolute;bottom:-10px;right:-10px;width:80px;height:80px;border:2px solid ${gold}33;border-radius:50%;"></div>
-                <div style="border:3px solid ${color};border-radius:10px;padding:4px;">
-                    <div style="border:1px solid ${gold};${innerPad};">
-                        <div style="display:flex;justify-content:center;gap:8px;align-items:center;margin-bottom:8px;">
-                            <span style="color:${gold};font-size:18px;">❧</span>
-                            <span style="flex:1;max-width:200px;height:1px;background:linear-gradient(90deg,transparent,${gold});"></span>
-                            <div style="font-size:14px;letter-spacing:5px;text-transform:uppercase;color:${color};font-weight:700;">${schoolName}</div>
-                            <span style="flex:1;max-width:200px;height:1px;background:linear-gradient(90deg,${gold},transparent);"></span>
-                            <span style="color:${gold};font-size:18px;">❧</span>
+            const navy = '#0f1d35';
+            const regNo = v.certType === 'Diploma Certificate' ? 'NF/KWNSC/1-22/167' : '';
+            innerContent = `<div style="width:92%;max-width:820px;margin:0 auto;font-family:'Palatino','Georgia','Times New Roman',serif;background:#faf6ef;text-align:center;position:relative;overflow:hidden;box-shadow:0 0 0 1px ${gold}44,0 0 0 8px #faf6ef,0 0 0 9px ${gold}33;">
+                <div style="position:absolute;top:10px;left:10px;right:10px;bottom:10px;border:1px solid ${gold}66;pointer-events:none;"></div>
+                <div style="position:absolute;top:14px;left:14px;right:14px;bottom:14px;border:1px solid ${navy}22;pointer-events:none;"></div>
+                <div style="position:absolute;top:0;left:0;width:100%;height:4px;background:linear-gradient(90deg,${gold},${navy},${gold});"></div>
+                <div style="position:absolute;bottom:0;left:0;width:100%;height:4px;background:linear-gradient(90deg,${gold},${navy},${gold});"></div>
+                ${regNo ? `<div style="position:absolute;left:4px;top:50%;transform:translateY(-50%) rotate(-90deg);transform-origin:center left;font-size:8px;letter-spacing:4px;color:${navy}88;font-weight:600;white-space:nowrap;text-transform:uppercase;">${regNo}</div>` : ''}
+                <div style="padding:20px 28px 16px;">
+                    <div style="display:flex;justify-content:center;align-items:center;gap:6px;margin-bottom:4px;">
+                        <span style="font-size:10px;letter-spacing:4px;font-weight:700;color:${navy};">NET</span>
+                        <span style="font-size:10px;letter-spacing:4px;font-weight:400;color:${gold};">EQUIPPING</span>
+                        <div style="width:26px;height:26px;border-radius:50%;border:2px solid ${gold};display:flex;align-items:center;justify-content:center;">
+                            <span style="font-size:10px;color:${navy};font-weight:800;">✦</span>
                         </div>
-                        <div style="font-size:9px;color:var(--text-muted);letter-spacing:1px;margin-bottom:8px;">${footer}</div>
-                        <div style="border-top:1px dashed ${gold}66;border-bottom:1px dashed ${gold}66;padding:10px 0;">
-                            ${certBadge}
-                            <div style="font-size:10px;color:var(--text-muted);letter-spacing:2px;margin:6px 0;">This is to certify that</div>
-                            <div style="font-size:34px;font-weight:800;color:${color};margin:4px 0;letter-spacing:2px;font-family:'Palatino','Georgia',serif;">${name}</div>
-                            <div style="font-size:10px;color:var(--text-muted);">has successfully completed and been awarded the</div>
-                            <div style="font-size:20px;font-weight:700;color:#1a1a2e;margin:6px 0;letter-spacing:1px;">${award}</div>
-                            <div style="font-size:10px;color:#475569;line-height:1.6;max-width:500px;margin:6px auto 4px;font-style:italic;">${citation}</div>
+                        <span style="font-size:10px;letter-spacing:4px;font-weight:700;color:${navy};">PASTORS</span>
+                        <span style="font-size:10px;letter-spacing:4px;font-weight:400;color:${gold};">WORLDWIDE</span>
+                    </div>
+                    <div style="margin:0 auto 6px;width:70%;height:1px;background:linear-gradient(90deg,transparent,${gold}88,transparent);"></div>
+                    <div style="font-size:18px;font-weight:800;color:${navy};letter-spacing:2px;font-family:'Palatino','Georgia',serif;margin-bottom:8px;">Diploma Certificate</div>
+                    <div style="margin:0 auto 10px;width:40%;height:1px;background:linear-gradient(90deg,transparent,${gold},transparent);"></div>
+                    <div style="font-size:10px;color:#666;letter-spacing:2px;margin-bottom:4px;">This is to certify that</div>
+                    <div style="font-size:28px;font-weight:800;color:${navy};margin:4px 0;letter-spacing:1px;font-family:'Palatino','Georgia',serif;">${name}</div>
+                    <div style="font-size:10px;color:#666;line-height:1.7;max-width:520px;margin:4px auto 6px;font-style:italic;">${citation}</div>
+                    <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin:6px 0 8px;">
+                        <span style="flex:1;height:1px;background:linear-gradient(90deg,transparent,${gold}88);"></span>
+                        <span style="color:${gold};font-size:12px;">❧</span>
+                        <span style="flex:1;height:1px;background:linear-gradient(90deg,${gold}88,transparent);"></span>
+                    </div>
+                    ${dateBlock}
+                    <div style="margin-top:14px;display:flex;justify-content:center;align-items:center;gap:40px;">
+                        <div style="text-align:center;">
+                            ${_regImg}<div style="width:130px;height:1px;background:${navy}44;margin:0 auto 3px;"></div>
+                            <div style="font-size:8px;color:#888;letter-spacing:1px;">Signature of presenter</div>
                         </div>
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
-                            <div style="text-align:left;">${_regImg}<div style="width:140px;height:1px;background:var(--border);margin-bottom:3px;"></div><div style="font-size:8px;color:var(--text-muted);">Authorized Signatory</div></div>
-                            ${dateBlock}
-                            ${seal}
+                        <div style="width:55px;height:55px;border-radius:50%;border:3px double ${gold};display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle,${gold}22,transparent);">
+                            <div style="font-size:16px;color:${gold};">✦</div>
+                            <div style="font-size:5px;color:${navy};letter-spacing:1px;font-weight:700;">SEAL</div>
+                        </div>
+                        <div style="text-align:center;">
+                            ${_dirImg}<div style="width:130px;height:1px;background:${navy}44;margin:0 auto 3px;"></div>
+                            <div style="font-size:8px;color:#888;letter-spacing:1px;">Signature of trainer</div>
                         </div>
                     </div>
+                    <div style="margin-top:10px;font-size:7px;color:${navy}44;letter-spacing:3px;text-transform:uppercase;">${footer || schoolName}</div>
                 </div>
             </div>`; break;
         case 10:
@@ -7384,7 +7401,7 @@ async function showLessonForm(lesson = null) {
     const courses = await dbGetAll('courses');
     const isEdit = !!lesson;
     const isPublished = lesson ? lesson.published !== false : false;
-    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div>`;
+    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div>`;
     showModal(isEdit ? 'Edit Lesson' : 'Add Lesson', content, `<button class="btn btn-primary" onclick="saveLesson()">${isEdit ? 'Update' : 'Save'}</button>`);
 }
 async function saveLesson() {
@@ -7400,6 +7417,7 @@ async function saveLesson() {
         description: document.getElementById('lesson-desc').value.trim(),
         order: parseInt(document.getElementById('lesson-order').value) || 1,
         reference: document.getElementById('lesson-reference').value.trim(),
+        videoUrl: document.getElementById('lesson-video').value.trim(),
         published: document.getElementById('lesson-published').checked,
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -7409,6 +7427,20 @@ async function saveLesson() {
 async function editLesson(id) {
     const lesson = await dbGet('lessons', id);
     if (lesson) showLessonForm(lesson);
+}
+function embedVideo(url) {
+    if (!url) return '';
+    let src = url.trim();
+    // YouTube
+    let yt = src.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/);
+    if (yt) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://www.youtube.com/embed/${yt[1]}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe></div>`;
+    // Vimeo
+    let vimeo = src.match(/vimeo\.com\/(\d+)/);
+    if (vimeo) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://player.vimeo.com/video/${vimeo[1]}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allowfullscreen></iframe></div>`;
+    // Direct file (mp4/webm/ogg)
+    if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(src)) return `<video src="${esc(src)}" controls style="width:100%;border-radius:10px;border:1px solid var(--border);max-height:420px;"></video>`;
+    // Fallback link
+    return `<a href="${esc(src)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">🎬 Open Lesson Video</a>`;
 }
 async function deleteLesson(id) {
     if (!await showConfirm('Confirm', 'Delete this lesson? Questions, notes, and files linked to it will be preserved but lose lesson association.')) return;
@@ -7427,6 +7459,7 @@ async function manageLesson(lessonId) {
                 <button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${lessonId}');manageLesson('${lessonId}');">${isPublished ? '✓ Published' : '🔒 Draft'}</button>
             </div>
         </div>
+        ${lesson.videoUrl ? `<div style="margin:12px 0;">${embedVideo(lesson.videoUrl)}</div>` : ''}
         <div class="tabs" id="lesson-mgr-tabs">
             <button class="tab-btn active" onclick="switchLessonTab('notes','${lessonId}')">📚 Notes (${(await dbGetAll('notes')).filter(n => n.lessonId === lessonId).length})</button>
             <button class="tab-btn" onclick="switchLessonTab('questions','${lessonId}')">❓ Questions (${(await dbGetAll('questionBank')).filter(q => q.lessonId === lessonId).length})</button>
@@ -13667,7 +13700,7 @@ async function renderRegions() {
         const regionCenters = centers.filter(c => c.regionId === r.id);
         const coordinators = users.filter(u => u.role === 'coordinator' && u.regionId === r.id);
         const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => (s.studyCenterId || s.campus) === c.id));
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:10px;color:var(--accent);">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => u.name || u.username).join(', ')}</div>` : ''}</div>`;
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:11px;color:var(--accent);margin-top:2px;">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 2px 0;">${esc(u.name || u.username)}<button class="btn btn-outline btn-sm" style="padding:0 5px;font-size:9px;margin-left:2px;" onclick="transferCoordinator('${u.username}')">🔄 Transfer</button></span>`).join('')}</div>` : ''}<div style="margin-top:4px;"><button class="btn btn-success btn-sm" onclick="showCoordinatorForm('${r.id}')">➕ Register Coordinator</button></div></div>`;
     }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
     const settingsList = document.getElementById('regions-list');
     if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
@@ -13701,6 +13734,59 @@ async function editRegion(id) {
 async function deleteRegion(id) {
     if (!await showConfirm('Confirm', 'Delete region? This will NOT delete its study centers or users.')) return;
     await dbDelete('regions', id); await renderRegions(); showToast('Region deleted'); logAudit('deleted', 'region', { id });
+}
+
+async function showCoordinatorForm(regionId) {
+    const region = await dbGet('regions', regionId);
+    if (!region) return showToast('Region not found');
+    const content = `<input type="hidden" id="coord-region" value="${regionId}">
+<div class="form-group"><label>Full Name *</label><input type="text" id="coord-name" placeholder="e.g., John Doe"></div>
+<div class="form-group"><label>Username *</label><input type="text" id="coord-username" placeholder="e.g., jdoe"></div>
+<div class="form-group"><label>Password *</label><input type="password" id="coord-password" placeholder="min 4 characters"></div>
+<div class="form-group"><label>Region</label><input type="text" value="${region.name}" disabled style="background:var(--bg-input);color:var(--text-muted);"></div>
+<div style="font-size:11px;color:var(--text-muted);">This account will be created as a <b>Coordinator</b> for <b>${region.name}</b>, with access limited to their region's data.</div>`;
+    showModal('Register Coordinator — ' + region.name, content, `<button class="btn btn-primary" onclick="saveCoordinator()">Register</button>`);
+}
+
+async function saveCoordinator() {
+    const regionId = document.getElementById('coord-region').value;
+    const name = document.getElementById('coord-name').value.trim();
+    const username = document.getElementById('coord-username').value.trim();
+    const password = document.getElementById('coord-password').value;
+    if (!name || !username || !password) return showToast('All fields required!');
+    if (password.length < 4) return showToast('Password must be at least 4 characters!');
+    const existing = await dbGet('users', username);
+    if (existing) return showToast('Username already taken!');
+    const pwHash = await hashPassword(password);
+    const user = { username, password: pwHash, name, role: 'coordinator', regionId, createdAt: new Date().toISOString() };
+    await dbPut('users', user);
+    closeModal(); await renderRegions(); await renderUsers();
+    showToast('Coordinator registered!', { type: 'success' });
+    logAudit('created', 'coordinator', { username, regionId });
+}
+
+async function transferCoordinator(username) {
+    const user = await dbGet('users', username);
+    if (!user || user.role !== 'coordinator') return showToast('Coordinator not found');
+    const regions = await dbGetAll('regions');
+    if (regions.length < 2) return showToast('At least two regions are required to transfer');
+    const opts = regions.filter(r => r.id !== user.regionId).map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    const content = `<div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">Transfer <b>${esc(user.name || user.username)}</b> from their current region to a new region. Their access will be scoped to the new region immediately.</div>
+<div class="form-group"><label>Current Region</label><input type="text" value="${window._regionsCache?.find(r => r.id === user.regionId)?.name || user.regionId || '—'}" disabled style="background:var(--bg-input);color:var(--text-muted);"></div>
+<div class="form-group"><label>New Region *</label><select id="coord-transfer-region">${opts}</select></div>`;
+    showModal('Transfer Coordinator', content, `<button class="btn btn-primary" onclick="confirmTransferCoordinator('${username}')">Transfer</button>`);
+}
+
+async function confirmTransferCoordinator(username) {
+    const newRegionId = document.getElementById('coord-transfer-region').value;
+    if (!newRegionId) return showToast('Select a new region!');
+    const user = await dbGet('users', username);
+    if (!user) return;
+    user.regionId = newRegionId;
+    await dbPut('users', user);
+    closeModal(); await renderRegions(); await renderUsers();
+    showToast('Coordinator transferred!', { type: 'success' });
+    logAudit('updated', 'coordinator-transfer', { username, regionId: newRegionId });
 }
 
 async function manageRegionCenters(regionId) {
@@ -13745,6 +13831,113 @@ async function unassignCenterFromRegion(centerId, regionId) {
     showToast(`${center.name} unassigned`);
     manageRegionCenters(regionId);
     renderRegions();
+}
+
+// ===================== INTERNAL MESSAGING (staff + coordinators) =====================
+async function renderMessages() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!currentUser.username) return;
+    const messages = await dbGetAll('messages');
+    const users = await dbGetAll('users');
+    const staff = users.filter(u => u.role !== 'student' && u.username !== currentUser.username);
+    const myMessages = messages.filter(m => m.sender === currentUser.username || m.recipient === currentUser.username);
+    const conversations = {};
+    myMessages.forEach(m => {
+        const other = m.sender === currentUser.username ? m.recipient : m.sender;
+        if (!conversations[other]) conversations[other] = { username: other, last: m, unread: 0 };
+        if (m.timestamp > conversations[other].last.timestamp) conversations[other].last = m;
+        if (!m.read && m.recipient === currentUser.username) conversations[other].unread++;
+    });
+    const convList = Object.values(conversations).sort((a, b) => b.last.timestamp - a.last.timestamp);
+    const convEl = document.getElementById('messages-conversations');
+    if (convEl) {
+        convEl.innerHTML = convList.length ? convList.map(c => {
+            const u = users.find(x => x.username === c.username);
+            const name = u ? (u.name || u.username) : c.username;
+            return `<div class="event-item" style="cursor:pointer;${c.unread ? 'background:var(--bg-input);border-left:3px solid var(--accent);' : ''}" onclick="openConversation('${c.username}')">
+                <div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:13px;">${esc(name)}</b>${c.unread ? `<span class="badge badge-danger" style="font-size:9px;">${c.unread}</span>` : ''}</div>
+                <div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;">${esc((c.last.sender === currentUser.username ? 'You: ' : '') + (c.last.body || ''))}</div>
+            </div>`;
+        }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No conversations yet</div>';
+    }
+    const threadEl = document.getElementById('messages-thread');
+    if (threadEl && !threadEl.dataset.activeConv) {
+        threadEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">Select a conversation or click <b>New Message</b> to start one.</div>';
+    }
+}
+
+async function openConversation(username) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!currentUser.username) return;
+    const users = await dbGetAll('users');
+    const other = users.find(u => u.username === username);
+    const threadEl = document.getElementById('messages-thread');
+    if (threadEl) threadEl.dataset.activeConv = username;
+    const messages = (await dbGetAll('messages'))
+        .filter(m => (m.sender === currentUser.username && m.recipient === username) || (m.sender === username && m.recipient === currentUser.username))
+        .sort((a, b) => a.timestamp - b.timestamp);
+    // mark read
+    for (const m of messages) {
+        if (!m.read && m.recipient === currentUser.username) { m.read = true; await dbPut('messages', m); }
+    }
+    const name = other ? (other.name || other.username) : username;
+    let html = `<div style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px;">
+        <div style="font-weight:700;font-size:15px;color:var(--accent);">${esc(name)}</div>
+        <div style="font-size:11px;color:var(--text-muted);">${other ? other.role : ''}</div>
+    </div>`;
+    html += messages.length ? messages.map(m => {
+        const mine = m.sender === currentUser.username;
+        return `<div style="display:flex;${mine ? 'justify-content:flex-end;' : ''}margin-bottom:10px;">
+            <div style="max-width:75%;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.4;${mine ? 'background:var(--accent);color:#fff;border-bottom-right-radius:2px;' : 'background:var(--bg-input);border-bottom-left-radius:2px;'}">
+                <div>${esc(m.body)}</div>
+                <div style="font-size:9px;opacity:0.7;margin-top:3px;text-align:${mine ? 'right' : 'left'};">${new Date(m.timestamp).toLocaleString()}</div>
+            </div>
+        </div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No messages yet. Say hello!</div>';
+    html += `<div style="margin-top:10px;display:flex;gap:6px;">
+        <input type="text" id="msg-reply" class="form-control" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage('${username}')" style="flex:1;">
+        <button class="btn btn-primary btn-sm" onclick="sendMessage('${username}')">Send</button>
+    </div>`;
+    if (threadEl) threadEl.innerHTML = html;
+    renderMessages();
+}
+
+async function sendMessage(recipient) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const input = document.getElementById('msg-reply');
+    if (!input) return;
+    const body = input.value.trim();
+    if (!body) return;
+    const msg = { id: 'MSG-' + Date.now(), sender: currentUser.username, recipient, body, timestamp: Date.now(), read: false };
+    await dbPut('messages', msg);
+    logAudit('sent', 'message', { recipient });
+    openConversation(recipient);
+}
+
+function showComposeMessage() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!currentUser.username) return;
+    dbGetAll('users').then(users => {
+        const staff = users.filter(u => u.role !== 'student' && u.username !== currentUser.username);
+        const opts = staff.map(u => `<option value="${u.username}">${esc(u.name || u.username)} (${u.role})</option>`).join('');
+        const content = `<div class="form-group"><label>To</label><select id="msg-to">${opts}</select></div>
+        <div class="form-group"><label>Message</label><textarea id="msg-body" rows="4" placeholder="Write your message..."></textarea></div>`;
+        showModal('New Message', content, `<button class="btn btn-primary" onclick="sendComposedMessage()">Send</button>`);
+    });
+}
+
+async function sendComposedMessage() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const to = document.getElementById('msg-to').value;
+    const body = document.getElementById('msg-body').value.trim();
+    if (!to || !body) return showToast('Recipient and message required!');
+    const msg = { id: 'MSG-' + Date.now(), sender: currentUser.username, recipient: to, body, timestamp: Date.now(), read: false };
+    await dbPut('messages', msg);
+    closeModal();
+    await renderMessages();
+    await openConversation(to);
+    showToast('Message sent!', { type: 'success' });
+    logAudit('sent', 'message', { recipient: to });
 }
 
 // Bootstrap: auth.js and app.js both throw SyntaxErrors (let redeclarations) preventing their init() calls,
