@@ -1385,12 +1385,17 @@ function showTermsModalApp(user) {
                 var content = settings.termsContent;
                 if (!/<[a-z][^>]*>/i.test(content)) {
                     var blocks = content.split(/\n{2,}/).filter(Boolean);
-                    content = blocks.map(function(b) {
-                        var lines = b.split('\n').filter(Boolean);
-                        if (lines.length <= 3 && lines.every(function(l) { return l.length < 60; })) {
-                            return '<div class="terms-section"><p>' + lines.join('<br>') + '</p></div>';
+                    var merged = [];
+                    for (var bi = 0; bi < blocks.length; bi++) {
+                        var blines = blocks[bi].split('\n').filter(Boolean);
+                        if (blines.length <= 3 && blines.every(function(l) { return l.length < 60; }) && merged.length && merged[merged.length - 1].isShort) {
+                            merged[merged.length - 1].text += '\n' + blocks[bi];
+                        } else {
+                            merged.push({ text: blocks[bi], isShort: blines.length <= 3 && blines.every(function(l) { return l.length < 60; }) });
                         }
-                        return '<div class="terms-section"><p>' + b.trim().replace(/\n/g, '<br>') + '</p></div>';
+                    }
+                    content = merged.map(function(m) {
+                        return '<div class="terms-section"><p>' + m.text.trim().replace(/\n/g, '<br>') + '</p></div>';
                     }).join('');
                 }
                 scroll.innerHTML = content;
