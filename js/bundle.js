@@ -2064,6 +2064,7 @@ async function renderCourses() {
                 </div>
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">${instructor ? 'Instructor: ' + instructor.name : ''}${c.credits ? ' — ' + c.credits + ' credits' : ''}${c.department ? ' — ' + c.department : ''}</div>
                 ${hasContent ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">
+                    ${courseVideos ? `<button class="btn btn-primary btn-sm" onclick="viewStudentCourse('${c.id}')" style="font-weight:600;">▶ Watch Videos</button>` : ''}
                     <button class="btn btn-outline btn-sm" onclick="viewStudentCourse('${c.id}')">📖 Lessons & Notes</button>
                     <button class="btn btn-outline btn-sm" onclick="viewStudentQuizzes('${c.id}')">🧠 Quizzes</button>
                 </div>` : ''}
@@ -9868,6 +9869,7 @@ function renderPortalContent(studentId, data, isStudentUser) {
         return `<div style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
             <div><b style="font-size:12px;">${c.code}</b> — ${c.name}<br><span style="font-size:10px;color:var(--text-muted);">${courseLessons.length} lesson${courseLessons.length !== 1 ? 's' : ''} · ${courseQuizzes.length} assessment${courseQuizzes.length !== 1 ? 's' : ''}${courseVideoCount ? ' · 🎬 <b style="color:var(--accent);">' + courseVideoCount + ' video</b>' : ''}${enrolledDate ? ' · Enrolled ' + enrolledDate : ''}</span></div>
             <div style="display:flex;gap:4px;">
+                ${courseVideoCount ? `<button class="btn btn-primary btn-sm" onclick="viewStudentCourse('${c.id}')" style="font-weight:600;font-size:11px;">▶ Videos</button>` : ''}
                 <button class="btn btn-outline btn-sm" onclick="viewStudentCourse('${c.id}')">📖</button>
                 <button class="btn btn-outline btn-sm" onclick="viewStudentQuizzes('${c.id}')">🧠</button>
             </div>
