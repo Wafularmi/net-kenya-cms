@@ -603,7 +603,7 @@ async function initAuth() {
                 // Terms & Conditions check — version-aware
                 const key = 'terms_accepted_' + (dbUser.username || dbUser.id);
                 const brandingCheck = await dbGet('settings', 'branding');
-                const currentVersion = brandingCheck && brandingCheck.termsVersion ? brandingCheck.termsVersion : 0;
+                const currentVersion = brandingCheck && brandingCheck.termsContent ? (brandingCheck.termsVersion || 1) : 0;
                 if (currentVersion > 0 && dbUser.termsVersion !== currentVersion) {
                     localStorage.removeItem(key);
                     showTermsModalApp(dbUser);
@@ -689,7 +689,7 @@ async function login() {
         document.getElementById('login-pass').value = '';
         var key = 'terms_accepted_' + (user.username || user.id);
         var brandingCheck = await dbGet('settings', 'branding');
-        var currentVersion = brandingCheck && brandingCheck.termsVersion ? brandingCheck.termsVersion : 0;
+        var currentVersion = brandingCheck && brandingCheck.termsContent ? (brandingCheck.termsVersion || 1) : 0;
         if (currentVersion > 0 && user.termsVersion !== currentVersion) {
             localStorage.removeItem(key);
             showTermsModalApp(user);
@@ -11809,9 +11809,9 @@ async function saveBranding() {
     if (prev && prev.termsContent !== branding.termsContent) {
         branding.termsVersion = (prev.termsVersion || 0) + 1;
     } else if (prev) {
-        branding.termsVersion = prev.termsVersion || 0;
+        branding.termsVersion = prev.termsVersion || (prev.termsContent ? 1 : 0);
     } else {
-        branding.termsVersion = 1;
+        branding.termsVersion = branding.termsContent ? 1 : 0;
     }
     await dbPut('settings', branding);
     loadBranding();
