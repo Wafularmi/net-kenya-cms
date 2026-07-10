@@ -137,6 +137,7 @@ function injectFbStyles() {
 .fb-inline-reply{margin-top:6px;}
 .fb-reply-input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:20px;background:var(--bg-input);color:var(--text);font-size:13px;resize:none;outline:none;box-sizing:border-box;font-family:inherit;transition:border-color .15s;}
 .fb-reply-input:focus{border-color:var(--accent);}
+@media (max-width:700px){.fb-post{grid-template-columns:1fr!important;}.fb-post-replies{border-left:none!important;padding-left:0!important;border-top:1px solid var(--border);padding-top:8px;margin-top:8px;}}
 `;
     document.head.appendChild(style);
 }
@@ -187,42 +188,46 @@ async function renderDiscussions() {
                 const replies = m.replies || [];
                 const liked = likes.includes(userId);
 
-                html += `<div class="fb-post ${m.pinned ? 'fb-pinned' : ''}">
-                    ${m.pinned ? '<div class="fb-pin-badge">📌 Pinned</div>' : ''}
-                    ${m.locked ? '<div class="fb-pin-badge" style="background:var(--danger);">🔒 Locked</div>' : ''}
-                    <div class="fb-post-header">
-                        ${avatarHTML(m.userName, 36)}
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-weight:600;font-size:13px;color:var(--accent);">${esc(m.userName)}</div>
-                            <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-muted);">
-                                <span>${esc(m.userRole)}</span>
-                                <span>·</span>
-                                <span>${courseLabel}</span>
-                                <span>·</span>
-                                <span>${timeAgo(m.timestamp)}</span>
+                html += `<div class="fb-post ${m.pinned ? 'fb-pinned' : ''}" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="fb-post-left">
+                        ${m.pinned ? '<div class="fb-pin-badge">📌 Pinned</div>' : ''}
+                        ${m.locked ? '<div class="fb-pin-badge" style="background:var(--danger);">🔒 Locked</div>' : ''}
+                        <div class="fb-post-header">
+                            ${avatarHTML(m.userName, 36)}
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:600;font-size:13px;color:var(--accent);">${esc(m.userName)}</div>
+                                <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-muted);">
+                                    <span>${esc(m.userRole)}</span>
+                                    <span>·</span>
+                                    <span>${courseLabel}</span>
+                                    <span>·</span>
+                                    <span>${timeAgo(m.timestamp)}</span>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:2px;flex-shrink:0;">
+                                ${isStaff ? `
+                                    <button class="fb-icon-btn" onclick="togglePin('${m.id}','${m.courseId}',${m.pinned})" title="${m.pinned ? 'Unpin' : 'Pin'}">📌</button>
+                                    <button class="fb-icon-btn" onclick="toggleLock('${m.id}','${m.courseId}',${m.locked})" title="${m.locked ? 'Unlock' : 'Lock'}">🔒</button>
+                                    <button class="fb-icon-btn" onclick="deleteDiscussion('${m.id}','${m.courseId}')" title="Delete" style="color:var(--danger);">🗑️</button>
+                                ` : ''}
                             </div>
                         </div>
-                        <div style="display:flex;gap:2px;flex-shrink:0;">
-                            ${isStaff ? `
-                                <button class="fb-icon-btn" onclick="togglePin('${m.id}','${m.courseId}',${m.pinned})" title="${m.pinned ? 'Unpin' : 'Pin'}">📌</button>
-                                <button class="fb-icon-btn" onclick="toggleLock('${m.id}','${m.courseId}',${m.locked})" title="${m.locked ? 'Unlock' : 'Lock'}">🔒</button>
-                                <button class="fb-icon-btn" onclick="deleteDiscussion('${m.id}','${m.courseId}')" title="Delete" style="color:var(--danger);">🗑️</button>
-                            ` : ''}
+                        <div class="fb-post-content">${esc(m.content)}</div>
+                        <div class="fb-post-actions">
+                            <button class="fb-action-button ${liked ? 'fb-action-active' : ''}" onclick="toggleLike('${m.id}','${m.courseId}')">
+                                <span class="fb-action-icon">👍</span> Like${likes.length ? ' ' + likes.length : ''}
+                            </button>
+                            <button class="fb-action-button" onclick="showMainReplyForm('${m.id}')">
+                                <span class="fb-action-icon">💬</span> Reply
+                            </button>
                         </div>
                     </div>
-                    <div class="fb-post-content">${esc(m.content)}</div>
-                    <div class="fb-post-actions">
-                        <button class="fb-action-button ${liked ? 'fb-action-active' : ''}" onclick="toggleLike('${m.id}','${m.courseId}')">
-                            <span class="fb-action-icon">👍</span> Like${likes.length ? ' ' + likes.length : ''}
-                        </button>
-                        <button class="fb-action-button" onclick="showMainReplyForm('${m.id}')">
-                            <span class="fb-action-icon">💬</span> Reply
-                        </button>
-                    </div>
-                    <div id="replies-${m.id}" class="fb-replies-section">
-                        ${renderThread(replies, m.courseId || courseId, m.id, currentUser, isStaff, userId, 0, true)}
-                        <div id="main-reply-form-${m.id}">
-                            ${renderMainReplyForm(m.id, m.courseId || courseId)}
+                    <div class="fb-post-replies" style="border-left:1px solid var(--border);padding-left:12px;">
+                        <div id="replies-${m.id}" class="fb-replies-section">
+                            ${renderThread(replies, m.courseId || courseId, m.id, currentUser, isStaff, userId, 0, true)}
+                            <div id="main-reply-form-${m.id}">
+                                ${renderMainReplyForm(m.id, m.courseId || courseId)}
+                            </div>
                         </div>
                     </div>
                 </div>`;
