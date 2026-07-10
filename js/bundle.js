@@ -600,12 +600,19 @@ async function initAuth() {
             const dbUser = await dbGet('users', user.username);
             if (dbUser && dbUser.status !== 'locked') {
                 sessionStorage.setItem('currentUser', JSON.stringify(dbUser));
-                // Terms & Conditions check
+                // Terms & Conditions check — version-aware
                 const key = 'terms_accepted_' + (dbUser.username || dbUser.id);
+                const brandingCheck = await dbGet('settings', 'branding');
+                const currentVersion = brandingCheck && brandingCheck.termsVersion ? brandingCheck.termsVersion : 0;
+                if (currentVersion > 0 && dbUser.termsVersion !== currentVersion) {
+                    localStorage.removeItem(key);
+                    showTermsModalApp(dbUser);
+                    return;
+                }
                 if (localStorage.getItem(key) !== 'true') {
                     try {
                         const existing = await dbGet('users', dbUser.username || dbUser.id);
-                        if (existing && existing.termsAccepted) {
+                        if (existing && existing.termsAccepted && existing.termsVersion === currentVersion) {
                             localStorage.setItem(key, 'true');
                         } else {
                             showTermsModalApp(dbUser);
@@ -681,10 +688,17 @@ async function login() {
         showLoginError('');
         document.getElementById('login-pass').value = '';
         var key = 'terms_accepted_' + (user.username || user.id);
+        var brandingCheck = await dbGet('settings', 'branding');
+        var currentVersion = brandingCheck && brandingCheck.termsVersion ? brandingCheck.termsVersion : 0;
+        if (currentVersion > 0 && user.termsVersion !== currentVersion) {
+            localStorage.removeItem(key);
+            showTermsModalApp(user);
+            return;
+        }
         if (localStorage.getItem(key) !== 'true') {
             try {
                 var existing = await dbGet('users', user.username || user.id);
-                if (existing && existing.termsAccepted) {
+                if (existing && existing.termsAccepted && existing.termsVersion === currentVersion) {
                     localStorage.setItem(key, 'true');
                 } else {
                     showTermsModalApp(user);
@@ -1397,6 +1411,8 @@ window.acceptTerms = window.acceptTerms || async function() {
         if (existing) {
             existing.termsAccepted = true;
             existing.termsAcceptedAt = new Date().toISOString();
+            const branding = await dbGet('settings', 'branding');
+            existing.termsVersion = branding && branding.termsVersion ? branding.termsVersion : 0;
             await dbPut('users', existing);
         }
     } catch {}
@@ -11788,6 +11804,14 @@ async function saveBranding() {
     } else {
         const existing = await dbGet('settings', 'branding');
         if (existing && existing.receiptLogo) branding.receiptLogo = existing.receiptLogo;
+    }
+    const prev = await dbGet('settings', 'branding');
+    if (prev && prev.termsContent !== branding.termsContent) {
+        branding.termsVersion = (prev.termsVersion || 0) + 1;
+    } else if (prev) {
+        branding.termsVersion = prev.termsVersion || 0;
+    } else {
+        branding.termsVersion = 1;
     }
     await dbPut('settings', branding);
     loadBranding();
