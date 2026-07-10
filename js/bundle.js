@@ -2004,6 +2004,25 @@ async function editStaff(id) { const staff = await dbGet('staff', id); if (!staf
 async function deleteStaff(id) { if (!await showConfirm('Confirm', 'Delete staff?')) return; await dbDelete('staff', id); renderStaff(); showToast('Staff deleted'); logAudit('deleted', 'staff', { id }); }
 document.getElementById('staff-search').addEventListener('input', debounce(renderStaff, 300));
 
+function renderStudentCourseCard(c, lessonsByCourseId, staffById, isEnrolled) {
+    const stats = lessonsByCourseId[c.id] || {};
+    const courseLessons = stats.published || 0;
+    const courseVideos = stats.videos || 0;
+    const instructor = staffById[c.instructorId];
+    const hasContent = courseLessons > 0;
+    return `<div style="padding:16px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;${isEnrolled ? 'border-left:3px solid var(--accent);' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div><b style="font-size:14px;">${c.code}</b> — ${c.name}${isEnrolled ? ' <span class="badge badge-success" style="font-size:9px;">Enrolled</span>' : ''}</div>
+            <span class="badge badge-${hasContent ? 'success' : 'warning'}">${courseLessons} lesson${courseLessons !== 1 ? 's' : ''}${courseVideos ? ' · 🎬 ' + courseVideos : ''}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">${instructor ? 'Instructor: ' + instructor.name : ''}${c.credits ? ' — ' + c.credits + ' credits' : ''}${c.department ? ' — ' + c.department : ''}</div>
+        ${hasContent ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">
+            ${courseVideos ? `<button class="btn btn-primary btn-sm" onclick="viewStudentCourse('${c.id}')" style="font-weight:600;">▶ Watch Videos</button>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="viewStudentCourse('${c.id}')">📖 Lessons & Notes</button>
+            <button class="btn btn-outline btn-sm" onclick="viewStudentQuizzes('${c.id}')">🧠 Quizzes</button>
+        </div>` : '<p style="font-size:12px;color:var(--text-muted);margin:0;">No content available yet</p>'}
+    </div>`;
+}
 async function renderCourses() {
     const batchResult = await dbGetBatch(['courses', 'staff', 'enrollments', 'lessons']);
     const courses = batchResult.courses || [];
@@ -2037,14 +2056,14 @@ async function renderCourses() {
     if (isStudentUser) {
         let studentId;
         try { studentId = await resolveStudentId(currentUser) || currentUId || currentUser.username; } catch (e) { studentId = currentUser.studentId || currentUser.username; console.error('resolveStudentId error:', e); }
-        const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-        const enrolledCourses = sortCoursesByTranscriptOrder(courses.filter(c => {
-            if (c.status === 'inactive') return false;
-            if (enrolledCourseIds.size > 0) return enrolledCourseIds.has(c.id);
-            return true;
-        }));
+        const studentRec = students.find(s => s.id === studentId || s.id === 'STU-' + studentId || s.admissionNumber === studentId || s.phone === studentId || (currentUser.name && s.name === currentUser.name));
+        const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, studentRec?.id, studentRec?.admissionNumber, studentRec?.phone, studentRec?.email].filter(Boolean));
+        const enrolledCourseIds = new Set(enrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
+        const allActive = courses.filter(c => c.status !== 'inactive');
+        const myCourses = sortCoursesByTranscriptOrder(allActive.filter(c => enrolledCourseIds.has(c.id)));
+        const available = sortCoursesByTranscriptOrder(allActive.filter(c => !enrolledCourseIds.has(c.id)));
         const search = document.getElementById('course-search').value.toLowerCase();
-        const filtered = enrolledCourses.filter(c => !search || c.name.toLowerCase().includes(search) || c.code.toLowerCase().includes(search));
+        const filtered = allActive.filter(c => !search || c.name.toLowerCase().includes(search) || c.code.toLowerCase().includes(search));
         const scheduleTab = document.querySelector('#course-tabs .tab-btn[data-tab="class-schedule"]');
         if (scheduleTab) scheduleTab.style.display = 'none';
         const scheduleContent = document.getElementById('tab-class-schedule');
@@ -2056,25 +2075,20 @@ async function renderCourses() {
             container.style.padding = '16px 0';
             document.getElementById('tab-course-list').appendChild(container);
         }
-        container.innerHTML = filtered.length ? filtered.map(c => {
-            const courseLessons = lessonsByCourseId[c.id]?.published || 0;
-            const courseVideos = lessonsByCourseId[c.id]?.videos || 0;
-            const instructor = staffById[c.instructorId];
-            const hasContent = courseLessons > 0;
-            return `<div style="padding:16px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                    <div><b style="font-size:14px;">${c.code}</b> — ${c.name}</div>
-                    <span class="badge badge-${hasContent ? 'success' : 'warning'}">${courseLessons} lesson${courseLessons !== 1 ? 's' : ''}${courseVideos ? ' · 🎬 ' + courseVideos : ''}</span>
-                </div>
-                <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">${instructor ? 'Instructor: ' + instructor.name : ''}${c.credits ? ' — ' + c.credits + ' credits' : ''}${c.department ? ' — ' + c.department : ''}</div>
-                ${hasContent ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">
-                    ${courseVideos ? `<button class="btn btn-primary btn-sm" onclick="viewStudentCourse('${c.id}')" style="font-weight:600;">▶ Watch Videos</button>` : ''}
-                    <button class="btn btn-outline btn-sm" onclick="viewStudentCourse('${c.id}')">📖 Lessons & Notes</button>
-                    <button class="btn btn-outline btn-sm" onclick="viewStudentQuizzes('${c.id}')">🧠 Quizzes</button>
-                </div>` : ''}
-                ${!hasContent ? `<p style="font-size:12px;color:var(--text-muted);">No content available yet</p>` : ''}
-            </div>`;
-        }).join('') : '<p style="text-align:center;padding:20px;color:var(--text-muted);">No courses enrolled</p>';
+        let html = '';
+        const enrolledSet = new Set(myCourses.map(c => c.id));
+        if (myCourses.length) {
+            html += `<h4 style="color:var(--accent);margin:0 0 8px;">📋 My Courses</h4>`;
+            html += myCourses.map(c => renderStudentCourseCard(c, lessonsByCourseId, staffById, true)).join('');
+        }
+        if (available.length) {
+            html += `<h4 style="color:var(--text-muted);margin:16px 0 8px;font-size:13px;">📌 Available Courses</h4>`;
+            html += available.map(c => renderStudentCourseCard(c, lessonsByCourseId, staffById, false)).join('');
+        }
+        if (!myCourses.length && !available.length) {
+            html = '<p style="text-align:center;padding:20px;color:var(--text-muted);">No courses available</p>';
+        }
+        container.innerHTML = html;
         return;
     }
     const search = document.getElementById('course-search').value.toLowerCase();
@@ -9861,21 +9875,25 @@ function renderPortalContent(studentId, data, isStudentUser) {
         <div class="stat-card"><div class="stat-label">Quizzes Passed</div><div class="stat-value" style="color:var(--success);">${quizzesPassed}</div></div>
         <div class="stat-card"><div class="stat-label">Quizzes Failed</div><div class="stat-value" style="color:var(--danger);">${quizzesFailed}</div></div>
     `;
-    const enrolledCourseIds = new Set(data.enrollments ? data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId) : []);
+    const currentPortalUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const allPortalStudentIds = new Set([studentId, currentPortalUser.username, currentPortalUser.studentId, student.id, student.admissionNumber, student.phone, student.email].filter(Boolean));
+    const enrolledCourseIds = new Set(data.enrollments ? data.enrollments.filter(e => allPortalStudentIds.has(e.studentId)).map(e => e.courseId) : []);
     const inactiveCourseIds = new Set(data.courses.filter(c => c.status === 'inactive').map(c => c.id));
     const portalCourses = sortCoursesByTranscriptOrder(data.courses.filter(c => {
         if (c.status === 'inactive') return false;
         if (enrolledCourseIds.size > 0) return enrolledCourseIds.has(c.id);
         return true;
     }));
+    const portalEnrolledByCourse = {};
+    (data.enrollments || []).filter(e => allPortalStudentIds.has(e.studentId)).forEach(e => { portalEnrolledByCourse[e.courseId] = e; });
     const portalCourseHtml = portalCourses.length ? portalCourses.map(c => {
         const courseLessons = data.lessons.filter(l => l.courseId === c.id && l.published);
         const courseVideoCount = courseLessons.filter(l => l.videoUrl).length;
         const courseQuizzes = data.quizzes.filter(q => q.courseId === c.id);
-        const enrollment = data.enrollments.find(e => e.studentId === studentId && e.courseId === c.id);
+        const enrollment = portalEnrolledByCourse[c.id];
         const enrolledDate = enrollment && enrollment.enrolledAt ? formatDate(enrollment.enrolledAt) : '';
         return `<div style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
-            <div><b style="font-size:12px;">${c.code}</b> — ${c.name}<br><span style="font-size:10px;color:var(--text-muted);">${courseLessons.length} lesson${courseLessons.length !== 1 ? 's' : ''} · ${courseQuizzes.length} assessment${courseQuizzes.length !== 1 ? 's' : ''}${courseVideoCount ? ' · 🎬 <b style="color:var(--accent);">' + courseVideoCount + ' video</b>' : ''}${enrolledDate ? ' · Enrolled ' + enrolledDate : ''}</span></div>
+            <div><b style="font-size:12px;">${c.code}</b> — ${c.name}${enrollment ? ' <span class="badge badge-success" style="font-size:9px;">Enrolled</span>' : ''}<br><span style="font-size:10px;color:var(--text-muted);">${courseLessons.length} lesson${courseLessons.length !== 1 ? 's' : ''} · ${courseQuizzes.length} assessment${courseQuizzes.length !== 1 ? 's' : ''}${courseVideoCount ? ' · 🎬 <b style="color:var(--accent);">' + courseVideoCount + ' video</b>' : ''}${enrolledDate ? ' · Enrolled ' + enrolledDate : ''}</span></div>
             <div style="display:flex;gap:4px;">
                 ${courseVideoCount ? `<button class="btn btn-primary btn-sm" onclick="viewStudentCourse('${c.id}')" style="font-weight:600;font-size:11px;">▶ Videos</button>` : ''}
                 <button class="btn btn-outline btn-sm" onclick="viewStudentCourse('${c.id}')">📖</button>
