@@ -1381,7 +1381,13 @@ function showTermsModalApp(user) {
     const dateEl = document.getElementById('terms-updated-date');
     dbGet('settings', 'branding').then(function(settings) {
         if (settings && settings.termsContent) {
-            if (scroll) scroll.innerHTML = settings.termsContent;
+            if (scroll) {
+                var content = settings.termsContent;
+                if (!/<[a-z][^>]*>/i.test(content)) {
+                    content = '<p>' + content.replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+                }
+                scroll.innerHTML = content;
+            }
         }
         if (settings && settings.termsUpdated && dateEl) {
             var parts = settings.termsUpdated.split('-');
