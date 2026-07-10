@@ -137,7 +137,7 @@ function injectFbStyles() {
 .fb-inline-reply{margin-top:6px;}
 .fb-reply-input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:20px;background:var(--bg-input);color:var(--text);font-size:13px;resize:none;outline:none;box-sizing:border-box;font-family:inherit;transition:border-color .15s;}
 .fb-reply-input:focus{border-color:var(--accent);}
-@media (max-width:700px){.fb-post{grid-template-columns:1fr!important;}.fb-post-replies{border-left:none!important;padding-left:16px!important;border-top:1px solid var(--border);padding-top:8px;margin-top:8px;}}
+@media (max-width:700px){.fb-post{grid-template-columns:1fr!important;}.fb-post-replies{border-left:none!important;padding-left:48px!important;border-top:1px solid var(--border);padding-top:8px;margin-top:8px;}}
 `;
     document.head.appendChild(style);
 }
