@@ -773,7 +773,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1341,6 +1341,7 @@ const _refreshMap = {
     payslips: () => { if (isScreenActive('finance')) renderPayrollList(); },
     salaryDeductions: () => { if (isScreenActive('finance')) renderDeductionsSummary(); },
     mpesaTransactions: () => { if (isScreenActive('finance')) renderMpesaTransactions(); },
+    messages: () => { refreshMessagesBadge(); if (isScreenActive('messages')) renderMessages(); },
 };
 function onDBChange(store, record) {
     const fn = _refreshMap[store];
@@ -2021,11 +2022,12 @@ async function renderCourses() {
     const lessonsByCourseId = {};
     lessons.forEach(l => {
         if (!lessonsByCourseId[l.courseId]) {
-            lessonsByCourseId[l.courseId] = { published: 0, total: 0 };
+            lessonsByCourseId[l.courseId] = { published: 0, total: 0, videos: 0 };
         }
         lessonsByCourseId[l.courseId].total++;
         if (l.published) {
             lessonsByCourseId[l.courseId].published++;
+            if (l.videoUrl) lessonsByCourseId[l.courseId].videos++;
         }
     });
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -2052,13 +2054,13 @@ async function renderCourses() {
         }
         container.innerHTML = filtered.length ? filtered.map(c => {
             const courseLessons = lessonsByCourseId[c.id]?.published || 0;
-            const allCourseLessons = lessonsByCourseId[c.id]?.total || 0;
+            const courseVideos = lessonsByCourseId[c.id]?.videos || 0;
             const instructor = staffById[c.instructorId];
-            const hasContent = courseLessons > 0 || allCourseLessons > 0;
+            const hasContent = courseLessons > 0;
             return `<div style="padding:16px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                     <div><b style="font-size:14px;">${c.code}</b> — ${c.name}</div>
-                    <span class="badge badge-${hasContent ? 'success' : 'warning'}">${courseLessons} lesson${courseLessons !== 1 ? 's' : ''}</span>
+                    <span class="badge badge-${hasContent ? 'success' : 'warning'}">${courseLessons} lesson${courseLessons !== 1 ? 's' : ''}${courseVideos ? ' · 🎬 ' + courseVideos : ''}</span>
                 </div>
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">${instructor ? 'Instructor: ' + instructor.name : ''}${c.credits ? ' — ' + c.credits + ' credits' : ''}${c.department ? ' — ' + c.department : ''}</div>
                 ${hasContent ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">
@@ -2081,9 +2083,10 @@ async function renderCourses() {
         const studentCount = enrollmentsByCourseId[c.id] || 0;
         const instructor = staffById[c.instructorId];
         const lessonCount = lessonsByCourseId[c.id]?.published || 0;
+        const videoCount = lessonsByCourseId[c.id]?.videos || 0;
         const statusClass = c.status === 'inactive' ? 'danger' : lessonCount > 0 ? 'success' : 'warning';
         const statusLabel = c.status === 'inactive' ? 'Inactive' : lessonCount > 0 ? 'Active' : 'No Lessons';
-        return `<tr><td><b>${c.code}</b></td><td>${c.name}</td><td>${instructor ? instructor.name : '--'}</td><td>${studentCount}</td><td>${lessonCount}</td><td><span class="badge badge-${statusClass}">${statusLabel}</span></td><td><button class="btn btn-outline btn-sm" onclick="editCourse('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteCourse('${c.id}')">Del</button></td></tr>`;
+        return `<tr><td><b>${c.code}</b></td><td>${c.name}</td><td>${instructor ? instructor.name : '--'}</td><td>${studentCount}</td><td>${lessonCount}${videoCount ? ' <span style="font-size:10px;color:var(--accent);">🎬' + videoCount + '</span>' : ''}</td><td><span class="badge badge-${statusClass}">${statusLabel}</span></td><td><button class="btn btn-outline btn-sm" onclick="editCourse('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteCourse('${c.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No courses found.</td></tr>';
 }
 function showCourseForm(course = null) {
@@ -2209,38 +2212,89 @@ async function viewStudentCourse(courseId) {
     const notes = await dbGetAll('notes');
     const files = await dbGetAll('lessonFiles');
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦', 'mp4': '🎬', 'mp3': '🎵' };
-    let html = `<div style="margin-bottom:16px;padding:12px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course.code}</b> — ${course.name}<br><span style="font-size:12px;color:var(--text-muted);">${course.description || ''}${course.credits ? ' — ' + course.credits + ' credits' : ''}</span></div>`;
-    if (courseLessons.length) {
-        html += `<h4 style="color:var(--accent);margin-bottom:8px;">Lessons & Resources</h4>`;
-        for (const lesson of courseLessons) {
+    const videoLessons = courseLessons.filter(l => l.videoUrl);
+    const textLessons = courseLessons.filter(l => !l.videoUrl);
+    let html = `<div style="margin-bottom:16px;padding:12px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course.code}</b> — ${course.name}<br><span style="font-size:12px;color:var(--text-muted);">${course.description || ''}${course.credits ? ' — ' + course.credits + ' credits' : ''}${videoLessons.length ? ' · <span style="color:var(--accent);font-weight:600;">🎬 ' + videoLessons.length + ' video lesson' + (videoLessons.length !== 1 ? 's' : '') + '</span>' : ''}</span></div>`;
+    if (videoLessons.length) {
+        html += `<h4 style="color:var(--accent);margin:12px 0 8px;display:flex;align-items:center;gap:6px;"><span style="font-size:18px;">🎬</span> Video Lessons <span class="badge badge-primary" style="font-size:11px;">${videoLessons.length}</span></h4>`;
+        for (const lesson of videoLessons) {
             const lessonNotes = notes.filter(n => n.lessonId === lesson.id);
             const lessonFiles = files.filter(f => f.lessonId === lesson.id);
-            html += `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
-                <b style="font-size:13px;">${lesson.order || ''}. ${lesson.title}</b>
-                ${lesson.description ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${lesson.description}</div>` : ''}
-                ${lesson.videoUrl ? `<div style="margin-top:8px;">${embedVideo(lesson.videoUrl)}</div>` : ''}`;
-            if (lessonNotes.length) {
-                html += `<div style="margin-top:8px;"><span style="font-size:11px;color:var(--text-muted);">📚 Notes:</span>`;
-                lessonNotes.forEach(n => {
-                    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;background:var(--bg);border-radius:4px;font-size:11px;"><span>${n.title}</span><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="viewNote('${n.id}')">Read</button><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadNote('${n.id}')">⬇</button></div></div>`;
-                });
-                html += `</div>`;
-            }
-            if (lessonFiles.length) {
-                html += `<div style="margin-top:6px;"><span style="font-size:11px;color:var(--text-muted);">📁 Files:</span>`;
-                lessonFiles.forEach(f => {
-                    const ext = f.fileName.split('.').pop().toLowerCase();
-                    const icon = fileIcons[ext] || '📎';
-                    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;background:var(--bg);border-radius:4px;font-size:11px;"><span>${icon} ${f.fileName}</span><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadLessonFile('${f.id}')">⬇</button></div>`;
-                });
-                html += `</div>`;
-            }
-            html += `</div>`;
+            html += `<div style="padding:14px;border:2px solid var(--accent);border-radius:10px;margin-bottom:10px;background:var(--bg-input);">
+                <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;">
+                    <div style="flex:1;">
+                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                            <span style="background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">VIDEO</span>
+                            <b style="font-size:14px;">${lesson.order || ''}. ${lesson.title}</b>
+                        </div>
+                        ${lesson.description ? `<div style="font-size:12px;color:var(--text-muted);">${lesson.description}</div>` : ''}
+                        <div style="margin-top:6px;display:flex;gap:12px;font-size:11px;color:var(--text-muted);">
+                            ${lessonNotes.length ? `<span>📚 ${lessonNotes.length} note${lessonNotes.length !== 1 ? 's' : ''}</span>` : ''}
+                            ${lessonFiles.length ? `<span>📁 ${lessonFiles.length} file${lessonFiles.length !== 1 ? 's' : ''}</span>` : ''}
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="viewStudentLesson('${lesson.id}')" style="white-space:nowrap;padding:8px 20px;font-size:14px;font-weight:600;">▶ Watch Now</button>
+                </div>
+            </div>`;
         }
-    } else {
+    }
+    if (textLessons.length) {
+        html += `<h4 style="color:var(--text-muted);margin:12px 0 6px;font-size:13px;">📖 Lesson Notes & Materials</h4>`;
+        for (const lesson of textLessons) {
+            const lessonNotes = notes.filter(n => n.lessonId === lesson.id);
+            const lessonFiles = files.filter(f => f.lessonId === lesson.id);
+            html += `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                <div><b style="font-size:13px;">${lesson.order || ''}. ${lesson.title}</b>
+                ${lesson.description ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${lesson.description}</div>` : ''}
+                <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">${lessonNotes.length ? '📚 ' + lessonNotes.length + ' note' + (lessonNotes.length !== 1 ? 's' : '') : ''}${lessonFiles.length ? (lessonNotes.length ? ' · ' : '') + '📁 ' + lessonFiles.length + ' file' + (lessonFiles.length !== 1 ? 's' : '') : ''}</div></div>
+                <button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${lesson.id}')" style="white-space:nowrap;">📖 Open</button>
+            </div>`;
+        }
+    }
+    if (!videoLessons.length && !textLessons.length) {
         html += '<div style="color:var(--text-muted);text-align:center;padding:20px;">No lessons published yet</div>';
     }
-    showModal(course.name + ' — Lessons & Notes', html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
+    showModal(course.name + ' — Lessons & Resources', html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
+}
+async function viewStudentLesson(lessonId) {
+    const lesson = await dbGet('lessons', lessonId);
+    if (!lesson) return showToast('Lesson not found');
+    const course = await dbGet('courses', lesson.courseId);
+    const notes = await dbGetAll('notes');
+    const files = await dbGetAll('lessonFiles');
+    const lessonNotes = notes.filter(n => n.lessonId === lessonId);
+    const lessonFiles = files.filter(f => f.lessonId === lessonId);
+    const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦', 'mp4': '🎬', 'mp3': '🎵' };
+    let html = `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course ? course.code + ' — ' + course.name : ''}</b></div>`;
+    html += `<h3 style="margin:0 0 4px;">${lesson.order ? lesson.order + '. ' : ''}${lesson.title}</h3>`;
+    if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
+    if (lesson.videoUrl) {
+        html += `<div style="max-width:720px;margin:0 auto 16px;">${embedVideo(lesson.videoUrl)}</div>`;
+    }
+    if (lessonNotes.length) {
+        html += `<h4 style="color:var(--accent);margin:12px 0 6px;">📚 Notes</h4>`;
+        lessonNotes.forEach(n => {
+            html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;">
+                <span style="font-size:12px;">${n.title}</span>
+                <div style="display:flex;gap:4px;">
+                    <button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">Read</button>
+                    <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button>
+                </div>
+            </div>`;
+        });
+    }
+    if (lessonFiles.length) {
+        html += `<h4 style="color:var(--accent);margin:12px 0 6px;">📁 Files</h4>`;
+        lessonFiles.forEach(f => {
+            const ext = f.fileName.split('.').pop().toLowerCase();
+            const icon = fileIcons[ext] || '📎';
+            html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;">
+                <span style="font-size:12px;">${icon} ${f.fileName}</span>
+                <button class="btn btn-outline btn-sm" onclick="downloadLessonFile('${f.id}')">⬇</button>
+            </div>`;
+        });
+    }
+    showModal(lesson.title, html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
 }
 async function viewStudentQuizzes(courseId) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -7382,7 +7436,7 @@ async function renderLessons() {
         const lessonNotes = notes.filter(n => n.lessonId === l.id).length;
         const lessonFiles = files.filter(f => f.lessonId === l.id).length;
         const isPublished = l.published !== false;
-        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? '' : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td><button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
+        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? '' : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No lessons yet. Click "+ Add Lesson" to create one.</td></tr>';
     courseSelect.addEventListener('change', renderLessons);
     document.getElementById('lesson-status-filter').addEventListener('change', renderLessons);
@@ -7401,8 +7455,16 @@ async function showLessonForm(lesson = null) {
     const courses = await dbGetAll('courses');
     const isEdit = !!lesson;
     const isPublished = lesson ? lesson.published !== false : false;
-    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div>`;
+    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div>`;
     showModal(isEdit ? 'Edit Lesson' : 'Add Lesson', content, `<button class="btn btn-primary" onclick="saveLesson()">${isEdit ? 'Update' : 'Save'}</button>`);
+    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); }, 100);
+}
+function previewLessonVideo() {
+    const url = document.getElementById('lesson-video').value.trim();
+    const preview = document.getElementById('lesson-video-preview');
+    if (!preview) return;
+    if (url) { preview.style.display = 'block'; preview.innerHTML = embedVideo(url); }
+    else { preview.style.display = 'none'; preview.innerHTML = ''; }
 }
 async function saveLesson() {
     const title = document.getElementById('lesson-title').value.trim();
@@ -7431,9 +7493,9 @@ async function editLesson(id) {
 function embedVideo(url) {
     if (!url) return '';
     let src = url.trim();
-    // YouTube
-    let yt = src.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/);
-    if (yt) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://www.youtube.com/embed/${yt[1]}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe></div>`;
+    // YouTube (watch, shorts, embed, youtu.be, mobile)
+    let ytId = src.match(/[?&]v=([\w-]{11})/)?.[1] || src.match(/youtube\.com\/(?:shorts|embed)\/([\w-]{11})/)?.[1] || src.match(/youtu\.be\/([\w-]{11})/)?.[1];
+    if (ytId) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://www.youtube.com/embed/${ytId}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe></div>`;
     // Vimeo
     let vimeo = src.match(/vimeo\.com\/(\d+)/);
     if (vimeo) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://player.vimeo.com/video/${vimeo[1]}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allowfullscreen></iframe></div>`;
@@ -9799,11 +9861,12 @@ function renderPortalContent(studentId, data, isStudentUser) {
     const portalCourses = sortCoursesByTranscriptOrder(data.courses.filter(c => enrolledCourseIds.has(c.id) && !inactiveCourseIds.has(c.id)));
     const portalCourseHtml = portalCourses.length ? portalCourses.map(c => {
         const courseLessons = data.lessons.filter(l => l.courseId === c.id && l.published);
+        const courseVideoCount = courseLessons.filter(l => l.videoUrl).length;
         const courseQuizzes = data.quizzes.filter(q => q.courseId === c.id);
         const enrollment = data.enrollments.find(e => e.studentId === studentId && e.courseId === c.id);
         const enrolledDate = enrollment && enrollment.enrolledAt ? formatDate(enrollment.enrolledAt) : '';
         return `<div style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
-            <div><b style="font-size:12px;">${c.code}</b> — ${c.name}<br><span style="font-size:10px;color:var(--text-muted);">${courseLessons.length} lesson${courseLessons.length !== 1 ? 's' : ''} · ${courseQuizzes.length} assessment${courseQuizzes.length !== 1 ? 's' : ''}${enrolledDate ? ' · Enrolled ' + enrolledDate : ''}</span></div>
+            <div><b style="font-size:12px;">${c.code}</b> — ${c.name}<br><span style="font-size:10px;color:var(--text-muted);">${courseLessons.length} lesson${courseLessons.length !== 1 ? 's' : ''} · ${courseQuizzes.length} assessment${courseQuizzes.length !== 1 ? 's' : ''}${courseVideoCount ? ' · 🎬 <b style="color:var(--accent);">' + courseVideoCount + ' video</b>' : ''}${enrolledDate ? ' · Enrolled ' + enrolledDate : ''}</span></div>
             <div style="display:flex;gap:4px;">
                 <button class="btn btn-outline btn-sm" onclick="viewStudentCourse('${c.id}')">📖</button>
                 <button class="btn btn-outline btn-sm" onclick="viewStudentQuizzes('${c.id}')">🧠</button>
