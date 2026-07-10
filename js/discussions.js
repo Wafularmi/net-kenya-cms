@@ -68,7 +68,7 @@ function renderReply(r, courseId, messageId, curUser, isStaff, userId, depth) {
                 </div>
                 <div style="display:flex;gap:14px;margin-top:2px;padding-left:4px;align-items:center;">
                     <button class="fb-action ${liked ? 'fb-action-active' : ''}" onclick="toggleLike('${messageId}','${courseId}','${replyId}')" style="font-size:11px;padding:2px 0;">Like${likes.length ? ' ' + likes.length : ''}</button>
-                    <button class="fb-action" onclick="showReplyFormInline('${messageId}','${replyId}')" style="font-size:11px;padding:2px 0;">Reply</button>
+                    <button class="fb-action" onclick="showReplyFormInline('${messageId}','${courseId}','${replyId}')" style="font-size:11px;padding:2px 0;">Reply</button>
                     <span class="fb-time">${timeAgo(r.timestamp)}</span>
                 </div>
                 <div id="reply-inline-${messageId}-${replyId}"></div>
@@ -78,23 +78,23 @@ function renderReply(r, courseId, messageId, curUser, isStaff, userId, depth) {
     </div>`;
 }
 
-function renderInlineReplyForm(messageId, replyId) {
+function renderInlineReplyForm(messageId, courseId, replyId) {
     return `<div class="fb-inline-reply" style="margin-top:4px;">
-        <textarea rows="1" placeholder="Write a reply..." class="fb-reply-input" id="fb-input-${messageId}-${replyId}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReplyInline('${messageId}','','${replyId}')}"></textarea>
+        <textarea rows="1" placeholder="Write a reply..." class="fb-reply-input" id="fb-input-${messageId}-${replyId}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReplyInline('${messageId}','${courseId}','${replyId}')}"></textarea>
         <div style="display:flex;gap:6px;margin-top:4px;">
-            <button class="btn btn-primary btn-sm" onclick="submitReplyInline('${messageId}','','${replyId}')" style="font-size:11px;padding:3px 10px;">Post</button>
+            <button class="btn btn-primary btn-sm" onclick="submitReplyInline('${messageId}','${courseId}','${replyId}')" style="font-size:11px;padding:3px 10px;">Post</button>
             <button class="btn btn-sm btn-outline" onclick="cancelReplyInline('${messageId}','${replyId}')" style="font-size:11px;padding:3px 10px;">Cancel</button>
         </div>
     </div>`;
 }
 
-function renderMainReplyForm(messageId) {
+function renderMainReplyForm(messageId, courseId) {
     return `<div class="fb-inline-reply" style="margin-top:8px;display:flex;gap:8px;align-items:start;">
         ${avatarHTML((JSON.parse(sessionStorage.getItem('currentUser')||'{}').name || 'U'), 28)}
         <div style="flex:1;">
-            <textarea rows="1" placeholder="Write a reply..." class="fb-reply-input" id="fb-input-${messageId}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReplyInline('${messageId}')}"></textarea>
+            <textarea rows="1" placeholder="Write a reply..." class="fb-reply-input" id="fb-input-${messageId}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitReplyInline('${messageId}','${courseId}')}"></textarea>
             <div style="display:flex;gap:6px;margin-top:4px;justify-content:flex-end;">
-                <button class="btn btn-primary btn-sm" onclick="submitReplyInline('${messageId}')" style="font-size:11px;padding:3px 10px;">Post Reply</button>
+                <button class="btn btn-primary btn-sm" onclick="submitReplyInline('${messageId}','${courseId}')" style="font-size:11px;padding:3px 10px;">Post Reply</button>
             </div>
         </div>
     </div>`;
@@ -222,7 +222,7 @@ async function renderDiscussions() {
                     <div id="replies-${m.id}" class="fb-replies-section">
                         ${renderThread(replies, m.courseId || courseId, m.id, currentUser, isStaff, userId, 0, true)}
                         <div id="main-reply-form-${m.id}">
-                            ${renderMainReplyForm(m.id)}
+                            ${renderMainReplyForm(m.id, m.courseId || courseId)}
                         </div>
                     </div>
                 </div>`;
@@ -248,12 +248,12 @@ function showMainReplyForm(messageId) {
     }
 }
 
-function showReplyFormInline(messageId, replyId) {
+function showReplyFormInline(messageId, courseId, replyId) {
     const container = document.getElementById('reply-inline-' + messageId + '-' + replyId);
     if (!container) return;
     const isOpen = container.querySelector('.fb-inline-reply');
     if (isOpen) { isOpen.remove(); return; }
-    container.innerHTML = renderInlineReplyForm(messageId, replyId);
+    container.innerHTML = renderInlineReplyForm(messageId, courseId, replyId);
     const ta = document.getElementById('fb-input-' + messageId + '-' + replyId);
     if (ta) { ta.focus(); ta.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 }
@@ -286,6 +286,7 @@ async function submitReplyInline(messageId, courseIdOverride, replyId) {
             method: 'PUT',
             body: JSON.stringify(body)
         });
+        if (ta) ta.value = '';
         renderDiscussions();
     } catch (err) {
         showToast('Failed to reply: ' + err.message, { type: 'danger' });
