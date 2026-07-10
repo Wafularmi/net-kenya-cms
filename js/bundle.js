@@ -1384,9 +1384,13 @@ function showTermsModalApp(user) {
             if (scroll) {
                 var content = settings.termsContent;
                 if (!/<[a-z][^>]*>/i.test(content)) {
-                    var paragraphs = content.split(/\n{2,}/).filter(Boolean);
-                    content = paragraphs.map(function(p) {
-                        return '<div class="terms-section"><p>' + p.trim().replace(/\n/g, '<br>') + '</p></div>';
+                    var blocks = content.split(/\n{2,}/).filter(Boolean);
+                    content = blocks.map(function(b) {
+                        var lines = b.split('\n').filter(Boolean);
+                        if (lines.length <= 3 && lines.every(function(l) { return l.length < 60; })) {
+                            return '<div class="terms-section"><p>' + lines.join('<br>') + '</p></div>';
+                        }
+                        return '<div class="terms-section"><p>' + b.trim().replace(/\n/g, '<br>') + '</p></div>';
                     }).join('');
                 }
                 scroll.innerHTML = content;
