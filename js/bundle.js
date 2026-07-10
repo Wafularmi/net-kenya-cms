@@ -354,7 +354,7 @@ function getRolePermissions(role) {
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','messages','discussions'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
-        student: ['dashboard','portal','student-hub','courses','quizzes','exams','library','tickets','discussions'],
+        student: ['dashboard','student-hub','quizzes','library','tickets','discussions'],
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions']
     };
