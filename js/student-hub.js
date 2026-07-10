@@ -54,8 +54,10 @@ function _hubBuildComputed(data, me) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me.id, me.admissionNumber, me.phone, me.email].filter(Boolean));
     const enrolledIds = new Set((data.enrollments || []).filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
-    const myCourses = (data.courses || []).filter(c => enrolledIds.has(c.id));
-    const availableCourses = (data.courses || []).filter(c => c.published !== false && !enrolledIds.has(c.id));
+    let myCourses = (data.courses || []).filter(c => enrolledIds.has(c.id));
+    if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
+    let availableCourses = (data.courses || []).filter(c => c.published !== false && !enrolledIds.has(c.id));
+    if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
     const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(r.studentId)).map(r => r.examId));
     const allCourseExams = (data.exams || []).filter(e =>
         e.published !== false && enrolledIds.has(e.courseId) &&
@@ -843,34 +845,38 @@ async function renderHubDiscussions(me, data) {
                 const replyFormId = 'hub-reply-form-' + m.id;
                 const repliesId = 'hub-replies-' + m.id;
 
-                html += '<div class="card" style="border-left:4px solid ' + (m.pinned ? 'var(--accent)' : m.locked ? 'var(--danger)' : 'var(--border)') + ';position:relative;font-size:13px;">' +
-                    (m.pinned ? '<span style="position:absolute;top:6px;right:6px;font-size:10px;background:var(--accent);color:#fff;padding:1px 6px;border-radius:3px;">📌 Pinned</span>' : '') +
-                    '<div style="font-weight:600;font-size:13px;">' + esc(m.userName) + ' <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(' + esc(m.userRole) + ') · ' + courseLabel + '</span></div>' +
-                    '<div style="margin-top:6px;line-height:1.5;white-space:pre-wrap;">' + esc(m.content) + '</div>' +
-                    '<div style="margin-top:4px;font-size:10px;color:var(--text-muted);">' + date + '</div>' +
-                    '<div style="display:flex;gap:10px;margin-top:8px;padding-top:6px;border-top:1px solid var(--border);align-items:center;">' +
-                        '<button class="btn btn-sm ' + (liked ? 'btn-primary' : 'btn-outline') + '" onclick="hubToggleLike(\'' + m.id + '\',\'' + m.courseId + '\')" style="font-size:10px;padding:3px 8px;">' +
-                            '👍 <span id="hub-like-count-' + m.id + '">' + likes.length + '</span>' +
-                        '</button>' +
-                        (!m.locked ? '<button class="btn btn-sm btn-outline" onclick="hubShowReplyForm(\'' + m.id + '\')" style="font-size:10px;padding:3px 8px;">💬 Reply</button>' : '') +
-                        '<span style="font-size:10px;color:var(--text-muted);">' + replies.length + ' ' + (replies.length === 1 ? 'reply' : 'replies') + '</span>' +
+                html += '<div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;border-left:4px solid ' + (m.pinned ? 'var(--accent)' : m.locked ? 'var(--danger)' : 'var(--border)') + ';font-size:13px;">' +
+                    '<div>' +
+                        (m.pinned ? '<span style="font-size:10px;background:var(--accent);color:#fff;padding:1px 6px;border-radius:3px;font-weight:600;">📌 Pinned</span>' : '') +
+                        '<div style="font-weight:600;font-size:13px;">' + esc(m.userName) + ' <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(' + esc(m.userRole) + ') · ' + courseLabel + '</span></div>' +
+                        '<div style="margin-top:6px;line-height:1.5;white-space:pre-wrap;">' + esc(m.content) + '</div>' +
+                        '<div style="margin-top:4px;font-size:10px;color:var(--text-muted);">' + date + '</div>' +
+                        '<div style="display:flex;gap:10px;margin-top:8px;padding-top:6px;border-top:1px solid var(--border);align-items:center;">' +
+                            '<button class="btn btn-sm ' + (liked ? 'btn-primary' : 'btn-outline') + '" onclick="hubToggleLike(\'' + m.id + '\',\'' + m.courseId + '\')" style="font-size:10px;padding:3px 8px;">' +
+                                '👍 <span id="hub-like-count-' + m.id + '">' + likes.length + '</span>' +
+                            '</button>' +
+                            (!m.locked ? '<button class="btn btn-sm btn-outline" onclick="hubShowReplyForm(\'' + m.id + '\')" style="font-size:10px;padding:3px 8px;">💬 Reply</button>' : '') +
+                            '<span style="font-size:10px;color:var(--text-muted);">' + replies.length + ' ' + (replies.length === 1 ? 'reply' : 'replies') + '</span>' +
+                        '</div>' +
                     '</div>' +
-                    '<div id="' + repliesId + '" style="margin-top:6px;padding-left:12px;border-left:2px solid var(--border);">' +
-                        replies.map(function(r) {
-                            return '<div style="padding:5px 0;border-bottom:1px solid var(--bg);font-size:12px;">' +
-                                '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">' +
-                                    '<span style="font-weight:600;">' + esc(r.userName) + '</span>' +
-                                    '<span class="badge badge-info" style="font-size:8px;">' + esc(r.userRole) + '</span>' +
-                                    '<span style="font-size:9px;color:var(--text-muted);">' + new Date(r.timestamp).toLocaleString() + '</span>' +
+                    '<div style="border-left:1px solid var(--border);padding-left:12px;">' +
+                        '<div id="' + repliesId + '">' +
+                            replies.map(function(r) {
+                                return '<div style="padding:5px 0;border-bottom:1px solid var(--bg);font-size:12px;">' +
+                                    '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">' +
+                                        '<span style="font-weight:600;">' + esc(r.userName) + '</span>' +
+                                        '<span class="badge badge-info" style="font-size:8px;">' + esc(r.userRole) + '</span>' +
+                                        '<span style="font-size:9px;color:var(--text-muted);">' + new Date(r.timestamp).toLocaleString() + '</span>' +
+                                    '</div>' +
+                                    '<div style="margin-top:2px;line-height:1.5;white-space:pre-wrap;">' + esc(r.content) + '</div>' +
+                                '</div>';
+                            }).join('') +
+                            '<div id="' + replyFormId + '" style="display:none;margin-top:6px;">' +
+                                '<textarea rows="2" placeholder="Write a reply..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>' +
+                                '<div style="display:flex;gap:6px;margin-top:5px;">' +
+                                    '<button class="btn btn-primary btn-sm" onclick="hubSubmitReply(\'' + m.id + '\',\'' + m.courseId + '\')" style="font-size:10px;padding:3px 10px;">Post Reply</button>' +
+                                    '<button class="btn btn-sm btn-outline" onclick="hubHideReplyForm(\'' + m.id + '\')" style="font-size:10px;padding:3px 10px;">Cancel</button>' +
                                 '</div>' +
-                                '<div style="margin-top:2px;line-height:1.5;white-space:pre-wrap;">' + esc(r.content) + '</div>' +
-                            '</div>';
-                        }).join('') +
-                        '<div id="' + replyFormId + '" style="display:none;margin-top:6px;">' +
-                            '<textarea rows="2" placeholder="Write a reply..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>' +
-                            '<div style="display:flex;gap:6px;margin-top:5px;">' +
-                                '<button class="btn btn-primary btn-sm" onclick="hubSubmitReply(\'' + m.id + '\',\'' + m.courseId + '\')" style="font-size:10px;padding:3px 10px;">Post Reply</button>' +
-                                '<button class="btn btn-sm btn-outline" onclick="hubHideReplyForm(\'' + m.id + '\')" style="font-size:10px;padding:3px 10px;">Cancel</button>' +
                             '</div>' +
                         '</div>' +
                     '</div>' +
