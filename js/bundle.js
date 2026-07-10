@@ -2024,11 +2024,12 @@ function renderStudentCourseCard(c, lessonsByCourseId, staffById, isEnrolled) {
     </div>`;
 }
 async function renderCourses() {
-    const batchResult = await dbGetBatch(['courses', 'staff', 'enrollments', 'lessons']);
+    const batchResult = await dbGetBatch(['courses', 'staff', 'enrollments', 'lessons', 'students']);
     const courses = batchResult.courses || [];
     const staff = batchResult.staff || [];
     const enrollments = batchResult.enrollments || [];
     const lessons = batchResult.lessons || [];
+    const students = batchResult.students || [];
     const staffById = {};
     staff.forEach(s => { staffById[s.id] = s; });
     const enrollmentsByCourseId = {};
@@ -2054,16 +2055,13 @@ async function renderCourses() {
     const addBtn = document.querySelector('#screen-courses .btn-primary');
     if (addBtn) addBtn.style.display = isStudentUser ? 'none' : '';
     if (isStudentUser) {
-        let studentId;
-        try { studentId = await resolveStudentId(currentUser) || currentUId || currentUser.username; } catch (e) { studentId = currentUser.studentId || currentUser.username; console.error('resolveStudentId error:', e); }
-        const studentRec = students.find(s => s.id === studentId || s.id === 'STU-' + studentId || s.admissionNumber === studentId || s.phone === studentId || (currentUser.name && s.name === currentUser.name));
-        const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, studentRec?.id, studentRec?.admissionNumber, studentRec?.phone, studentRec?.email].filter(Boolean));
+        const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || (currentUser.username && s.phone === currentUser.username));
+        const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
+        const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me?.id, me?.admissionNumber, me?.phone, me?.email].filter(Boolean));
         const enrolledCourseIds = new Set(enrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
         const allActive = courses.filter(c => c.status !== 'inactive');
         const myCourses = sortCoursesByTranscriptOrder(allActive.filter(c => enrolledCourseIds.has(c.id)));
         const available = sortCoursesByTranscriptOrder(allActive.filter(c => !enrolledCourseIds.has(c.id)));
-        const search = document.getElementById('course-search').value.toLowerCase();
-        const filtered = allActive.filter(c => !search || c.name.toLowerCase().includes(search) || c.code.toLowerCase().includes(search));
         const scheduleTab = document.querySelector('#course-tabs .tab-btn[data-tab="class-schedule"]');
         if (scheduleTab) scheduleTab.style.display = 'none';
         const scheduleContent = document.getElementById('tab-class-schedule');
@@ -2076,7 +2074,6 @@ async function renderCourses() {
             document.getElementById('tab-course-list').appendChild(container);
         }
         let html = '';
-        const enrolledSet = new Set(myCourses.map(c => c.id));
         if (myCourses.length) {
             html += `<h4 style="color:var(--accent);margin:0 0 8px;">📋 My Courses</h4>`;
             html += myCourses.map(c => renderStudentCourseCard(c, lessonsByCourseId, staffById, true)).join('');
