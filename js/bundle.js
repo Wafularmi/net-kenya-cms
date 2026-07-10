@@ -354,7 +354,7 @@ function getRolePermissions(role) {
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','messages','discussions'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
-        student: ['dashboard','student-hub','quizzes','library','tickets','discussions'],
+        student: ['dashboard','student-hub','library','tickets','discussions'],
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions']
     };
@@ -12410,7 +12410,7 @@ async function performSmartSearch(query) {
     if (sMatches.length) results.push({ category: 'Staff', items: sMatches.slice(0, 5).map(s => ({ label: 'Staff', text: s.name, sub: `${s.role || ''} — ${s.department || ''}`, action: () => { showScreen('staff'); }, })) });
     const quizzes = await dbGetAll('quizzes');
     const qzMatches = quizzes.filter(z => z.title.toLowerCase().includes(q) || (z.courseId || '').toLowerCase().includes(q));
-    if (qzMatches.length) results.push({ category: 'Quizzes', items: qzMatches.slice(0, 5).map(z => ({ label: 'Quiz', text: z.title, sub: `Pass: ${z.passMark}% — ${z.questions ? z.questions.length : 0} questions`, action: () => { showScreen('quizzes'); }, })) });
+    if (qzMatches.length) results.push({ category: 'Quizzes', items: qzMatches.slice(0, 5).map(z => { const isStudentRole = JSON.parse(sessionStorage.getItem('currentUser') || '{}').role === 'student'; return { label: 'Quiz', text: z.title, sub: `Pass: ${z.passMark}% — ${z.questions ? z.questions.length : 0} questions`, action: isStudentRole ? () => { closeModal(); startQuiz(z.id); } : () => showScreen('quizzes') }; }) });
     const notes = await dbGetAll('notes');
     const nMatches = notes.filter(n => n.title.toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q));
     if (nMatches.length) results.push({ category: 'Notes', items: nMatches.slice(0, 5).map(n => ({ label: 'Note', text: n.title, sub: (n.content || '').substring(0, 60) + '...', action: () => { showScreen('notes'); }, })) });

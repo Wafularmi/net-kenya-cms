@@ -943,11 +943,15 @@ async function hubToggleLike(messageId, courseId) {
 }
 
 function hubGoToQuiz(quizId) {
-    showScreen('quizzes');
-    setTimeout(() => {
-        const quizEl = document.querySelector(`[data-quiz-id="${quizId}"]`) || document.querySelector(`[onclick*="${quizId}"]`);
-        if (quizEl) quizEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 500);
+    if (typeof startQuiz === 'function') {
+        startQuiz(quizId);
+    } else {
+        showScreen('quizzes');
+        setTimeout(() => {
+            const quizEl = document.querySelector(`[data-quiz-id="${quizId}"]`) || document.querySelector(`[onclick*="${quizId}"]`);
+            if (quizEl) quizEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 500);
+    }
 }
 
 function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
