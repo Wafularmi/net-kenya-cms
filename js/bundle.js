@@ -1550,7 +1550,7 @@ async function renderStudentDashboard(currentUser) {
     const quizzesPassed = studentSubmissions.filter(s => s.status === 'pass').length;
     const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
     const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
-    const myCourses = courses.filter(c => enrolledCourseIds.has(c.id) && c.status !== 'inactive');
+    const myCourses = courses.filter(c => c.status !== 'inactive' && (enrolledCourseIds.size === 0 || enrolledCourseIds.has(c.id)));
     document.getElementById('dash-stats').innerHTML = `<div class="stat-card"><div class="stat-label">Welcome</div><div class="stat-value" style="font-size:16px;">${escapeHtml(me.name)}</div></div><div class="stat-card"><div class="stat-label">Admission #</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.admissionNumber || '--')}</div></div><div class="stat-card"><div class="stat-label">Program</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.program || '--')}</div></div><div class="stat-card"><div class="stat-label">Avg Grade</div><div class="stat-value" style="color:${avgGrade >= 70 ? 'var(--success)' : avgGrade >= 50 ? 'var(--warning)' : 'var(--danger)'};">${avgGrade}%</div></div><div class="stat-card"><div class="stat-label">Attendance</div><div class="stat-value" style="color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div></div><div class="stat-card"><div class="stat-label">Fee Balance</div><div class="stat-value" style="color:${balance <= 0 ? 'var(--success)' : 'var(--warning)'};">${formatCurrency(balance)}</div></div><div class="stat-card"><div class="stat-label">Quizzes Passed</div><div class="stat-value" style="color:var(--success);">${quizzesPassed}</div></div><div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${myCourses.length}</div></div>`;
     document.getElementById('dash-recent-students').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">Your Courses</h4>${myCourses.length ? myCourses.slice(0, 5).map(c => `<div class="event-item"><span><b>${escapeHtml(c.code)}</b> — ${escapeHtml(c.name)}</span><span class="badge badge-success">Enrolled</span></div>`).join('') : '<div style="color:var(--text-muted);padding:10px;">You are not enrolled in any courses. <a href="#" onclick="showScreen(\'student-hub\');return false;" style="color:var(--accent);">Browse courses →</a></div>'}</div>`;
     const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -2038,7 +2038,11 @@ async function renderCourses() {
         let studentId;
         try { studentId = await resolveStudentId(currentUser) || currentUId || currentUser.username; } catch (e) { studentId = currentUser.studentId || currentUser.username; console.error('resolveStudentId error:', e); }
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-        const enrolledCourses = sortCoursesByTranscriptOrder(courses.filter(c => enrolledCourseIds.has(c.id) && c.status !== 'inactive'));
+        const enrolledCourses = sortCoursesByTranscriptOrder(courses.filter(c => {
+            if (c.status === 'inactive') return false;
+            if (enrolledCourseIds.size > 0) return enrolledCourseIds.has(c.id);
+            return true;
+        }));
         const search = document.getElementById('course-search').value.toLowerCase();
         const filtered = enrolledCourses.filter(c => !search || c.name.toLowerCase().includes(search) || c.code.toLowerCase().includes(search));
         const scheduleTab = document.querySelector('#course-tabs .tab-btn[data-tab="class-schedule"]');
@@ -9859,7 +9863,11 @@ function renderPortalContent(studentId, data, isStudentUser) {
     `;
     const enrolledCourseIds = new Set(data.enrollments ? data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId) : []);
     const inactiveCourseIds = new Set(data.courses.filter(c => c.status === 'inactive').map(c => c.id));
-    const portalCourses = sortCoursesByTranscriptOrder(data.courses.filter(c => enrolledCourseIds.has(c.id) && !inactiveCourseIds.has(c.id)));
+    const portalCourses = sortCoursesByTranscriptOrder(data.courses.filter(c => {
+        if (c.status === 'inactive') return false;
+        if (enrolledCourseIds.size > 0) return enrolledCourseIds.has(c.id);
+        return true;
+    }));
     const portalCourseHtml = portalCourses.length ? portalCourses.map(c => {
         const courseLessons = data.lessons.filter(l => l.courseId === c.id && l.published);
         const courseVideoCount = courseLessons.filter(l => l.videoUrl).length;
