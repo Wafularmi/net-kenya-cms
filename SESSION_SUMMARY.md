@@ -1,4 +1,4 @@
-# Session Summary — July 8, 2026
+# Session Summary — July 11, 2026
 
 ## What's Working
 - **Live site**: https://netfoundation.ke (CNAME: hcfq1dgb.up.railway.app)
@@ -57,27 +57,12 @@
 - Coordinator scoping: `getCoordinatorRegionId()` returns `currentUser.regionId`. Drill-downs block access to other regions.
 
 ## Current State
-### Committed & LIVE on Railway (after commit 654c6a2)
-- Regions & coordinators full feature set
-- Region dropdown in study center form + `regionId` saved
-- Coordinator role in user form + region assignment
-- `renderRegions()`, `showRegionForm()`, `saveRegion()`, `deleteRegion()`, `editRegion()`
-- `manageRegionCenters()` center assignment modal
-- Updated `renderStudyCenters` (region badge), `renderUsers` (coordinator region)
-- Switch `case 'regions'` in `showScreen()`, settings card wiring
-- `toggleUserStudentSelect()` region section, `saveUser()` coordinator validation
-
-### NOT committed (local only, NOT on live server)
-- **DRILL-DOWN system**: `showRegionDetail(regionId)`, `showCenterDetail(centerId)`, `_canAccessRegion()`, `_attendanceRate()`
-- Region card "🔍 Drill Down" button; Study Center card "🔍 Open" button
-- Student problem-flagging (low attendance <70%, outstanding fee, non-active status)
-- `renderRegions` student count uses `studyCenterId || campus`
-- `dbGetBatch` hardened with 3-attempt retry (fixes startup race during init/syncUserAccounts)
-
-### Files modified (unstaged, pre-commit):
-- `M index.html` — version bumped to v=180 / main.145.css
-- `M js/bundle.js` — drill-down functions + region/card buttons + dbGetBatch retry
-- `M SESSION_SUMMARY.md`
+### Committed & LIVE on Railway (commit 80bfbe9)
+- All regions & coordinators features (including drill-down, center detail, problem flags)
+- `dbGetBatch` hardened with 3-attempt retry
+- Quiz Register/Drop buttons fixed — `_hubGetMe()` ordering, event delegation pattern
+- Exam Register/Drop/Request Retake buttons fixed — same `_hubGetMe()` ordering + try/catch
+- Dashboard course count fixed — removed `c.status !== 'inactive'` filter (Hub didn't filter by status; enrolled-but-inactive courses were excluded from dashboard only); card heading dynamically changed to "Your Courses"
 
 ## Credentials
 - Admin: username=`admin`, password=`admin123` (SHA-256: `240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9`)

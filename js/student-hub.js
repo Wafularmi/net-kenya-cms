@@ -104,7 +104,11 @@ function _hubBuildComputed(data, me) {
     allScores.sort((a, b) => (b.submission?.submittedAt || b.grade?.gradedAt || '').localeCompare(a.submission?.submittedAt || a.grade?.gradedAt || ''));
     const myLessons = (data.lessons || []).filter(l => enrolledIds.has(l.courseId) && l.published !== false);
     const myNotes = (data.notes || []).filter(n => enrolledIds.has(n.courseId));
-    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes };
+    const todoItems = [
+        ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: (data.courses || []).find(c => c.id === q.courseId)?.name || '', date: q.dueDate || '' })),
+        ...upcomingRegisteredExams.map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: (data.courses || []).find(c => c.id === e.courseId)?.name || '', date: e.date || '' }))
+    ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
 }
 
 
@@ -191,7 +195,7 @@ async function renderStudentHub() {
                 <button class="hub-tab" data-tab="discussions" onclick="switchHubTab('discussions',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">💬 Discussions</button>
             </div>
 
-            <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.upcomingRegisteredExams, c.pendingQuizzes, c.completedQuizzes, c.data)}</div>
+            <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.upcomingRegisteredExams, c.pendingQuizzes, c.completedQuizzes, c.data, c.todoItems)}</div>
             <div id="hub-tab-courses" style="display:none;"></div>
             <div id="hub-tab-exams" style="display:none;"></div>
             <div id="hub-tab-quizzes" style="display:none;"></div>
@@ -263,7 +267,7 @@ async function switchHubTab(tab, btn) {
     if (tab === 'notes') renderHubNotesSearch();
 }
 
-function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data) {
+function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data, todoItems) {
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
     const myPayments = (data.payments || []).filter(p => p.studentId === me.id);
     const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0);
@@ -294,14 +298,13 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
             </div>
 
             <div class="card" style="border-top:3px solid var(--warning);">
-                <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">📋 Pending Quizzes</h3>
-                ${pendingQuizzes.length ? pendingQuizzes.slice(0, 4).map(q => {
-                    const course = myCourses.find(c => c.id === q.courseId);
-                    return `<div class="event-item" style="padding:8px 0;">
-                        <div><b>${esc(q.title)}</b></div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${course ? esc(course.name) : q.courseId}</div>
-                    </div>`;
-                }).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">🎉 All quizzes completed!</div>'}
+                <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">📋 To Do</h3>
+                ${todoItems.length ? todoItems.slice(0, 5).map(item => `
+                    <div class="event-item" style="padding:8px 0;">
+                        <div><b>${esc(item.title)}</b> <span style="font-size:10px;color:var(--text-muted);background:var(--bg-input);padding:1px 6px;border-radius:4px;">${item.type === 'quiz' ? 'Quiz' : 'Exam'}</span></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${esc(item.courseName)}${item.date ? ' · ' + formatDate(item.date) : ''}</div>
+                    </div>
+                `).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">🎉 Nothing pending!</div>'}
             </div>
 
             <div class="card" style="border-top:3px solid var(--info);">
@@ -320,7 +323,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                         <div style="font-size:10px;color:var(--text-muted);">Courses</div>
                     </div>
                     <div style="text-align:center;padding:8px;background:var(--bg-input);border-radius:6px;">
-                        <div style="font-size:20px;font-weight:700;color:var(--warning);">${pendingQuizzes.length}</div>
+                        <div style="font-size:20px;font-weight:700;color:var(--warning);">${todoItems.length}</div>
                         <div style="font-size:10px;color:var(--text-muted);">To Do</div>
                     </div>
                 </div>
