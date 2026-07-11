@@ -57,12 +57,14 @@
 - Coordinator scoping: `getCoordinatorRegionId()` returns `currentUser.regionId`. Drill-downs block access to other regions.
 
 ## Current State
-### Committed & LIVE on Railway (commit 80bfbe9)
+### Committed & LIVE on Railway (commits 6fdf738, 3971f1d)
 - All regions & coordinators features (including drill-down, center detail, problem flags)
 - `dbGetBatch` hardened with 3-attempt retry
 - Quiz Register/Drop buttons fixed — `_hubGetMe()` ordering, event delegation pattern
 - Exam Register/Drop/Request Retake buttons fixed — same `_hubGetMe()` ordering + try/catch
 - Dashboard course count fixed — removed `c.status !== 'inactive'` filter (Hub didn't filter by status; enrolled-but-inactive courses were excluded from dashboard only); card heading dynamically changed to "Your Courses"
+- Hub "To Do" card now includes both pending quizzes AND upcoming registered exams, sorted by date with Quiz/Exam badges; stats "To Do" count reflects combined total
+- Library section populated with 15 sample theology/Christian living books (added via API to live server); seed file updated for fresh deploys
 
 ## Credentials
 - Admin: username=`admin`, password=`admin123` (SHA-256: `240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9`)

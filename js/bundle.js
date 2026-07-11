@@ -1621,7 +1621,7 @@ async function renderStudentDashboard(currentUser) {
     const totalPaid = studentPayments.reduce((s, p) => s + p.amount, 0);
     const meFee = getCachedStudentFee(me);
     const balance = meFee - totalPaid;
-    const studentAttendance = attendance.filter(a => allStudentIds.has(a.studentId));
+        const studentAttendance = attendance.filter(a => a.studentId === studentId);
     const attended = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
     const attendancePct = studentAttendance.length ? Math.round((attended / studentAttendance.length) * 100) : 0;
     const studentGrades = grades.filter(g => allStudentIds.has(g.studentId));
