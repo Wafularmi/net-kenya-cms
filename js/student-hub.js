@@ -1002,15 +1002,17 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                         const content = lessonNote?.content || l.description || l.reference || '';
                         const readTime = estimateReadTime(content);
                         const isRead = readLessons[l.id];
+                        const hasVideo = !!l.videoUrl;
                         return `
-                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="viewHubLessonNote('${l.id}','${esc(course.id)}')" style="border:1px solid ${isRead ? 'var(--success)' : 'var(--border)'};border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isRead ? 'var(--success)' : 'var(--border)'}';this.style.transform='';this.style.boxShadow='';">
+                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="${hasVideo ? '' : "viewHubLessonNote('" + l.id + "','" + esc(course.id) + "')"}" style="border:1px solid ${isRead ? 'var(--success)' : 'var(--border)'};border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isRead ? 'var(--success)' : 'var(--border)'}';this.style.transform='';this.style.boxShadow='';">
                                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px;">
-                                    <div style="font-weight:600;font-size:14px;line-height:1.3;">${isRead ? '✅' : '📖'} ${esc(l.title)}</div>
+                                    <div style="font-weight:600;font-size:14px;line-height:1.3;">${isRead ? '✅' : hasVideo ? '🎬' : '📖'} ${esc(l.title)}</div>
+                                    ${hasVideo ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">VIDEO</span>' : ''}
                                 </div>
                                 ${l.description ? `<div style="color:var(--text-muted);font-size:12px;line-height:1.4;margin-bottom:8px;">${esc(l.description.substring(0, 90))}${l.description.length > 90 ? '...' : ''}</div>` : ''}
                                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-muted);">
-                                    <span>⏱ ${readTime} min read</span>
-                                    ${lessonNote ? '<span style="color:var(--success);">📄 Notes</span>' : '<span>No notes yet</span>'}
+                                    <span>${hasVideo ? '🎬 Video lesson' : '⏱ ' + readTime + ' min read'}</span>
+                                    ${hasVideo ? '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();viewStudentLesson(\'' + l.id + '\')" style="padding:4px 12px;font-size:11px;font-weight:600;">▶ Watch Now</button>' : (lessonNote ? '<span style="color:var(--success);">📄 Notes</span>' : '<span>No notes yet</span>')}
                                 </div>
                             </div>
                         `;
@@ -1083,11 +1085,14 @@ async function viewHubLessonNote(lessonId, courseId) {
 
         const contentEscaped = esc(content);
         const safeContent = contentEscaped.replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
+        const videoHtml = lesson.videoUrl ? `<div style="max-width:720px;margin:0 auto 20px;">${embedVideo(lesson.videoUrl)}</div>` : '';
         const html = `
             <div style="max-width:760px;margin:0 auto;">
+                ${videoHtml}
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">${esc(course?.code || '')} · ${esc(course?.name || '')}</div>
                 <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(lesson.title)}</h2>
                 <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+                    ${lesson.videoUrl ? '<span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;font-size:10px;">🎬 VIDEO</span>' : ''}
                     <span>⏱ ${readTime} min read</span>
                     ${currentIdx >= 0 ? `<span>📖 Lesson ${currentIdx + 1} of ${courseLessons.length}</span>` : ''}
                     ${note ? '<span style="color:var(--success);">📄 Study notes attached</span>' : ''}
