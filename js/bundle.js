@@ -2355,6 +2355,17 @@ async function viewStudentCourse(courseId) {
 async function viewStudentLesson(lessonId) {
     const lesson = await dbGet('lessons', lessonId);
     if (!lesson) return showToast('Lesson not found');
+    if (lesson.videoUrl) {
+        const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (currentUser.role === 'student') {
+            const studentId = currentUser.studentId || currentUser.username;
+            const readKey = 'read-lessons-' + studentId;
+            const readLessons = JSON.parse(localStorage.getItem(readKey) || '{}');
+            if (!readLessons[lessonId]) {
+                return showToast('📖 Please read the lesson notes first before watching the video.', { type: 'warning', duration: 4000 });
+            }
+        }
+    }
     const course = await dbGet('courses', lesson.courseId);
     const notes = await dbGetAll('notes');
     const files = await dbGetAll('lessonFiles');

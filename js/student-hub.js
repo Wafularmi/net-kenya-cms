@@ -1003,8 +1003,9 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                         const readTime = estimateReadTime(content);
                         const isRead = readLessons[l.id];
                         const hasVideo = !!l.videoUrl;
+                        const videoLocked = hasVideo && !isRead;
                         return `
-                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="${hasVideo ? '' : "viewHubLessonNote('" + l.id + "','" + esc(course.id) + "')"}" style="border:1px solid ${isRead ? 'var(--success)' : 'var(--border)'};border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isRead ? 'var(--success)' : 'var(--border)'}';this.style.transform='';this.style.boxShadow='';">
+                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="viewHubLessonNote('${l.id}','${esc(course.id)}')" style="border:1px solid ${isRead ? 'var(--success)' : 'var(--border)'};border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isRead ? 'var(--success)' : 'var(--border)'}';this.style.transform='';this.style.boxShadow='';">
                                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px;">
                                     <div style="font-weight:600;font-size:14px;line-height:1.3;">${isRead ? '✅' : hasVideo ? '🎬' : '📖'} ${esc(l.title)}</div>
                                     ${hasVideo ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">VIDEO</span>' : ''}
@@ -1012,7 +1013,7 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                                 ${l.description ? `<div style="color:var(--text-muted);font-size:12px;line-height:1.4;margin-bottom:8px;">${esc(l.description.substring(0, 90))}${l.description.length > 90 ? '...' : ''}</div>` : ''}
                                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-muted);">
                                     <span>${hasVideo ? '🎬 Video lesson' : '⏱ ' + readTime + ' min read'}</span>
-                                    ${hasVideo ? '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();viewStudentLesson(\'' + l.id + '\')" style="padding:4px 12px;font-size:11px;font-weight:600;">▶ Watch Now</button>' : (lessonNote ? '<span style="color:var(--success);">📄 Notes</span>' : '<span>No notes yet</span>')}
+                                    ${hasVideo ? (videoLocked ? '<span style="color:var(--text-muted);font-size:10px;">🔒 Read notes first</span>' : '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();viewStudentLesson(\'' + l.id + '\')" style="padding:4px 12px;font-size:11px;font-weight:600;">▶ Watch Now</button>') : (lessonNote ? '<span style="color:var(--success);">📄 Notes</span>' : '<span>No notes yet</span>')}
                                 </div>
                             </div>
                         `;
