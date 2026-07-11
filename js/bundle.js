@@ -6385,7 +6385,7 @@ async function generateCertificate() {
         const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
         const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
         const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
-    const studentAttendance = attendance.filter(a => allStudentIds.has(a.studentId));
+        const studentAttendance = attendance.filter(a => a.studentId === studentId);
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
         const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;
