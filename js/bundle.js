@@ -9635,7 +9635,7 @@ async function viewNote(id) {
     const course = courses.find(c => c.id === note.courseId);
     const lesson = lessons.find(l => l.id === note.lessonId);
     const html = `<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Course: ${course ? course.name : '—'} | Lesson: ${lesson ? lesson.title : 'General'}</div><h3 style="color:var(--accent);margin-bottom:12px;">${note.title}</h3><div style="white-space:pre-line;font-size:13px;line-height:1.7;max-height:400px;overflow-y:auto;padding:12px;background:var(--bg-input);border-radius:8px;">${note.content}</div>`;
-    showModal(note.title, html, `<button class="btn btn-success" onclick="sendNoteWhatsApp('${id}')">📱 Send via WhatsApp</button> <button class="btn btn-outline" onclick="copyNote('${id}')">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'txt')">⬇ Download (.txt)</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'doc')">📄 Download (.doc)</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'pdf')">🖨 Print / Save as PDF</button>`);
+    showModal(note.title, html, `<button class="btn btn-success" onclick="sendNoteWhatsApp('${id}')">📱 Send via WhatsApp</button> <button class="btn btn-outline" onclick="copyNote('${id}')">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'doc')">📄 Download (.doc)</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'pdf')">⬇ Download PDF</button>`);
 }
 async function copyNote(id) {
     const note = await dbGet('notes', id);
