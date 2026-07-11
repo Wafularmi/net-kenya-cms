@@ -1912,6 +1912,24 @@ async function saveStudent() {
     };
     if (!editId) student.createdAt = new Date().toISOString();
     await dbPut('students', student);
+    if (student.status === 'graduated') {
+        const existingAlumni = (await dbGetAll('alumni')).find(a => a.studentId === student.id || a.name === student.name);
+        if (!existingAlumni) {
+            await dbPut('alumni', {
+                id: 'ALU-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substr(2, 4).toUpperCase(),
+                name: student.name,
+                program: student.program,
+                gradYear: new Date().getFullYear(),
+                phone: student.phone || '',
+                email: student.email || '',
+                ministry: '',
+                location: '',
+                notes: '',
+                studentId: student.id,
+                createdAt: new Date().toISOString()
+            });
+        }
+    }
     const allExisting = await dbGetAll('users');
     const hasUser = allExisting.some(u => u.studentId === student.id || u.username === student.phone || u.username === student.id || u.name === student.name);
     if (!hasUser && student.status === 'active' && student.phone && student.admissionNumber) {
@@ -4160,9 +4178,82 @@ async function generateGraduationList() {
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;">
         <button class="btn btn-primary" onclick="printGraduationList()">🖨️ Print</button>
-        <button class="btn btn-outline" onclick="downloadGraduationListCSV()">📥 Download CSV</button>
+    <button class="btn btn-outline" onclick="downloadGraduationListCSV()">📥 Download CSV</button>
+        <button class="btn btn-success" onclick="graduateEligibleStudents()">🎓 Graduate & Migrate to Alumni</button>
     </div>`;
     document.getElementById('graduation-list').innerHTML = listHtml;
+}
+async function graduateEligibleStudents() {
+    const program = document.getElementById('grad-program').value;
+    const year = document.getElementById('grad-year').value;
+    if (!program && !year) return showToast('Select program or year first!');
+    const students = (await dbGetAll('students')).filter(s => s.status === 'active' && (program ? s.program === program : true) && (year ? s.year == year : true));
+    const grades = await dbGetAll('grades');
+    const courses = await dbGetAll('courses');
+    const chapel = await dbGetAll('chapel');
+    const attendance = await dbGetAll('attendance');
+    const requirements = await dbGetAll('gradRequirements');
+    const payments = await dbGetAll('payments');
+    let eligible = [];
+    for (const s of students) {
+        const studentGrades = grades.filter(g => g.studentId === s.id);
+        const enrolledCourses = courses.filter(c => studentGrades.map(g => g.courseId).includes(c.id));
+        const totalCredits = enrolledCourses.reduce((sum, c) => sum + c.credits, 0);
+        const totalGPAPoints = studentGrades.reduce((sum, g) => {
+            const c = enrolledCourses.find(c => c.id === g.courseId);
+            return sum + g.gpa * (c ? c.credits : 3);
+        }, 0);
+        const cgpa = totalCredits > 0 ? (totalGPAPoints / totalCredits) : 0;
+        const studentChapel = chapel.filter(c => c.studentId === s.id && (c.status === 'present' || c.status === 'late')).length;
+        const studentAttendance = attendance.filter(a => a.studentId === s.id);
+        const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
+        const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
+        const totalPaid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const feeBalance = getCachedStudentFee(s) - totalPaid;
+        const programReqs = requirements.filter(r => r.program === s.program);
+        let issues = [];
+        const reqCredit = programReqs.find(r => r.requirement === 'credits');
+        if (reqCredit && totalCredits < reqCredit.minimum) issues.push(true);
+        const reqGPA = programReqs.find(r => r.requirement === 'gpa');
+        if (reqGPA && cgpa < reqGPA.minimum) issues.push(true);
+        const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
+        if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(true);
+        const reqChapel = programReqs.find(r => r.requirement === 'chapel');
+        if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
+        if (programReqs.length && feeBalance > 0) issues.push(true);
+        if (issues.length === 0) eligible.push(s);
+    }
+    if (!eligible.length) return showToast('No eligible graduates to process.');
+    if (!await showConfirm('Confirm Graduation', `<b>${eligible.length}</b> eligible student(s) will be marked as Graduated and migrated to Alumni. Continue?`)) return;
+    let migrated = 0, skipped = 0, errors = 0;
+    for (const s of eligible) {
+        try {
+            s.status = 'graduated';
+            s.updatedAt = new Date().toISOString();
+            await dbPut('students', s);
+            const existingAlumni = (await dbGetAll('alumni')).find(a => a.studentId === s.id || a.name === s.name);
+            if (!existingAlumni) {
+                await dbPut('alumni', {
+                    id: 'ALU-' + Date.now().toString(36).toUpperCase() + '-' + migrated + Math.random().toString(36).substr(2, 2).toUpperCase(),
+                    name: s.name,
+                    program: s.program,
+                    gradYear: new Date().getFullYear(),
+                    phone: s.phone || '',
+                    email: s.email || '',
+                    ministry: '',
+                    location: '',
+                    notes: '',
+                    studentId: s.id,
+                    createdAt: new Date().toISOString()
+                });
+                migrated++;
+            } else { skipped++; }
+        } catch (e) { errors++; }
+    }
+    showToast(`Graduated ${eligible.length} student(s). Migrated ${migrated} to alumni, ${skipped} already existed${errors ? `, ${errors} error(s)` : ''}.`);
+    generateGraduationList();
+    renderAlumni();
+    renderDashboard();
 }
 function printGraduationList() {
     const content = document.getElementById('grad-list-print');
