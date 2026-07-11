@@ -6240,6 +6240,7 @@ async function generateCertificate() {
     const vCode = generateVerificationCode();
     let html = '';
     let docTitle = '';
+    let docId = '';
     if (type === 'admission') {
         docTitle = 'Admission Letter';
         const year = new Date().getFullYear();
@@ -6387,13 +6388,13 @@ async function generateCertificate() {
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
         const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;
-        const docId = 'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
+        docId = 'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         html = `<div id="transcript-print-area">${buildProfessionalTranscript({
             student, grades, courses, branding: { schoolName, tagline, initials: branding ? branding.initials : 'CM', logo: branding ? branding.logo : null, accentColor: branding ? branding.accentColor : '#f59e0b', sig_registrar: getRoleSignature('Registrar', branding), sig_dean: getRoleSignature('Academic Dean', branding), sig_director: getRoleSignature('Director / Principal', branding), postalAddress: branding ? branding.postalAddress : '', city: branding ? branding.city : '', phone: branding ? branding.phone : '', email: branding ? branding.email : '', website: branding ? branding.website : '' },
             docType: 'official', semester: 'all', year: student.academicYear || '', docId, vCode, generatedDate: today, generatedTime: '', center,
             financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
             academic: { chapel: studentChapel, attendancePct },
-            allGrades, academicSettings: academic
+            allGrades, academicSettings
         })}</div>`;
     } else if (type === 'fee-statement') {
         docTitle = 'Fee Statement';
