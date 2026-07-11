@@ -17,7 +17,7 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 300000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -34,7 +34,7 @@ async function _hubLoadTabData(tab) {
     const needed = [];
     if (tab === 'overview' || !tab) { if (!studentHubCache.attendance) needed.push('attendance'); if (!studentHubCache.payments) needed.push('payments'); }
     if (tab === 'exams') { if (!studentHubCache.retakeRequests) needed.push('retakeRequests'); if (!studentHubCache.seating) needed.push('seating'); }
-    if (tab === 'quizzes' || tab === 'overview' || !tab) { if (!studentHubCache.submissions) needed.push('submissions'); if (!studentHubCache.grades) needed.push('grades'); }
+    if (tab === 'quizzes' || tab === 'overview' || !tab) { if (!studentHubCache.submissions) needed.push('submissions'); if (!studentHubCache.grades) needed.push('grades'); if (!studentHubCache.quizRegistrations) needed.push('quizRegistrations'); }
     if (!needed.length) return;
     const extra = await dbGetBatch(needed);
     Object.assign(studentHubCache, extra);
@@ -445,94 +445,164 @@ function _hubExamStatus(exam) {
 }
 
 function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, data) {
-    const myCourses = (data.courses || []);
+    let myCourses = (data.courses || []);
+    if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
     const myRetakeRequests = (data.retakeRequests || []).filter(r => r.studentId === me.id);
     const approvedSuppIds = new Set(myRetakeRequests.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => r.supplementaryExamId));
     const displayUpcomingReg = upcomingRegisteredExams.filter(e => !(e.type === 'supplementary' && approvedSuppIds.has(e.id)));
     const pendingReqExamIds = new Set(myRetakeRequests.filter(r => r.status === 'pending').map(r => r.examId));
+    const allRegistered = [...upcomingRegisteredExams, ...pastRegisteredExams];
+    const passedCount = allRegistered.filter(e => { const s = mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId)); return s && s.status === 'pass'; }).length;
+    const scoredSubs = allRegistered.map(e => mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId))).filter(Boolean);
+    const avgScore = scoredSubs.length ? Math.round(scoredSubs.reduce((s, x) => s + (x.score || 0), 0) / scoredSubs.length) : 0;
+    const activeFilter = window._hubExamFilter || 'all';
+
+    function filterExams(exams) {
+        if (activeFilter === 'all') return exams;
+        return exams.filter(e => e.type === activeFilter);
+    }
+
+    function groupByCourse(exams) {
+        const m = {};
+        exams.forEach(e => { const c = e.courseId || '_'; if (!m[c]) m[c] = []; m[c].push(e); });
+        return m;
+    }
 
     function examCard(e, isRegistered, extra) {
         const course = myCourses.find(c => c.id === e.courseId);
         const exam = _hubExamStatus(e);
         const mySub = isRegistered ? mySubmissions.find(s => s.quizId === e.id || (e.linkedQuizId && s.quizId === e.linkedQuizId)) : null;
         const passed = mySub && mySub.status === 'pass';
-        const typeLabel = e.type === 'final' ? '📄 Final' : e.type === 'supplementary' ? '🔄 Supplementary' : '📝 Midterm';
+        const typeIcon = e.type === 'final' ? '📄' : e.type === 'supplementary' ? '🔄' : '📝';
+        const typeLabel = e.type === 'final' ? 'Final' : e.type === 'supplementary' ? 'Supplementary' : 'Midterm';
         const pendingRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'pending');
         const approvedRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'approved');
         const rejectedRequest = myRetakeRequests.find(r => r.examId === e.id && r.status === 'rejected');
-        const suppExam = approvedRequest && approvedRequest.supplementaryExamId ? (data.exams || []).find(ex => ex.id === approvedRequest.supplementaryExamId) : null;
-        const hasActiveSupp = suppExam && !passed;
+        const suppExamId = approvedRequest?.supplementaryExamId;
+        const hasActiveSupp = suppExamId && !passed;
         const canRequestRetake = exam.status === 'ended' && (!mySub || (mySub && !passed));
+        const typeColors = { midterm: '#3b82f6', final: '#8b5cf6', supplementary: '#f59e0b' };
+        const typeBg = typeColors[e.type] || '#64748b';
         let actionBtn = '';
-        let borderColor = extra?.borderColor || 'var(--accent)';
+        let scorePill = '';
+        let dropBtn = '';
+
         if (hasActiveSupp) {
-            const suppStatus = _hubExamStatus(suppExam);
-            borderColor = 'var(--success)';
-            actionBtn = `<button class="btn btn-success btn-sm" onclick="startExam('${suppExam.id}')" style="font-size:13px;padding:8px 16px;font-weight:600;">🔄 Take Supplementary Exam</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">📅 ${formatDate(suppExam.date)} ${esc(suppExam.time || '')} · ${suppStatus.label}</div>`;
+            const suppExam = (data.exams || []).find(ex => ex.id === suppExamId);
+            const suppDate = suppExam ? formatDate(suppExam.date) + ' ' + esc(suppExam.time || '') : '';
+            const suppInfo = suppDate ? `<div style="font-size:10px;color:var(--text-muted);margin-top:3px;">📅 ${suppDate}</div>` : '';
+            actionBtn = `<button class="btn btn-success btn-sm" onclick="startExam('${suppExamId}')" style="font-size:12px;padding:7px 14px;font-weight:600;">🔄 Take Supplementary</button>${suppInfo}`;
         } else if (pendingRequest) {
-            actionBtn = `<span class="badge badge-warning" style="font-size:11px;padding:4px 10px;">⏳ Request Pending</span>`;
+            actionBtn = `<span class="badge badge-warning" style="font-size:10px;padding:4px 8px;">⏳ Request Pending</span>`;
         } else if (rejectedRequest) {
-            actionBtn = `<span class="badge badge-danger" style="font-size:11px;padding:4px 10px;">❌ Re-take Rejected${rejectedRequest.adminNote ? ': ' + esc(rejectedRequest.adminNote) : ''}</span>`;
+            actionBtn = `<span class="badge badge-danger" style="font-size:10px;padding:4px 8px;">❌ Re-take Rejected${rejectedRequest.adminNote ? ': ' + esc(rejectedRequest.adminNote) : ''}</span>`;
         } else if (isRegistered && canRequestRetake) {
-            borderColor = 'var(--warning)';
-            actionBtn = `<button class="btn btn-outline btn-sm" onclick="hubRequestRetake('${e.id}')" style="font-size:12px;border-color:var(--warning);color:var(--warning);">📋 Request Re-take</button>`;
+            actionBtn = `<button class="btn btn-outline btn-sm" onclick="hubRequestRetake('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Re-take</button>`;
         } else if (isRegistered && mySub) {
-            borderColor = passed ? 'var(--success)' : 'var(--danger)';
-            actionBtn = `<span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:12px;padding:6px 12px;">${passed ? '✅ Passed' : '❌ Failed'} — ${mySub.score || 0}%</span>`;
+            const passedIcon = passed ? '✅' : '❌';
+            actionBtn = `<span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:11px;padding:5px 10px;">${passedIcon} ${passed ? 'Passed' : 'Failed'} — ${mySub.score || 0}%</span>`;
+            scorePill = `<div style="margin-top:5px;"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="display:inline-block;width:50px;height:5px;background:var(--bg-input);border-radius:3px;overflow:hidden;"><span style="display:block;height:100%;width:${Math.min(mySub.score || 0, 100)}%;background:${passed ? 'var(--success)' : 'var(--danger)'};border-radius:3px;"></span></span><span style="font-weight:600;color:${passed ? 'var(--success)' : 'var(--danger)'};">${mySub.score || 0}%</span></span></div>`;
         } else if (isRegistered) {
-            if (exam.status === 'active') borderColor = 'var(--success)';
-            actionBtn = `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:12px;">📝 Take Exam</button>`;
+            actionBtn = `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:11px;padding:6px 14px;">${typeIcon} Take Exam</button>`;
         } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
-            borderColor = 'var(--warning)';
-            actionBtn = `<button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:12px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>`;
+            actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button></div>`;
         } else if (!isRegistered) {
-            actionBtn = `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')">Register</button>`;
+            actionBtn = `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button>`;
         }
-        return `<div class="card" style="margin-bottom:10px;border-left:4px solid ${borderColor};">
-            <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;">
-                <div style="flex:1;">
-                    <div style="font-weight:700;font-size:15px;">${esc(e.title || course?.code || 'Exam')} <span class="badge badge-info" style="font-size:9px;">${typeLabel}</span></div>
-                    <div style="color:var(--text);font-size:13px;margin-top:4px;">${course ? esc(course.name) : ''}</div>
-                    <div style="display:flex;gap:12px;margin-top:8px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;">
-                        <span>📅 ${formatDate(e.date)}</span>
-                        <span>🕐 ${esc(e.time || 'TBA')}</span>
-                        <span>📍 ${esc(e.venue || 'TBA')}</span>
-                        ${e.duration ? `<span>⏱ ${e.duration} min</span>` : ''}
-                        <span style="color:${exam.color};font-weight:600;">${exam.label}</span>
-                    </div>
+
+        if (isRegistered && !mySub && !hasActiveSupp) {
+            dropBtn = `<button class="btn btn-outline btn-sm" onclick="hubDropExam('${e.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:4px 8px;">Drop</button>`;
+        }
+
+        return `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
+                    <span style="background:${typeBg};color:#fff;font-size:9px;padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap;">${typeIcon} ${typeLabel}</span>
+                    <span style="font-weight:600;font-size:14px;color:var(--text);">${esc(e.title || course?.code || 'Exam')}</span>
                 </div>
-                <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-                    ${actionBtn}
-                    ${isRegistered && !mySub && !hasActiveSupp ? `<button class="btn btn-outline btn-sm" onclick="hubDropExam('${e.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);font-size:11px;">Drop</button>` : ''}
+                ${course ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${esc(course.name)}</div>` : ''}
+                <div style="display:flex;gap:8px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;">
+                    <span>📅 ${formatDate(e.date)}</span>
+                    <span>🕐 ${esc(e.time || 'TBA')}</span>
+                    <span>📍 ${esc(e.venue || 'TBA')}</span>
+                    ${e.duration ? `<span>⏱ ${e.duration} min</span>` : ''}
                 </div>
+                <div style="margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="font-size:11px;color:${exam.color};font-weight:500;">${exam.label}</span>
+                    ${scorePill}
+                </div>
+            </div>
+            <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+                ${actionBtn}
+                ${dropBtn}
             </div>
         </div>`;
     }
 
+    function renderCategory(title, icon, exams, isRegistered, extra) {
+        const filtered = filterExams(exams);
+        if (!filtered.length) return '';
+        const grouped = groupByCourse(filtered);
+        let html = '';
+        myCourses.filter(c => grouped[c.id]).forEach(course => {
+            const cExams = grouped[course.id];
+            html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,var(--accent),#1a3a6b);color:#fff;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;">
+                    <div><span style="font-weight:700;font-size:13px;">${esc(course.code || course.name)}</span>${course.name && course.code ? ` <span style="font-size:11px;opacity:0.85;">${esc(course.name)}</span>` : ''}</div>
+                    <span style="font-size:10px;background:rgba(255,255,255,0.2);padding:2px 10px;border-radius:10px;">${cExams.length} exam${cExams.length !== 1 ? 's' : ''}</span>
+                </div>
+                <div style="padding:0 12px;">${cExams.map(e => examCard(e, isRegistered, extra)).join('')}</div>
+            </div>`;
+        });
+        const uncat = Object.keys(grouped).filter(cid => !myCourses.find(c => c.id === cid));
+        uncat.forEach(cid => {
+            html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,var(--accent),#1a3a6b);color:#fff;padding:9px 14px;font-size:13px;font-weight:600;">${esc(cid)}</div>
+                <div style="padding:0 12px;">${grouped[cid].map(e => examCard(e, isRegistered, extra)).join('')}</div>
+            </div>`;
+        });
+        if (!html) return '';
+        return `<div style="margin-bottom:24px;">
+            <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">${icon} <span>${title}</span> <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${filtered.length})</span></h3>
+            ${extra?.showHint ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">${extra.hint}</div>` : ''}
+            ${html}
+        </div>`;
+    }
+
     return `
-        <div style="margin-bottom:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">📝 Upcoming Registered Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${displayUpcomingReg.length})</span></h3>
-            ${displayUpcomingReg.length ? displayUpcomingReg.map(e => examCard(e, true)).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No upcoming registered exams.</div>'}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px;">
+            <div class="card" style="text-align:center;padding:10px;border-top:3px solid var(--accent);cursor:pointer;" onclick="window._hubExamFilter='all';_hubRenderedTabs.exams=false;switchHubTab('exams')">
+                <div style="font-size:20px;font-weight:800;color:var(--accent);">${allRegistered.length}</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Registered</div>
+            </div>
+            <div class="card" style="text-align:center;padding:10px;border-top:3px solid var(--success);">
+                <div style="font-size:20px;font-weight:800;color:var(--success);">${passedCount}</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Passed</div>
+            </div>
+            <div class="card" style="text-align:center;padding:10px;border-top:3px solid var(--info);">
+                <div style="font-size:20px;font-weight:800;color:var(--info);">${avgScore}%</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Average</div>
+            </div>
+            <div class="card" style="text-align:center;padding:10px;border-top:3px solid var(--warning);cursor:pointer;" onclick="document.getElementById('hub-retake-section')?.scrollIntoView({behavior:'smooth'})">
+                <div style="font-size:20px;font-weight:800;color:var(--warning);">${myRetakeRequests.length}</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Retakes</div>
+            </div>
         </div>
 
-        <div style="margin-bottom:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Past Registered Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${pastRegisteredExams.length})</span></h3>
-            ${pastRegisteredExams.length ? pastRegisteredExams.map(e => examCard(e, true)).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No past registered exams.</div>'}
+        <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
+            <button class="btn btn-sm ${activeFilter === 'all' ? 'btn-primary' : 'btn-outline'}" onclick="window._hubExamFilter='all';_hubRenderedTabs.exams=false;switchHubTab('exams')" style="font-size:11px;padding:5px 12px;">All</button>
+            <button class="btn btn-sm ${activeFilter === 'midterm' ? 'btn-primary' : 'btn-outline'}" onclick="window._hubExamFilter='midterm';_hubRenderedTabs.exams=false;switchHubTab('exams')" style="font-size:11px;padding:5px 12px;">📝 Midterms</button>
+            <button class="btn btn-sm ${activeFilter === 'final' ? 'btn-primary' : 'btn-outline'}" onclick="window._hubExamFilter='final';_hubRenderedTabs.exams=false;switchHubTab('exams')" style="font-size:11px;padding:5px 12px;">📄 Finals</button>
+            <button class="btn btn-sm ${activeFilter === 'supplementary' ? 'btn-primary' : 'btn-outline'}" onclick="window._hubExamFilter='supplementary';_hubRenderedTabs.exams=false;switchHubTab('exams')" style="font-size:11px;padding:5px 12px;">🔄 Supplementary</button>
         </div>
 
-        <div style="margin-bottom:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">➕ Upcoming Available Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${upcomingAvailableExams.length})</span></h3>
-            ${upcomingAvailableExams.length ? upcomingAvailableExams.map(e => examCard(e, false)).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No upcoming exams available for registration.</div>'}
-        </div>
+        ${renderCategory('Upcoming Registered', '📝', displayUpcomingReg, true)}
+        ${renderCategory('Past Registered', '📋', pastRegisteredExams, true)}
+        ${renderCategory('Available for Registration', '➕', upcomingAvailableExams, false)}
+        ${renderCategory('Missed Exams', '⚠️', pastAvailableExams, false, { today: new Date().toISOString().split('T')[0], showHint: true, hint: 'Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.' })}
 
-        <div style="margin-bottom:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Missed Exams <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${pastAvailableExams.length})</span></h3>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.</div>
-            ${pastAvailableExams.length ? pastAvailableExams.map(e => examCard(e, false, { today: new Date().toISOString().split('T')[0] })).join('') : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No missed exams.</div>'}
-        </div>
-
-        ${renderHubRetakeRequests(myRetakeRequests)}
+        ${renderHubRetakeRequests(myRetakeRequests).replace('<div style="margin-top:24px;">', '<div id="hub-retake-section" style="margin-top:24px;">')}
     `;
 }
 
@@ -563,6 +633,32 @@ async function hubDropExam(examId, studentName) {
     if (reg) { await dbDelete('examRegistrations', reg.id); _hubCacheRemove('examRegistrations', reg.id); }
     showToast('Exam dropped');
     logAudit('deleted', 'examRegistration', { studentId: me.id, examId });
+    renderStudentHub();
+}
+
+async function hubRegisterQuiz(quizId) {
+    if (!await showConfirm('Register for Quiz', 'Register for this quiz?')) return;
+    const me = _hubGetMe();
+    if (!me) return;
+    const data = studentHubCache || await loadStudentHubData();
+    if ((data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId)) return showToast('Already registered');
+    const regRecord = { id: 'QREG-' + Date.now(), quizId, studentId: me.id, seat: '', createdAt: new Date().toISOString() };
+    await dbPut('quizRegistrations', regRecord);
+    _hubCachePush('quizRegistrations', regRecord);
+    showToast('✅ Registered for quiz!');
+    logAudit('created', 'quizRegistration', { studentId: me.id, quizId });
+    renderStudentHub();
+}
+
+async function hubDropQuiz(quizId) {
+    if (!await showConfirm('Drop Quiz', 'Drop this quiz registration?')) return;
+    const me = _hubGetMe();
+    if (!me) return;
+    const data = studentHubCache || await loadStudentHubData();
+    const reg = (data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId);
+    if (reg) { await dbDelete('quizRegistrations', reg.id); _hubCacheRemove('quizRegistrations', reg.id); }
+    showToast('Quiz registration dropped');
+    logAudit('deleted', 'quizRegistration', { studentId: me.id, quizId });
     renderStudentHub();
 }
 
@@ -682,7 +778,13 @@ function renderHubRetakeRequests(data) {
 }
 
 function renderHubQuizzes(me, pendingQuizzes, completedQuizzes, data, allScores) {
-    const myCourses = (data.courses || []);
+    let myCourses = (data.courses || []);
+    if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
+    const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
+    const myQuizRegs = (data.quizRegistrations || []).filter(r => r.studentId === me.id);
+    const registeredQuizIds = new Set(myQuizRegs.map(r => r.quizId));
+    const submittedQuizIds = new Set(mySubmissions.map(s => s.quizId));
+    const allActiveQuizzes = (data.quizzes || []).filter(q => q.published !== false && myCourses.some(c => c.id === q.courseId));
     const quizScores = allScores.filter(s => !s.isExam);
     const examScores = allScores.filter(s => s.isExam);
     const totalScores = allScores.length;
@@ -692,26 +794,84 @@ function renderHubQuizzes(me, pendingQuizzes, completedQuizzes, data, allScores)
     }).length;
     const failedCount = totalScores - passedCount;
     const avgScore = totalScores > 0 ? Math.round(allScores.reduce((sum, s) => sum + (s.grade?.score || s.submission?.score || 0), 0) / totalScores) : 0;
+
+    const typeColors = { exam: '#8b5cf6', cat: '#f59e0b', quiz: '#3b82f6' };
+    const typeLabels = { exam: '📄 Exam', cat: '📋 CAT', quiz: '🧠 Quiz' };
+
+    function quizCard(q) {
+        const course = myCourses.find(c => c.id === q.courseId);
+        const isRegistered = registeredQuizIds.has(q.id);
+        const typeLabel = typeLabels[q.assessmentType] || '🧠 Quiz';
+        const typeColor = typeColors[q.assessmentType] || '#64748b';
+        const isComplete = submittedQuizIds.has(q.id);
+        const mySub = isComplete ? mySubmissions.find(s => s.quizId === q.id) : null;
+        if (isComplete) {
+            const passed = mySub && mySub.status === 'pass';
+            return `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+                <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="background:${typeColor};color:#fff;font-size:9px;padding:2px 8px;border-radius:10px;font-weight:600;">${typeLabel}</span>
+                        <span style="font-weight:600;font-size:14px;">${esc(q.title)}</span>
+                    </div>
+                    ${course ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${esc(course.name)}</div>` : ''}
+                </div>
+                <div style="text-align:right;flex-shrink:0;">
+                    <span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:11px;padding:5px 10px;">${passed ? '✅ Passed' : '❌ Failed'} — ${mySub.score || 0}%</span>
+                </div>
+            </div>`;
+        }
+        const canDrop = isRegistered && !submittedQuizIds.has(q.id);
+        return `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <span style="background:${typeColor};color:#fff;font-size:9px;padding:2px 8px;border-radius:10px;font-weight:600;">${typeLabel}</span>
+                    <span style="font-weight:600;font-size:14px;">${esc(q.title)}</span>
+                    ${isRegistered ? '<span class="badge badge-success" style="font-size:9px;">Registered</span>' : ''}
+                </div>
+                ${course ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${esc(course.name)}</div>` : ''}
+                ${q.dueDate ? `<div style="font-size:11px;color:var(--warning);margin-top:4px;">⏰ Due: ${formatDate(q.dueDate)}</div>` : ''}
+            </div>
+            <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+                ${isRegistered ? `<button class="btn btn-primary btn-sm" onclick="hubGoToQuiz('${q.id}')" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" onclick="hubRegisterQuiz('${q.id}')" style="font-size:11px;padding:5px 12px;">Register</button>`}
+                ${canDrop ? `<button class="btn btn-outline btn-sm" onclick="hubDropQuiz('${q.id}')" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:3px 8px;">Drop</button>` : ''}
+            </div>
+        </div>`;
+    }
+
+    function renderQuizSection(title, icon, quizzes) {
+        if (!quizzes.length) return '';
+        const grouped = {};
+        quizzes.forEach(q => { const c = q.courseId || '_'; if (!grouped[c]) grouped[c] = []; grouped[c].push(q); });
+        let html = '';
+        myCourses.filter(c => grouped[c.id]).forEach(course => {
+            html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,var(--accent),#1a3a6b);color:#fff;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;">
+                    <div><span style="font-weight:700;font-size:13px;">${esc(course.code || course.name)}</span>${course.name && course.code ? ` <span style="font-size:11px;opacity:0.85;">${esc(course.name)}</span>` : ''}</div>
+                    <span style="font-size:10px;background:rgba(255,255,255,0.2);padding:2px 10px;border-radius:10px;">${grouped[course.id].length}</span>
+                </div>
+                <div style="padding:0 12px;">${grouped[course.id].map(quizCard).join('')}</div>
+            </div>`;
+        });
+        Object.keys(grouped).filter(cid => !myCourses.find(c => c.id === cid)).forEach(cid => {
+            html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                <div style="background:linear-gradient(135deg,var(--accent),#1a3a6b);color:#fff;padding:9px 14px;font-size:13px;font-weight:600;">${esc(cid)}</div>
+                <div style="padding:0 12px;">${grouped[cid].map(quizCard).join('')}</div>
+            </div>`;
+        });
+        if (!html) return '';
+        return `<div style="margin-bottom:24px;">
+            <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">${icon} <span>${title}</span> <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${quizzes.length})</span></h3>
+            ${html}
+        </div>`;
+    }
+
+    const notRegistered = allActiveQuizzes.filter(q => !registeredQuizIds.has(q.id) && !submittedQuizIds.has(q.id));
+    const registeredNotSubmitted = allActiveQuizzes.filter(q => registeredQuizIds.has(q.id) && !submittedQuizIds.has(q.id));
+
     return `
-        <div style="margin-bottom:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Pending Quizzes <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${pendingQuizzes.length})</span></h3>
-            ${pendingQuizzes.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${pendingQuizzes.map(q => {
-                const course = myCourses.find(c => c.id === q.courseId);
-                return `<div class="card" style="border-left:4px solid var(--warning);">
-                    <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;">
-                        <div style="flex:1;">
-                            <div style="font-weight:700;font-size:15px;">${esc(q.title)}</div>
-                            <div style="color:var(--text);font-size:13px;margin-top:4px;">${course ? esc(course.name) : esc(q.courseId)}</div>
-                            ${q.dueDate ? `<div style="font-size:11px;color:var(--warning);margin-top:6px;">⏰ Due: ${formatDate(q.dueDate)}</div>` : ''}
-                        </div>
-                        <span class="badge badge-warning">Pending</span>
-                    </div>
-                    <div style="margin-top:10px;">
-                        <button class="btn btn-primary btn-sm" onclick="hubGoToQuiz('${q.id}')">Take Quiz →</button>
-                    </div>
-                </div>`;
-            }).join('')}</div>` : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">🎉</div><div>All quizzes completed!</div><div style="font-size:12px;margin-top:8px;">Great job staying on top of your work.</div></div>'}
-        </div>
+        ${renderQuizSection('Registered Quizzes', '📋', registeredNotSubmitted)}
+        ${renderQuizSection('Available Quizzes', '➕', notRegistered)}
+        ${renderQuizSection('Completed Quizzes', '✅', completedQuizzes)}
 
         <div style="margin-bottom:24px;">
             <h3 style="color:var(--accent);margin-bottom:16px;">📊 Your Grades</h3>
@@ -798,7 +958,7 @@ function _hubRenderTab(tab) {
     const el = document.getElementById('hub-tab-' + tab);
     if (!el) return;
     if (tab === 'quizzes') el.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores);
-    else if (tab === 'exams') el.innerHTML = renderHubExams(c.me, c.myRegisteredExams, c.availableExams, c.data);
+    else if (tab === 'exams') el.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
     else if (tab === 'courses') el.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data);
     else if (tab === 'notes') el.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
     else if (tab === 'discussions') renderHubDiscussions(c.me, c.data);
