@@ -6374,6 +6374,7 @@ async function generateCertificate() {
             ${docFooter(vCode)}
         ${a4PrintStyle}</div>`;
     } else if (type === 'transcript') {
+        alert('TRANSCRIPT CASE REACHED! Generating transcript for student: ' + studentId);
         docTitle = 'Official Transcript';
         const grades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
         const courses = await dbGetAll('courses');
