@@ -637,29 +637,41 @@ async function hubDropExam(examId, studentName) {
 }
 
 async function hubRegisterQuiz(quizId) {
-    if (!await showConfirm('Register for Quiz', 'Register for this quiz?')) return;
-    const me = _hubGetMe();
-    if (!me) return;
-    const data = studentHubCache || await loadStudentHubData();
-    if ((data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId)) return showToast('Already registered');
-    const regRecord = { id: 'QREG-' + Date.now(), quizId, studentId: me.id, seat: '', createdAt: new Date().toISOString() };
-    await dbPut('quizRegistrations', regRecord);
-    _hubCachePush('quizRegistrations', regRecord);
-    showToast('✅ Registered for quiz!');
-    logAudit('created', 'quizRegistration', { studentId: me.id, quizId });
-    renderStudentHub();
+    try {
+        console.log('hubRegisterQuiz called with:', quizId);
+        if (!await showConfirm('Register for Quiz', 'Register for this quiz?')) return;
+        const me = _hubGetMe();
+        if (!me) { console.warn('_hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
+        const data = studentHubCache || await loadStudentHubData();
+        if ((data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId)) return showToast('Already registered');
+        const regRecord = { id: 'QREG-' + Date.now(), quizId, studentId: me.id, seat: '', createdAt: new Date().toISOString() };
+        await dbPut('quizRegistrations', regRecord);
+        _hubCachePush('quizRegistrations', regRecord);
+        showToast('✅ Registered for quiz!');
+        logAudit('created', 'quizRegistration', { studentId: me.id, quizId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubRegisterQuiz error:', e);
+        showToast('Error: ' + e.message, { type: 'danger', duration: 6000 });
+    }
 }
 
 async function hubDropQuiz(quizId) {
-    if (!await showConfirm('Drop Quiz', 'Drop this quiz registration?')) return;
-    const me = _hubGetMe();
-    if (!me) return;
-    const data = studentHubCache || await loadStudentHubData();
-    const reg = (data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId);
-    if (reg) { await dbDelete('quizRegistrations', reg.id); _hubCacheRemove('quizRegistrations', reg.id); }
-    showToast('Quiz registration dropped');
-    logAudit('deleted', 'quizRegistration', { studentId: me.id, quizId });
-    renderStudentHub();
+    try {
+        console.log('hubDropQuiz called with:', quizId);
+        if (!await showConfirm('Drop Quiz', 'Drop this quiz registration?')) return;
+        const me = _hubGetMe();
+        if (!me) { console.warn('_hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
+        const data = studentHubCache || await loadStudentHubData();
+        const reg = (data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId);
+        if (reg) { await dbDelete('quizRegistrations', reg.id); _hubCacheRemove('quizRegistrations', reg.id); }
+        showToast('Quiz registration dropped');
+        logAudit('deleted', 'quizRegistration', { studentId: me.id, quizId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubDropQuiz error:', e);
+        showToast('Error: ' + e.message, { type: 'danger', duration: 6000 });
+    }
 }
 
 async function hubRequestMissedExam(examId) {
@@ -832,8 +844,8 @@ function renderHubQuizzes(me, pendingQuizzes, completedQuizzes, data, allScores)
                 ${q.dueDate ? `<div style="font-size:11px;color:var(--warning);margin-top:4px;">⏰ Due: ${formatDate(q.dueDate)}</div>` : ''}
             </div>
             <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-                ${isRegistered ? `<button class="btn btn-primary btn-sm" onclick="hubGoToQuiz('${q.id}')" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" onclick="hubRegisterQuiz('${q.id}')" style="font-size:11px;padding:5px 12px;">Register</button>`}
-                ${canDrop ? `<button class="btn btn-outline btn-sm" onclick="hubDropQuiz('${q.id}')" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:3px 8px;">Drop</button>` : ''}
+                ${isRegistered ? `<button class="btn btn-primary btn-sm" onclick="hubGoToQuiz('${q.id.replace(/'/g, "\\'")}')" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" onclick="hubRegisterQuiz('${q.id.replace(/'/g, "\\'")}')" style="font-size:11px;padding:5px 12px;">Register</button>`}
+                ${canDrop ? `<button class="btn btn-outline btn-sm" onclick="hubDropQuiz('${q.id.replace(/'/g, "\\'")}')" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:3px 8px;">Drop</button>` : ''}
             </div>
         </div>`;
     }
