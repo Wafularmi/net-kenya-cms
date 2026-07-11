@@ -6224,6 +6224,7 @@ async function showCertificateForm() {
     showModal('Generate Document', content, `<button class="btn btn-primary" onclick="generateCertificate()">Generate</button>`);
 }
 async function generateCertificate() {
+    try {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (currentUser.role === 'student') return showToast('Students cannot generate documents. Please contact the administration office.');
     const studentId = document.getElementById('cert-student').value;
@@ -6438,6 +6439,7 @@ async function generateCertificate() {
     logAudit('generated', 'certificate', cert);
     renderDocumentHistory();
     showToast(docTitle + ' generated for ' + student.name, { action: 'Print', actionFn: () => printCertificate(cert.id) });
+    } catch (e) { console.error('generateCertificate error:', e); showToast('Error: ' + e.message, { type: 'danger' }); }
 }
 async function renderDocumentHistory() {
     const certs = await dbGetAll('certificates');
