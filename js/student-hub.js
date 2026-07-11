@@ -385,9 +385,9 @@ function _hubCacheRemove(store, id) {
 
 async function hubEnrollCourse(courseId, studentName) {
     if (!await showConfirm('Enroll in Course', `Enroll ${studentName} in this course?`)) return;
+    const data = studentHubCache || await loadStudentHubData();
     const me = _hubGetMe();
     if (!me) return showToast('Student profile not found', { type: 'danger' });
-    const data = studentHubCache || await loadStudentHubData();
     if ((data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId)) return showToast('Already enrolled');
     const record = { id: `ENR-${courseId}-${me.id}`, courseId, studentId: me.id, enrolledAt: new Date().toISOString() };
     await dbPut('enrollments', record);
@@ -399,9 +399,9 @@ async function hubEnrollCourse(courseId, studentName) {
 
 async function hubDropCourse(courseId, studentName) {
     if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
+    const data = studentHubCache || await loadStudentHubData();
     const me = _hubGetMe();
     if (!me) return;
-    const data = studentHubCache || await loadStudentHubData();
     const enr = (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId);
     if (enr) { await dbDelete('enrollments', enr.id); _hubCacheRemove('enrollments', enr.id); }
     showToast('Course dropped');
