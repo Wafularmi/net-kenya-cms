@@ -581,13 +581,32 @@ function getPaletteStripHtml(palette, colorInputId) {
     </div>`;
 }
 
-// Client-side protections (casual-user deterrent only)
+// Client-side protections
 document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 document.addEventListener('keydown', function(e) {
     if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key.toUpperCase())) || (e.ctrlKey && e.key.toUpperCase() === 'U')) {
         e.preventDefault();
     }
 });
+document.addEventListener('selectstart', function(e) { e.preventDefault(); });
+document.addEventListener('copy', function(e) { e.preventDefault(); });
+try { Object.defineProperty(document, 'onselectstart', { get: function() { return null; } }); } catch (e) {}
+(function() {
+    var devtoolsOpen = false;
+    var threshold = 160;
+    var check = function() {
+        var w = window.outerWidth - window.innerWidth;
+        var h = window.outerHeight - window.innerHeight;
+        var detected = w > threshold || h > threshold || (w === 0 && h === 0 && window.outerWidth > 0);
+        if (detected && !devtoolsOpen) {
+            devtoolsOpen = true;
+            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#fff;"><div style="text-align:center;padding:40px;"><div style="font-size:64px;margin-bottom:16px;">🔒</div><h2>Developer Tools Detected</h2><p style="color:#64748b;margin-top:8px;">Please close Developer Tools to continue using this system.</p></div></div>';
+        } else if (!detected) {
+            devtoolsOpen = false;
+        }
+    };
+    setInterval(check, 1000);
+})();
 
 async function initAuth() {
     try {
