@@ -667,6 +667,17 @@
                         <div class="form-group"><label>Content (HTML)</label><textarea id="settings-terms-content" rows="16" style="font-family:monospace;font-size:12px;line-height:1.5;" placeholder="Leave empty to use the default Terms &amp; Conditions content."></textarea></div>
                         <button class="btn btn-primary" onclick="saveBranding()">Save T&amp;C</button>
                     </div>
+                    <div class="card"><h3>🔒 Protection Switch</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, right-click, text selection, copy, F12, Ctrl+Shift+I/J/C, and Ctrl+U are blocked. Turn OFF while you are working on the system.</div>
+                        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+                            <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                <input type="checkbox" id="settings-protection" onchange="setProtection()" style="opacity:0;width:0;height:0;">
+                                <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                            </label>
+                            <span id="protection-status" style="font-size:13px;font-weight:600;color:var(--success);">ON</span>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveBranding()">Save Protection Setting</button>
+                    </div>
                     <div class="card"><h3>Academic Settings</h3>
                         <div class="form-group"><label>Current Academic Year</label><input type="text" id="settings-academic-year"></div>
                         <div class="form-row"><div class="form-group"><label>Semester</label><select id="settings-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select></div><div class="form-group"><label>Grading Scale</label><select id="settings-grading"><option value="standard">Standard (A-F, B+, B-)</option><option value="gpa4">GPA 4.0 Scale</option><option value="gpa5">GPA 5.0 Scale</option><option value="ects">ECTS (A-F)</option><option value="percent">Percentage Only</option></select></div></div>

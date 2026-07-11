@@ -581,20 +581,30 @@ function getPaletteStripHtml(palette, colorInputId) {
     </div>`;
 }
 
-// Client-side protections
-document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+// Client-side protections (respects _protectionEnabled flag)
+var _protectionEnabled = true;
+var _devtoolsInterval = null;
+function applyProtection(enabled) {
+    _protectionEnabled = enabled;
+    document.getElementById('settings-protection').checked = enabled;
+    document.getElementById('protection-status').textContent = enabled ? 'ON' : 'OFF';
+    document.getElementById('protection-status').style.color = enabled ? 'var(--success)' : 'var(--danger)';
+}
+document.addEventListener('contextmenu', function(e) { if (_protectionEnabled) e.preventDefault(); });
 document.addEventListener('keydown', function(e) {
+    if (!_protectionEnabled) return;
     if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key.toUpperCase())) || (e.ctrlKey && e.key.toUpperCase() === 'U')) {
         e.preventDefault();
     }
 });
-document.addEventListener('selectstart', function(e) { e.preventDefault(); });
-document.addEventListener('copy', function(e) { e.preventDefault(); });
+document.addEventListener('selectstart', function(e) { if (_protectionEnabled) e.preventDefault(); });
+document.addEventListener('copy', function(e) { if (_protectionEnabled) e.preventDefault(); });
 try { Object.defineProperty(document, 'onselectstart', { get: function() { return null; } }); } catch (e) {}
 (function() {
     var devtoolsOpen = false;
     var threshold = 160;
     var check = function() {
+        if (!_protectionEnabled) { devtoolsOpen = false; return; }
         var w = window.outerWidth - window.innerWidth;
         var h = window.outerHeight - window.innerHeight;
         var detected = w > threshold || h > threshold || (w === 0 && h === 0 && window.outerWidth > 0);
@@ -605,8 +615,16 @@ try { Object.defineProperty(document, 'onselectstart', { get: function() { retur
             devtoolsOpen = false;
         }
     };
-    setInterval(check, 1000);
+    _devtoolsInterval = setInterval(check, 1000);
 })();
+async function setProtection() {
+    var enabled = document.getElementById('settings-protection').checked;
+    applyProtection(enabled);
+    var branding = await dbGet('settings', 'branding') || { key: 'branding' };
+    branding.protectionEnabled = enabled;
+    await dbPut('settings', branding);
+    showToast('Protection ' + (enabled ? 'ON' : 'OFF'));
+}
 
 async function initAuth() {
     try {
@@ -11826,10 +11844,13 @@ async function loadBranding() {
         if (termsContentInput) termsContentInput.value = settings.termsContent || '';
         const termsUpdatedInput = document.getElementById('settings-terms-updated');
         if (termsUpdatedInput) termsUpdatedInput.value = settings.termsUpdated || '';
+        if (settings.protectionEnabled !== undefined) {
+            applyProtection(settings.protectionEnabled);
+        }
     }
 }
 async function saveBranding() {
-    const branding = { key: 'branding', schoolName: document.getElementById('settings-school-name').value.trim(), tagline: document.getElementById('settings-tagline').value.trim(), initials: document.getElementById('settings-initials').value.trim().toUpperCase(), accentColor: document.getElementById('settings-accent-color').value, theme: document.getElementById('settings-theme').value, kraPin: document.getElementById('settings-kra-pin').value.trim(), receiptFooter: document.getElementById('settings-receipt-footer').value.trim(), postalAddress: document.getElementById('settings-postalAddress').value.trim(), city: document.getElementById('settings-city').value.trim(), phone: document.getElementById('settings-phone').value.trim(), email: document.getElementById('settings-email').value.trim(), website: document.getElementById('settings-website').value.trim(), termsContent: document.getElementById('settings-terms-content').value, termsUpdated: document.getElementById('settings-terms-updated').value };
+    const branding = { key: 'branding', schoolName: document.getElementById('settings-school-name').value.trim(), tagline: document.getElementById('settings-tagline').value.trim(), initials: document.getElementById('settings-initials').value.trim().toUpperCase(), accentColor: document.getElementById('settings-accent-color').value, theme: document.getElementById('settings-theme').value, kraPin: document.getElementById('settings-kra-pin').value.trim(), receiptFooter: document.getElementById('settings-receipt-footer').value.trim(), postalAddress: document.getElementById('settings-postalAddress').value.trim(), city: document.getElementById('settings-city').value.trim(), phone: document.getElementById('settings-phone').value.trim(), email: document.getElementById('settings-email').value.trim(), website: document.getElementById('settings-website').value.trim(), termsContent: document.getElementById('settings-terms-content').value, termsUpdated: document.getElementById('settings-terms-updated').value, protectionEnabled: document.getElementById('settings-protection').checked };
     const readFile = (input) => new Promise(resolve => {
         if (!input || !input.files || !input.files[0]) return resolve(null);
         const reader = new FileReader();
