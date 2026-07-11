@@ -640,9 +640,9 @@ async function hubRegisterQuiz(quizId) {
     try {
         console.log('hubRegisterQuiz called with:', quizId);
         if (!await showConfirm('Register for Quiz', 'Register for this quiz?')) return;
+        const data = await loadStudentHubData();
         const me = _hubGetMe();
-        if (!me) { console.warn('_hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
-        const data = studentHubCache || await loadStudentHubData();
+        if (!me) { console.warn('_hubGetMe returned null', { students: data?.students?.length, cache: !!studentHubCache }); return showToast('Could not identify your profile', { type: 'danger' }); }
         if ((data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId)) return showToast('Already registered');
         const regRecord = { id: 'QREG-' + Date.now(), quizId, studentId: me.id, seat: '', createdAt: new Date().toISOString() };
         await dbPut('quizRegistrations', regRecord);
@@ -660,9 +660,9 @@ async function hubDropQuiz(quizId) {
     try {
         console.log('hubDropQuiz called with:', quizId);
         if (!await showConfirm('Drop Quiz', 'Drop this quiz registration?')) return;
+        const data = await loadStudentHubData();
         const me = _hubGetMe();
         if (!me) { console.warn('_hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
-        const data = studentHubCache || await loadStudentHubData();
         const reg = (data.quizRegistrations || []).find(r => r.studentId === me.id && r.quizId === quizId);
         if (reg) { await dbDelete('quizRegistrations', reg.id); _hubCacheRemove('quizRegistrations', reg.id); }
         showToast('Quiz registration dropped');
