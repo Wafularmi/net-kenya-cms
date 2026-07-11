@@ -253,7 +253,7 @@ async function switchHubTab(tab, btn) {
         try {
             if (tab === 'courses') container.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data);
             else if (tab === 'exams') container.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
-            else if (tab === 'quizzes') container.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores);
+            else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
             else if (tab === 'notes') container.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
             else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(c.me, c.data); return; }
         } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
@@ -844,8 +844,8 @@ function renderHubQuizzes(me, pendingQuizzes, completedQuizzes, data, allScores)
                 ${q.dueDate ? `<div style="font-size:11px;color:var(--warning);margin-top:4px;">⏰ Due: ${formatDate(q.dueDate)}</div>` : ''}
             </div>
             <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-                ${isRegistered ? `<button class="btn btn-primary btn-sm" onclick="hubGoToQuiz('${q.id.replace(/'/g, "\\'")}')" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" onclick="hubRegisterQuiz('${q.id.replace(/'/g, "\\'")}')" style="font-size:11px;padding:5px 12px;">Register</button>`}
-                ${canDrop ? `<button class="btn btn-outline btn-sm" onclick="hubDropQuiz('${q.id.replace(/'/g, "\\'")}')" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:3px 8px;">Drop</button>` : ''}
+                ${isRegistered ? `<button class="btn btn-primary btn-sm" data-quiz-id="${esc(q.id)}" data-action="take" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" data-quiz-id="${esc(q.id)}" data-action="register" style="font-size:11px;padding:5px 12px;">Register</button>`}
+                ${canDrop ? `<button class="btn btn-outline btn-sm" data-quiz-id="${esc(q.id)}" data-action="drop" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:3px 8px;">Drop</button>` : ''}
             </div>
         </div>`;
     }
@@ -969,7 +969,7 @@ function _hubRenderTab(tab) {
     if (!c) return;
     const el = document.getElementById('hub-tab-' + tab);
     if (!el) return;
-    if (tab === 'quizzes') el.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores);
+    if (tab === 'quizzes') { el.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores); if (!el.dataset.hubQuizBound) { el.dataset.hubQuizBound = '1'; el.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
     else if (tab === 'exams') el.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
     else if (tab === 'courses') el.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data);
     else if (tab === 'notes') el.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
