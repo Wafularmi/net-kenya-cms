@@ -36,3 +36,7 @@ build/
 
 # Pre-compressed gzip (regenerated at runtime if needed)
 *.gz
+
+seed-books-api.js
+
+seed-books-api.js
