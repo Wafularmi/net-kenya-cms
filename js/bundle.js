@@ -1616,18 +1616,19 @@ async function renderStudentDashboard(currentUser) {
         return;
     }
     const studentId = me.id;
-    const studentPayments = payments.filter(p => p.studentId === studentId);
+    const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me.id, me.admissionNumber, me.phone, me.email].filter(Boolean));
+    const studentPayments = payments.filter(p => allStudentIds.has(p.studentId));
     const totalPaid = studentPayments.reduce((s, p) => s + p.amount, 0);
     const meFee = getCachedStudentFee(me);
     const balance = meFee - totalPaid;
-    const studentAttendance = attendance.filter(a => a.studentId === studentId);
+    const studentAttendance = attendance.filter(a => allStudentIds.has(a.studentId));
     const attended = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
     const attendancePct = studentAttendance.length ? Math.round((attended / studentAttendance.length) * 100) : 0;
-    const studentGrades = grades.filter(g => g.studentId === studentId);
+    const studentGrades = grades.filter(g => allStudentIds.has(g.studentId));
     const avgGrade = studentGrades.length ? Math.round(studentGrades.reduce((s, g) => s + g.score, 0) / studentGrades.length) : 0;
-    const studentSubmissions = submissions.filter(s => s.studentId === studentId);
+    const studentSubmissions = submissions.filter(s => allStudentIds.has(s.studentId));
     const quizzesPassed = studentSubmissions.filter(s => s.status === 'pass').length;
-    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const enrolledCourseIds = new Set(enrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
     const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
     let myCourses = courses.filter(c => c.status !== 'inactive' && (enrolledCourseIds.size === 0 || enrolledCourseIds.has(c.id)));
     myCourses = sortCoursesByTranscriptOrder(myCourses);
@@ -6381,7 +6382,7 @@ async function generateCertificate() {
         const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
         const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
         const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
-        const studentAttendance = attendance.filter(a => a.studentId === studentId);
+    const studentAttendance = attendance.filter(a => allStudentIds.has(a.studentId));
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
         const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;

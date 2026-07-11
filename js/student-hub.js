@@ -607,33 +607,43 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
 }
 
 async function hubRegisterExam(examId, studentName) {
-    if (!await showConfirm('Register for Exam', `Register ${studentName} for this exam?`)) return;
-    const me = _hubGetMe();
-    if (!me) return;
-    const data = studentHubCache || await loadStudentHubData();
-    if ((data.examRegistrations || []).find(r => r.studentId === me.id && r.examId === examId)) return showToast('Already registered');
-    const allSeats = (data.seating || []).filter(s => s.examId === examId);
-    const maxSeat = allSeats.reduce((m, s) => Math.max(m, s.seatNumber || 0), 0);
-    const regRecord = { id: `EXREG-${examId}-${me.id}`, examId, studentId: me.id, registeredAt: new Date().toISOString() };
-    const seatRecord = { id: `SEAT-${examId}-${me.id}`, examId, studentId: me.id, seatNumber: maxSeat + 1, createdAt: new Date().toISOString() };
-    await Promise.all([dbPut('examRegistrations', regRecord), dbPut('seating', seatRecord)]);
-    _hubCachePush('examRegistrations', regRecord);
-    _hubCachePush('seating', seatRecord);
-    showToast('✅ Registered!');
-    logAudit('created', 'examRegistration', { studentId: me.id, examId });
-    renderStudentHub();
+    try {
+        if (!await showConfirm('Register for Exam', `Register ${studentName} for this exam?`)) return;
+        const data = await loadStudentHubData();
+        const me = _hubGetMe();
+        if (!me) { console.warn('hubRegisterExam: _hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
+        if ((data.examRegistrations || []).find(r => r.studentId === me.id && r.examId === examId)) return showToast('Already registered');
+        const allSeats = (data.seating || []).filter(s => s.examId === examId);
+        const maxSeat = allSeats.reduce((m, s) => Math.max(m, s.seatNumber || 0), 0);
+        const regRecord = { id: `EXREG-${examId}-${me.id}`, examId, studentId: me.id, registeredAt: new Date().toISOString() };
+        const seatRecord = { id: `SEAT-${examId}-${me.id}`, examId, studentId: me.id, seatNumber: maxSeat + 1, createdAt: new Date().toISOString() };
+        await Promise.all([dbPut('examRegistrations', regRecord), dbPut('seating', seatRecord)]);
+        _hubCachePush('examRegistrations', regRecord);
+        _hubCachePush('seating', seatRecord);
+        showToast('✅ Registered!');
+        logAudit('created', 'examRegistration', { studentId: me.id, examId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubRegisterExam error:', e);
+        showToast('Error: ' + e.message, { type: 'danger', duration: 6000 });
+    }
 }
 
 async function hubDropExam(examId, studentName) {
-    if (!await showConfirm('Drop Exam', `Drop this exam for ${studentName}?`)) return;
-    const me = _hubGetMe();
-    if (!me) return;
-    const data = studentHubCache || await loadStudentHubData();
-    const reg = (data.examRegistrations || []).find(r => r.studentId === me.id && r.examId === examId);
-    if (reg) { await dbDelete('examRegistrations', reg.id); _hubCacheRemove('examRegistrations', reg.id); }
-    showToast('Exam dropped');
-    logAudit('deleted', 'examRegistration', { studentId: me.id, examId });
-    renderStudentHub();
+    try {
+        if (!await showConfirm('Drop Exam', `Drop this exam for ${studentName}?`)) return;
+        const data = await loadStudentHubData();
+        const me = _hubGetMe();
+        if (!me) { console.warn('hubDropExam: _hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
+        const reg = (data.examRegistrations || []).find(r => r.studentId === me.id && r.examId === examId);
+        if (reg) { await dbDelete('examRegistrations', reg.id); _hubCacheRemove('examRegistrations', reg.id); }
+        showToast('Exam dropped');
+        logAudit('deleted', 'examRegistration', { studentId: me.id, examId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubDropExam error:', e);
+        showToast('Error: ' + e.message, { type: 'danger', duration: 6000 });
+    }
 }
 
 async function hubRegisterQuiz(quizId) {
@@ -675,9 +685,9 @@ async function hubDropQuiz(quizId) {
 }
 
 async function hubRequestMissedExam(examId) {
+    const data = await loadStudentHubData();
     const me = _hubGetMe();
     if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
-    const data = studentHubCache || await loadStudentHubData();
     const exam = (data.exams || []).find(e => e.id === examId);
     if (!exam) return showToast('Exam not found', { type: 'danger' });
     const course = (data.courses || []).find(c => c.id === exam.courseId);
@@ -701,9 +711,9 @@ async function hubRequestMissedExam(examId) {
 async function hubSubmitMissedRequest(examId) {
     const reason = document.getElementById('missed-reason')?.value.trim();
     if (!reason) return showToast('Please provide a reason', { type: 'danger' });
+    const data = await loadStudentHubData();
     const me = _hubGetMe();
     if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
-    const data = studentHubCache || await loadStudentHubData();
     const existing = (data.retakeRequests || []).find(r => r.studentId === me.id && r.examId === examId && r.status === 'pending');
     if (existing) return showToast('You already have a pending request for this exam', { type: 'warning' });
     const record = { id: `RET-${examId}-${me.id}`, examId, studentId: me.id, reason, status: 'pending', requestType: 'missed', createdAt: new Date().toISOString() };
