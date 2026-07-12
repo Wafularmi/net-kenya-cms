@@ -4511,15 +4511,19 @@ async function generateGraduationSeating() {
     const existing = (await dbGetAll('seating')).filter(s => s.examId === gradId);
     for (const e of existing) await dbDelete('seating', e.id);
     const sorted = [...eligible].sort((a, b) => {
-        const aParts = (a.name || '').split(' ');
-        const bParts = (b.name || '').split(' ');
-        const aLast = aParts.pop() || '';
-        const bLast = bParts.pop() || '';
-        const aFirst = aParts.shift() || '';
-        const bFirst = bParts.shift() || '';
-        const aMiddle = aParts.join(' ');
-        const bMiddle = bParts.join(' ');
-        return aLast.localeCompare(bLast) || aFirst.localeCompare(bFirst) || aMiddle.localeCompare(bMiddle);
+        const aName = (a.name || '').trim();
+        const bName = (b.name || '').trim();
+        const aParts = aName.split(/\s+/);
+        const bParts = bName.split(/\s+/);
+        const aLast = (aParts.pop() || '').toLowerCase();
+        const bLast = (bParts.pop() || '').toLowerCase();
+        const aFirst = (aParts.shift() || '').toLowerCase();
+        const bFirst = (bParts.shift() || '').toLowerCase();
+        const aMiddle = aParts.join(' ').toLowerCase();
+        const bMiddle = bParts.join(' ').toLowerCase();
+        if (aLast !== bLast) return aLast < bLast ? -1 : 1;
+        if (aFirst !== bFirst) return aFirst < bFirst ? -1 : 1;
+        return aMiddle < bMiddle ? -1 : aMiddle > bMiddle ? 1 : 0;
     });
     let seatNum = 1;
     for (const s of sorted) {
