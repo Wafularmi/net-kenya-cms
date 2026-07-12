@@ -11710,7 +11710,7 @@ function renderManuals() {
                 <h3>Student Manual Distribution</h3>
                 <div style="display:flex;align-items:center;gap:10px">
                     ${isStudentUser ? `<span style="font-size:12px;color:var(--text-muted);">${getCenterName(studentCenterId)}</span>` : `<select id="mf-center-filter" onchange="renderManuals()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:180px"><option value="">${isCoordinator ? 'All Centers in Region' : 'All Centers'}</option>${filterCenters.map(c => `<option value="${c.id}" ${c.id === centerFilter ? 'selected' : ''}>${c.name}</option>`).join('')}</select>`}
-                    ${isStudentUser || isCoordinator ? '' : '<button class="btn btn-primary" onclick="showManualForm()">+ New Manual Distribution</button>'}
+                    ${isStudentUser ? '' : '<button class="btn btn-primary" onclick="showManualForm()">+ New Manual Distribution</button>'}
                 </div>
             </div>`;
         html += `<div class="tabs">
