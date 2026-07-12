@@ -392,6 +392,21 @@ async function getRegionCenterIds(regionId) {
     const centers = window._allCentersCache || await dbGetAll('studyCenters');
     return centers.filter(c => c.regionId === regionId).map(c => c.id);
 }
+async function getCenters() {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const all = window._allCentersCache || await dbGetAll('studyCenters');
+    if (u.role !== 'coordinator' || !u.regionId) return all;
+    const cidSet = new Set(await getRegionCenterIds(u.regionId));
+    return all.filter(c => cidSet.has(c.id));
+}
+async function getRegionalStudentIdSet() {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (u.role !== 'coordinator' || !u.regionId) return null;
+    const centerIds = await getRegionCenterIds(u.regionId);
+    const cidSet = new Set(centerIds);
+    const students = await dbGetAll('students');
+    return new Set(students.filter(s => cidSet.has(s.studyCenterId)).map(s => s.id));
+}
 async function filterByRegion(arr, getCenterId) {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (u.role !== 'coordinator' || !u.regionId) return arr;
@@ -952,7 +967,7 @@ function signupFilterCenters() {
 async function showSignupForm() {
     try {
         const [centers, programs, regions] = await Promise.all([
-            dbGetAll('studyCenters').catch(() => []),
+            getCenters().catch(() => []),
             getProgramsList().catch(() => []),
             dbGetAll('regions').catch(() => [])
         ]);
@@ -1742,7 +1757,7 @@ async function onQuickProgramChange(sel) {
 async function showQuickEnroll() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (u.role === 'student') return showToast('Access denied.', { type: 'danger' });
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const programs = await getProgramsList();
     const content = `<div class="form-group"><label>Student Name</label><input type="text" id="quick-name" required></div><div class="form-group"><label>Study Center</label><select id="quick-center"><option value="">Main</option>${centers.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="quick-email"></div><div class="form-group"><label>Phone</label><input type="text" id="quick-phone"></div></div><div class="form-row"><div class="form-group"><label>Program</label><select id="quick-program" onchange="onQuickProgramChange(this)"><option value="">Select Program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Year</label><input type="number" id="quick-year" value="1" min="1" max="5"></div></div><div class="form-group"><label>Fee Amount</label><input type="number" id="quick-fee" value="0"></div>`;
     showModal('Quick Student Enrollment', content, `<button class="btn btn-primary" onclick="quickEnrollStudent()">Enroll</button>`);
@@ -1836,7 +1851,7 @@ async function renderStudents() {
 }
 async function showStudentForm(student = null) {
     const isEdit = !!student;
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const branding = await dbGet('settings', 'branding');
     const initials = (branding && branding.initials) ? branding.initials : 'XX';
     const now = new Date();
@@ -2071,7 +2086,7 @@ async function showProgramAssignment() {
         </div>
         <div class="form-group">
             <label>Study Center</label>
-            <select id="prog-assign-center"><option value="">All Centers</option>${(await dbGetAll('studyCenters')).map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('')}</select>
+            <select id="prog-assign-center"><option value="">All Centers</option>${(await getCenters()).map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('')}</select>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0;">
             <label style="font-weight:600;">Students (${students.length})</label>
@@ -2694,7 +2709,7 @@ document.getElementById('course-search').addEventListener('input', debounce(rend
 
 async function populateAttendanceCourses() {
     const type = document.getElementById('attendance-type').value;
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const centerSelect = document.getElementById('attendance-center');
     centerSelect.innerHTML = '<option value="">All Centers</option>' + centers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
     const courses = await dbGetAll('courses');
@@ -2711,10 +2726,11 @@ async function loadAttendance() {
     const centerId = document.getElementById('attendance-center').value;
     if (!courseId || !date) return showToast('Select course and date!');
     const enrollments = (await dbGetAll('enrollments')).filter(e => e.courseId === courseId);
-    const students = await dbGetAll('students');
+    const regionalIds = await getRegionalStudentIdSet();
+    const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
     const attendance = await dbGetAll('attendance');
     const course = await dbGet('courses', courseId);
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     let studentIds = enrollments.map(e => e.studentId);
     let courseStudents = students.filter(s => studentIds.includes(s.id) && s.status === 'active');
     if (centerId) courseStudents = courseStudents.filter(s => s.studyCenterId === centerId);
@@ -2813,13 +2829,14 @@ async function printAttendanceWindow() {
     const date = document.getElementById('attendance-date').value;
     const centerId = document.getElementById('attendance-center').value;
     if (!courseId || !date) return showToast('Select course and date!');
+    const regionalIds = await getRegionalStudentIdSet();
     const [course, students, attendance, enrollments, branding, centers] = await Promise.all([
         dbGet('courses', courseId),
-        dbGetAll('students'),
+        regionalIds ? dbGetAll('students').then(s => s.filter(st => regionalIds.has(st.id))) : dbGetAll('students'),
         dbGetAll('attendance'),
         dbGetAll('enrollments'),
         dbGet('settings', 'branding'),
-        dbGetAll('studyCenters')
+        getCenters()
     ]);
     const studentIds = enrollments.filter(e => e.courseId === courseId).map(e => e.studentId);
     let courseStudents = students.filter(s => studentIds.includes(s.id) && s.status === 'active');
@@ -2950,7 +2967,8 @@ async function loadGrades() {
     if (!courseId) return showToast('Select a course!');
     const course = await dbGet('courses', courseId);
     if (!course) return showToast('Course not found!');
-    const students = await dbGetAll('students');
+    const regionalIds = await getRegionalStudentIdSet();
+    const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
     const quizzes = await dbGetAll('quizzes');
     const submissions = await dbGetAll('submissions');
     const attendance = await dbGetAll('attendance');
@@ -3187,12 +3205,13 @@ function getGrade(score) {
 async function renderExams() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
-    const exams = await dbGetAll('exams');
+    const isCoord = currentUser.role === 'coordinator';
+    let exams = await dbGetAll('exams');
     const courses = await dbGetAll('courses');
     const staff = await dbGetAll('staff');
     const enrollments = await dbGetAll('enrollments');
-    const centers = await dbGetAll('studyCenters');
-    const registrations = await dbGetAll('examRegistrations');
+    const centers = await getCenters();
+    let registrations = await dbGetAll('examRegistrations');
     const semester = document.getElementById('exam-semester').value;
     if (isStudentUser) {
         const addBtn = document.querySelector('#screen-exams .btn-primary');
@@ -3284,6 +3303,12 @@ async function renderExams() {
         if (tableContainer) tableContainer.style.display = '';
         const container = document.getElementById('student-exams-container');
         if (container) container.innerHTML = '';
+        if (isCoord && currentUser.regionId) {
+            const cidSet = new Set(await getRegionCenterIds(currentUser.regionId));
+            const regionStudents = await getRegionalStudentIdSet();
+            exams = exams.filter(e => !e.studyCenterId || cidSet.has(e.studyCenterId));
+            registrations = regionStudents ? registrations.filter(r => regionStudents.has(r.studentId)) : registrations;
+        }
         const filtered = exams.filter(e => e.semester == semester).sort((a, b) => a.date.localeCompare(b.date));
         document.getElementById('exams-body').innerHTML = filtered.map(e => {
             const course = courses.find(c => c.id === e.courseId);
@@ -3298,7 +3323,7 @@ async function renderExams() {
 async function showExamForm(exam = null) {
     const courses = await dbGetAll('courses');
     const staff = await dbGetAll('staff');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const semester = document.getElementById('exam-semester').value;
     const questions = await dbGetAll('questionBank');
     const selQ = (exam && exam.questionIds) ? exam.questionIds : [];
@@ -3508,7 +3533,7 @@ async function renderSeatingPlan() {
     const exam = await dbGet('exams', examId);
     const seating = (await dbGetAll('seating')).filter(s => s.examId === examId);
     const students = await dbGetAll('students');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
     seating.sort((a, b) => a.seatNumber - b.seatNumber);
     if (!seating.length) {
@@ -3563,7 +3588,7 @@ async function showExamRegistration(examId) {
     if (!exam) return;
     const course = await dbGet('courses', exam.courseId);
     const students = await dbGetAll('students');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
     const regIds = new Set(regs.map(r => r.studentId));
     const activeStudents = students.filter(s => s.status === 'active');
@@ -3713,7 +3738,7 @@ async function showExamNotify(examId) {
     const exam = await dbGet('exams', examId);
     if (!exam) return;
     const students = await dbGetAll('students');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
     const course = await dbGet('courses', exam.courseId);
     const center = centers.find(c => c.id === exam.studyCenterId);
@@ -4266,7 +4291,7 @@ async function generateGraduationList() {
     const attendance = await dbGetAll('attendance');
     const requirements = await dbGetAll('gradRequirements');
     const payments = await dbGetAll('payments');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     let eligible = [];
     for (const s of students) {
         const studentGrades = grades.filter(g => g.studentId === s.id);
@@ -4478,7 +4503,7 @@ async function generateTranscript() {
     const payments = await dbGetAll('payments');
     const chapel = await dbGetAll('chapel');
     const attendance = await dbGetAll('attendance');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const branding = await dbGet('settings', 'branding');
     const academic = await dbGet('settings', 'academic');
     const schoolName = branding ? branding.schoolName : 'College Management System';
@@ -5289,7 +5314,7 @@ async function generateFinalTranscript() {
     const allGrades = await dbGetAll('grades');
     const branding = await dbGet('settings', 'branding');
     const academic = await dbGet('settings', 'academic');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const payments = await dbGetAll('payments');
     const fromEnrollments = enrollments.filter(e => e.studentId === studentId).map(e => e.courseId);
     const savedGrades = allGrades.filter(g => g.studentId === studentId);
@@ -6222,7 +6247,8 @@ async function renderHostels() {
         return `<div class="hostel-block"><h4>${b.name} (${occupied}/${total} occupied)</h4>${rooms.map(r => `<div class="room-item"><span>Room ${r.roomNumber || r.name}</span><span class="room-status ${r.occupantId ? 'occupied' : 'vacant'}"></span></div>`).join('')}</div>`;
     }).join('') : '<div style="color:var(--text-muted);text-align:center;padding:40px;">No hostels configured. Click "+ Add Hostel/Room" to begin.</div>';
     const rooms = hostels.filter(h => h.type === 'room');
-    const students = await dbGetAll('students');
+    const regionalIds = await getRegionalStudentIdSet();
+    const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
     document.getElementById('hostel-occupancy-body').innerHTML = rooms.filter(r => r.occupantId).map(r => {
         const student = students.find(s => s.id === r.occupantId);
         return `<tr><td>${r.roomNumber || r.name}</td><td>${student ? student.name : r.occupantId}</td><td>${student ? student.program : '--'}</td><td>${formatDate(r.checkInDate)}</td><td><span class="badge badge-success">Occupied</span></td><td><button class="btn btn-outline btn-sm" onclick="checkoutRoom('${r.id}')">Check Out</button></td></tr>`;
@@ -6246,7 +6272,8 @@ async function saveHostel() {
 }
 async function showRoomAssignment() {
     const rooms = (await dbGetAll('hostels')).filter(r => r.type === 'room' && !r.occupantId);
-    const students = (await dbGetAll('students')).filter(s => s.status === 'active' && !s.hostelRoomId);
+    const regionalIds = await getRegionalStudentIdSet();
+    const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
     const content = `<div class="form-group"><label>Student</label><select id="assign-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('')}</select></div><div class="form-group"><label>Room</label><select id="assign-room"><option value="">Select room...</option>${rooms.map(r => `<option value="${r.id}">Room ${r.roomNumber || r.name}</option>`).join('')}</select></div><div class="form-group"><label>Check-in Date</label><input type="date" id="assign-date" value="${new Date().toISOString().split('T')[0]}"></div>`;
     showModal('Assign Room', content, `<button class="btn btn-primary" onclick="assignRoom()">Assign</button>`);
 }
@@ -6445,7 +6472,16 @@ async function showInventoryReport() {
 document.getElementById('inventory-search').addEventListener('input', debounce(renderInventory, 300));
 
 async function renderAlumni() {
-    const alumni = await dbGetAll('alumni');
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    let alumni = await dbGetAll('alumni');
+    if (u.role === 'coordinator' && u.regionId) {
+        const regionalIds = await getRegionalStudentIdSet();
+        if (regionalIds) {
+            const students = regionalIds.size ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : [];
+            const regionalNames = new Set(students.map(s => s.name?.toLowerCase()));
+            alumni = alumni.filter(a => regionalNames.has(a.name?.toLowerCase()));
+        }
+    }
     const search = document.getElementById('alumni-search').value.toLowerCase();
     const filtered = alumni.filter(a => !search || a.name.toLowerCase().includes(search) || (a.program || '').toLowerCase().includes(search) || (a.ministry || '').toLowerCase().includes(search));
     filtered.sort((a, b) => (b.gradYear || 0) - (a.gradYear || 0));
@@ -6639,7 +6675,7 @@ async function generateCertificate() {
         const payments = await dbGetAll('payments');
         const chapel = await dbGetAll('chapel');
         const attendance = await dbGetAll('attendance');
-        const centers = await dbGetAll('studyCenters');
+        const centers = await getCenters();
         const academic = await dbGet('settings', 'academic');
         const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
         const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
@@ -7373,7 +7409,7 @@ let _bulkSelectedIds = [];
 async function openStudentPicker() {
     const students = (await dbGetAll('students')).filter(s => s.status === 'active');
     const programs = await dbGetAll('programs');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const renderList = (filter) => {
         const f = (filter || '').toLowerCase();
         const list = students.filter(s => !f || s.name.toLowerCase().includes(f) || (s.phone || '').includes(f) || (s.admissionNumber || '').toLowerCase().includes(f));
@@ -7449,7 +7485,7 @@ async function startBulkBroadcast(target) {
     sendWhatsAppBroadcast(targets, template, message, schoolName);
 }
 
-async function loadCommunicationPage() {    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');    if (u.role !== 'admin') return showToast('Admin only.', { type: 'danger' });    const [students, centers, programs, templates] = await Promise.all([        dbGetAll('students'),        dbGetAll('studyCenters'),        getProgramsList(),        dbGetAll('whatsappTemplates')    ]);    const activeStudents = students.filter(s => s.status === 'active' && s.phone);    const centerOptions = centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.code})</option>`).join('');    const programOptions = programs.map(p => `<option value="${p}">${escapeHtml(p)}</option>`).join('');    const templateOptions = templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');    document.getElementById('communication-content').innerHTML = `        <div class="page-header">            <h2>📱 Communication Center</h2>            <p style="color:var(--text-muted);font-size:13px;">Filter students, compose a message, and send via WhatsApp (individual or bulk).</p>        </div>        <div class="card" style="margin-bottom:16px;">            <div class="card-header"><b>Filters</b></div>            <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">                <div class="form-group" style="flex:1;min-width:180px;">                    <label>Study Center</label>                    <select id="comm-center" class="form-control"><option value="">All Centers</option>${centerOptions}</select>                </div>                <div class="form-group" style="flex:1;min-width:180px;">                    <label>Program</label>                    <select id="comm-program" class="form-control"><option value="">All Programs</option>${programOptions}</select>                </div>                <div class="form-group" style="flex:1;min-width:180px;">                    <label>Course</label>                    <select id="comm-course" class="form-control"><option value="">All Courses</option></select>                </div>                <div class="form-group" style="flex:1;min-width:200px;">                    <label>Search</label>                    <input type="text" id="comm-search" class="form-control" placeholder="Name, phone, admission..." oninput="debounceCommSearch()">                </div>                <button class="btn btn-primary" onclick="applyCommFilters()" style="height:38px;">🔍 Apply</button>                <button class="btn btn-outline" onclick="clearCommFilters()" style="height:38px;">✖ Clear</button>            </div>        </div>        <div class="card" style="margin-bottom:16px;">            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">                <b>Message</b>                <select id="comm-template" class="form-control" style="width:auto;min-width:220px;" onchange="loadCommTemplate()">                    <option value="">— Select Template —</option>${templateOptions}                </select>            </div>            <div class="card-body">                <div class="form-group"><label>Message (variables: {{name}}, {{admission}}, {{phone}}, {{program}}, {{school}}, {{balance}}, {{email}})</label>                    <textarea id="comm-message" rows="4" class="form-control" style="font-family:monospace;font-size:13px;"></textarea>                </div>                <div style="display:flex;gap:8px;flex-wrap:wrap;">                    <button class="btn btn-outline" onclick="previewCommMessage()">👁 Preview</button>                    <button class="btn btn-outline" onclick="copyCommMessage()">📋 Copy</button>                    <button class="btn btn-outline" onclick="openVariablePicker('comm-message')">🔤 Variables</button>                    <span id="comm-preview-count" style="align-self:center;font-size:12px;color:var(--text-muted);"></span>                </div>                <div id="comm-preview-area" style="display:none;margin-top:10px;padding:10px;background:var(--bg-input);border-radius:6px;font-size:12px;white-space:pre-line;"></div>            </div>        </div>        <div class="card">            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">                <b>Recipients (<span id="comm-recipient-count">0</span>)</b>                <div style="display:flex;gap:8px;">                    <button class="btn btn-success" onclick="sendCommBulk()">📤 Send to All (Bulk)</button>                </div>            </div>            <div class="card-body" style="padding:0;overflow-x:auto;">                <table class="data-table" style="min-width:700px;">                    <thead>                        <tr>                            <th style="width:40px;"><input type="checkbox" id="comm-select-all" onchange="toggleCommSelectAll()"></th>                            <th>Name</th>                            <th>Admission No.</th>                            <th>Program</th>                            <th>Center</th>                            <th>Phone</th>                            <th>Balance</th>                            <th style="width:90px;">Action</th>                        </tr>                    </thead>                    <tbody id="comm-student-body"></tbody>                </table>            </div>        </div>    `;    document.getElementById('comm-program').addEventListener('change', async function() {        const program = this.value;        const courseSelect = document.getElementById('comm-course');        if (!program) {            courseSelect.innerHTML = '<option value="">All Courses</option>';            return;        }        const courses = await getCoursesForProgram(program);        courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');    });    applyCommFilters();}async function applyCommFilters() {    const centerId = document.getElementById('comm-center').value;    const program = document.getElementById('comm-program').value;    const courseId = document.getElementById('comm-course').value;    const search = document.getElementById('comm-search').value.toLowerCase();    let students = await dbGetAll('students');    students = students.filter(s => s.status === 'active' && s.phone);    if (centerId) students = students.filter(s => s.studyCenterId === centerId);    if (program) students = students.filter(s => s.program === program);    if (courseId) {        const enrollments = await dbGetAll('enrollments');        const enrolledIds = enrollments.filter(e => e.courseId === courseId).map(e => e.studentId);        students = students.filter(s => enrolledIds.includes(s.id));    }    if (search) students = students.filter(s =>         s.name.toLowerCase().includes(search) ||        s.phone.includes(search) ||        (s.admissionNumber || '').toLowerCase().includes(search)    );    const payments = await dbGetAll('payments');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const centers = await dbGetAll('studyCenters');    const tbody = document.getElementById('comm-student-body');    tbody.innerHTML = students.map(s => {        const center = centers.find(c => c.id === s.studyCenterId);        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);        const balance = getCachedStudentFee(s) - paid;        return `<tr data-id="${s.id}">            <td><input type="checkbox" class="comm-row-check" value="${s.id}"></td>            <td><b>${escapeHtml(s.name)}</b></td>            <td>${escapeHtml(s.admissionNumber || '--')}</td>            <td>${escapeHtml(s.program || '--')}</td>            <td>${center ? escapeHtml(center.name) : '--'}</td>            <td>${escapeHtml(s.phone)}</td>            <td>${balance > 0 ? '<span style="color:var(--danger);font-weight:600;">' + formatCurrency(balance) + '</span>' : '<span style="color:var(--success);">Cleared</span>'}</td>            <td><button class="btn btn-sm btn-primary" onclick="sendCommSingle('${s.id}')">Send</button></td>        </tr>`;    }).join('');    document.getElementById('comm-recipient-count').textContent = students.length;    document.getElementById('comm-select-all').checked = false;    updateCommPreviewCount();}function clearCommFilters() {    document.getElementById('comm-center').value = '';    document.getElementById('comm-program').value = '';    document.getElementById('comm-course').innerHTML = '<option value="">All Courses</option>';    document.getElementById('comm-search').value = '';    document.getElementById('comm-template').value = '';    document.getElementById('comm-message').value = '';    document.getElementById('comm-preview-area').style.display = 'none';    applyCommFilters();}let commSearchTimer;function debounceCommSearch() {    clearTimeout(commSearchTimer);    commSearchTimer = setTimeout(applyCommFilters, 200);}async function loadCommTemplate() {    const tplId = document.getElementById('comm-template').value;    if (!tplId) return;    const tpl = await dbGet('whatsappTemplates', tplId);    if (tpl) {        document.getElementById('comm-message').value = tpl.message;        updateCommPreviewCount();    }}async function previewCommMessage() {    const msg = document.getElementById('comm-message').value;    const checked = Array.from(document.querySelectorAll('.comm-row-check:checked')).map(cb => cb.value);    const students = await dbGetAll('students');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const payments = await dbGetAll('payments');    let preview = '';    if (checked.length) {        const s = students.find(st => st.id === checked[0]);        if (s) {            const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);            const balance = getCachedStudentFee(s) - paid;            preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);        }    } else {        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'INST/GEN/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com');    }    const area = document.getElementById('comm-preview-area');    area.textContent = preview;    area.style.display = 'block';}function copyCommMessage() {    const msg = document.getElementById('comm-message').value;    navigator.clipboard.writeText(msg).then(() => showToast('Copied!')).catch(() => showToast('Copy failed'));}function updateCommPreviewCount() {    const checked = document.querySelectorAll('.comm-row-check:checked').length;    const total = document.querySelectorAll('.comm-row-check').length;    const el = document.getElementById('comm-preview-count');    el.textContent = checked ? `${checked} of ${total} selected` : `${total} recipients`;}function toggleCommSelectAll() {    const all = document.getElementById('comm-select-all').checked;    document.querySelectorAll('.comm-row-check').forEach(cb => cb.checked = all);    updateCommPreviewCount();}document.addEventListener('change', e => {    if (e.target.classList.contains('comm-row-check')) updateCommPreviewCount();});async function sendCommSingle(studentId) {    const student = await dbGet('students', studentId);    if (!student || !student.phone) return showToast('No phone number');    const msg = document.getElementById('comm-message').value.trim();    if (!msg) return showToast('Compose a message first');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const payments = await dbGetAll('payments');    const paid = payments.filter(p => p.studentId === student.id).reduce((sum, p) => sum + p.amount, 0);    const balance = getCachedStudentFee(student) - paid;    const resolved = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);    sendWhatsApp(student.phone, resolved);    await dbAdd('whatsappLog', {        id: 'WA-' + Date.now(),        phone: student.phone,        name: student.name,        message: resolved.substring(0, 200),        date: new Date().toISOString().split('T')[0],        time: new Date().toLocaleTimeString(),        template: 'Communication Center',        status: 'sent',        createdAt: new Date().toISOString()    });    showToast(`Sent to ${student.name}`);    renderWhatsAppLog();}async function sendCommBulk() {    const msg = document.getElementById('comm-message').value.trim();    if (!msg) return showToast('Compose a message first');    const checked = Array.from(document.querySelectorAll('.comm-row-check:checked')).map(cb => cb.value);    let students = await dbGetAll('students');    students = students.filter(s => s.status === 'active' && s.phone);    if (checked.length) {        students = students.filter(s => checked.includes(s.id));    }    if (!students.length) return showToast('No recipients');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const template = { name: 'Communication Center' };    closeModal(); // close any open modal    sendWhatsAppBroadcast(students, template, msg, schoolName);}async function getCoursesForProgram(program) {    const [courses, enrollments, students] = await Promise.all([        dbGetAll('courses'),        dbGetAll('enrollments'),        dbGetAll('students')    ]);    const studentIdsInProgram = students.filter(s => s.program === program).map(s => s.id);    const enrolledCourseIds = new Set(enrollments.filter(e => studentIdsInProgram.includes(e.studentId)).map(e => e.courseId));    return courses.filter(c => enrolledCourseIds.has(c.id));}function openVariablePicker(targetTextareaId) {    const vars = ['{{name}}', '{{admission}}', '{{phone}}', '{{program}}', '{{school}}', '{{balance}}', '{{email}}', '{{year}}'];    const html = vars.map(v => `<button class="btn btn-outline btn-xs" style="margin:2px;" onclick="insertVariable('${targetTextareaId}', '${v}')">${v}</button>`).join('');    showModal('Insert Variable', `<div style="display:flex;flex-wrap:wrap;gap:4px;">${html}</div>`);}function insertVariable(textareaId, variable) {    const ta = document.getElementById(textareaId);    const start = ta.selectionStart;    ta.value = ta.value.slice(0, start) + variable + ta.value.slice(start);    ta.focus();    closeModal();}window.loadCommunicationPage = loadCommunicationPage;
+async function loadCommunicationPage() {    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');    if (u.role !== 'admin') return showToast('Admin only.', { type: 'danger' });    const [students, centers, programs, templates] = await Promise.all([        dbGetAll('students'),        getCenters(),        getProgramsList(),        dbGetAll('whatsappTemplates')    ]);    const activeStudents = students.filter(s => s.status === 'active' && s.phone);    const centerOptions = centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.code})</option>`).join('');    const programOptions = programs.map(p => `<option value="${p}">${escapeHtml(p)}</option>`).join('');    const templateOptions = templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');    document.getElementById('communication-content').innerHTML = `        <div class="page-header">            <h2>📱 Communication Center</h2>            <p style="color:var(--text-muted);font-size:13px;">Filter students, compose a message, and send via WhatsApp (individual or bulk).</p>        </div>        <div class="card" style="margin-bottom:16px;">            <div class="card-header"><b>Filters</b></div>            <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">                <div class="form-group" style="flex:1;min-width:180px;">                    <label>Study Center</label>                    <select id="comm-center" class="form-control"><option value="">All Centers</option>${centerOptions}</select>                </div>                <div class="form-group" style="flex:1;min-width:180px;">                    <label>Program</label>                    <select id="comm-program" class="form-control"><option value="">All Programs</option>${programOptions}</select>                </div>                <div class="form-group" style="flex:1;min-width:180px;">                    <label>Course</label>                    <select id="comm-course" class="form-control"><option value="">All Courses</option></select>                </div>                <div class="form-group" style="flex:1;min-width:200px;">                    <label>Search</label>                    <input type="text" id="comm-search" class="form-control" placeholder="Name, phone, admission..." oninput="debounceCommSearch()">                </div>                <button class="btn btn-primary" onclick="applyCommFilters()" style="height:38px;">🔍 Apply</button>                <button class="btn btn-outline" onclick="clearCommFilters()" style="height:38px;">✖ Clear</button>            </div>        </div>        <div class="card" style="margin-bottom:16px;">            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">                <b>Message</b>                <select id="comm-template" class="form-control" style="width:auto;min-width:220px;" onchange="loadCommTemplate()">                    <option value="">— Select Template —</option>${templateOptions}                </select>            </div>            <div class="card-body">                <div class="form-group"><label>Message (variables: {{name}}, {{admission}}, {{phone}}, {{program}}, {{school}}, {{balance}}, {{email}})</label>                    <textarea id="comm-message" rows="4" class="form-control" style="font-family:monospace;font-size:13px;"></textarea>                </div>                <div style="display:flex;gap:8px;flex-wrap:wrap;">                    <button class="btn btn-outline" onclick="previewCommMessage()">👁 Preview</button>                    <button class="btn btn-outline" onclick="copyCommMessage()">📋 Copy</button>                    <button class="btn btn-outline" onclick="openVariablePicker('comm-message')">🔤 Variables</button>                    <span id="comm-preview-count" style="align-self:center;font-size:12px;color:var(--text-muted);"></span>                </div>                <div id="comm-preview-area" style="display:none;margin-top:10px;padding:10px;background:var(--bg-input);border-radius:6px;font-size:12px;white-space:pre-line;"></div>            </div>        </div>        <div class="card">            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">                <b>Recipients (<span id="comm-recipient-count">0</span>)</b>                <div style="display:flex;gap:8px;">                    <button class="btn btn-success" onclick="sendCommBulk()">📤 Send to All (Bulk)</button>                </div>            </div>            <div class="card-body" style="padding:0;overflow-x:auto;">                <table class="data-table" style="min-width:700px;">                    <thead>                        <tr>                            <th style="width:40px;"><input type="checkbox" id="comm-select-all" onchange="toggleCommSelectAll()"></th>                            <th>Name</th>                            <th>Admission No.</th>                            <th>Program</th>                            <th>Center</th>                            <th>Phone</th>                            <th>Balance</th>                            <th style="width:90px;">Action</th>                        </tr>                    </thead>                    <tbody id="comm-student-body"></tbody>                </table>            </div>        </div>    `;    document.getElementById('comm-program').addEventListener('change', async function() {        const program = this.value;        const courseSelect = document.getElementById('comm-course');        if (!program) {            courseSelect.innerHTML = '<option value="">All Courses</option>';            return;        }        const courses = await getCoursesForProgram(program);        courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');    });    applyCommFilters();}async function applyCommFilters() {    const centerId = document.getElementById('comm-center').value;    const program = document.getElementById('comm-program').value;    const courseId = document.getElementById('comm-course').value;    const search = document.getElementById('comm-search').value.toLowerCase();    let students = await dbGetAll('students');    students = students.filter(s => s.status === 'active' && s.phone);    if (centerId) students = students.filter(s => s.studyCenterId === centerId);    if (program) students = students.filter(s => s.program === program);    if (courseId) {        const enrollments = await dbGetAll('enrollments');        const enrolledIds = enrollments.filter(e => e.courseId === courseId).map(e => e.studentId);        students = students.filter(s => enrolledIds.includes(s.id));    }    if (search) students = students.filter(s =>         s.name.toLowerCase().includes(search) ||        s.phone.includes(search) ||        (s.admissionNumber || '').toLowerCase().includes(search)    );    const payments = await dbGetAll('payments');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const centers = await getCenters();    const tbody = document.getElementById('comm-student-body');    tbody.innerHTML = students.map(s => {        const center = centers.find(c => c.id === s.studyCenterId);        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);        const balance = getCachedStudentFee(s) - paid;        return `<tr data-id="${s.id}">            <td><input type="checkbox" class="comm-row-check" value="${s.id}"></td>            <td><b>${escapeHtml(s.name)}</b></td>            <td>${escapeHtml(s.admissionNumber || '--')}</td>            <td>${escapeHtml(s.program || '--')}</td>            <td>${center ? escapeHtml(center.name) : '--'}</td>            <td>${escapeHtml(s.phone)}</td>            <td>${balance > 0 ? '<span style="color:var(--danger);font-weight:600;">' + formatCurrency(balance) + '</span>' : '<span style="color:var(--success);">Cleared</span>'}</td>            <td><button class="btn btn-sm btn-primary" onclick="sendCommSingle('${s.id}')">Send</button></td>        </tr>`;    }).join('');    document.getElementById('comm-recipient-count').textContent = students.length;    document.getElementById('comm-select-all').checked = false;    updateCommPreviewCount();}function clearCommFilters() {    document.getElementById('comm-center').value = '';    document.getElementById('comm-program').value = '';    document.getElementById('comm-course').innerHTML = '<option value="">All Courses</option>';    document.getElementById('comm-search').value = '';    document.getElementById('comm-template').value = '';    document.getElementById('comm-message').value = '';    document.getElementById('comm-preview-area').style.display = 'none';    applyCommFilters();}let commSearchTimer;function debounceCommSearch() {    clearTimeout(commSearchTimer);    commSearchTimer = setTimeout(applyCommFilters, 200);}async function loadCommTemplate() {    const tplId = document.getElementById('comm-template').value;    if (!tplId) return;    const tpl = await dbGet('whatsappTemplates', tplId);    if (tpl) {        document.getElementById('comm-message').value = tpl.message;        updateCommPreviewCount();    }}async function previewCommMessage() {    const msg = document.getElementById('comm-message').value;    const checked = Array.from(document.querySelectorAll('.comm-row-check:checked')).map(cb => cb.value);    const students = await dbGetAll('students');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const payments = await dbGetAll('payments');    let preview = '';    if (checked.length) {        const s = students.find(st => st.id === checked[0]);        if (s) {            const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);            const balance = getCachedStudentFee(s) - paid;            preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);        }    } else {        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'INST/GEN/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com');    }    const area = document.getElementById('comm-preview-area');    area.textContent = preview;    area.style.display = 'block';}function copyCommMessage() {    const msg = document.getElementById('comm-message').value;    navigator.clipboard.writeText(msg).then(() => showToast('Copied!')).catch(() => showToast('Copy failed'));}function updateCommPreviewCount() {    const checked = document.querySelectorAll('.comm-row-check:checked').length;    const total = document.querySelectorAll('.comm-row-check').length;    const el = document.getElementById('comm-preview-count');    el.textContent = checked ? `${checked} of ${total} selected` : `${total} recipients`;}function toggleCommSelectAll() {    const all = document.getElementById('comm-select-all').checked;    document.querySelectorAll('.comm-row-check').forEach(cb => cb.checked = all);    updateCommPreviewCount();}document.addEventListener('change', e => {    if (e.target.classList.contains('comm-row-check')) updateCommPreviewCount();});async function sendCommSingle(studentId) {    const student = await dbGet('students', studentId);    if (!student || !student.phone) return showToast('No phone number');    const msg = document.getElementById('comm-message').value.trim();    if (!msg) return showToast('Compose a message first');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const payments = await dbGetAll('payments');    const paid = payments.filter(p => p.studentId === student.id).reduce((sum, p) => sum + p.amount, 0);    const balance = getCachedStudentFee(student) - paid;    const resolved = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);    sendWhatsApp(student.phone, resolved);    await dbAdd('whatsappLog', {        id: 'WA-' + Date.now(),        phone: student.phone,        name: student.name,        message: resolved.substring(0, 200),        date: new Date().toISOString().split('T')[0],        time: new Date().toLocaleTimeString(),        template: 'Communication Center',        status: 'sent',        createdAt: new Date().toISOString()    });    showToast(`Sent to ${student.name}`);    renderWhatsAppLog();}async function sendCommBulk() {    const msg = document.getElementById('comm-message').value.trim();    if (!msg) return showToast('Compose a message first');    const checked = Array.from(document.querySelectorAll('.comm-row-check:checked')).map(cb => cb.value);    let students = await dbGetAll('students');    students = students.filter(s => s.status === 'active' && s.phone);    if (checked.length) {        students = students.filter(s => checked.includes(s.id));    }    if (!students.length) return showToast('No recipients');    const branding = await dbGet('settings', 'branding');    const schoolName = branding ? branding.schoolName : 'College';    const template = { name: 'Communication Center' };    closeModal(); // close any open modal    sendWhatsAppBroadcast(students, template, msg, schoolName);}async function getCoursesForProgram(program) {    const [courses, enrollments, students] = await Promise.all([        dbGetAll('courses'),        dbGetAll('enrollments'),        dbGetAll('students')    ]);    const studentIdsInProgram = students.filter(s => s.program === program).map(s => s.id);    const enrolledCourseIds = new Set(enrollments.filter(e => studentIdsInProgram.includes(e.studentId)).map(e => e.courseId));    return courses.filter(c => enrolledCourseIds.has(c.id));}function openVariablePicker(targetTextareaId) {    const vars = ['{{name}}', '{{admission}}', '{{phone}}', '{{program}}', '{{school}}', '{{balance}}', '{{email}}', '{{year}}'];    const html = vars.map(v => `<button class="btn btn-outline btn-xs" style="margin:2px;" onclick="insertVariable('${targetTextareaId}', '${v}')">${v}</button>`).join('');    showModal('Insert Variable', `<div style="display:flex;flex-wrap:wrap;gap:4px;">${html}</div>`);}function insertVariable(textareaId, variable) {    const ta = document.getElementById(textareaId);    const start = ta.selectionStart;    ta.value = ta.value.slice(0, start) + variable + ta.value.slice(start);    ta.focus();    closeModal();}window.loadCommunicationPage = loadCommunicationPage;
 async function renderAudit() {
     const audit = await dbGetAll('audit');
     const from = document.getElementById('audit-from').value;
@@ -9581,7 +9617,8 @@ async function toggleNotificationDropdown() {
     // Admin: pending registrations
     if (!isStudent) {
         try {
-            const students = await dbGetAll('students');
+    const regionalIds = await getRegionalStudentIdSet();
+    const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
             const pending = students.filter(s => s.status === 'pending');
             if (pending.length > 0) {
                 items.push({ icon: '👤', title: pending.length + ' Pending Registration(s)', desc: 'Review and approve new student registrations.', time: '', action: () => { closeNotifDropdown(); showScreen('pending'); }, deleteAfter: false });
@@ -9652,17 +9689,20 @@ let progressDataCache = null;
 let progressSearchDebounce = null;
 async function loadProgressData() {
     if (progressDataCache) return progressDataCache;
-    progressDataCache = {
-        students: await dbGetAll('students'),
-        courses: await dbGetAll('courses'),
-        enrollments: await dbGetAll('enrollments'),
-        lessons: await dbGetAll('lessons'),
-        quizzes: await dbGetAll('quizzes'),
-        submissions: await dbGetAll('submissions'),
-        attendance: await dbGetAll('attendance'),
-        grades: await dbGetAll('grades'),
-        loadedAt: Date.now()
-    };
+    const [allStudents, courses, allEnrollments, lessons, quizzes, allSubmissions, allAttendance, allGrades] = await Promise.all([
+        dbGetAll('students'), dbGetAll('courses'), dbGetAll('enrollments'), dbGetAll('lessons'), dbGetAll('quizzes'), dbGetAll('submissions'), dbGetAll('attendance'), dbGetAll('grades')
+    ]);
+    const regionalIds = await getRegionalStudentIdSet();
+    let students = allStudents, enrollments = allEnrollments, submissions = allSubmissions, attendance = allAttendance, grades = allGrades;
+    if (regionalIds) {
+        students = allStudents.filter(s => regionalIds.has(s.id));
+        const sidSet = new Set(students.map(s => s.id));
+        enrollments = allEnrollments?.filter(r => sidSet.has(r.studentId));
+        submissions = allSubmissions?.filter(r => sidSet.has(r.studentId));
+        attendance = allAttendance?.filter(r => sidSet.has(r.studentId));
+        grades = allGrades?.filter(r => sidSet.has(r.studentId));
+    }
+    progressDataCache = { students, courses, enrollments, lessons, quizzes, submissions, attendance, grades, loadedAt: Date.now() };
     return progressDataCache;
 }
 function invalidateProgressCache() {
@@ -10102,12 +10142,25 @@ let portalSearchDebounce = null;
 let portalSelectedStudent = null;
 async function loadPortalData() {
     if (portalDataCache) return portalDataCache;
-    const [students, courses, lessons, notes, quizzes, submissions, grades, payments, attendance, enrollments, quizRegistrations, lessonFiles, examRegistrations, exams] = await Promise.all([
+    const [allStudents, courses, lessons, notes, allQuizzes, allSubmissions, allGrades, allPayments, allAttendance, allEnrollments, allQuizRegistrations, lessonFiles, allExamRegistrations, exams] = await Promise.all([
         dbGetAll('students'), dbGetAll('courses'), dbGetAll('lessons'), dbGetAll('notes'),
         dbGetAll('quizzes'), dbGetAll('submissions'), dbGetAll('grades'), dbGetAll('payments'),
         dbGetAll('attendance'), dbGetAll('enrollments'), dbGetAll('quizRegistrations'),
         dbGetAll('lessonFiles'), dbGetAll('examRegistrations'), dbGetAll('exams')
     ]);
+    const regionalIds = await getRegionalStudentIdSet();
+    let students = allStudents, submissions = allSubmissions, grades = allGrades, payments = allPayments, attendance = allAttendance, enrollments = allEnrollments, quizRegistrations = allQuizRegistrations, examRegistrations = allExamRegistrations, quizzes = allQuizzes;
+    if (regionalIds) {
+        students = allStudents.filter(s => regionalIds.has(s.id));
+        const sidSet = new Set(students.map(s => s.id));
+        submissions = allSubmissions?.filter(r => sidSet.has(r.studentId));
+        grades = allGrades?.filter(r => sidSet.has(r.studentId));
+        payments = allPayments?.filter(r => sidSet.has(r.studentId));
+        attendance = allAttendance?.filter(r => sidSet.has(r.studentId));
+        enrollments = allEnrollments?.filter(r => sidSet.has(r.studentId));
+        quizRegistrations = allQuizRegistrations?.filter(r => sidSet.has(r.studentId));
+        examRegistrations = allExamRegistrations?.filter(r => sidSet.has(r.studentId));
+    }
     portalDataCache = { students, courses, lessons, notes, quizzes, submissions, grades, payments, attendance, enrollments, quizRegistrations, lessonFiles, examRegistrations, exams, loadedAt: Date.now() };
     return portalDataCache;
 }
@@ -10429,7 +10482,7 @@ async function viewPortalTranscript() {
 }
 async function renderPendingRegistrations() {
     const students = await filterByRegion(await dbGetAll('students'), s => s.studyCenterId);
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const pending = students.filter(s => s.status === 'pending');
     const approved = (await dbGetAll('users')).filter(u => u.role === 'student').length;
     document.getElementById('pending-stats').innerHTML = `
@@ -10464,7 +10517,7 @@ async function renderPendingRegistrations() {
 async function editRegistration(studentId) {
     const student = await dbGet('students', studentId);
     if (!student) return;
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const programs = await getProgramsList();
     const center = centers.find(c => c.id === student.studyCenterId);
     const html = `<div style="padding:4px;">
@@ -10514,7 +10567,7 @@ async function openApproveModal(studentId) {
     const student = await dbGet('students', studentId);
     if (!student) return showToast('Student not found!');
     if (student.status !== 'pending') return showToast('This registration is no longer pending.');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const programs = await getProgramsList();
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
@@ -11741,7 +11794,7 @@ function renderManuals() {
         coordinatorCenterIds = (window._allCentersCache || []).filter(c => c.regionId === currentUser.regionId).map(c => c.id);
     }
     const centerFilter = document.getElementById('mf-center-filter')?.value || '';
-    Promise.all([dbGetAll('manuals'), dbGetAll('courses'), dbGetAll('students'), dbGetAll('studyCenters')]).then(([docs, courses, students, centers]) => {
+    Promise.all([dbGetAll('manuals'), dbGetAll('courses'), dbGetAll('students'), getCenters()]).then(([docs, courses, students, centers]) => {
         let studentCenterId = '';
         if (isStudentUser) {
             const studentId = currentUser.studentId || currentUser.username;
@@ -11816,7 +11869,7 @@ function switchManualTab(tab) {
     else { btns[1].classList.add('active'); document.getElementById('manuals-distributed').style.display = 'block'; }
 }
 function showManualForm(existingId) {
-    Promise.all([dbGetAll('courses'), dbGetAll('studyCenters')]).then(([courses, centers]) => {
+    Promise.all([dbGetAll('courses'), getCenters()]).then(([courses, centers]) => {
         const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         const isCoordinator = currentUser && currentUser.role === 'coordinator';
         let coordinatorCenterIds = [];
@@ -12384,7 +12437,7 @@ async function loadMpesaSettings() {
 }
 async function getAdmissionPreviewContext() {
     const branding = await dbGet('settings', 'branding');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const initials = (branding && branding.initials) ? branding.initials : 'XX';
     const now = new Date();
     const month = now.getMonth() + 1;
@@ -12618,7 +12671,7 @@ async function migrateIndexedDB() {
     }
 }
 async function renderStudyCenters() {
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const branding = await dbGet('settings', 'branding');
     const initials = (branding && branding.initials) ? branding.initials : 'XX';
     const now = new Date();
@@ -12948,7 +13001,7 @@ function highlightSearchItem() {
 async function exportStudentsCSV() {
     const students = await dbGetAll('students');
     const payments = await dbGetAll('payments');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     let csv = 'Admission #,Name,Email,Phone,Program,Year,Study Center,Status,Fee Amount,Paid,Balance,Enroll Date\n';
     students.forEach(s => {
         const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
@@ -14140,7 +14193,7 @@ async function showRegionDetail(regionId) {
     if (!_canAccessRegion(regionId)) return showToast('Access denied: this region is outside your scope.', { type: 'danger' });
     const region = await dbGet('regions', regionId);
     if (!region) return showToast('Region not found');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const students = await dbGetAll('students');
     const attendance = await dbGetAll('attendance');
     const payments = await dbGetAll('payments');
@@ -14229,7 +14282,7 @@ async function showCenterDetail(centerId) {
 
 async function renderRegions() {
     const regions = await dbGetAll('regions');
-    const centers = await dbGetAll('studyCenters');
+    const centers = await getCenters();
     const users = await dbGetAll('users');
     const students = await dbGetAll('students');
     document.getElementById('regions-overview').innerHTML = regions.length ? regions.map(r => {
@@ -14328,7 +14381,7 @@ async function confirmTransferCoordinator(username) {
 async function manageRegionCenters(regionId) {
     const region = await dbGet('regions', regionId);
     if (!region) return showToast('Region not found');
-    const allCenters = await dbGetAll('studyCenters');
+    const allCenters = await getCenters();
     const regionCenters = allCenters.filter(c => c.regionId === regionId);
     const unassigned = allCenters.filter(c => !c.regionId);
     const otherRegionCenters = allCenters.filter(c => c.regionId && c.regionId !== regionId);
