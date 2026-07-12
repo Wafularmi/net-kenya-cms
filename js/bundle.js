@@ -351,9 +351,9 @@ function getRoleColor(role) {
 function getRolePermissions(role) {
     const perms = {
         admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
-        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
-        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','messages','discussions'],
-        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','messages','discussions'],
+        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
+        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions'],
+        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         student: ['dashboard','student-hub','library','tickets','discussions'],
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions']
@@ -782,6 +782,8 @@ async function showApp(user) {
     document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
     buildNavigation(user);
+    const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
+    if (msgBtn) msgBtn.style.display = (user.role === 'admin' || user.role === 'coordinator') ? '' : 'none';
     updateHeaderDate();
     setInterval(updateHeaderDate, 60000);
     await loadBranding();
@@ -11686,6 +11688,11 @@ let manualRefreshTimer = null;
 function renderManuals() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
+    const isCoordinator = currentUser && currentUser.role === 'coordinator';
+    let coordinatorCenterIds = [];
+    if (isCoordinator && currentUser.regionId) {
+        coordinatorCenterIds = (window._allCentersCache || []).filter(c => c.regionId === currentUser.regionId).map(c => c.id);
+    }
     const centerFilter = document.getElementById('mf-center-filter')?.value || '';
     Promise.all([dbGetAll('manuals'), dbGetAll('courses'), dbGetAll('students'), dbGetAll('studyCenters')]).then(([docs, courses, students, centers]) => {
         let studentCenterId = '';
@@ -11694,15 +11701,16 @@ function renderManuals() {
             const me = students.find(s => s.id === studentId);
             studentCenterId = me?.studyCenterId || '';
         }
-        const active = docs.filter(d => d.status === 'active' && (isStudentUser ? (!studentCenterId || d.studyCenterId === studentCenterId) : (!centerFilter || d.studyCenterId === centerFilter)));
-        const distributed = docs.filter(d => d.status === 'distributed' && (isStudentUser ? (!studentCenterId || d.studyCenterId === studentCenterId) : (!centerFilter || d.studyCenterId === centerFilter)));
+        const filterCenters = isCoordinator ? centers.filter(c => coordinatorCenterIds.includes(c.id)) : centers;
+        const active = docs.filter(d => d.status === 'active' && (isStudentUser ? (!studentCenterId || d.studyCenterId === studentCenterId) : isCoordinator ? coordinatorCenterIds.includes(d.studyCenterId) : (!centerFilter || d.studyCenterId === centerFilter)));
+        const distributed = docs.filter(d => d.status === 'distributed' && (isStudentUser ? (!studentCenterId || d.studyCenterId === studentCenterId) : isCoordinator ? coordinatorCenterIds.includes(d.studyCenterId) : (!centerFilter || d.studyCenterId === centerFilter)));
         const getCenterName = (id) => { const c = centers.find(x => x.id === id); return c ? c.name : id || ''; };
         let html = `<div class="card">
             <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
                 <h3>Student Manual Distribution</h3>
                 <div style="display:flex;align-items:center;gap:10px">
-                    ${isStudentUser ? `<span style="font-size:12px;color:var(--text-muted);">${getCenterName(studentCenterId)}</span>` : `<select id="mf-center-filter" onchange="renderManuals()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:180px"><option value="">All Centers</option>${centers.map(c => `<option value="${c.id}" ${c.id === centerFilter ? 'selected' : ''}>${c.name}</option>`).join('')}</select>`}
-                    ${isStudentUser ? '' : '<button class="btn btn-primary" onclick="showManualForm()">+ New Manual Distribution</button>'}
+                    ${isStudentUser ? `<span style="font-size:12px;color:var(--text-muted);">${getCenterName(studentCenterId)}</span>` : `<select id="mf-center-filter" onchange="renderManuals()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-width:180px"><option value="">${isCoordinator ? 'All Centers in Region' : 'All Centers'}</option>${filterCenters.map(c => `<option value="${c.id}" ${c.id === centerFilter ? 'selected' : ''}>${c.name}</option>`).join('')}</select>`}
+                    ${isStudentUser || isCoordinator ? '' : '<button class="btn btn-primary" onclick="showManualForm()">+ New Manual Distribution</button>'}
                 </div>
             </div>`;
         html += `<div class="tabs">
@@ -11762,6 +11770,13 @@ function switchManualTab(tab) {
 }
 function showManualForm(existingId) {
     Promise.all([dbGetAll('courses'), dbGetAll('studyCenters')]).then(([courses, centers]) => {
+        const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const isCoordinator = currentUser && currentUser.role === 'coordinator';
+        let coordinatorCenterIds = [];
+        if (isCoordinator && currentUser.regionId) {
+            coordinatorCenterIds = (window._allCentersCache || []).filter(c => c.regionId === currentUser.regionId).map(c => c.id);
+            centers = centers.filter(c => coordinatorCenterIds.includes(c.id));
+        }
         let title = existingId ? 'Edit Manual Distribution' : 'New Manual Distribution';
         let content = '';
         if (!existingId) {
