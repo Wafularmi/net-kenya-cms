@@ -1313,11 +1313,36 @@ async function renderOnlineUsers() {
         const res = await fetch('/api/online');
         const data = await res.json();
         const el = document.getElementById('dash-online');
-        if (el) {
-            const students = data.users.filter(u2 => u2.role === 'student');
-            const staff = data.users.filter(u2 => u2.role !== 'student');
-            el.innerHTML = `<div style="padding:12px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-weight:700;">Online Now</span><span style="font-size:18px;font-weight:800;color:var(--success);">${data.count}</span></div>${data.count > 0 ? `<div style="font-size:11px;color:var(--text-muted);">${students.length} student${students.length !== 1 ? 's' : ''}${staff.length ? ` · ${staff.length} staff` : ''}</div><div style="margin-top:8px;max-height:120px;overflow-y:auto;">${data.users.slice(0, 10).map(u2 => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border);"><span>${u2.name}</span><span class="badge badge-${u2.role === 'student' ? 'info' : 'success'}" style="font-size:9px;">${u2.role}</span></div>`).join('')}</div>` : '<div style="font-size:11px;color:var(--text-muted);text-align:center;">No users currently online</div>'}</div>`;
+        if (!el) return;
+        const isCoordinator = u.role === 'coordinator';
+        const isAdmin = u.role === 'admin';
+        let filteredUsers = data.users;
+        let filteredCount = data.count;
+        if (isCoordinator && u.regionId) {
+            const batch = await dbGetBatch(['students']);
+            const regionalStudents = await filterByRegion(batch.students, s => s.studyCenterId);
+            const regionalNames = new Set(regionalStudents.map(s => s.name?.toLowerCase()));
+            filteredUsers = data.users.filter(u2 => u2.role !== 'student' || regionalNames.has(u2.name?.toLowerCase()));
+            filteredCount = filteredUsers.length;
         }
+        const students = filteredUsers.filter(u2 => u2.role === 'student');
+        const staff = filteredUsers.filter(u2 => u2.role !== 'student');
+        let regionBreakdown = '';
+        if (isAdmin && window.__regionMap && window._allCentersCache) {
+            const batch = await dbGetBatch(['students']);
+            const regions = Object.entries(window.__regionMap);
+            const centers = window._allCentersCache;
+            const regionCounts = regions.map(([rid, rname]) => {
+                const cIds = centers.filter(c => c.regionId === rid).map(c => c.id);
+                const regionalStudentNames = new Set(batch.students.filter(s => cIds.includes(s.studyCenterId)).map(s => s.name?.toLowerCase()));
+                const onlineInRegion = data.users.filter(u2 => u2.role === 'student' && regionalStudentNames.has(u2.name?.toLowerCase())).length;
+                return { name: rname, count: onlineInRegion };
+            }).filter(r => r.count > 0);
+            if (regionCounts.length) {
+                regionBreakdown = `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;">${regionCounts.map(r => `<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>${r.name}</span><span style="font-weight:600;color:var(--success);">${r.count} online</span></div>`).join('')}</div>`;
+            }
+        }
+        el.innerHTML = `<div style="padding:12px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-weight:700;">Online Now</span><span style="font-size:18px;font-weight:800;color:var(--success);">${filteredCount}</span></div>${filteredCount > 0 ? `<div style="font-size:11px;color:var(--text-muted);">${students.length} student${students.length !== 1 ? 's' : ''}${staff.length ? ` · ${staff.length} staff` : ''}</div><div style="margin-top:8px;max-height:120px;overflow-y:auto;">${filteredUsers.slice(0, 10).map(u2 => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border);"><span>${u2.name}</span><span class="badge badge-${u2.role === 'student' ? 'info' : 'success'}" style="font-size:9px;">${u2.role}</span></div>`).join('')}</div>${regionBreakdown}` : '<div style="font-size:11px;color:var(--text-muted);text-align:center;">No users currently online</div>'}</div>`;
     } catch {}
 }
 function stopAutoRefresh() {
@@ -1618,6 +1643,8 @@ async function renderDashboard() {
 }
 async function renderServerHealth() {
     try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u.role === 'student' || u.role === 'coordinator') return;
         const el = document.getElementById('dash-server-health');
         if (!el) return;
         const [health, net] = await Promise.all([
