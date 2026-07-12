@@ -12407,6 +12407,16 @@ async function loadCoordinatorAccess() {
     if (el('coord-access-exams')) el('coord-access-exams').checked = s ? s.exams !== false : true;
     if (el('coord-access-lessons')) el('coord-access-lessons').checked = s ? s.lessons !== false : true;
     if (el('coord-access-grades')) el('coord-access-grades').checked = s ? s.grades !== false : true;
+    ['exams','lessons','grades'].forEach(k => updateCoordAccessLabel(k));
+}
+function updateCoordAccessLabel(key) {
+    const cb = document.getElementById('coord-access-' + key);
+    const status = document.getElementById('coord-access-' + key + '-status');
+    if (cb && status) {
+        const on = cb.checked;
+        status.textContent = on ? 'ON' : 'OFF';
+        status.style.color = on ? 'var(--success)' : 'var(--danger)';
+    }
 }
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };

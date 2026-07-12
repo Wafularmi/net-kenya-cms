@@ -694,24 +694,33 @@
                         <div class="form-group">
                             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
                                 <span style="font-size:13px;">Examinations</span>
-                                <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
-                                    <input type="checkbox" id="coord-access-exams" style="opacity:0;width:0;height:0;">
-                                    <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
-                                </label>
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                        <input type="checkbox" id="coord-access-exams" onchange="updateCoordAccessLabel('exams')" style="opacity:0;width:0;height:0;">
+                                        <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                                    </label>
+                                    <span id="coord-access-exams-status" style="font-size:12px;font-weight:700;min-width:34px;"></span>
+                                </div>
                             </div>
                             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
                                 <span style="font-size:13px;">Lessons</span>
-                                <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
-                                    <input type="checkbox" id="coord-access-lessons" style="opacity:0;width:0;height:0;">
-                                    <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
-                                </label>
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                        <input type="checkbox" id="coord-access-lessons" onchange="updateCoordAccessLabel('lessons')" style="opacity:0;width:0;height:0;">
+                                        <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                                    </label>
+                                    <span id="coord-access-lessons-status" style="font-size:12px;font-weight:700;min-width:34px;"></span>
+                                </div>
                             </div>
                             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
                                 <span style="font-size:13px;">Grades</span>
-                                <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
-                                    <input type="checkbox" id="coord-access-grades" style="opacity:0;width:0;height:0;">
-                                    <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
-                                </label>
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                        <input type="checkbox" id="coord-access-grades" onchange="updateCoordAccessLabel('grades')" style="opacity:0;width:0;height:0;">
+                                        <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                                    </label>
+                                    <span id="coord-access-grades-status" style="font-size:12px;font-weight:700;min-width:34px;"></span>
+                                </div>
                             </div>
                         </div>
                         <button class="btn btn-primary" onclick="saveCoordinatorAccess()">Save Coordinator Access</button>
@@ -861,7 +870,7 @@
     </div>
 </div>
 
-    <script src="js/bundle.js?v=198"></script>
+    <script src="js/bundle.js?v=199"></script>
     <script src="js/student-hub.js?v=7"></script>
     <script src="js/discussions.js?v=5"></script>
     <script src="js/help.js?v=3"></script>
