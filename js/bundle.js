@@ -4222,8 +4222,8 @@ async function populateGraduationFilters() {
 async function checkGraduation() {
     const program = document.getElementById('grad-program').value;
     const year = document.getElementById('grad-year').value;
-    if (!program && !year) return showToast('Select program or year!');
-    const students = await filterByRegion((await dbGetAll('students')).filter(s => s.status === 'active' && (program ? s.program === program : true) && (year ? s.year == year : true)), s => s.studyCenterId);
+    if (!program && (!year || year === 'all')) return showToast('Select program or year!');
+    const students = await filterByRegion((await dbGetAll('students')).filter(s => s.status === 'active' && (program ? s.program === program : true) && (year && year !== 'all' ? s.year == year : true)), s => s.studyCenterId);
     const grades = await dbGetAll('grades');
     const courses = await dbGetAll('courses');
     const chapel = await dbGetAll('chapel');
@@ -4280,11 +4280,11 @@ async function checkGraduation() {
 async function generateGraduationList() {
     const program = document.getElementById('grad-program').value;
     const year = document.getElementById('grad-year').value;
-    if (!program && !year) return showToast('Select program or year!');
+    if (!program && (!year || year === 'all')) return showToast('Select program or year!');
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     const initials = branding ? branding.initials : 'CM';
-    const students = await filterByRegion((await dbGetAll('students')).filter(s => s.status === 'active' && (program ? s.program === program : true) && (year ? s.year == year : true)), s => s.studyCenterId);
+    const students = await filterByRegion((await dbGetAll('students')).filter(s => s.status === 'active' && (program ? s.program === program : true) && (year && year !== 'all' ? s.year == year : true)), s => s.studyCenterId);
     const grades = await dbGetAll('grades');
     const courses = await dbGetAll('courses');
     const chapel = await dbGetAll('chapel');
