@@ -4510,9 +4510,19 @@ async function generateGraduationSeating() {
     const gradId = 'GRAD-' + (program || 'ALL') + '-' + (year || 'ALL');
     const existing = (await dbGetAll('seating')).filter(s => s.examId === gradId);
     for (const e of existing) await dbDelete('seating', e.id);
-    const shuffled = eligible.sort(() => Math.random() - 0.5);
+    const sorted = [...eligible].sort((a, b) => {
+        const aParts = (a.name || '').split(' ');
+        const bParts = (b.name || '').split(' ');
+        const aLast = aParts.pop() || '';
+        const bLast = bParts.pop() || '';
+        const aFirst = aParts.shift() || '';
+        const bFirst = bParts.shift() || '';
+        const aMiddle = aParts.join(' ');
+        const bMiddle = bParts.join(' ');
+        return aLast.localeCompare(bLast) || aFirst.localeCompare(bFirst) || aMiddle.localeCompare(bMiddle);
+    });
     let seatNum = 1;
-    for (const s of shuffled) {
+    for (const s of sorted) {
         await dbPut('seating', { id: `SEAT-${gradId}-${s.id}`, examId: gradId, studentId: s.id, studentName: s.name, studentProgram: s.program, seatNumber: seatNum, createdAt: new Date().toISOString() });
         seatNum++;
     }
