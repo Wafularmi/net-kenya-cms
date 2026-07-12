@@ -2081,30 +2081,68 @@ document.getElementById('student-filter-campus').addEventListener('change', rend
 document.getElementById('student-filter-program').addEventListener('change', renderStudents);
 
 async function renderStaff() {
-    const batchResult = await dbGetBatch(['staff', 'campuses']);
+    const [batchResult, users] = await Promise.all([
+        dbGetBatch(['staff', 'campuses']),
+        dbGetAll('users')
+    ]);
     const staff = batchResult.staff || [];
     const campuses = batchResult.campuses || [];
+    const coordinators = users.filter(u => u.role === 'coordinator').map(u => ({
+        id: '__coord__' + u.username,
+        name: u.name,
+        email: u.email || '',
+        phone: u.username,
+        role: 'coordinator',
+        campus: '',
+        department: u.regionId ? ((window.__regionMap && window.__regionMap[u.regionId]) || u.regionId) : '',
+        status: 'active',
+        _user: u
+    }));
+    const allStaff = [...staff, ...coordinators];
     const search = document.getElementById('staff-search').value.toLowerCase();
-    const filtered = staff.filter(s => {
+    const filtered = allStaff.filter(s => {
         const nameMatch = s.name && s.name.toLowerCase().includes(search);
-        const roleMatch = s.role && s.role.toLowerCase().includes(search);
+        const roleMatch = (s.role || '').toLowerCase().includes(search);
         const deptMatch = s.department && s.department.toLowerCase().includes(search);
         return !search || nameMatch || roleMatch || deptMatch;
     });
     filtered.sort((a, b) => a.name.localeCompare(b.name));
     document.getElementById('staff-body').innerHTML = filtered.map(s => {
+        const isCoord = s.id && s.id.startsWith('__coord__');
         const campus = campuses.find(c => c.id === s.campus);
-        const statusClass = s.status === 'active' ? 'success' : s.status === 'on-leave' ? 'warning' : 'danger';
-        return `<tr><td style="width:40px;">${s.photo ? `<img src="${s.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:1px solid var(--border);">` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);">${(s.name || '?').charAt(0).toUpperCase()}</div>`}</td><td><b>${s.id}</b></td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || s.phone || ''}</div></td><td>${s.role || '--'}</td><td>${s.department || '--'}</td><td>${campus ? campus.name : 'Main'}</td><td>${s.phone || '--'}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span></td><td><button class="btn btn-outline btn-sm" onclick="editStaff('${s.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStaff('${s.id}')">Del</button></td></tr>`;
+        const statusClass = isCoord ? 'success' : (s.status === 'active' ? 'success' : s.status === 'on-leave' ? 'warning' : 'danger');
+        const roleDisplay = isCoord ? '<span class="badge badge-warning">Coordinator</span>' : (s.role || '--');
+        const subInfo = isCoord ? ('Login: ' + s.phone) : (s.email || s.phone || '');
+        const centerInfo = isCoord ? '—' : (campus ? campus.name : 'Main');
+        return `<tr><td style="width:40px;">${!isCoord && s.photo ? `<img src="${s.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:1px solid var(--border);">` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);">${(s.name || '?').charAt(0).toUpperCase()}</div>`}</td><td><b>${isCoord ? 'Coordinator' : s.id}</b></td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${subInfo}</div></td><td>${roleDisplay}</td><td>${s.department || '--'}</td><td>${centerInfo}</td><td>${s.phone || '--'}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span></td><td><button class="btn btn-outline btn-sm" onclick="editStaff('${s.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStaff('${s.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No staff records.</td></tr>';
 }
-function showStaffForm(staff = null) {
+async function showStaffForm(staff = null) {
     const isEdit = !!staff;
-    const content = `<input type="hidden" id="staff-edit-id" value="${staff ? staff.id : ''}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="staff-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${staff && staff.photo ? `<img src="${staff.photo}" style="width:100%;height:100%;object-fit:cover;">` : (staff ? (staff.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="staff-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStaffPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="staff-name" value="${staff ? staff.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="staff-email" value="${staff ? staff.email || '' : ''}"></div><div class="form-group"><label>Phone</label><input type="text" id="staff-phone" value="${staff ? staff.phone || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Role</label><select id="staff-role"><option value="lecturer">Lecturer</option><option value="professor">Professor</option><option value="dean">Dean</option><option value="admin">Admin</option><option value="support">Support Staff</option></select></div><div class="form-group"><label>Department</label><input type="text" id="staff-department" value="${staff ? staff.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="staff-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Qualification</label><input type="text" id="staff-qualification" value="${staff ? staff.qualification || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="staff-status"><option value="active">Active</option><option value="on-leave">On Leave</option><option value="inactive">Inactive</option></select></div><div class="form-group"><label>WhatsApp Number</label><input type="text" id="staff-whatsapp" value="${staff ? staff.whatsapp || staff.phone || '' : ''}"></div></div><div class="form-group"><label>Specialization</label><textarea id="staff-specialization">${staff ? staff.specialization || '' : ''}</textarea></div>`;
+    const isCoordEdit = isEdit && staff.id && staff.id.startsWith('__coord__');
+    if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
+    const regionOpts = window._regionsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    const content = `<input type="hidden" id="staff-edit-id" value="${isCoordEdit ? staff.id : (staff ? staff.id : '')}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="staff-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${staff && staff.photo ? `<img src="${staff.photo}" style="width:100%;height:100%;object-fit:cover;">` : (staff ? (staff.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="staff-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStaffPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="staff-name" value="${staff ? staff.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="staff-email" value="${staff ? staff.email || '' : ''}"></div><div class="form-group"><label>Phone / Username</label><input type="text" id="staff-phone" value="${staff ? (isCoordEdit ? staff.phone : (staff.phone || '')) : ''}"></div></div><div class="form-row"><div class="form-group"><label>Role</label><select id="staff-role" onchange="toggleStaffRoleFields()"><option value="lecturer">Lecturer</option><option value="professor">Professor</option><option value="dean">Dean</option><option value="admin">Admin</option><option value="support">Support Staff</option><option value="coordinator">Coordinator</option></select></div><div class="form-group" id="staff-dept-group"><label>Department</label><input type="text" id="staff-department" value="${staff && !isCoordEdit ? (staff.department || '') : ''}"></div></div><div id="staff-coord-fields" style="display:${isCoordEdit ? 'block' : 'none'};"><div class="form-group"><label>Region *</label><select id="staff-region"><option value="">— Select region —</option>${regionOpts}</select></div><div class="form-group"><label>Password ${isEdit ? '(leave blank to keep current)' : '*'}</label><input type="password" id="staff-password"></div></div><div id="staff-regular-fields"><div class="form-row"><div class="form-group"><label>Campus</label><select id="staff-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Qualification</label><input type="text" id="staff-qualification" value="${staff && !isCoordEdit ? (staff.qualification || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="staff-status"><option value="active">Active</option><option value="on-leave">On Leave</option><option value="inactive">Inactive</option></select></div><div class="form-group"><label>Specialization</label><input type="text" id="staff-specialization" value="${staff && !isCoordEdit ? (staff.specialization || '') : ''}"></div></div><div class="form-group"><label>WhatsApp</label><input type="text" id="staff-whatsapp" value="${staff && !isCoordEdit ? (staff.whatsapp || '') : ''}"></div></div>`;
     showModal(isEdit ? 'Edit Staff' : 'Add New Staff', content, `<button class="btn btn-primary" onclick="saveStaff()">${isEdit ? 'Update' : 'Add'}</button>`);
     loadStaffCampusDropdown();
-    if (staff) { document.getElementById('staff-role').value = staff.role || 'lecturer'; document.getElementById('staff-status').value = staff.status || 'active'; }
+    if (staff) {
+        document.getElementById('staff-role').value = (isCoordEdit ? 'coordinator' : (staff.role || 'lecturer'));
+        if (!isCoordEdit) document.getElementById('staff-status').value = staff.status || 'active';
+        if (isCoordEdit) {
+            document.getElementById('staff-region').value = staff._user ? staff._user.regionId || '' : '';
+        }
+    }
+    toggleStaffRoleFields();
 }
+window.toggleStaffRoleFields = function() {
+    const role = document.getElementById('staff-role').value;
+    const coordFields = document.getElementById('staff-coord-fields');
+    const regularFields = document.getElementById('staff-regular-fields');
+    const deptGroup = document.getElementById('staff-dept-group');
+    if (coordFields) coordFields.style.display = role === 'coordinator' ? 'block' : 'none';
+    if (regularFields) regularFields.style.display = role === 'coordinator' ? 'none' : 'block';
+    if (deptGroup) deptGroup.style.display = role === 'coordinator' ? 'none' : 'block';
+};
 async function loadStaffCampusDropdown() {
     const campuses = await dbGetAll('campuses');
     const select = document.getElementById('staff-campus');
@@ -2125,15 +2163,61 @@ async function saveStaff() {
     const name = document.getElementById('staff-name').value.trim();
     if (!name) return showToast('Name required!');
     const editId = document.getElementById('staff-edit-id').value;
+    const isCoordEdit = editId && editId.startsWith('__coord__');
+    const role = document.getElementById('staff-role').value;
+    if (role === 'coordinator') {
+        const phone = document.getElementById('staff-phone').value.trim();
+        const regionId = document.getElementById('staff-region').value;
+        if (!regionId) return showToast('Please select a region for this coordinator!');
+        if (!isCoordEdit && !phone) return showToast('Phone/Username required for coordinator login!');
+        const allUsers = await dbGetAll('users');
+        const existing = isCoordEdit ? allUsers.find(u => u.username === editId.replace('__coord__', '')) : null;
+        const username = isCoordEdit ? existing.username : phone;
+        if (!isCoordEdit && allUsers.some(u => u.username === username)) return showToast('Username already taken!');
+        const password = document.getElementById('staff-password').value;
+        if (!isCoordEdit && !password) return showToast('Password required!');
+        const pwHash = password ? await hashPassword(password) : existing.password;
+        const user = { username, password: pwHash, name, email: document.getElementById('staff-email').value.trim(), role: 'coordinator', regionId, createdAt: existing ? existing.createdAt : new Date().toISOString() };
+        await dbPut('users', user);
+        closeModal(); renderStaff(); showToast(isCoordEdit ? 'Coordinator updated!' : 'Coordinator account created!'); logAudit(isCoordEdit ? 'updated' : 'created', 'user', { username, role: 'coordinator' });
+        return;
+    }
     const id = editId || await getNextCounter('staff', 'STF-');
     const photoPreview = document.getElementById('staff-photo-preview');
     const photoImg = photoPreview ? photoPreview.querySelector('img') : null;
     const photo = photoImg ? photoImg.src : (editId ? (await dbGet('staff', id)).photo || '' : '');
-    const staff = { id, photo, name, email: document.getElementById('staff-email').value.trim(), phone: document.getElementById('staff-phone').value.trim(), role: document.getElementById('staff-role').value, campus: document.getElementById('staff-campus').value, department: document.getElementById('staff-department').value.trim(), qualification: document.getElementById('staff-qualification').value.trim(), status: document.getElementById('staff-status').value, specialization: document.getElementById('staff-specialization').value.trim(), whatsapp: document.getElementById('staff-whatsapp').value.trim(), createdAt: editId ? (await dbGet('staff', id)).createdAt : new Date().toISOString() };
+    const staff = { id, photo, name, email: document.getElementById('staff-email').value.trim(), phone: document.getElementById('staff-phone').value.trim(), role, campus: document.getElementById('staff-campus').value, department: document.getElementById('staff-department').value.trim(), qualification: document.getElementById('staff-qualification').value.trim(), status: document.getElementById('staff-status').value, specialization: document.getElementById('staff-specialization').value.trim(), whatsapp: document.getElementById('staff-whatsapp').value.trim(), createdAt: editId ? (await dbGet('staff', id)).createdAt : new Date().toISOString() };
     await dbPut('staff', staff); closeModal(); renderStaff(); showToast(editId ? 'Staff updated!' : `Staff ${id} added!`); logAudit(editId ? 'updated' : 'created', 'staff', staff);
 }
-async function editStaff(id) { const staff = await dbGet('staff', id); if (!staff) return; showStaffForm(staff); }
-async function deleteStaff(id) { if (!await showConfirm('Confirm', 'Delete staff?')) return; await dbDelete('staff', id); renderStaff(); showToast('Staff deleted'); logAudit('deleted', 'staff', { id }); }
+async function editStaff(id) {
+    if (id.startsWith('__coord__')) {
+        const username = id.replace('__coord__', '');
+        const user = await dbGet('users', username);
+        if (!user) return showToast('Coordinator not found.');
+        const staffLike = { id, name: user.name, email: user.email || '', phone: user.username, role: 'coordinator', _user: user };
+        showStaffForm(staffLike);
+        return;
+    }
+    const staff = await dbGet('staff', id);
+    if (!staff) return;
+    showStaffForm(staff);
+}
+async function deleteStaff(id) {
+    if (id.startsWith('__coord__')) {
+        if (!await showConfirm('Confirm', 'Delete this coordinator account?')) return;
+        const username = id.replace('__coord__', '');
+        await dbDelete('users', username);
+        renderStaff();
+        showToast('Coordinator deleted');
+        logAudit('deleted', 'user', { username, role: 'coordinator' });
+        return;
+    }
+    if (!await showConfirm('Confirm', 'Delete staff?')) return;
+    await dbDelete('staff', id);
+    renderStaff();
+    showToast('Staff deleted');
+    logAudit('deleted', 'staff', { id });
+}
 document.getElementById('staff-search').addEventListener('input', debounce(renderStaff, 300));
 
 function renderStudentCourseCard(c, lessonsByCourseId, staffById, isEnrolled) {
