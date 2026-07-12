@@ -170,9 +170,19 @@ async function renderDiscussions() {
             allMessages = results.flat();
         }
 
+        const curUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (curUser.role === 'coordinator' && curUser.regionId) {
+            const centerIds = (window._allCentersCache || []).filter(c => c.regionId === curUser.regionId).map(c => c.id);
+            const students = await dbGetAll('students');
+            const regionalStudents = students.filter(s => centerIds.includes(s.studyCenterId));
+            const validIds = new Set();
+            regionalStudents.forEach(s => { validIds.add(s.id); if (s.phone) validIds.add(s.phone); if (s.admissionNumber) validIds.add(s.admissionNumber); });
+            allMessages = allMessages.filter(m => m.userRole !== 'student' || validIds.has(m.userId));
+        }
+
         allMessages.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.timestamp) - new Date(a.timestamp));
 
-        const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const currentUser = curUser;
         const isStaff = ['admin', 'lecturer', 'registrar'].includes(currentUser.role);
         const userId = currentUser.studentId || currentUser.username;
 

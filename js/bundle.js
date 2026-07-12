@@ -1558,6 +1558,22 @@ async function renderDashboard() {
     const inventoryItems = inventory.length;
     const regionBanner = !isAdmin && currentUser.regionId ? `<div style="grid-column:1/-1;text-align:center;padding:12px;background:var(--bg-input);border-radius:var(--radius);margin-bottom:8px;"><span style="font-weight:700;color:var(--accent);">Region: ${(window.__regionMap && window.__regionMap[currentUser.regionId]) || currentUser.regionId}</span></div>` : '';
         document.getElementById('dash-stats').innerHTML = regionBanner + `<div class="stat-card"><div class="stat-label">Total Students</div><div class="stat-value">${totalEnrolled}</div></div><div class="stat-card"><div class="stat-label">Active Students</div><div class="stat-value" style="color:var(--success)">${activeStudents}</div></div>${isAdmin ? `<div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${courses.length}</div></div><div class="stat-card"><div class="stat-label">Staff</div><div class="stat-value">${staff.length}</div></div><div class="stat-card"><div class="stat-label">Alumni</div><div class="stat-value">${alumniCount}</div></div><div class="stat-card"><div class="stat-label">Inventory Items</div><div class="stat-value">${inventoryItems}</div></div>` : ''}<div class="stat-card"><div class="stat-label">Today's Revenue</div><div class="stat-value" style="color:var(--accent)">${formatCurrency(todayTotal)}</div></div><div class="stat-card"><div class="stat-label">Monthly Net</div><div class="stat-value" style="color:${monthRevenue >= 0 ? 'var(--success)' : 'var(--danger)'}">${formatCurrency(monthRevenue)}</div></div>${isAdmin ? `<div class="stat-card" style="cursor:pointer;" onclick="window.open('/connect.html', '_blank', 'width=420,height=700')"><div class="stat-label">Connect Devices</div><div class="stat-value" style="font-size:24px;">[+]</div><div class="stat-label" style="font-size:10px;margin-top:2px;color:var(--accent);">QR Code & Network Info</div></div>` : ''}`;
+    const regionStatsEl = document.getElementById('dash-region-stats');
+    if (regionStatsEl) {
+        if (isAdmin && window.__regionMap) {
+            const regions = Object.entries(window.__regionMap);
+            const centers = window._allCentersCache || [];
+            const regionCards = regions.map(([rid, rname]) => {
+                const cIds = centers.filter(c => c.regionId === rid).map(c => c.id);
+                const sCount = students.filter(s => cIds.includes(s.studyCenterId)).length;
+                const rPayments = payments.filter(p => cIds.includes(p.studyCenterId) || students.some(s => (s.id === p.studentId || s.phone === p.studentId) && cIds.includes(s.studyCenterId))).reduce((sum, p) => sum + p.amount, 0);
+                return `<div class="stat-card"><div class="stat-label">${escapeHtml(rname)}</div><div class="stat-value" style="font-size:14px;">${sCount} students</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${cIds.length} centers • ${formatCurrency(rPayments)} paid</div></div>`;
+            }).join('');
+            regionStatsEl.innerHTML = regionCards ? `<div style="grid-column:1/-1;font-weight:700;font-size:14px;color:var(--accent);margin-bottom:4px;">Regions Overview</div>${regionCards}` : '';
+        } else {
+            regionStatsEl.innerHTML = '';
+        }
+    }
     const recentStudents = students.sort((a, b) => new Date(b.enrollDate) - new Date(a.enrollDate)).slice(0, 5);
     document.getElementById('dash-recent-students').innerHTML = recentStudents.length ? recentStudents.map(s => `<div class="event-item"><span><b>${escapeHtml(s.name)}</b> - ${escapeHtml(s.program || 'N/A')}</span><span class="badge badge-${s.status === 'active' ? 'success' : 'warning'}">${s.status || 'active'}</span></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No students enrolled yet</div>';
     document.getElementById('dash-today-schedule').innerHTML = isAdmin ? `<div style="text-align:center;color:var(--text-muted);padding:10px;"><p><b>Today's Schedule</b></p><p style="font-size:12px;margin-top:4px;">${courses.length} courses available</p></div>` : '';
@@ -4389,11 +4405,13 @@ async function renderGradRequirementsInModal() {
 async function deleteGradReqModal(id) {
     await dbDelete('gradRequirements', id); renderGradRequirementsInModal(); renderGradRequirements(); showToast('Requirement deleted');
 }
-async function showTranscriptForm() {
+async function showTranscriptForm(preselectedId) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (currentUser.role === 'student') return showToast('Students cannot generate transcripts. Please contact the administration office.');
     const students = await dbGetAll('students');
-    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}">${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div>`;
+    const portalId = document.getElementById('portal-student')?.value || '';
+    const selectedId = preselectedId || portalId;
+    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div>`;
     showModal('Generate Transcript', content, `<button class="btn btn-primary" onclick="generateTranscript()">Generate</button>`);
 }
 async function generateTranscript() {
@@ -5202,7 +5220,8 @@ async function showFinalTranscriptForm() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (currentUser.role === 'student') return showToast('Students cannot generate transcripts.');
     const students = await dbGetAll('students');
-    const content = `<div class="form-group"><label>Student</label><select id="final-transcript-student" class="filter-select" style="width:100%;"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}">${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div>`;
+    const portalId = document.getElementById('portal-student')?.value || '';
+    const content = `<div class="form-group"><label>Student</label><select id="final-transcript-student" class="filter-select" style="width:100%;"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div>`;
     showModal('Generate Final Transcript', content, `<button class="btn btn-primary" onclick="generateFinalTranscript()">Generate</button>`);
 }
 async function generateFinalTranscript() {
@@ -6410,7 +6429,8 @@ async function showCertificateForm() {
     const students = await filterByRegion((await dbGetAll('students')).filter(s => s.status === 'active' || s.status === 'graduated'), s => s.studyCenterId);
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
-    const content = `<div class="form-group"><label>Student</label><select id="cert-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}">${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
+    const portalId = document.getElementById('portal-student')?.value || '';
+    const content = `<div class="form-group"><label>Student</label><select id="cert-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
     showModal('Generate Document', content, `<button class="btn btn-primary" onclick="generateCertificate()">Generate</button>`);
 }
 async function generateCertificate() {
@@ -10356,8 +10376,7 @@ async function viewPortalFeeStatement(studentId) {
 async function viewPortalTranscript() {
     const studentId = document.getElementById('portal-student').value;
     if (!studentId) return showToast('Select a student first!');
-    showTranscriptForm();
-    document.getElementById('transcript-student').value = studentId;
+    showTranscriptForm(studentId);
 }
 async function renderPendingRegistrations() {
     const students = await filterByRegion(await dbGetAll('students'), s => s.studyCenterId);
