@@ -4467,6 +4467,77 @@ function downloadGraduationListCSV() {
     a.click();
     URL.revokeObjectURL(a.href);
 }
+async function generateGraduationSeating() {
+    const program = document.getElementById('grad-program').value;
+    const year = document.getElementById('grad-year').value;
+    if (!program && (!year || year === 'all')) return showToast('Select program or year!');
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding ? branding.schoolName : 'College';
+    const students = await filterByRegion((await dbGetAll('students')).filter(s => s.status === 'active' && (program ? s.program === program : true) && (year && year !== 'all' ? s.year == year : true)), s => s.studyCenterId);
+    const grades = await dbGetAll('grades');
+    const courses = await dbGetAll('courses');
+    const chapel = await dbGetAll('chapel');
+    const attendance = await dbGetAll('attendance');
+    const requirements = await dbGetAll('gradRequirements');
+    const payments = await dbGetAll('payments');
+    const eligible = [];
+    for (const s of students) {
+        const studentGrades = grades.filter(g => g.studentId === s.id);
+        const enrolledCourses = courses.filter(c => studentGrades.map(g => g.courseId).includes(c.id));
+        const totalCredits = enrolledCourses.reduce((sum, c) => sum + c.credits, 0);
+        const totalGPAPoints = studentGrades.reduce((sum, g) => { const c = enrolledCourses.find(c => c.id === g.courseId); return sum + g.gpa * (c ? c.credits : 3); }, 0);
+        const cgpa = totalCredits > 0 ? (totalGPAPoints / totalCredits) : 0;
+        const studentChapel = chapel.filter(c => c.studentId === s.id && (c.status === 'present' || c.status === 'late')).length;
+        const studentAttendance = attendance.filter(a => a.studentId === s.id);
+        const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
+        const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
+        const totalPaid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const feeBalance = getCachedStudentFee(s) - totalPaid;
+        const programReqs = requirements.filter(r => r.program === s.program);
+        let issues = [];
+        const reqCredit = programReqs.find(r => r.requirement === 'credits');
+        if (reqCredit && totalCredits < reqCredit.minimum) issues.push(true);
+        const reqGPA = programReqs.find(r => r.requirement === 'gpa');
+        if (reqGPA && cgpa < reqGPA.minimum) issues.push(true);
+        const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
+        if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(true);
+        const reqChapel = programReqs.find(r => r.requirement === 'chapel');
+        if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
+        if (programReqs.length && feeBalance > 0) issues.push(true);
+        if (issues.length === 0) eligible.push(s);
+    }
+    if (!eligible.length) return showToast('No eligible graduates to seat!');
+    const gradId = 'GRAD-' + (program || 'ALL') + '-' + (year || 'ALL');
+    const existing = (await dbGetAll('seating')).filter(s => s.examId === gradId);
+    for (const e of existing) await dbDelete('seating', e.id);
+    const shuffled = eligible.sort(() => Math.random() - 0.5);
+    let seatNum = 1;
+    for (const s of shuffled) {
+        await dbPut('seating', { id: `SEAT-${gradId}-${s.id}`, examId: gradId, studentId: s.id, studentName: s.name, studentProgram: s.program, seatNumber: seatNum, createdAt: new Date().toISOString() });
+        seatNum++;
+    }
+    showToast(`${eligible.length} graduates seated!`);
+    showGraduationSeating(gradId, program, year || '', schoolName);
+}
+async function showGraduationSeating(gradId, program, year, schoolName) {
+    const seating = (await dbGetAll('seating')).filter(s => s.examId === gradId).sort((a, b) => a.seatNumber - b.seatNumber);
+    if (!seating.length) return showToast('No seating arrangement found.');
+    const label = (program || 'All Programs') + (year && year !== 'all' && year !== 'ALL' ? ' — Year ' + year : '');
+    let html = `<div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">${schoolName} — Graduation Seating${label ? ' — ' + label : ''} | Total: ${seating.length} graduates</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax:200px,1fr);gap:8px;">`;
+    seating.forEach(s => {
+        html += `<div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);font-size:12px;text-align:center;"><div style="font-size:26px;font-weight:800;color:var(--accent);">${s.seatNumber}</div><div style="font-weight:600;margin-top:4px;">${s.studentName || 'Unknown'}</div><div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${s.studentProgram || ''}</div></div>`;
+    });
+    html += '</div>';
+    showModal('Graduation Seating Plan', html, `<button class="btn btn-outline" onclick="printGraduationSeating()">Print</button>`);
+}
+function printGraduationSeating() {
+    const content = document.querySelector('#modal-content .modal-body')?.innerHTML || document.querySelector('#modal-content')?.innerHTML;
+    if (!content) return;
+    const w = window.open('', '_blank', 'width=900,height=700');
+    w.document.write('<html><head><title>Graduation Seating Plan</title><style>body{font-family:Arial,sans-serif;padding:20px;}h2{margin-bottom:4px;}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax:200px,1fr);gap:8px;}.card{padding:10px;border:1px solid #ddd;border-radius:8px;background:#f8fafc;text-align:center;}.no{font-size:26px;font-weight:800;color:#2563eb;}.name{font-weight:600;margin-top:4px;}.prog{font-size:10px;color:#64748b;margin-top:2px;}</style></head><body><h2>Graduation Seating Plan</h2>' + content + '</body></html>');
+    w.document.close();
+    w.print();
+}
 async function showGraduationRequirements() {
     const content = `<div id="grad-req-modal-list"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showGradReqForm();closeModal();">+ Add Requirement</button>`;
     showModal('Manage Graduation Requirements', content);
