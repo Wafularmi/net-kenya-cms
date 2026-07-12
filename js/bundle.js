@@ -1527,7 +1527,9 @@ async function renderDashboard() {
         const isAdmin = currentUser.role === 'admin';
         const regionalStudentIds = new Set(students.map(s => s.id));
         const payments = isAdmin ? batch.payments : batch.payments.filter(p => regionalStudentIds.has(p.studentId));
-        const courses = batch.courses, events = batch.events, staff = batch.staff, attendance = batch.attendance, inventory = batch.inventory, alumniList = batch.alumni, income = batch.income, expenses = batch.expenses;
+        const income = isAdmin ? batch.income : [];
+        const expenses = isAdmin ? batch.expenses : [];
+        const courses = batch.courses, events = batch.events, staff = batch.staff, attendance = batch.attendance, inventory = batch.inventory, alumniList = batch.alumni;
     const today = new Date().toISOString().split('T')[0];
     const settings = await dbGet('settings', 'academic');
     const minAttendance = settings ? settings.attendanceMin || 75 : 75;
