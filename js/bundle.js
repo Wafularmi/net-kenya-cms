@@ -777,7 +777,9 @@ async function showApp(user) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     document.getElementById('user-name-display').textContent = user.name || user.username;
-    document.getElementById('user-role-badge').textContent = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+    const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+    const regionName = user.role === 'coordinator' && user.regionId ? (window.__regionMap && window.__regionMap[user.regionId] || user.regionId) : '';
+    document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
     buildNavigation(user);
     updateHeaderDate();
