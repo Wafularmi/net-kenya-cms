@@ -286,6 +286,10 @@ async function getProgramsList() {
     return [];
 }
 let _academicCache = null;
+let _coordinatorAccessCache = null;
+async function initCoordinatorAccessCache() {
+    _coordinatorAccessCache = await dbGet('settings', 'coordinatorAccess');
+}
 async function initAcademicCache() {
     _academicCache = await dbGet('settings', 'academic');
 }
@@ -358,7 +362,22 @@ function getRolePermissions(role) {
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions']
     };
-    return perms[role] || [];
+    const base = perms[role] || [];
+    if (role === 'coordinator' && _coordinatorAccessCache) {
+        if (_coordinatorAccessCache.exams === false) {
+            const idx = base.indexOf('exams');
+            if (idx !== -1) base.splice(idx, 1);
+        }
+        if (_coordinatorAccessCache.lessons === false) {
+            const idx = base.indexOf('lessons');
+            if (idx !== -1) base.splice(idx, 1);
+        }
+        if (_coordinatorAccessCache.grades === false) {
+            const idx = base.indexOf('grades');
+            if (idx !== -1) base.splice(idx, 1);
+        }
+    }
+    return base;
 }
 function isCoordinator() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -781,6 +800,7 @@ async function showApp(user) {
     const regionName = user.role === 'coordinator' && user.regionId ? (window.__regionMap && window.__regionMap[user.regionId] || user.regionId) : '';
     document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
+    await initCoordinatorAccessCache();
     buildNavigation(user);
     const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
     if (msgBtn) msgBtn.style.display = (user.role === 'admin' || user.role === 'coordinator') ? '' : 'none';
@@ -1206,7 +1226,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); break;
+        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); break;
     }
 }
 function initTabs() {
@@ -12316,6 +12336,24 @@ async function saveAcademicSettings() {
     });
     const settings = { key: 'academic', academicYear: document.getElementById('settings-academic-year').value.trim(), semester: document.getElementById('settings-semester').value, grading: document.getElementById('settings-grading').value, programs: programs.join(', '), departments: document.getElementById('settings-departments').value.trim(), attendanceMin: parseInt(document.getElementById('settings-attendance-min').value) || 75, programFees, currencyCode: document.getElementById('settings-currency-code').value.trim().toUpperCase(), currencySymbol: document.getElementById('settings-currency-symbol').value.trim(), currencyDecimals: parseInt(document.getElementById('settings-currency-decimals').value) || 2 };
     await dbPut('settings', settings); invalidateAcademicCache(); initAcademicCache(); updateProgramFilter(); showToast('Academic settings saved!'); logAudit('updated', 'academic-settings', settings);
+}
+async function saveCoordinatorAccess() {
+    const s = {
+        key: 'coordinatorAccess',
+        exams: document.getElementById('coord-access-exams').checked,
+        lessons: document.getElementById('coord-access-lessons').checked,
+        grades: document.getElementById('coord-access-grades').checked
+    };
+    await dbPut('settings', s);
+    _coordinatorAccessCache = s;
+    showToast('Coordinator access settings saved!'); logAudit('updated', 'coordinator-access', s);
+}
+async function loadCoordinatorAccess() {
+    const s = await dbGet('settings', 'coordinatorAccess');
+    const el = id => document.getElementById(id);
+    if (el('coord-access-exams')) el('coord-access-exams').checked = s ? s.exams !== false : true;
+    if (el('coord-access-lessons')) el('coord-access-lessons').checked = s ? s.lessons !== false : true;
+    if (el('coord-access-grades')) el('coord-access-grades').checked = s ? s.grades !== false : true;
 }
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };
