@@ -1725,26 +1725,65 @@ async function renderStudentDashboard(currentUser) {
     document.getElementById('dash-stats').innerHTML = `<div class="stat-card"><div class="stat-label">Welcome</div><div class="stat-value" style="font-size:16px;">${escapeHtml(me.name)}</div></div><div class="stat-card"><div class="stat-label">Admission #</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.admissionNumber || '--')}</div></div><div class="stat-card"><div class="stat-label">Program</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.program || '--')}</div></div><div class="stat-card"><div class="stat-label">Avg Grade</div><div class="stat-value" style="color:${avgGrade >= 70 ? 'var(--success)' : avgGrade >= 50 ? 'var(--warning)' : 'var(--danger)'};">${avgGrade}%</div></div><div class="stat-card"><div class="stat-label">Attendance</div><div class="stat-value" style="color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div></div><div class="stat-card"><div class="stat-label">Fee Balance</div><div class="stat-value" style="color:${balance <= 0 ? 'var(--success)' : 'var(--warning)'};">${formatCurrency(balance)}</div></div><div class="stat-card"><div class="stat-label">Quizzes Passed</div><div class="stat-value" style="color:var(--success);">${quizzesPassed}</div></div><div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${myCourses.length}</div></div>`;
     document.getElementById('dash-recent-students').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">Your Courses</h4>${myCourses.length ? myCourses.slice(0, 5).map(c => `<div class="event-item"><span><b>${escapeHtml(c.code)}</b> — ${escapeHtml(c.name)}</span><span class="badge badge-success">Enrolled</span></div>`).join('') : '<div style="color:var(--text-muted);padding:10px;">You are not enrolled in any courses. <a href="#" onclick="showScreen(\'student-hub\');return false;" style="color:var(--accent);">Browse courses →</a></div>'}</div>`;
     const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    document.getElementById('dash-today-schedule').innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:10px;"><p><b>Today</b></p><p style="font-size:12px;margin-top:4px;">${todayStr}</p></div>`;
-    const upcomingEvents = events.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
-    document.getElementById('dash-upcoming-events').innerHTML = upcomingEvents.length ? upcomingEvents.map(e => `<div class="event-item"><span><b>${e.title}</b></span><span style="color:var(--text-muted);font-size:12px;">${formatDate(e.date)}</span></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No upcoming events</div>';
+    const todoItems = [];
+    const threeDaysFromNow = new Date(); threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+    const sevenDaysFromNow = new Date(); sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+    const threeDaysStr = threeDaysFromNow.toISOString().split('T')[0];
+    const sevenDaysStr = sevenDaysFromNow.toISOString().split('T')[0];
+    const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
+    const examList = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId) && e.date >= today);
+    examList.forEach(e => {
+        const course = courses.find(c => c.id === e.courseId);
+        todoItems.push({ type: 'exam', title: e.title || (course ? course.code : 'Exam'), course: course ? course.name : '', date: e.date, time: e.time || '', dateObj: new Date(e.date + 'T' + (e.time || '00:00')), icon: '📄' });
+    });
+    const eventList = events.filter(e => e.date >= today);
+    eventList.forEach(e => {
+        todoItems.push({ type: 'event', title: e.title, course: '', date: e.date, time: '', dateObj: new Date(e.date + 'T00:00'), icon: '📅' });
+    });
+    const studentSubIds = new Set(submissions.filter(s => allStudentIds.has(s.studentId) && s.status === 'pass').map(s => s.quizId));
+    const pendingQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !studentSubIds.has(q.id));
+    pendingQuizzes.forEach(q => {
+        const course = courses.find(c => c.id === q.courseId);
+        todoItems.push({ type: 'quiz', title: q.title, course: course ? course.name : '', date: '', time: '', dateObj: null, icon: '🧠' });
+    });
+    todoItems.sort((a, b) => {
+        if (!a.dateObj && !b.dateObj) return 0;
+        if (!a.dateObj) return 1;
+        if (!b.dateObj) return -1;
+        return a.dateObj - b.dateObj;
+    });
+    const todoHtml = todoItems.length ? todoItems.map(item => {
+        let badge, badgeClass;
+        if (item.type === 'quiz') {
+            badge = 'Available Now'; badgeClass = 'badge-success';
+        } else if (item.date <= today) {
+            badge = 'Today'; badgeClass = 'badge-danger';
+        } else if (item.date <= threeDaysStr) {
+            badge = `${Math.ceil((new Date(item.date) - new Date(today)) / 86400000)} day${Math.ceil((new Date(item.date) - new Date(today)) / 86400000) !== 1 ? 's' : ''}`; badgeClass = 'badge-danger';
+        } else if (item.date <= sevenDaysStr) {
+            badge = `${Math.ceil((new Date(item.date) - new Date(today)) / 86400000)} day${Math.ceil((new Date(item.date) - new Date(today)) / 86400000) !== 1 ? 's' : ''}`; badgeClass = 'badge-warning';
+        } else {
+            badge = formatDate(item.date); badgeClass = 'badge-info';
+        }
+        const timeStr = item.time ? ` · ${item.time}` : '';
+        const courseStr = item.course ? `<br><span style="font-size:10px;color:var(--text-muted);">${item.course}</span>` : '';
+        return `<div class="event-item"><span><b>${item.icon} ${item.title}</b>${courseStr}${item.date ? `<br><span style="font-size:10px;color:var(--text-muted);">${formatDate(item.date)}${timeStr}</span>` : ''}</span><span class="badge ${badgeClass}" style="white-space:nowrap;">${badge}</span></div>`;
+    }).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No pending tasks 🎉</div>';
+    document.getElementById('dash-today-schedule').innerHTML = `<div style="max-height:350px;overflow-y:auto;">${todoHtml}</div>`;
+    const scheduleCard = document.getElementById('dash-today-schedule')?.closest('.card');
+    if (scheduleCard) scheduleCard.querySelector('h3').textContent = '📋 My ToDo';
+    document.getElementById('dash-upcoming-events')?.closest('.card')?.style ? (document.getElementById('dash-upcoming-events').closest('.card').style.display = 'none') : 0;
+    document.getElementById('dash-tickets')?.closest('.card')?.style ? (document.getElementById('dash-tickets').closest('.card').style.display = 'none') : 0;
     document.getElementById('dash-finance').innerHTML = `<div style="padding:12px;text-align:center;"><div style="font-size:11px;color:var(--text-muted);">Total Fees</div><div style="font-weight:700;font-size:18px;">${formatCurrency(meFee)}</div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Paid: <span style="color:var(--success);">${formatCurrency(totalPaid)}</span></div><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Balance: <span style="color:${balance <= 0 ? 'var(--success)' : 'var(--danger)'};font-weight:700;">${formatCurrency(balance)}</span></div></div>`;
     document.getElementById('dash-attendance-alerts').innerHTML = `<div style="padding:12px;text-align:center;"><div style="font-size:24px;font-weight:800;color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${attended} of ${studentAttendance.length} sessions attended</div>${attendancePct < 75 ? '<div style="font-size:11px;color:var(--danger);margin-top:8px;">⚠ Below minimum attendance!</div>' : ''}</div>`;
     document.getElementById('dash-stock-alerts').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">Recent Grades</h4>${studentGrades.length ? studentGrades.slice(0, 5).map(g => {
         const course = courses.find(c => c.id === g.courseId);
         return `<div class="event-item"><span><b>${course ? course.name : g.courseId}</b></span><span class="badge badge-${g.score >= 70 ? 'success' : g.score >= 50 ? 'warning' : 'danger'}">${g.score}% (${g.grade})</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);padding:10px;">No grades recorded yet</div>'}</div>`;
-    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId) && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-    const examHtml = myExams.length ? myExams.slice(0, 5).map(e => {
-        const course = courses.find(c => c.id === e.courseId);
-        return `<div class="event-item"><span><b>📄 ${e.title || course?.code || e.courseId}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''} — ${formatDate(e.date)} ${e.time || ''}</span></span></div>`;
-    }).join('') : '<div style="color:var(--text-muted);padding:10px;">No upcoming exams</div>';
-    document.getElementById('dash-tickets').innerHTML = `<div style="padding:12px;"><h4 style="color:var(--accent);margin-bottom:8px;">📋 Upcoming Exams</h4>${examHtml}</div>`;
     document.getElementById('dash-server-health')?.closest('.card')?.style ? (document.getElementById('dash-server-health').closest('.card').style.display = 'none') : 0;
     document.getElementById('dash-online')?.closest('.card')?.style ? (document.getElementById('dash-online').closest('.card').style.display = 'none') : 0;
     document.querySelector('#dash-finance')?.closest('.card')?.querySelector('h3') && (document.querySelector('#dash-finance').closest('.card').querySelector('h3').textContent = '💰 My Fees');
     document.querySelector('#dash-stock-alerts')?.closest('.card')?.querySelector('h3') && (document.querySelector('#dash-stock-alerts').closest('.card').querySelector('h3').textContent = '📊 Recent Grades');
-    document.querySelector('#dash-tickets')?.closest('.card')?.querySelector('h3') && (document.querySelector('#dash-tickets').closest('.card').querySelector('h3').textContent = '📋 Upcoming Exams');
     } catch (err) {
         console.error('Student dashboard error:', err);
     }
