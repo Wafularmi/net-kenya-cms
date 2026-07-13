@@ -1629,7 +1629,7 @@ async function renderDashboard() {
                 const cIds = centers.filter(c => c.regionId === rid).map(c => c.id);
                 const sCount = students.filter(s => cIds.includes(s.studyCenterId)).length;
                 const rPayments = payments.filter(p => cIds.includes(p.studyCenterId) || students.some(s => (s.id === p.studentId || s.phone === p.studentId) && cIds.includes(s.studyCenterId))).reduce((sum, p) => sum + p.amount, 0);
-                return `<div class="stat-card"><div class="stat-label">${escapeHtml(rname)}</div><div class="stat-value" style="font-size:14px;">${sCount} students</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${cIds.length} centers • ${formatCurrency(rPayments)} paid</div></div>`;
+                return `<div class="stat-card"><div class="stat-label" style="color:var(--accent);">${escapeHtml(rname)}</div><div class="stat-value" style="font-size:14px;">${sCount} students</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${cIds.length} centers • ${formatCurrency(rPayments)} paid</div></div>`;
             }).join('');
             regionStatsEl.innerHTML = regionCards ? `<div style="grid-column:1/-1;font-weight:600;font-size:14px;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:12px;">Regions Overview</div>${regionCards}` : '';
         } else {
