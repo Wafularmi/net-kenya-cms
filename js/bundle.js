@@ -7074,12 +7074,11 @@ async function seedWhatsAppTemplates() {
     return seeded;
 }
 async function migrateWelcomeTemplate() {
-    const WELCOME_KEY = 'Below are your login details:';
     const welcome = await dbGet('whatsappTemplates', 'tpl-welcome');
     if (!welcome) return;
     const defaults = WHATSAPP_DEFAULT_TEMPLATES.find(t => t.id === 'tpl-welcome');
     if (!defaults) return;
-    if (welcome.message && welcome.message.includes(WELCOME_KEY)) return;
+    if (welcome.message && /\{\{/.test(welcome.message)) return;
     welcome.message = defaults.message;
     welcome.updatedAt = new Date().toISOString();
     welcome.lastMigratedAt = new Date().toISOString();
@@ -10708,14 +10707,22 @@ async function openApproveModal(studentId) {
     const admissionNumber = generateAdmissionNumber(student, branding, centers, seq);
     _approvalState.admissionSeq = seq;
     const BUILTIN_MSG = `Dear {{name}},
+
 Welcome to {{school}}! Your registration has been approved.
+
 Below are your login details:
+
 Program: {{program}}
+Region: {{region}}
+Study Center: {{center}}
 Username: {{phone}}
-Admission Number: {{admission}}
-Password: {{admission}}
+Admission Number: {{admissionNumber}}
+Password: {{admissionNumber}}
+
 Please use the Username and Password above to log in to the student portal where you will access your courses, quizzes, and more.
+
 For any questions, contact the administration office.
+
 {{school}} Administration`;
     const sortedTemplates = (allTemplates || []).slice().sort((a, b) => {
         const aIsWelcome = (a.id === 'tpl-welcome' || /welcome|approval|register/i.test(a.name || '')) ? 0 : 1;
