@@ -134,9 +134,11 @@ Welcome to {{school}}! Your registration has been approved.
 Below are your login details:
 
 Program: {{program}}
+Region: {{region}}
+Study Center: {{center}}
 Username: {{phone}}
-Admission Number: {{admission}}
-Password: {{admission}}
+Admission Number: {{admissionNumber}}
+Password: {{admissionNumber}}
 
 Please use the Username and Password above to log in to the student portal where you will access your courses, quizzes, and more.
 

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="css/main.145.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=183" as="script">
+    <link rel="preload" href="js/bundle.js?v=211" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
@@ -870,7 +870,7 @@
     </div>
 </div>
 
-    <script src="js/bundle.js?v=210"></script>
+    <script src="js/bundle.js?v=211"></script>
     <script src="js/student-hub.js?v=7"></script>
     <script src="js/discussions.js?v=5"></script>
     <script src="js/help.js?v=3"></script>
@@ -888,7 +888,13 @@
                     var u=res.data.user; if(!u){showLoginError('Login failed');return;}
                     sessionStorage.setItem('currentUser', JSON.stringify(u));
                     document.getElementById('login-pass').value='';
-                    location.reload();
+                    showLoginError('');
+                    if (typeof showApp === 'function' && typeof logAudit === 'function') {
+                        showApp(u);
+                        try { logAudit('login', 'user', { username: u.username }); } catch(e){}
+                    } else {
+                        location.reload();
+                    }
                 }).catch(function(e){showLoginError('Cannot reach server: ' + e.message)});
             } catch(e) { showLoginError('Error: ' + e.message); }
         };
