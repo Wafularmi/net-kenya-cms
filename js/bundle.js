@@ -10697,6 +10697,11 @@ async function openApproveModal(studentId) {
     const [allTemplates] = await Promise.all([
         dbGetAll('whatsappTemplates')
     ]);
+    const welcomeDefault = WHATSAPP_DEFAULT_TEMPLATES.find(t => t.id === 'tpl-welcome');
+    const welcomeStored = allTemplates.find(t => t.id === 'tpl-welcome');
+    if (welcomeDefault && welcomeStored) {
+        welcomeStored.message = welcomeDefault.message;
+    }
     let settingVal = 0;
     try {
         const setting = await dbGet('settings', 'admissionLastSeq');
