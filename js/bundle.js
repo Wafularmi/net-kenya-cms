@@ -11376,15 +11376,17 @@ async function approveRegistration(studentId) {
     return openApproveModal(studentId);
 }
 async function rejectRegistration(studentId) {
-    if (!await showConfirm('Reject Registration', 'Mark this registration as rejected?')) return;
+    if (!await showConfirm('Reject Registration', 'This will permanently delete the student record and any associated user account. Continue?')) return;
     const student = await dbGet('students', studentId);
     if (!student) return;
-    student.status = 'rejected';
-    student.rejectedAt = new Date().toISOString();
-    await dbPut('students', student);
+    try {
+        const user = await dbGet('users', student.phone);
+        if (user) await dbDelete('users', student.phone);
+    } catch (e) {}
+    await dbDelete('students', studentId);
     renderPendingRegistrations();
-    showToast('Registration rejected.', { type: 'warning' });
-    logAudit('rejected', 'registration', { studentId, name: student.name });
+    showToast('Registration rejected and deleted.', { type: 'warning' });
+    logAudit('rejected', 'registration', { studentId, name: student.name, phone: student.phone });
 }
 
 async function renderTickets() {
