@@ -815,13 +815,13 @@ async function showApp(user) {
     const regionName = user.role === 'coordinator' && user.regionId ? (window.__regionMap && window.__regionMap[user.regionId] || user.regionId) : '';
     document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
-    await initCoordinatorAccessCache();
+    initCoordinatorAccessCache();
     buildNavigation(user);
     const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
     if (msgBtn) msgBtn.style.display = (user.role === 'admin' || user.role === 'coordinator') ? '' : 'none';
     updateHeaderDate();
     setInterval(updateHeaderDate, 60000);
-    await loadBranding();
+    loadBranding();
     adjustHeaderPadding();
     loadAcademicSettings();
     initTabs();
