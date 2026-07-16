@@ -307,6 +307,21 @@ setInterval(cleanOnlineUsers, 30000);
 
 let db = loadDB();
 
+// Ensure admin user has known password (admin123) regardless of volume state
+(function resetAdminPassword() {
+    try {
+        const admin = db.users && db.users.find(u => u.username === 'admin');
+        if (admin) {
+            const expected = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
+            if (admin.password !== expected) {
+                admin.password = expected;
+                safeWriteJSON(db);
+                console.log('ADMIN_PASSWORD_RESET');
+            }
+        }
+    } catch (e) { console.error('ADMIN_PASSWORD_RESET_FAILED', e.message); }
+})();
+
 let _saveTimer = null;
 function saveDB() {
     if (_saveTimer) clearTimeout(_saveTimer);
