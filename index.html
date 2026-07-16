@@ -21,7 +21,7 @@
                 <div class="form-group"><label>Username / Phone Number</label><input type="text" id="login-user" placeholder="Phone number (students) or username (staff)"></div>
                 <div class="form-group" style="display:none;"><input type="text" name="fakeuser" autocomplete="off"></div>
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
-                <button class="btn btn-primary btn-full" onclick="login()">Sign In</button>
+                <button class="btn btn-full" id="login-btn" onclick="login()" style="background:var(--accent);border-color:var(--accent);color:#fff;">Sign In</button>
                 <p id="login-error" class="login-error" style="display:none;"></p>
                 <p class="login-hint" style="margin-top:12px;font-size:11px;color:var(--text-muted);">Don't have an account? <a href="#" onclick="showSignupForm(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">Request Registration</a></p>
             </div>
@@ -888,7 +888,19 @@
                     var u=res.data.user; if(!u){showLoginError('Login failed');return;}
                     sessionStorage.setItem('currentUser', JSON.stringify(u));
                     document.getElementById('login-pass').value='';
-                    location.reload();
+                    showLoginError('');
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('app').style.display = 'flex';
+                    if (typeof showApp === 'function') {
+                        showApp(u);
+                    } else {
+                        var waitForShowApp = setInterval(function() {
+                            if (typeof showApp === 'function') {
+                                clearInterval(waitForShowApp);
+                                showApp(u);
+                            }
+                        }, 50);
+                    }
                 }).catch(function(e){showLoginError('Cannot reach server: ' + e.message)});
             } catch(e) { showLoginError('Error: ' + e.message); }
         };
