@@ -1952,7 +1952,7 @@ async function onTestAccountToggle() {
     const manual = document.getElementById('adm-manual-section');
     if (manual) manual.style.display = checked ? 'none' : '';
 }
-function updateAdmissionPreview() {
+async function updateAdmissionPreview() {
     const branding = await dbGet('settings', 'branding');
     const initials = (branding && branding.initials) ? branding.initials : 'XX';
     const centerId = document.getElementById('student-center') ? document.getElementById('student-center').value : '';
