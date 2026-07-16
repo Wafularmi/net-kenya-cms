@@ -888,19 +888,7 @@
                     var u=res.data.user; if(!u){showLoginError('Login failed');return;}
                     sessionStorage.setItem('currentUser', JSON.stringify(u));
                     document.getElementById('login-pass').value='';
-                    showLoginError('');
-                    document.getElementById('login-screen').style.display = 'none';
-                    document.getElementById('app').style.display = 'flex';
-                    if (typeof showApp === 'function') {
-                        showApp(u);
-                    } else {
-                        var waitForShowApp = setInterval(function() {
-                            if (typeof showApp === 'function') {
-                                clearInterval(waitForShowApp);
-                                showApp(u);
-                            }
-                        }, 50);
-                    }
+                    location.reload();
                 }).catch(function(e){showLoginError('Cannot reach server: ' + e.message)});
             } catch(e) { showLoginError('Error: ' + e.message); }
         };
