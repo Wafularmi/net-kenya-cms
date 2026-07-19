@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Student User Manual — NET Foundation College</title>
+<title>Student User Manual — {{SCHOOL_NAME}}</title>
 <style>
     :root {
         --primary: #f59e0b;
@@ -36,23 +36,72 @@
     }
     .cover {
         text-align: center;
-        padding: 60px 0 40px;
+        padding: 48px 0 36px;
         border-bottom: 3px solid var(--primary);
         margin-bottom: 40px;
+        position: relative;
+    }
+    .cover-logo {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+        box-shadow: 0 4px 16px rgba(245,158,11,0.3);
+    }
+    .cover-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .cover-logo .initials {
+        color: #fff;
+        font-weight: 800;
+        font-size: 28px;
+        letter-spacing: 2px;
     }
     .cover h1 {
         font-size: 28px;
         color: var(--text);
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     }
     .cover .subtitle {
         font-size: 16px;
         color: var(--text-secondary);
+        max-width: 500px;
+        margin: 0 auto;
+    }
+    .cover .divider {
+        width: 60px;
+        height: 3px;
+        background: var(--primary);
+        margin: 16px auto;
+        border-radius: 2px;
+    }
+    .cover .author {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-top: 16px;
     }
     .cover .version {
         font-size: 12px;
         color: var(--text-muted);
+        margin-top: 4px;
+    }
+    .cover .mission {
         margin-top: 20px;
+        padding: 16px 20px;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 10px;
+        font-size: 14px;
+        color: #78350f;
+        font-style: italic;
+        line-height: 1.6;
     }
     .toc { margin-bottom: 40px; }
     .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
@@ -69,6 +118,7 @@
         margin-bottom: 16px;
     }
     section h3 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+    section h4 { font-size: 14px; margin: 12px 0 6px; color: var(--text-secondary); }
     section p { margin-bottom: 10px; color: var(--text-secondary); }
     section ul, section ol { padding-left: 24px; margin-bottom: 10px; }
     section li { margin-bottom: 4px; color: var(--text-secondary); }
@@ -88,8 +138,29 @@
         margin: 12px 0;
         font-size: 13px;
     }
-    .step { margin: 8px 0 8px 24px; }
+    .step { margin: 6px 0 6px 24px; }
     .step b { color: var(--text); }
+    .ack-box {
+        background: linear-gradient(135deg, #fffbeb, #fef3c7);
+        border: 1px solid #f59e0b;
+        border-radius: 12px;
+        padding: 28px 24px;
+        margin-bottom: 36px;
+    }
+    .ack-box h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    .ack-box p, .ack-box li { color: #78350f; }
+    .signature-area {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid #fde68a;
+        font-size: 13px;
+    }
     .footer {
         text-align: center;
         padding: 20px 0 0;
@@ -102,251 +173,544 @@
         .container { box-shadow: none; padding: 40px; border-radius: 0; max-width: 100%; }
         .toc { page-break-after: always; }
         section { page-break-inside: avoid; }
+        .no-print { display: none; }
     }
 </style>
 </head>
 <body>
 <div class="container">
 
-<div style="text-align:right;margin-bottom:12px;">
-    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF (Print → Save as PDF)</button>
+<div class="no-print" style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF</button>
     <button onclick="history.back()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
 </div>
+
 <div class="cover">
-    <h1>📘 Student User Manual</h1>
-    <div class="subtitle">NET Foundation College — Student Portal Guide</div>
-    <div class="version">Version 1.0 &middot; July 2026</div>
+    <div class="cover-logo">
+        <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+        <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+    </div>
+    <h1>{{SCHOOL_NAME}}</h1>
+    <div class="subtitle">Student Portal User Manual</div>
+    <div class="divider"></div>
+    <div class="author">
+        Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}}<br>
+        Lead Developer: Pastor David Wafula Wanyonyi
+    </div>
+    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
+    <div class="mission">
+        "This platform exists to ensure that no one has an excuse for ministering<br>
+        without having been trained."
+    </div>
 </div>
 
 <div class="toc">
     <h2>Table of Contents</h2>
     <ol>
-        <li><a href="#intro">Introduction</a></li>
-        <li><a href="#login">Logging In</a></li>
-        <li><a href="#dashboard">Your Dashboard</a></li>
-        <li><a href="#profile">Your Profile</a></li>
-        <li><a href="#courses">Courses &amp; Classes</a></li>
-        <li><a href="#quizzes">Quizzes</a></li>
-        <li><a href="#exams">Exams</a></li>
+        <li><a href="#intro">Introduction — About This Portal</a></li>
+        <li><a href="#login">Logging In &amp; Out</a></li>
+        <li><a href="#dashboard">Dashboard — Your Home Screen</a></li>
+        <li><a href="#hub">My Hub — Your Personal Dashboard</a></li>
+        <li><a href="#courses">Courses &amp; Lessons</a></li>
+        <li><a href="#quizzes">Quizzes — Testing Your Knowledge</a></li>
+        <li><a href="#exams">Exams — Formal Assessments</a></li>
         <li><a href="#grades">Grades &amp; Transcripts</a></li>
         <li><a href="#attendance">Attendance</a></li>
         <li><a href="#fees">Fees &amp; Payments</a></li>
-        <li><a href="#library">Library</a></li>
-        <li><a href="#support">Support &amp; Communication</a></li>
-        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#portal">Student Portal — Your Profile</a></li>
+        <li><a href="#library">Library — Digital Books</a></li>
+        <li><a href="#support">Support, Tickets &amp; Communication</a></li>
+        <li><a href="#troubleshooting">Troubleshooting — Common Problems</a></li>
+        <li><a href="#acknowledgments">Acknowledgments</a></li>
     </ol>
 </div>
 
 <section id="intro">
-    <h2>1. Introduction</h2>
-    <p>Welcome to the NET Foundation College Student Portal. This portal gives you access to your courses, quizzes, exams, grades, attendance records, fee statements, and more — all in one place.</p>
-    <p>The portal works on any device with a modern web browser (Chrome, Firefox, Safari, or Edge). You can access it from your phone, tablet, or computer.</p>
-    <div class="tip">Bookmark the portal URL: <strong>https://netfoundation.ke</strong> for quick access.</div>
+    <h2>1. Introduction — About This Portal</h2>
+    <p>Welcome to the <strong>{{SCHOOL_NAME}} Student Portal</strong>. This online platform is designed to make your learning journey smooth, accessible, and effective. Whether you are studying from home, at a study center, or on the go, the portal puts everything you need right at your fingertips.</p>
+
+    <h3>The Mission</h3>
+    <p>This platform exists to ensure that <strong>no one has an excuse for ministering without having been trained</strong>. We believe that every person called to ministry deserves access to quality theological education. By blending face-to-face training with online learning, we make it possible for busy Pastors, Church leaders, and ministry workers to study at their own pace, from wherever they are, without leaving their calling or responsibilities behind.</p>
+
+    <h3>What You Can Do Here</h3>
+    <ul>
+        <li>Access course materials and lessons anytime</li>
+        <li>Take quizzes and get instant feedback</li>
+        <li>Register for exams and view your schedules</li>
+        <li>Check your grades and download your transcript</li>
+        <li>Track your attendance record</li>
+        <li>View your fee statement and payment history</li>
+        <li>Read digital books from the library</li>
+        <li>Submit support tickets and get help</li>
+        <li>Participate in course discussions with fellow students and instructors</li>
+    </ul>
+
+    <h3>Device &amp; Browser Requirements</h3>
+    <p>The portal works on any device — phone, tablet, laptop, or desktop. Use any modern browser: Chrome, Firefox, Safari, or Edge. You just need an internet connection.</p>
+    <div class="tip">Bookmark this URL: <strong>https://netfoundation.ke</strong> for quick access.</div>
+
+    <h3>Navigating This Manual</h3>
+    <p>Each section below explains one part of the portal in simple terms with step-by-step instructions. If you get stuck, check the Troubleshooting section at the end.</p>
 </section>
 
 <section id="login">
-    <h2>2. Logging In</h2>
+    <h2>2. Logging In &amp; Out</h2>
 
-    <h3>Your Credentials</h3>
-    <p>When you are enrolled as a student, the college creates a login account for you. Your credentials are:</p>
+    <h3>Your Login Credentials</h3>
+    <p>When you are enrolled as a student, the college creates an account for you automatically. You will receive your login details from the administration or your study center coordinator.</p>
     <ul>
-        <li><strong>Username:</strong> Your phone number (the one you provided during registration)</li>
+        <li><strong>Username:</strong> Your phone number (the number you gave during registration)</li>
         <li><strong>Password:</strong> Your admission number (e.g., <em>NET/001/07-26/001</em>)</li>
     </ul>
 
-    <h3>Steps to Log In</h3>
-    <div class="step">1. Open your browser and go to <strong>https://netfoundation.ke</strong></div>
-    <div class="step">2. You will see the login screen with fields for Username and Password.</div>
-    <div class="step">3. Enter your phone number as the username and your admission number as the password.</div>
-    <div class="step">4. Click <strong>"Sign In"</strong>.</div>
-    <div class="note">Passwords are case-sensitive. Type carefully. If you see "Invalid credentials," double-check your username and password.</div>
+    <h3>Step-by-Step: How to Log In</h3>
+    <div class="step"><b>Step 1:</b> Open your browser and go to <strong>https://netfoundation.ke</strong></div>
+    <div class="step"><b>Step 2:</b> Wait for the login screen to appear. You will see two fields: <strong>Username</strong> and <strong>Password</strong>, plus a <strong>Sign In</strong> button.</div>
+    <div class="step"><b>Step 3:</b> Type your phone number into the <strong>Username</strong> field.</div>
+    <div class="step"><b>Step 4:</b> Type your admission number into the <strong>Password</strong> field. Be careful with capital letters and symbols — passwords are case-sensitive.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Sign In"</strong> (or press Enter on your keyboard).</div>
+    <div class="step"><b>Step 6:</b> If your details are correct, you will enter the portal. If you see "Invalid credentials," double-check your username and password, then try again.</div>
 
-    <h3>First-Time Login — Terms &amp; Conditions</h3>
-    <p>The first time you log in, you will be asked to read and accept the college's Terms and Conditions. You must accept them to proceed. You will only see this once.</p>
+    <div class="note"><b>Important:</b> Passwords are case-sensitive. "NET/001" and "net/001" are different. Make sure Caps Lock is off. If you still cannot log in, contact your study center coordinator or the college administration.</div>
+
+    <h3>First-Time Login — Accepting Terms</h3>
+    <p>The first time you ever log in, you will see a pop-up window with the college's <strong>Terms and Conditions</strong>. Please read them carefully. You must check the "I agree" box and click "Accept" to enter the portal. You will only see this once.</p>
 
     <h3>Forgot Your Password?</h3>
-    <p>Contact the college administration or your coordinator to have your password reset. You can also ask your study center coordinator for assistance.</p>
+    <p>If you forget your password, contact the college administration or your study center coordinator. They can reset it for you. After reset, you will get a temporary password that you can change later from your profile settings.</p>
+
+    <h3>How to Log Out</h3>
+    <p>For security, always log out when you are done, especially on a shared device.</p>
+    <div class="step"><b>Step 1:</b> Click your name or profile icon at the top-right corner of the screen.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Logout"</strong> or <strong>"Sign Out"</strong> from the dropdown menu.</div>
 </section>
 
 <section id="dashboard">
-    <h2>3. Your Dashboard</h2>
-    <p>The Dashboard is the first screen you see after logging in. It gives you a quick overview of everything important:</p>
+    <h2>3. Dashboard — Your Home Screen</h2>
+    <p>The Dashboard is the first screen you see after logging in. It gives you a quick summary of everything important.</p>
+
+    <h3>What You Will See on the Dashboard</h3>
+
+    <h4>📊 Statistics Cards</h4>
+    <p>Four cards at the top show numbers for your courses, exams, quizzes, and attendance. Click any card to jump directly to that section for more details.</p>
+
+    <h4>📝 To Do List</h4>
+    <p>A list of pending quizzes and upcoming registered exams, sorted by date. Items that are due soon appear first. Each item shows the course name and what you need to do.</p>
+
+    <h4>📅 Upcoming Events</h4>
+    <p>Important dates such as exam schedules and academic deadlines.</p>
+
+    <h4>📢 Notifications</h4>
+    <p>Alerts and messages from the college. The bell icon at the top-right also shows unread notification count.</p>
+
+    <h4>📚 Your Courses</h4>
+    <p>Quick links to your enrolled courses so you can jump straight into learning.</p>
+
+    <h3>How to Navigate</h3>
+    <p>Use the <strong>sidebar menu</strong> on the left side of the screen to move between sections. The sidebar lists all available areas:</p>
     <ul>
-        <li><strong>📊 Stats Cards</strong> — Shows your total courses, upcoming quizzes, registered exams, and attendance rate.</li>
-        <li><strong>📝 To Do</strong> — A list of pending quizzes and upcoming exams sorted by date.</li>
-        <li><strong>📅 Upcoming Events</strong> — Calendar of scheduled exams and important dates.</li>
-        <li><strong>📢 Notifications</strong> — Messages and alerts from the college.</li>
+        <li><strong>Dashboard</strong> — This home screen</li>
+        <li><strong>🎓 My Hub</strong> — Your personal student dashboard (more details in section 4)</li>
+        <li><strong>📚 Courses</strong> — Your enrolled courses and lessons</li>
+        <li><strong>📋 Quizzes</strong> — Take and review quizzes</li>
+        <li><strong>📝 Exams</strong> — Register for exams</li>
+        <li><strong>📄 Grades</strong> — Your scores and transcript</li>
+        <li><strong>📖 Library</strong> — Digital books</li>
+        <li><strong>🎫 Support</strong> — Submit and track tickets</li>
+        <li><strong>💬 Discussions</strong> — Course discussion forums</li>
     </ul>
-    <p>Use the sidebar on the left to navigate to other sections of the portal.</p>
+    <p>The active section is highlighted. Click any section name to open it.</p>
 </section>
 
-<section id="profile">
-    <h2>4. Your Profile</h2>
-    <p>Click on your name or avatar in the top-right corner to view your profile. Here you can:</p>
+<section id="hub">
+    <h2>4. My Hub — Your Personal Dashboard</h2>
+    <p><strong>🎓 My Hub</strong> is a special dashboard just for you. It brings together everything about your studies in one beautiful page.</p>
+
+    <h3>How to Open My Hub</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"🎓 My Hub"</strong> in the sidebar menu.</div>
+    <div class="step"><b>Step 2:</b> The page loads with your name, admission number, program, and year displayed in a welcome banner at the top.</div>
+
+    <h3>What You Will See in My Hub</h3>
+
+    <h4>Welcome Banner</h4>
+    <p>Shows your name, admission number, program of study, and current year. A green "Live" indicator shows you are connected.</p>
+
+    <h4>Quick Stats Cards</h4>
+    <p>Four cards showing your enrolled courses count, registered exams, pending quizzes, and study notes. Click any card to jump to that section.</p>
+
+    <h4>Tab Navigation</h4>
+    <p>Below the stats you will find tabs that let you switch between different views:</p>
     <ul>
-        <li>View your admission number, program, year of study, and study center.</li>
-        <li>See your personal details (name, phone, email).</li>
-        <li>View your fee balance.</li>
-        <li>Change your password.</li>
+        <li><strong>Overview</strong> — A combined view of your upcoming exams, pending quizzes, and recent activity</li>
+        <li><strong>📚 Courses</strong> — List of all your enrolled courses with progress</li>
+        <li><strong>📝 Exams</strong> — Exam schedule and registration status</li>
+        <li><strong>📋 Quizzes</strong> — Pending and completed quizzes with scores</li>
+        <li><strong>📄 Notes</strong> — Study notes you have created for your courses</li>
+        <li><strong>💬 Discussions</strong> — Course discussion forums</li>
     </ul>
-    <div class="tip">Keep your contact details (phone and email) up to date so the college can reach you.</div>
+
+    <h3>Using the Tabs</h3>
+    <div class="step"><b>Step 1:</b> Click a tab name (e.g., "📚 Courses") to view that section.</div>
+    <div class="step"><b>Step 2:</b> The content below the tabs changes to show the relevant information.</div>
+    <div class="step"><b>Step 3:</b> Click another tab to switch views. The active tab is highlighted with a gold underline.</div>
+
+    <div class="tip">My Hub is the best place to start your day. Check it first to see what needs your attention — pending quizzes, upcoming exams, or new grades.</div>
 </section>
 
 <section id="courses">
-    <h2>5. Courses &amp; Classes</h2>
-    <p>The <strong>My Courses</strong> section shows all the courses you are currently enrolled in.</p>
+    <h2>5. Courses &amp; Lessons</h2>
+
+    <h3>Viewing Your Enrolled Courses</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📚 Courses"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> You will see a list or grid of all courses you are enrolled in. Each course card shows:</div>
+    <ul style="margin-left: 40px;">
+        <li>Course code (e.g., BTH101)</li>
+        <li>Course title</li>
+        <li>Instructor name</li>
+        <li>Credit hours</li>
+        <li>Progress bar showing how much you have completed</li>
+    </ul>
+    <div class="step"><b>Step 3:</b> Click <strong>"View Course"</strong> on any course to open it and see its full content.</div>
+
+    <h3>Inside a Course</h3>
+    <p>When you open a course, you will find:</p>
+
+    <h4>Course Overview</h4>
+    <p>A description of the course, its learning objectives, and the syllabus or topics covered.</p>
+
+    <h4>Lessons</h4>
+    <p>The course is divided into lessons. Each lesson covers one topic. Lessons are arranged in order — start from the first lesson and work your way through.</p>
+
+    <h4>Lesson Materials</h4>
+    <p>Each lesson may include different types of materials:</p>
     <ul>
-        <li>Each course card shows the course code, name, instructor, credits, and a progress bar.</li>
-        <li>Click <strong>"View Course"</strong> to open the course and see lessons, materials, and quizzes.</li>
-        <li>Click <strong>"Class Schedule"</strong> to see your weekly timetable.</li>
+        <li><strong>📄 Study Notes</strong> — Written content explaining the topic</li>
+        <li><strong>🎥 Videos</strong> — Video lectures or teaching clips</li>
+        <li><strong>📎 Downloads</strong> — PDF files, slides, or other resources you can save</li>
+        <li><strong>📋 Quizzes</strong> — Short tests at the end of a lesson to check your understanding</li>
     </ul>
 
-    <h3>Lessons &amp; Materials</h3>
-    <p>Inside a course, you will find lessons organized by topic. Each lesson may include:</p>
-    <ul>
-        <li>📄 Study notes and reading materials</li>
-        <li>🎥 Video links</li>
-        <li>📎 Downloadable resources (PDFs, documents)</li>
-    </ul>
+    <h3>How to Study a Lesson</h3>
+    <div class="step"><b>Step 1:</b> Open a course and click on a lesson title.</div>
+    <div class="step"><b>Step 2:</b> Read the study notes or watch the video.</div>
+    <div class="step"><b>Step 3:</b> Download any attached materials for offline review.</div>
+    <div class="step"><b>Step 4:</b> Take the lesson quiz (if available) to test what you have learned.</div>
+    <div class="step"><b>Step 5:</b> Mark the lesson as complete if there is a completion button.</div>
+
+    <h3>Class Schedule</h3>
+    <p>If your course has scheduled live classes, click the <strong>"Schedule"</strong> tab to view the timetable with dates, times, and venues or online meeting links.</p>
 </section>
 
 <section id="quizzes">
-    <h2>6. Quizzes</h2>
-    <p>Quizzes are short assessments that test your understanding of a topic.</p>
+    <h2>6. Quizzes — Testing Your Knowledge</h2>
+    <p>Quizzes are short tests that help you check how well you understand a topic. They appear within lessons or as standalone assessments for each course.</p>
 
-    <h3>Taking a Quiz</h3>
-    <div class="step">1. Go to <strong>My Courses</strong> and click <strong>"View Course"</strong> on the relevant course.</div>
-    <div class="step">2. Find the quiz in the course content or go to the <strong>Quizzes</strong> section.</div>
-    <div class="step">3. Click <strong>"Start Quiz"</strong> to begin.</div>
-    <div class="step">4. Answer each question. Some quizzes are multiple-choice, others may require typed answers.</div>
-    <div class="step">5. Click <strong>"Submit"</strong> when done. Your score will appear immediately.</div>
+    <h3>How to Take a Quiz</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>📚 Courses</strong> and open the course that has the quiz.</div>
+    <div class="step"><b>Step 2:</b> Find the quiz in the lesson content, or click the <strong>📋 Quizzes</strong> tab inside the course.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Start Quiz"</strong> to begin. The quiz opens immediately.</div>
+    <div class="step"><b>Step 4:</b> Read each question and select or type your answer.</div>
+    <div class="step"><b>Step 5:</b> Use <strong>"Next"</strong> and <strong>"Previous"</strong> to move between questions.</div>
+    <div class="step"><b>Step 6:</b> Click <strong>"Submit"</strong> when you have answered all questions.</div>
 
-    <div class="note">Quizzes have a time limit. The timer starts when you begin. If you run out of time, your answers will be auto-submitted.</div>
+    <div class="note"><b>Time Limit:</b> Most quizzes have a time limit. A timer at the top shows remaining time. When time runs out, your answers are automatically submitted. You cannot pause or restart once begun.</div>
 
-    <h3>Quiz Results</h3>
-    <p>After submitting, you will see your score, grade, and which questions you got right or wrong. You can retake some quizzes depending on the course settings.</p>
+    <h3>After Submitting</h3>
+    <p>Your score, percentage, and letter grade appear immediately. You will see which questions you got right and wrong, and for some quizzes, the correct answers are shown.</p>
+
+    <h3>Retaking a Quiz</h3>
+    <p>If the course allows retakes, a <strong>"Retake Quiz"</strong> button will appear after you see your results. Your highest score is usually kept as the final grade.</p>
 </section>
 
 <section id="exams">
-    <h2>7. Exams</h2>
-    <p>Exams are formal assessments scheduled at specific dates and times.</p>
+    <h2>7. Exams — Formal Assessments</h2>
+    <p>Exams are larger assessments that cover the full content of a course. They are scheduled on specific dates and times, and they contribute significantly to your final grade.</p>
 
-    <h3>Registering for an Exam</h3>
-    <div class="step">1. Go to the <strong>Exams</strong> section from the sidebar.</div>
-    <div class="step">2. You will see a list of available exams for your enrolled courses.</div>
-    <div class="step">3. Click <strong>"Register"</strong> next to each exam you want to take.</div>
-    <div class="step">4. Your exam registration is confirmed when you see a "Registered" badge.</div>
+    <h3>How to View Available Exams</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📝 Exams"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> You will see two lists:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>Upcoming Exams</strong> — Exams in the future that you can register for</li>
+        <li><strong>Past Exams</strong> — Exams that have already happened (for reference only)</li>
+    </ul>
+    <div class="step"><b>Step 3:</b> Each exam entry shows the title, course, date, time, and venue.</div>
+
+    <h3>How to Register for an Exam</h3>
+    <div class="step"><b>Step 1:</b> Find the exam in the Upcoming list.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Register"</strong> next to that exam.</div>
+    <div class="step"><b>Step 3:</b> A confirmation message appears. The button changes to a green <strong>"Registered"</strong> badge.</div>
+    <div class="step"><b>Step 4:</b> The exam now appears in your registered list and on your Dashboard To Do list.</div>
+
+    <div class="note">You can only register for exams of courses you are enrolled in. Register early to secure your seat.</div>
 
     <h3>On Exam Day</h3>
     <ul>
-        <li>Check the exam date, time, and venue listed in the Exams section.</li>
-        <li>Arrive at least 15 minutes early.</li>
-        <li>Bring your admission number and a valid ID.</li>
+        <li>Check the date, time, and venue at least one day before</li>
+        <li>Arrive 15 minutes early</li>
+        <li>Bring your admission number and a valid ID</li>
+        <li>For online exams, ensure a stable internet connection</li>
+        <li>If you cannot attend, inform the administration as soon as possible</li>
     </ul>
 
-    <h3>Retaking an Exam</h3>
-    <p>If you need to retake an exam, click <strong>"Request Retake"</strong> on the exam record. The admin will review and approve your request.</p>
+    <h3>How to Request an Exam Retake</h3>
+    <div class="step"><b>Step 1:</b> Go to the Exams section and find the exam.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Request Retake"</strong> and give a brief reason.</div>
+    <div class="step"><b>Step 3:</b> The administration will review and respond to your request.</div>
 </section>
 
 <section id="grades">
     <h2>8. Grades &amp; Transcripts</h2>
 
-    <h3>Viewing Your Grades</h3>
-    <p>Go to <strong>My Grades</strong> from the sidebar. You will see a table of all your courses with your scores, letter grades, and GPA points for each course.</p>
-
-    <h3>Your Transcript</h3>
-    <p>Click <strong>"View Transcript"</strong> to see a formal document listing all your courses, scores, grades, and cumulative GPA. You can print this or save it as a PDF from your browser.</p>
+    <h3>How to View Your Grades</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📄 Grades"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> A table shows all your courses with:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>Course</strong> — Name and code</li>
+        <li><strong>Score</strong> — Your numerical score (out of 100)</li>
+        <li><strong>Grade</strong> — Letter grade (A, B, C, D, or F)</li>
+        <li><strong>GPA</strong> — Grade points earned (on a 4.0 scale)</li>
+        <li><strong>Status</strong> — Pass or Fail</li>
+    </ul>
 
     <h3>Grading Scale</h3>
-    <p>The college uses the following grading scale:</p>
     <ul>
-        <li><strong>A</strong> (80-100%) — Excellent</li>
-        <li><strong>B</strong> (70-79%) — Good</li>
-        <li><strong>C</strong> (60-69%) — Satisfactory</li>
-        <li><strong>D</strong> (50-59%) — Pass</li>
-        <li><strong>F</strong> (below 50%) — Fail</li>
+        <li><strong>A</strong> (80-100%) — Excellent — GPA: 4.0</li>
+        <li><strong>B</strong> (70-79%) — Good — GPA: 3.0</li>
+        <li><strong>C</strong> (60-69%) — Satisfactory — GPA: 2.0</li>
+        <li><strong>D</strong> (50-59%) — Pass — GPA: 1.0</li>
+        <li><strong>F</strong> (Below 50%) — Fail — GPA: 0.0</li>
     </ul>
+
+    <h3>How to Download Your Transcript</h3>
+    <div class="step"><b>Step 1:</b> On the Grades page, click <strong>"View Transcript"</strong>.</div>
+    <div class="step"><b>Step 2:</b> A formatted transcript document appears on screen.</div>
+    <div class="step"><b>Step 3:</b> Press <strong>Ctrl+P</strong> (Windows) or <strong>Cmd+P</strong> (Mac) to open print.</div>
+    <div class="step"><b>Step 4:</b> Choose <strong>"Save as PDF"</strong> as the destination and click Save.</div>
+    <div class="tip">For an officially stamped transcript, contact the college administration office.</div>
 </section>
 
 <section id="attendance">
     <h2>9. Attendance</h2>
-    <p>The <strong>My Attendance</strong> section shows your attendance record for each course.</p>
-    <ul>
-        <li>You will see the total number of sessions held, how many you attended, and your attendance percentage.</li>
-        <li>A green badge means good attendance (70% or above).</li>
-        <li>An orange or red badge means your attendance needs improvement.</li>
+
+    <h3>How to Check Your Attendance</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Attendance"</strong> in the sidebar (or find it inside your Courses section).</div>
+    <div class="step"><b>Step 2:</b> For each course you will see:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>Total Sessions</strong> — How many classes have been held</li>
+        <li><strong>Attended</strong> — How many you attended</li>
+        <li><strong>Percentage</strong> — Your attendance rate</li>
+        <li><strong>Status</strong> — A color-coded badge</li>
     </ul>
-    <div class="tip">Regular attendance is important. Students with attendance below 70% may be flagged for follow-up by the administration.</div>
+
+    <h3>What the Colors Mean</h3>
+    <ul>
+        <li><b style="color:#22c55e;">Green</b> — 70% or above (good)</li>
+        <li><b style="color:#f59e0b;">Orange</b> — 50% to 69% (needs improvement)</li>
+        <li><b style="color:#ef4444;">Red</b> — Below 50% (urgent attention needed)</li>
+    </ul>
+    <div class="tip">You need at least 70% attendance for each course. Falling below may trigger a follow-up from the administration.</div>
+
+    <h3>If You Spot an Error</h3>
+    <p>Contact your instructor or study center coordinator to correct your attendance record.</p>
 </section>
 
 <section id="fees">
     <h2>10. Fees &amp; Payments</h2>
-    <p>The <strong>Finance</strong> section shows your fee statement.</p>
-    <ul>
-        <li>You can see your total fee amount, total paid, and outstanding balance.</li>
-        <li><strong>Payment History</strong> lists all payments made with dates, receipt numbers, and amounts.</li>
-        <li><strong>Installment Plan</strong> — If you are on a payment plan, you will see your installment schedule and due dates.</li>
+
+    <h3>How to View Your Fee Statement</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Finance"</strong> or <strong>"My Fees"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Your statement shows:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>Total Fee</strong> — Full program fee charged</li>
+        <li><strong>Total Paid</strong> — What you have paid so far</li>
+        <li><strong>Balance</strong> — Remaining amount (total minus paid)</li>
     </ul>
-    <p>For any questions about fees or payments, contact the college finance office.</p>
+
+    <h3>Payment History</h3>
+    <p>A table lists every payment you have made with date, receipt number, amount, and payment method (e.g., M-Pesa, bank, cash). Keep your receipt numbers for your records.</p>
+
+    <h3>Installment Plans</h3>
+    <p>If you are on a payment plan, you will see each installment with its due date, amount, and whether it is paid, pending, or overdue.</p>
+
+    <h3>Balance on Dashboard</h3>
+    <p>Your outstanding balance also appears on the Dashboard. Green means fully paid; orange means there is an outstanding amount.</p>
+
+    <div class="note">For fee questions, contact the finance office directly. Never make payments to individuals without official authorization.</div>
+</section>
+
+<section id="portal">
+    <h2>11. Student Portal — Your Profile</h2>
+    <p>The Student Portal section is where you manage your personal information and account settings.</p>
+
+    <h3>How to Open Your Profile</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Student Portal"</strong> in the sidebar (listed under your name or in the Main section).</div>
+    <div class="step"><b>Step 2:</b> Your profile page opens with your personal and academic information.</div>
+
+    <h3>What You Can Do Here</h3>
+
+    <h4>View Your Details</h4>
+    <ul>
+        <li><strong>Personal:</strong> Name, admission number, phone, email, date of birth, gender</li>
+        <li><strong>Academic:</strong> Program, year, study center</li>
+        <li><strong>Fee:</strong> Current balance</li>
+    </ul>
+
+    <h4>Upload a Photo</h4>
+    <div class="step"><b>Step 1:</b> In your profile, find the photo section.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Choose File"</strong> and select a photo from your device.</div>
+    <div class="step"><b>Step 3:</b> The photo will upload and display. It is used for your ID card.</div>
+
+    <h4>Change Your Password</h4>
+    <div class="step"><b>Step 1:</b> Find the Change Password section in your profile.</div>
+    <div class="step"><b>Step 2:</b> Enter your current password.</div>
+    <div class="step"><b>Step 3:</b> Enter a new password and type it again to confirm.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> or <strong>"Update"</strong>.</div>
+    <div class="tip">Use a mix of letters, numbers, and symbols. Do not share your password with anyone.</div>
 </section>
 
 <section id="library">
-    <h2>11. Library</h2>
-    <p>The <strong>Library</strong> section gives you access to digital books and reading materials provided by the college.</p>
-    <ul>
-        <li>Browse available books by title or author.</li>
-        <li>Click on a book to read it online or download it.</li>
-    </ul>
-    <p>The library is updated regularly with new materials.</p>
+    <h2>12. Library — Digital Books</h2>
+    <p>The Library gives you access to digital books and study materials provided by the college to support your learning.</p>
+
+    <h3>How to Use the Library</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📖 Library"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Browse the list of available books. Each entry shows the title, author, and a short description.</div>
+    <div class="step"><b>Step 3:</b> Click a book to open and read it in your browser.</div>
+    <div class="step"><b>Step 4:</b> If a download option is available, you can save the book to read offline.</div>
+
+    <h3>Searching</h3>
+    <p>Use the search bar at the top to find books by title or author. Results filter as you type.</p>
+    <div class="tip">New books are added regularly. Check the library often for new materials.</div>
 </section>
 
 <section id="support">
-    <h2>12. Support &amp; Communication</h2>
+    <h2>13. Support, Tickets &amp; Communication</h2>
 
-    <h3>Submitting a Ticket</h3>
-    <p>If you have a question, issue, or complaint, go to <strong>Support</strong> from the sidebar and click <strong>"New Ticket"</strong>. Select a category (e.g., Academic, Fee, Technical), describe your issue, and submit. The admin will respond to your ticket.</p>
+    <h3>Submitting a Support Ticket</h3>
+    <p>A support ticket is how you ask for help or report a problem.</p>
+    <div class="step"><b>Step 1:</b> Click <strong>"🎫 Support"</strong> or <strong>"Tickets"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"New Ticket"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Choose a <strong>Category</strong>:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>Academic</strong> — Questions about courses, assignments, or grades</li>
+        <li><strong>Fee / Finance</strong> — Fees, payments, receipts</li>
+        <li><strong>Technical</strong> — Portal problems, login issues, errors</li>
+        <li><strong>General</strong> — Everything else</li>
+    </ul>
+    <div class="step"><b>Step 4:</b> Enter a subject and describe your issue in detail.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Submit"</strong>.</div>
+    <div class="step"><b>Step 6:</b> Track your ticket status (Open, In Progress, Resolved) from the Support page. You will be notified when there is an update.</div>
 
     <h3>WhatsApp Communication</h3>
-    <p>The college may send you WhatsApp messages for fee reminders, attendance alerts, and general announcements. You can also initiate a WhatsApp conversation from your profile or the communication center.</p>
+    <p>The college may send you WhatsApp messages for:</p>
+    <ul>
+        <li>💰 Fee reminders</li>
+        <li>⚠️ Attendance alerts</li>
+        <li>👋 Welcome messages when you enroll</li>
+        <li>📢 General announcements</li>
+    </ul>
+    <p>You can also start a WhatsApp conversation from your profile by clicking the 📱 button.</p>
 
-    <h3>Notifications</h3>
-    <p>The bell icon in the top-right corner shows your notifications. Click it to see messages, alerts, and updates from the college.</p>
+    <h3>Notifications (Bell Icon)</h3>
+    <p>The <strong>🔔 bell icon</strong> at the top-right shows a red badge with your unread notification count. Click it to see messages, alerts, ticket updates, grade postings, and announcements. Click any notification to view details.</p>
+
+    <h3>Course Discussions</h3>
+    <p>In the <strong>💬 Discussions</strong> section, you can post questions, share insights, and reply to other students and instructors. Discussions are organized by course — select the course you want to join.</p>
 </section>
 
 <section id="troubleshooting">
-    <h2>13. Troubleshooting</h2>
+    <h2>14. Troubleshooting — Common Problems</h2>
 
-    <h3>Can't Log In</h3>
-    <ul>
-        <li>Check that Caps Lock is off.</li>
-        <li>Ensure you are using your phone number as username (with the correct country code if applicable).</li>
-        <li>Your password is your admission number — type it exactly as shown on your enrollment documents.</li>
-        <li>If still stuck, contact your study center coordinator or the college admin.</li>
-    </ul>
-
-    <h3>Page Not Loading / Blank Screen</h3>
-    <ul>
-        <li>Refresh the page (F5 or Ctrl+R).</li>
-        <li>Clear your browser cache (Settings → Privacy → Clear browsing data).</li>
+    <h3>I Cannot Log In</h3>
+    <ol>
+        <li>Check that Caps Lock is off. Passwords are case-sensitive.</li>
+        <li>Make sure you are using your phone number as the username (with country code if outside Kenya).</li>
+        <li>Your password is your admission number. Type it exactly, including all slashes and letters.</li>
+        <li>Clear your browser cache and cookies, then try again.</li>
         <li>Try a different browser or an incognito/private window.</li>
-        <li>Ensure you have a stable internet connection.</li>
-    </ul>
+        <li>If still stuck, contact your study center coordinator or submit a support ticket.</li>
+    </ol>
 
-    <h3>Quiz Not Submitting</h3>
-    <ul>
-        <li>Don't close the browser tab while taking a quiz.</li>
+    <h3>The Page Shows Blank or Won't Load</h3>
+    <ol>
+        <li>Press <strong>F5</strong> or <strong>Ctrl+R</strong> (Windows) / <strong>Cmd+R</strong> (Mac) to refresh.</li>
+        <li>Check your internet connection. Try opening another website.</li>
+        <li>Clear your browser cache (Chrome: Settings → Privacy → Clear browsing data).</li>
+        <li>Try a different device or network.</li>
+        <li>If the problem persists, the server may be down for maintenance. Try again later.</li>
+    </ol>
+
+    <h3>A Quiz Will Not Submit</h3>
+    <ol>
+        <li>Do not close the browser tab while taking a quiz. It may reset your progress.</li>
         <li>If the timer runs out, answers are auto-submitted.</li>
-        <li>If you experience a technical issue, contact support with the quiz name and time.</li>
-    </ul>
+        <li>If "Submit" does not respond, try refreshing (may restart the quiz).</li>
+        <li>If you have a technical issue during a timed quiz, contact support with the quiz name and time.</li>
+    </ol>
 
-    <h3>Contact Support</h3>
-    <p>For any issues not covered in this manual, submit a support ticket from the portal or contact the college administration directly.</p>
+    <h3>Grades or Attendance Are Missing</h3>
+    <ol>
+        <li>Confirm you are enrolled in the course.</li>
+        <li>Wait for the instructor to publish results — it may take time after an assessment.</li>
+        <li>Refresh the page.</li>
+        <li>If still missing, contact your instructor or submit a support ticket.</li>
+    </ol>
+
+    <h3>I Forgot If I Registered for an Exam</h3>
+    <p>Go to <strong>Exams</strong> in the sidebar. Registered exams show a green "Registered" badge. You can also check the To Do list on your Dashboard.</p>
+
+    <h3>Need More Help?</h3>
+    <p>If your issue is not listed here, submit a support ticket from the portal (Support → New Ticket) or contact your study center coordinator.</p>
+</section>
+
+<section id="acknowledgments">
+    <h2>15. Acknowledgments</h2>
+
+    <div class="ack-box">
+        <p>This Student Portal and its accompanying User Manual were made possible through the collective effort and shared vision of many individuals and organizations. We express our deepest gratitude to:</p>
+
+        <p><strong>NET Foundation Netherlands</strong><br>
+        For generously availing their curriculum for use in training Pastors and Church leaders in Kenya and around the world. This platform exists because of their foundational work and unwavering commitment to theological education.</p>
+
+        <p><strong>NET Foundation Kenya (North Rift Trainers)</strong><br>
+        For their invaluable contribution to the development of this system — working tirelessly to fuse face-to-face training with online training, making quality theological education accessible to more students across Kenya and beyond. Their dedication aligns with NET Foundation Netherlands' long-term vision of reaching the world with this training.</p>
+
+        <p><strong>Raymond Warnar</strong><br>
+        For being an anchor to this vision, providing steadfast support, guidance, and oversight that has kept this project grounded and moving forward.</p>
+
+        <p><strong>Lazarus Gatimu</strong><br>
+        For serving as the English-Speaking Countries Coordinator, with Kenya being among the nations under this coordination. His leadership has been instrumental in bringing this system to the English-speaking African context.</p>
+
+        <p><strong>Lead Developer: Pastor David Wafula Wanyonyi</strong><br>
+        For leading the technical development of this platform, bringing together the vision, the curriculum, and the technology to create a system that serves students across Kenya and beyond.</p>
+
+        <p>This work is dedicated to the mission of ensuring that every person called to ministry has access to sound theological training — so that no one has an excuse for ministering without having been trained.</p>
+
+        <div class="signature-area">
+            <p><strong>Developed by:</strong> Eternal Ministries Africa Tech Team &amp; NET Foundation Kenya</p>
+            <p><strong>Lead Developer:</strong> Pastor David Wafula Wanyonyi</p>
+            <p><strong>Year:</strong> 2026</p>
+        </div>
+    </div>
 </section>
 
 <div class="footer">
-    <p>NET Foundation College &middot; https://netfoundation.ke &middot; Student Portal v1.0</p>
-    <p>This manual was generated on July 2026. For the latest version, visit the Student Portal.</p>
+    <p>{{SCHOOL_NAME}} &middot; https://netfoundation.ke</p>
+    <p>Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}} &middot; Lead Developer: Pastor David Wafula Wanyonyi</p>
+    <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
 </div>
+
+<script>
+    var img = document.querySelector('.cover-logo img');
+    var initialsSpan = document.querySelector('.cover-logo .initials');
+    if (img && img.getAttribute('src') === '{{LOGO_DATA}}' || !img.getAttribute('src') || img.getAttribute('src') === '') {
+        img.style.display = 'none';
+        if (initialsSpan) initialsSpan.style.display = 'block';
+    } else {
+        img.style.display = 'block';
+        if (initialsSpan) initialsSpan.style.display = 'none';
+    }
+</script>
 
 </div>
 </body>

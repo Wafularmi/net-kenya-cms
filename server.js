@@ -1321,21 +1321,27 @@ const server = http.createServer((req, res) => {
         return res.end('Forbidden');
     }
 
-    // Inject branding into index.html at serve-time for zero-flash rendering
-    if (filePath.endsWith('index.html')) {
+    // Inject branding into index.html and student-manual.html at serve-time
+    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html')) {
         fs.readFile(filePath, 'utf8', (err, html) => {
             if (err) {
                 res.writeHead(500);
                 return res.end('Server error');
             }
             const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
-            const schoolName = branding && branding.schoolName ? branding.schoolName : 'College Management System';
-            const initials = branding && branding.initials ? branding.initials : 'CM';
+            const schoolName = branding && branding.schoolName ? branding.schoolName : 'NET Foundation Kenya';
+            const initials = branding && branding.initials ? branding.initials : 'NET';
+            const logoData = branding && branding.logo ? branding.logo : '';
             let logoCss = '';
             if (branding && branding.logo) {
                 logoCss = '<style>#login-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover;text-indent:-9999px}#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover}</style>';
             }
-            html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName).replace(/\{\{INITIALS\}\}/g, initials).replace(/\{\{LOGO_CSS\}\}/g, logoCss);
+            html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName)
+                       .replace(/\{\{INITIALS\}\}/g, initials)
+                       .replace(/\{\{LOGO_CSS\}\}/g, logoCss)
+                       .replace(/\{\{LOGO_DATA\}\}/g, logoData)
+                       .replace(/\{\{LOGO_VISIBLE\}\}/g, logoData ? 'block' : 'none')
+                       .replace(/\{\{INITIALS_VISIBLE\}\}/g, logoData ? 'none' : 'block');
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.setHeader('CDN-Cache-Control', 'no-store');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
