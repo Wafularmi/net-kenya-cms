@@ -856,11 +856,16 @@ async function showApp(user) {
     window.removeEventListener('resize', adjustHeaderPadding);
     window.addEventListener('resize', adjustHeaderPadding);
     setTimeout(adjustHeaderPadding, 100);
+    const lastScreen = sessionStorage.getItem('lastScreen');
+    if (lastScreen && lastScreen !== 'dashboard') {
+        setTimeout(() => showScreen(lastScreen), 50);
+    }
 }
 function logout() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     logAudit('logout', 'user', { username: user.username });
     sessionStorage.removeItem('currentUser');
+    sessionStorage.removeItem('lastScreen');
     location.reload();
 }
 function buildNavigation(user) {
@@ -1200,6 +1205,7 @@ function showScreen(id) {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const perms = getRolePermissions(user.role);
     if (!perms.includes(id)) return showToast('Access denied: You do not have permission to view this section.');
+    sessionStorage.setItem('lastScreen', id);
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.getElementById('screen-' + id).classList.add('active');
