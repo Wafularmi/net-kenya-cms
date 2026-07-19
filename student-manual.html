@@ -182,7 +182,7 @@
 
 <div class="no-print" style="text-align:right;margin-bottom:12px;">
     <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF</button>
-    <a href="/" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;text-decoration:none;display:inline-block;">← Back to Portal</a>
+    <button onclick="closeManualTab()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
 </div>
 
 <div class="cover">
@@ -707,5 +707,11 @@
 </div>
 
 </div>
+<script>
+function closeManualTab() {
+    window.close();
+    setTimeout(function() { window.location.href = '/'; }, 200);
+}
+</script>
 </body>
 </html>
