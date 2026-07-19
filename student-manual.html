@@ -34,75 +34,6 @@
         body { padding: 16px; }
         .container { padding: 24px 20px; }
     }
-    .cover {
-        text-align: center;
-        padding: 48px 0 36px;
-        border-bottom: 3px solid var(--primary);
-        margin-bottom: 40px;
-        position: relative;
-    }
-    .cover-logo {
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        margin: 0 auto 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-        box-shadow: 0 4px 16px rgba(245,158,11,0.3);
-    }
-    .cover-logo img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-    .cover-logo .initials {
-        color: #fff;
-        font-weight: 800;
-        font-size: 28px;
-        letter-spacing: 2px;
-    }
-    .cover h1 {
-        font-size: 28px;
-        color: var(--text);
-        margin-bottom: 4px;
-    }
-    .cover .subtitle {
-        font-size: 16px;
-        color: var(--text-secondary);
-        max-width: 500px;
-        margin: 0 auto;
-    }
-    .cover .divider {
-        width: 60px;
-        height: 3px;
-        background: var(--primary);
-        margin: 16px auto;
-        border-radius: 2px;
-    }
-    .cover .author {
-        font-size: 13px;
-        color: var(--text-secondary);
-        margin-top: 16px;
-    }
-    .cover .version {
-        font-size: 12px;
-        color: var(--text-muted);
-        margin-top: 4px;
-    }
-    .cover .mission {
-        margin-top: 20px;
-        padding: 16px 20px;
-        background: #fffbeb;
-        border: 1px solid #fde68a;
-        border-radius: 10px;
-        font-size: 14px;
-        color: #78350f;
-        font-style: italic;
-        line-height: 1.6;
-    }
     .toc { margin-bottom: 40px; }
     .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
     .toc ol { padding-left: 24px; }
@@ -168,9 +99,223 @@
         font-size: 12px;
         color: var(--text-muted);
     }
+    .front-cover {
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1a2744 100%);
+        border-radius: 16px;
+        margin-bottom: 0;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .front-cover::before {
+        content: '';
+        position: absolute;
+        top: -80px;
+        right: -80px;
+        width: 300px;
+        height: 300px;
+        background: rgba(245,158,11,0.08);
+        border-radius: 50%;
+    }
+    .front-cover::after {
+        content: '';
+        position: absolute;
+        bottom: -120px;
+        left: -60px;
+        width: 400px;
+        height: 400px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .front-cover .cover-logo {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .cover-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .front-cover .cover-logo .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 36px;
+        letter-spacing: 2px;
+    }
+    .front-cover h1 {
+        font-size: 34px;
+        font-weight: 800;
+        margin-bottom: 6px;
+        position: relative;
+        z-index: 1;
+        letter-spacing: 0.5px;
+    }
+    .front-cover .subtitle {
+        font-size: 18px;
+        opacity: 0.85;
+        font-weight: 400;
+        margin-bottom: 10px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .divider {
+        width: 80px;
+        height: 4px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .version {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .mission {
+        max-width: 500px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        font-size: 15px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
+        backdrop-filter: blur(4px);
+    }
+    .front-cover .author {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover {
+        page-break-before: always;
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a2744 0%, #2a5298 50%, #1e3c72 100%);
+        border-radius: 16px;
+        margin-top: 36px;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .back-cover::before {
+        content: '';
+        position: absolute;
+        bottom: -60px;
+        right: -60px;
+        width: 250px;
+        height: 250px;
+        background: rgba(245,158,11,0.06);
+        border-radius: 50%;
+    }
+    .back-cover::after {
+        content: '';
+        position: absolute;
+        top: -40px;
+        left: -40px;
+        width: 200px;
+        height: 200px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .back-cover .inner {
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover .divider {
+        width: 60px;
+        height: 3px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+    }
+    .back-cover .logo-small {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .back-cover .logo-small img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .back-cover .logo-small .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 20px;
+        letter-spacing: 1px;
+    }
+    .back-cover h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        opacity: 0.85;
+    }
+    .back-cover p {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 6px;
+        line-height: 1.8;
+    }
+    .back-cover .mission-statement {
+        max-width: 450px;
+        margin: 24px auto;
+        padding: 16px 20px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 14px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.8;
+    }
+    .back-cover .contact {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 20px;
+    }
     @media print {
         body { padding: 0; background: #fff; }
-        .container { box-shadow: none; padding: 40px; border-radius: 0; max-width: 100%; }
+        .container { box-shadow: none; padding: 0; border-radius: 0; max-width: 100%; }
+        .front-cover, .back-cover { border-radius: 0; margin: 0; min-height: 100vh; }
         .toc { page-break-after: always; }
         section { page-break-inside: avoid; }
         .no-print { display: none; }
@@ -185,7 +330,7 @@
     <button onclick="closeManualTab()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
 </div>
 
-<div class="cover">
+<div class="front-cover">
     <div class="cover-logo">
         <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
         <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
@@ -193,14 +338,14 @@
     <h1>{{SCHOOL_NAME}}</h1>
     <div class="subtitle">Student Portal User Manual</div>
     <div class="divider"></div>
+    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
+    <div class="mission">
+        "This platform exists to ensure that no one has an excuse<br>
+        for ministering without having been trained."
+    </div>
     <div class="author">
         Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}}<br>
         Lead Developer: Pastor David Wafula Wanyonyi
-    </div>
-    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
-    <div class="mission">
-        "This platform exists to ensure that no one has an excuse for ministering<br>
-        without having been trained."
     </div>
 </div>
 
@@ -704,6 +849,29 @@
     <p>{{SCHOOL_NAME}} &middot; https://netfoundation.ke</p>
     <p>Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}} &middot; Lead Developer: Pastor David Wafula Wanyonyi</p>
     <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
+</div>
+
+<div class="back-cover">
+    <div class="inner">
+        <div class="logo-small">
+            <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+            <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+        </div>
+        <h3>{{SCHOOL_NAME}}</h3>
+        <p>Student Portal User Manual</p>
+        <div class="divider"></div>
+        <div class="mission-statement">
+            "Equipping ministers with sound theological training —<br>
+            so that no one has an excuse for ministering<br>
+            without having been trained."
+        </div>
+        <p>https://netfoundation.ke</p>
+        <div class="contact">
+            <p>Developed by Eternal Ministries Africa Tech Team</p>
+            <p>Lead Developer: Pastor David Wafula Wanyonyi</p>
+            <p>&copy; 2026 &middot; {{SCHOOL_NAME}} &middot; All Rights Reserved &middot; Version 1.0</p>
+        </div>
+    </div>
 </div>
 
 </div>
