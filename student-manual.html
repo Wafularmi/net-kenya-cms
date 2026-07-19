@@ -92,6 +92,22 @@
         border-top: 1px solid #fde68a;
         font-size: 13px;
     }
+    .screenshot {
+        max-width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        margin: 16px 0;
+        display: block;
+    }
+    .screenshot-caption {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: -10px;
+        margin-bottom: 20px;
+        font-style: italic;
+    }
     .footer {
         text-align: center;
         padding: 20px 0 0;
@@ -336,7 +352,7 @@
         <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
     </div>
     <h1>{{SCHOOL_NAME}}</h1>
-    <div class="subtitle">Student Portal User Manual</div>
+    <div class="subtitle">Student User Manual</div>
     <div class="divider"></div>
     <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
     <div class="mission">
@@ -469,22 +485,34 @@
 
 <section id="hub">
     <h2>4. My Hub — Your Personal Dashboard</h2>
-    <p><strong>🎓 My Hub</strong> is a special dashboard just for you. It brings together everything about your studies in one beautiful page.</p>
+    <p><strong>🎓 My Hub</strong> is a special dashboard just for you. It brings together everything about your studies in one beautiful page. Follow the steps below with the screenshots to help you navigate.</p>
 
     <h3>How to Open My Hub</h3>
-    <div class="step"><b>Step 1:</b> Click <strong>"🎓 My Hub"</strong> in the sidebar menu.</div>
-    <div class="step"><b>Step 2:</b> The page loads with your name, admission number, program, and year displayed in a welcome banner at the top.</div>
+    <div class="step"><b>Step 1:</b> Look at the <strong>sidebar menu</strong> on the left side of the screen. Find <strong>"🎓 My Hub"</strong> in the list.</div>
+    <div class="step"><b>Step 2:</b> Click on <strong>"🎓 My Hub"</strong> to open your personal dashboard.</div>
+    <img src="/manual-screenshots/hub-sidebar.png" alt="Sidebar menu with My Hub highlighted" class="screenshot">
+    <div class="screenshot-caption">The sidebar menu — click "🎓 My Hub" (circled in red) to open your dashboard</div>
+    <div class="step"><b>Step 3:</b> The page loads and you will see your <strong>Welcome Banner</strong> at the top with your name and details.</div>
 
     <h3>What You Will See in My Hub</h3>
 
     <h4>Welcome Banner</h4>
-    <p>Shows your name, admission number, program of study, and current year. A green "Live" indicator shows you are connected.</p>
+    <p>The banner at the top shows your <strong>name</strong>, <strong>admission number</strong>, <strong>program of study</strong>, and <strong>current year</strong>. A green <strong>"Live"</strong> indicator at the top right shows you are connected and your data is up to date.</p>
 
     <h4>Quick Stats Cards</h4>
-    <p>Four cards showing your enrolled courses count, registered exams, pending quizzes, and study notes. Click any card to jump to that section.</p>
+    <p>Just below the welcome banner, you will see four <strong>stats cards</strong>:</p>
+    <ul>
+        <li><strong>📚 Enrolled Courses</strong> — Number of courses you are taking</li>
+        <li><strong>📝 My Exams</strong> — Number of exams you have registered for</li>
+        <li><strong>📋 Pending Quizzes</strong> — Quizzes waiting for you to complete</li>
+        <li><strong>📄 Study Notes</strong> — Notes you have created</li>
+    </ul>
+    <div class="step"><b>Tip:</b> Click any stats card to jump directly to that section for more details.</div>
+    <img src="/manual-screenshots/hub-overview.png" alt="My Hub overview page" class="screenshot">
+    <div class="screenshot-caption">The My Hub overview page showing the welcome banner, stats cards, and tab navigation</div>
 
     <h4>Tab Navigation</h4>
-    <p>Below the stats you will find tabs that let you switch between different views:</p>
+    <p>Below the stats cards, you will find a row of <strong>tabs</strong>. These let you switch between different views of your data:</p>
     <ul>
         <li><strong>Overview</strong> — A combined view of your upcoming exams, pending quizzes, and recent activity</li>
         <li><strong>📚 Courses</strong> — List of all your enrolled courses with progress</li>
@@ -493,11 +521,49 @@
         <li><strong>📄 Notes</strong> — Study notes you have created for your courses</li>
         <li><strong>💬 Discussions</strong> — Course discussion forums</li>
     </ul>
+    <div class="step"><b>To switch tabs:</b> Click a tab name (e.g., "📚 Courses"). The content below changes to show that section. The active tab is highlighted.</div>
+    <img src="/manual-screenshots/hub-tabs.png" alt="Tab navigation bar" class="screenshot">
+    <div class="screenshot-caption">Click any tab to switch between views — the active tab is highlighted</div>
 
-    <h3>Using the Tabs</h3>
-    <div class="step"><b>Step 1:</b> Click a tab name (e.g., "📚 Courses") to view that section.</div>
-    <div class="step"><b>Step 2:</b> The content below the tabs changes to show the relevant information.</div>
-    <div class="step"><b>Step 3:</b> Click another tab to switch views. The active tab is highlighted with a gold underline.</div>
+    <h3>Courses Tab</h3>
+    <p>The <strong>📚 Courses</strong> tab shows every course you are enrolled in. Each course card displays the course name, code, and a progress bar.</p>
+    <div class="step"><b>Step 1:</b> Click the <strong>"📚 Courses"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Browse the list of your enrolled courses.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"View Course"</strong> on any course (circled in red) to open its full content, including lessons and materials.</div>
+    <img src="/manual-screenshots/hub-courses.png" alt="Courses tab showing enrolled courses" class="screenshot">
+    <div class="screenshot-caption">Courses tab — click "View Course" (circled) to open a course</div>
+
+    <h3>Exams Tab</h3>
+    <p>The <strong>📝 Exams</strong> tab shows upcoming and past exams for your enrolled courses.</p>
+    <div class="step"><b>Step 1:</b> Click the <strong>"📝 Exams"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Upcoming exams appear first. Each entry shows the exam title, course, date, time, and venue.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Register"</strong> (circled in red) to register for an exam. The button changes to a green "Registered" badge.</div>
+    <img src="/manual-screenshots/hub-exams.png" alt="Exams tab with register button" class="screenshot">
+    <div class="screenshot-caption">Exams tab — click "Register" (circled) to sign up for an exam</div>
+
+    <h3>Quizzes Tab</h3>
+    <p>The <strong>📋 Quizzes</strong> tab shows all quizzes for your enrolled courses, split into <strong>Pending</strong> and <strong>Completed</strong> sections.</p>
+    <div class="step"><b>Step 1:</b> Click the <strong>"📋 Quizzes"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Pending quizzes appear first. Each entry shows the quiz title, course, and due date.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Take Quiz"</strong> (circled in red) to start a pending quiz. A timer appears at the top — your answers are auto-submitted when time runs out.</div>
+    <img src="/manual-screenshots/hub-quizzes.png" alt="Quizzes tab with take quiz button" class="screenshot">
+    <div class="screenshot-caption">Quizzes tab — click "Take Quiz" (circled) to start a pending quiz</div>
+
+    <h3>Notes Tab</h3>
+    <p>The <strong>📄 Notes</strong> tab shows study notes you have created for your courses. You can read, edit, or delete your notes here.</p>
+    <div class="step"><b>Step 1:</b> Click the <strong>"📄 Notes"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Your notes are listed by course. Click a note to read or edit it.</div>
+    <div class="step"><b>Step 3:</b> Use the search bar to find notes by title or content.</div>
+    <img src="/manual-screenshots/hub-notes.png" alt="Notes tab" class="screenshot">
+    <div class="screenshot-caption">Notes tab — view and manage your study notes</div>
+
+    <h3>Discussions Tab</h3>
+    <p>The <strong>💬 Discussions</strong> tab lets you participate in course discussion forums with fellow students and instructors.</p>
+    <div class="step"><b>Step 1:</b> Click the <strong>"💬 Discussions"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Select a course to view its discussion thread.</div>
+    <div class="step"><b>Step 3:</b> Read existing posts or click <strong>"Post a Question"</strong> (circled in red) to start a new discussion.</div>
+    <img src="/manual-screenshots/hub-discussions.png" alt="Discussions tab" class="screenshot">
+    <div class="screenshot-caption">Discussions tab — post questions and interact with classmates and instructors</div>
 
     <div class="tip">My Hub is the best place to start your day. Check it first to see what needs your attention — pending quizzes, upcoming exams, or new grades.</div>
 </section>
@@ -858,7 +924,7 @@
             <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
         </div>
         <h3>{{SCHOOL_NAME}}</h3>
-        <p>Student Portal User Manual</p>
+        <p>Student User Manual</p>
         <div class="divider"></div>
         <div class="mission-statement">
             "Equipping ministers with sound theological training —<br>
