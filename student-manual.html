@@ -700,18 +700,6 @@
     <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
 </div>
 
-<script>
-    var img = document.querySelector('.cover-logo img');
-    var initialsSpan = document.querySelector('.cover-logo .initials');
-    if (img && img.getAttribute('src') === '{{LOGO_DATA}}' || !img.getAttribute('src') || img.getAttribute('src') === '') {
-        img.style.display = 'none';
-        if (initialsSpan) initialsSpan.style.display = 'block';
-    } else {
-        img.style.display = 'block';
-        if (initialsSpan) initialsSpan.style.display = 'none';
-    }
-</script>
-
 </div>
 </body>
 </html>
