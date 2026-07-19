@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coordinator User Manual — {{SCHOOL_NAME}}</title>
+<style>
+    :root {
+        --primary: #f59e0b;
+        --primary-dark: #d97706;
+        --text: #1e293b;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --bg: #f8fafc;
+        --border: #e2e8f0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        line-height: 1.7;
+        padding: 40px 20px;
+    }
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        padding: 48px 56px;
+    }
+    @media (max-width: 600px) {
+        body { padding: 16px; }
+        .container { padding: 24px 20px; }
+    }
+    .front-cover {
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1a2744 100%);
+        border-radius: 16px;
+        margin-bottom: 0;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .front-cover::before {
+        content: '';
+        position: absolute;
+        top: -80px;
+        right: -80px;
+        width: 300px;
+        height: 300px;
+        background: rgba(245,158,11,0.08);
+        border-radius: 50%;
+    }
+    .front-cover::after {
+        content: '';
+        position: absolute;
+        bottom: -120px;
+        left: -60px;
+        width: 400px;
+        height: 400px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .front-cover .cover-logo {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .cover-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .front-cover .cover-logo .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 36px;
+        letter-spacing: 2px;
+    }
+    .front-cover h1 {
+        font-size: 34px;
+        font-weight: 800;
+        margin-bottom: 6px;
+        position: relative;
+        z-index: 1;
+        letter-spacing: 0.5px;
+    }
+    .front-cover .subtitle {
+        font-size: 18px;
+        opacity: 0.85;
+        font-weight: 400;
+        margin-bottom: 10px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .divider {
+        width: 80px;
+        height: 4px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .version {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .mission {
+        max-width: 500px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        font-size: 15px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
+        backdrop-filter: blur(4px);
+    }
+    .front-cover .author {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover {
+        page-break-before: always;
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a2744 0%, #2a5298 50%, #1e3c72 100%);
+        border-radius: 16px;
+        margin-top: 36px;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .back-cover::before {
+        content: '';
+        position: absolute;
+        bottom: -60px;
+        right: -60px;
+        width: 250px;
+        height: 250px;
+        background: rgba(245,158,11,0.06);
+        border-radius: 50%;
+    }
+    .back-cover::after {
+        content: '';
+        position: absolute;
+        top: -40px;
+        left: -40px;
+        width: 200px;
+        height: 200px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .back-cover .inner {
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover .divider {
+        width: 60px;
+        height: 3px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+    }
+    .back-cover .logo-small {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .back-cover .logo-small img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .back-cover .logo-small .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 20px;
+        letter-spacing: 1px;
+    }
+    .back-cover h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        opacity: 0.85;
+    }
+    .back-cover p {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 6px;
+        line-height: 1.8;
+    }
+    .back-cover .mission-statement {
+        max-width: 450px;
+        margin: 24px auto;
+        padding: 16px 20px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 14px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.8;
+    }
+    .back-cover .contact {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 20px;
+    }
+    .toc { margin-bottom: 40px; }
+    .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
+    .toc ol { padding-left: 24px; }
+    .toc ol li { margin-bottom: 4px; }
+    .toc ol li a { color: var(--primary-dark); text-decoration: none; }
+    .toc ol li a:hover { text-decoration: underline; }
+    section { margin-bottom: 36px; }
+    section h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    section h3 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+    section h4 { font-size: 14px; margin: 12px 0 6px; color: var(--text-secondary); }
+    section p { margin-bottom: 10px; color: var(--text-secondary); }
+    section ul, section ol { padding-left: 24px; margin-bottom: 10px; }
+    section li { margin-bottom: 4px; color: var(--text-secondary); }
+    .note {
+        background: #fffbeb;
+        border-left: 4px solid var(--primary);
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .tip {
+        background: #f0fdf4;
+        border-left: 4px solid #22c55e;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .warn {
+        background: #fef2f2;
+        border-left: 4px solid #ef4444;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .step { margin: 6px 0 6px 24px; }
+    .step b { color: var(--text); }
+    .ack-box {
+        background: linear-gradient(135deg, #fffbeb, #fef3c7);
+        border: 1px solid #f59e0b;
+        border-radius: 12px;
+        padding: 28px 24px;
+        margin-bottom: 36px;
+    }
+    .ack-box h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    .ack-box p, .ack-box li { color: #78350f; }
+    .signature-area {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid #fde68a;
+        font-size: 13px;
+    }
+    .screenshot {
+        max-width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        margin: 16px 0;
+        display: block;
+    }
+    .screenshot-caption {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: -10px;
+        margin-bottom: 20px;
+        font-style: italic;
+    }
+    .footer {
+        text-align: center;
+        padding: 20px 0 0;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    @media print {
+        body { padding: 0; background: #fff; }
+        .container { box-shadow: none; padding: 0; border-radius: 0; max-width: 100%; }
+        .front-cover, .back-cover { border-radius: 0; margin: 0; min-height: 100vh; }
+        .toc { page-break-after: always; }
+        section { page-break-inside: avoid; }
+        .no-print { display: none; }
+    }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="no-print" style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF</button>
+    <button onclick="closeManualTab()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
+</div>
+
+<div class="front-cover">
+    <div class="cover-logo">
+        <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+        <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+    </div>
+    <h1>{{SCHOOL_NAME}}</h1>
+    <div class="subtitle">Coordinator User Manual</div>
+    <div class="divider"></div>
+    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
+    <div class="mission">
+        "This platform exists to ensure that no one has an excuse<br>
+        for ministering without having been trained."
+    </div>
+    <div class="author">
+        Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}}<br>
+        Lead Developer: Pastor David Wafula Wanyonyi
+    </div>
+</div>
+
+<div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#intro">Introduction — About This Portal</a></li>
+        <li><a href="#login">Logging In &amp; Out</a></li>
+        <li><a href="#dashboard">Dashboard — Your Command Center</a></li>
+        <li><a href="#students">Managing Students</a></li>
+        <li><a href="#pending">Pending Registrations — Approving New Students</a></li>
+        <li><a href="#portal">Student Portal — Student Lookup Tool</a></li>
+        <li><a href="#attendance">Attendance Management</a></li>
+        <li><a href="#grades">Grades</a></li>
+        <li><a href="#exams">Examinations</a></li>
+        <li><a href="#finance">Finance &amp; Fee Tracking</a></li>
+        <li><a href="#progress">Progress Tracking</a></li>
+        <li><a href="#tickets">Tickets — Support Management</a></li>
+        <li><a href="#discussions">Discussions — Regional Moderation</a></li>
+        <li><a href="#messaging">Internal Messaging</a></li>
+        <li><a href="#events">Events Management</a></li>
+        <li><a href="#alumni">Alumni &amp; Certificates</a></li>
+        <li><a href="#activities">Chapel, Graduation, Hostel &amp; Library</a></li>
+        <li><a href="#reprint">Reprinting Documents</a></li>
+        <li><a href="#troubleshooting">Troubleshooting — Common Problems</a></li>
+        <li><a href="#acknowledgments">Acknowledgments</a></li>
+    </ol>
+</div>
+
+<section id="intro">
+    <h2>1. Introduction — About This Portal</h2>
+    <p>Welcome to the <strong>{{SCHOOL_NAME}} Coordinator Portal</strong>. As a Study Center Coordinator, you are the vital link between the college administration, the students in your region, and the trainers on the ground. This manual will help you understand every feature available to you in the system.</p>
+
+    <h3>Your Role as a Coordinator</h3>
+    <p>As a coordinator, you are assigned to a specific <strong>Region</strong>. Your access is scoped to the study centers and students within that region. You cannot see data from other regions. Your role badge in the system displays "Coordinator — {Region Name}" with a gold/yellow colour.</p>
+
+    <h3>What You Can Do</h3>
+    <ul>
+        <li>Review and approve new student registrations</li>
+        <li>Manage student profiles and academic records</li>
+        <li>Record and monitor attendance</li>
+        <li>View grades and examination schedules</li>
+        <li>Track fee payments and financial summaries</li>
+        <li>Monitor student progress across courses</li>
+        <li>Manage support tickets</li>
+        <li>Moderate discussions in your region</li>
+        <li>Manage events, alumni, and certificates</li>
+        <li>Communicate via internal messaging</li>
+    </ul>
+
+    <h3>Device &amp; Browser Requirements</h3>
+    <p>The portal works on any device — phone, tablet, laptop, or desktop. Use any modern browser: Chrome, Firefox, Safari, or Edge.</p>
+    <div class="tip">Bookmark this URL: <strong>https://netfoundation.ke</strong> for quick access.</div>
+</section>
+
+<section id="login">
+    <h2>2. Logging In &amp; Out</h2>
+
+    <h3>Your Login Credentials</h3>
+    <p>Your coordinator account is created by the college administration. You will receive your username and password from the system administrator.</p>
+    <ul>
+        <li><strong>Username:</strong> Your email address or phone number (as set by the administrator)</li>
+        <li><strong>Password:</strong> A password provided by the administrator (you can change it after logging in)</li>
+    </ul>
+
+    <h3>Step-by-Step: How to Log In</h3>
+    <div class="step"><b>Step 1:</b> Open your browser and go to <strong>https://netfoundation.ke</strong></div>
+    <div class="step"><b>Step 2:</b> Wait for the login screen to appear with <strong>Username</strong> and <strong>Password</strong> fields.</div>
+    <div class="step"><b>Step 3:</b> Enter your username (email or phone number).</div>
+    <div class="step"><b>Step 4:</b> Enter your password.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Sign In"</strong>.</div>
+    <div class="step"><b>Step 6:</b> You will see your Dashboard with your region name displayed at the top.</div>
+
+    <div class="note">Passwords are case-sensitive. If you cannot log in, contact the system administrator.</div>
+
+    <h3>How to Log Out</h3>
+    <div class="step"><b>Step 1:</b> Click your name at the top-right corner of the screen.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Logout"</strong> from the dropdown menu.</div>
+</section>
+
+<section id="dashboard">
+    <h2>3. Dashboard — Your Command Center</h2>
+    <p>The Dashboard is the first screen you see after logging in. It gives you a quick overview of everything happening in your region.</p>
+
+    <h3>Region Banner</h3>
+    <p>At the top of the dashboard, you will see your region name displayed. This confirms which region's data you are viewing.</p>
+
+    <h3>Pending Registrations Banner</h3>
+    <p>If there are students waiting for approval, a prominent yellow banner appears at the top showing the count. Click it to go directly to the Pending Registrations screen.</p>
+
+    <h3>Statistics Cards</h3>
+    <p>Four cards at the top show key numbers for your region:</p>
+    <ul>
+        <li><strong>Total Students</strong> — All students in your region</li>
+        <li><strong>Active Students</strong> — Currently enrolled students</li>
+        <li><strong>Today's Revenue</strong> — Payments received today</li>
+        <li><strong>Monthly Net</strong> — Net revenue for the current month</li>
+    </ul>
+
+    <h3>Dashboard Widgets</h3>
+    <ul>
+        <li><strong>Recent Students</strong> — Latest 5 students enrolled in your region</li>
+        <li><strong>Upcoming Events</strong> — Next 5 scheduled events</li>
+        <li><strong>Finance Summary</strong> — Fee income, expenses, net balance, and students with outstanding balance</li>
+        <li><strong>Attendance Alerts</strong> — Students whose attendance is below the minimum threshold</li>
+        <li><strong>Tickets</strong> — Open and urgent support tickets</li>
+        <li><strong>Online Users</strong> — Students from your region currently active on the portal</li>
+    </ul>
+</section>
+
+<section id="students">
+    <h2>4. Managing Students</h2>
+    <p>The Students screen lets you view, add, and manage all students in your region.</p>
+
+    <h3>Viewing Students</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Students"</strong> in the sidebar menu.</div>
+    <div class="step"><b>Step 2:</b> A table lists all students in your region showing: Name, Admission Number, Email, Study Center, Program, Year, Status, and Fee Balance.</div>
+    <div class="step"><b>Step 3:</b> Use the search bar to find a student by name, admission number, or phone number.</div>
+    <div class="step"><b>Step 4:</b> Click the filter buttons to view students by status (Active, Inactive, Pending, All).</div>
+
+    <h3>Adding a New Student</h3>
+    <div class="step"><b>Step 1:</b> Click the <strong>"Add Student"</strong> button above the student table.</div>
+    <div class="step"><b>Step 2:</b> Fill in the student's details: Name, Email, Phone, Date of Birth, Gender, Study Center, Program, Academic Year.</div>
+    <div class="step"><b>Step 3:</b> An admission number is auto-generated based on your school's format.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> to create the student record.</div>
+    <div class="tip">The student's login credentials (username = phone number, password = admission number) are automatically created when you add them.</div>
+
+    <h3>Editing a Student</h3>
+    <div class="step"><b>Step 1:</b> Find the student in the table and click the <strong>"Edit"</strong> button.</div>
+    <div class="step"><b>Step 2:</b> Update the student's details as needed.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong> to apply changes.</div>
+
+    <h3>WhatsApp Communication</h3>
+    <p>From the student table, you can send WhatsApp messages directly:</p>
+    <div class="step"><b>Step 1:</b> Click the <strong>"WhatsApp"</strong> dropdown next to a student.</div>
+    <div class="step"><b>Step 2:</b> Choose from: Custom Message, Fee Reminder, Attendance Alert, or Welcome Message.</div>
+    <div class="step"><b>Step 3:</b> The message is sent immediately via WhatsApp.</div>
+</section>
+
+<section id="pending">
+    <h2>5. Pending Registrations — Approving New Students</h2>
+    <p>When a student submits a registration request through the portal, it appears in the Pending Registrations screen for coordinators in their region to review and approve.</p>
+
+    <h3>Viewing Pending Registrations</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Pending Registrations"</strong> in the sidebar, or click the yellow banner on your Dashboard.</div>
+    <div class="step"><b>Step 2:</b> A list shows all pending students with their name, phone, email, program, study center, and registration date.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Approve"</strong> on any student to begin the approval process.</div>
+
+    <h3>Approving a Registration</h3>
+    <p>The approval modal gives you full control over the student's details before finalizing:</p>
+    <div class="step"><b>Step 1:</b> Review and edit the student's name, phone (username), email, program, and study center.</div>
+    <div class="step"><b>Step 2:</b> The admission number is auto-generated based on your school's format (e.g., NET/KNSC/7-26/001).</div>
+    <div class="step"><b>Step 3:</b> Choose a <strong>WhatsApp welcome template</strong> from the dropdown. A preview of the message appears below.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Customize"</strong> if you want to edit the welcome message, save it as a new template, or save changes to the existing template.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Finalize &amp; Send Welcome"</strong> to approve the student.</div>
+
+    <h3>What Happens After Approval</h3>
+    <ul>
+        <li>The student's status changes from pending to active</li>
+        <li>A user account is created (username = phone number, password = admission number)</li>
+        <li>A WhatsApp message with login credentials and welcome information is sent to the student</li>
+        <li>The event is recorded in the audit trail</li>
+    </ul>
+
+    <h3>Rejecting a Registration</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Reject"</strong> next to the student's record.</div>
+    <div class="step"><b>Step 2:</b> Confirm the rejection. The student record and any associated data are permanently deleted.</div>
+    <div class="warn">Rejection is permanent and cannot be undone.</div>
+</section>
+
+<section id="portal">
+    <h2>6. Student Portal — Student Lookup Tool</h2>
+    <p>The Student Portal is a powerful lookup tool that lets you view a complete profile of any student in your region.</p>
+
+    <h3>How to Look Up a Student</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Student Portal"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Search for a student by name, admission number, email, phone, or program.</div>
+    <div class="step"><b>Step 3:</b> Click the student's name from the search results.</div>
+
+    <h3>What You Can View</h3>
+    <p>The student portal shows a consolidated view with these tabs:</p>
+    <ul>
+        <li><strong>Overview</strong> — Photo, name, admission number, program, average grade, attendance percentage, fee balance, quiz statistics</li>
+        <li><strong>Courses</strong> — Enrolled courses with lesson counts, assessment counts, and video counts</li>
+        <li><strong>Assessments</strong> — Available quizzes and exams with scores</li>
+        <li><strong>Notes</strong> — Lesson resources and downloadable files</li>
+        <li><strong>Grades</strong> — Grade history per course with scores and GPA</li>
+        <li><strong>Finance</strong> — Fee summary, total paid, balance, payment history, and link to full statement</li>
+        <li><strong>Attendance</strong> — Attendance percentage per course</li>
+    </ul>
+
+    <h3>Generating Transcripts</h3>
+    <p>From the student portal, you can generate and view a student's transcript. The transcript includes all completed courses with grades and can be printed or saved as PDF.</p>
+</section>
+
+<section id="attendance">
+    <h2>7. Attendance Management</h2>
+    <p>The Attendance screen lets you record and monitor attendance for students in your region.</p>
+
+    <h3>Taking Attendance</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Attendance"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select the <strong>date</strong> and <strong>course</strong> for the session.</div>
+    <div class="step"><b>Step 3:</b> A list of enrolled students appears. Mark each student as <strong>Present</strong>, <strong>Late</strong>, <strong>Absent</strong>, or <strong>Excused</strong>.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save Attendance"</strong> to record the session.</div>
+
+    <h3>Viewing Attendance Records</h3>
+    <p>You can view attendance history for any course. Each student shows their total sessions, attended count, percentage, and a colour-coded status badge:</p>
+    <ul>
+        <li><b style="color:#22c55e;">Green</b> — 70% or above (good)</li>
+        <li><b style="color:#f59e0b;">Orange</b> — 50% to 69% (needs improvement)</li>
+        <li><b style="color:#ef4444;">Red</b> — Below 50% (urgent attention needed)</li>
+    </ul>
+
+    <h3>Attendance Alerts</h3>
+    <p>The Dashboard shows an attendance alerts widget listing students whose attendance falls below the minimum threshold. Follow up with these students to improve their attendance.</p>
+</section>
+
+<section id="grades">
+    <h2>8. Grades</h2>
+    <p>The Grades screen (if enabled by the administrator) lets you view grades for students in your region.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"Grades"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select a course from the dropdown to filter grades.</div>
+    <div class="step"><b>Step 3:</b> A table shows each student's score, letter grade, GPA, and pass/fail status.</div>
+
+    <div class="note">Grade data comes from quizzes and exams submitted by students. If a student has missing grades, check whether they completed the required assessments.</div>
+
+    <h3>Grading Scale</h3>
+    <ul>
+        <li><strong>A</strong> (80-100%) — Excellent — GPA: 4.0</li>
+        <li><strong>B</strong> (70-79%) — Good — GPA: 3.0</li>
+        <li><strong>C</strong> (60-69%) — Satisfactory — GPA: 2.0</li>
+        <li><strong>D</strong> (50-59%) — Pass — GPA: 1.0</li>
+        <li><strong>F</strong> (Below 50%) — Fail — GPA: 0.0</li>
+    </ul>
+
+    <div class="tip">If the Grades option is not visible in your sidebar, it may have been disabled by the administrator.</div>
+</section>
+
+<section id="exams">
+    <h2>9. Examinations</h2>
+    <p>The Examinations screen (if enabled by the administrator) lets you view exam schedules for courses in your region.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"Examinations"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> View upcoming and past exams with details: title, course, date, time, and venue.</div>
+    <div class="step"><b>Step 3:</b> You can see which students have registered for each exam.</div>
+
+    <div class="note">Coordinators can view exam schedules but cannot create or modify exams. Contact the administrator for exam changes.</div>
+</section>
+
+<section id="finance">
+    <h2>10. Finance &amp; Fee Tracking</h2>
+    <p>The Finance screen gives you visibility into fee payments and financial summaries for students in your region.</p>
+
+    <h3>Viewing Financial Overview</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Finance"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> The dashboard shows: Today's collections, Monthly net, Total fee income, Other income, Expenses, and Overall net balance.</div>
+    <div class="step"><b>Step 3:</b> Scroll down to see a list of students with outstanding fee balances.</div>
+
+    <h3>Student Payment Details</h3>
+    <p>From the <strong>Student Portal</strong>, you can view each student's full fee statement including:</p>
+    <ul>
+        <li>Total fee charged</li>
+        <li>Total amount paid</li>
+        <li>Outstanding balance</li>
+        <li>Payment history with dates, receipt numbers, and methods (M-Pesa, bank, cash)</li>
+    </ul>
+
+    <div class="tip">Use the WhatsApp option on a student's record to send fee reminders directly.</div>
+</section>
+
+<section id="progress">
+    <h2>11. Progress Tracking</h2>
+    <p>The Progress screen lets you monitor how students in your region are performing across their courses.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"Progress"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Search for a student by name or admission number.</div>
+    <div class="step"><b>Step 3:</b> View detailed progress per course including:</div>
+    <ul style="margin-left: 40px;">
+        <li>Overall progress percentage</li>
+        <li>Number of lessons completed</li>
+        <li>Number of quizzes passed</li>
+        <li>Attendance percentage per course</li>
+        <li>Pass rate for assessments</li>
+    </ul>
+
+    <p>This is a valuable tool for identifying students who may be falling behind and need additional support.</p>
+</section>
+
+<section id="tickets">
+    <h2>12. Tickets — Support Management</h2>
+    <p>The Tickets system lets you manage support requests from students in your region.</p>
+
+    <h3>Viewing Tickets</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Tickets"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Tickets are displayed with status filters: Open, In Progress, Resolved, Closed.</div>
+    <div class="step"><b>Step 3:</b> Click a ticket to view its full details and conversation history.</div>
+
+    <h3>Managing Tickets</h3>
+    <div class="step"><b>Step 1:</b> Open a ticket and read the student's issue.</div>
+    <div class="step"><b>Step 2:</b> Type your response in the reply box and click <strong>"Send"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Update the ticket status as you work on it (e.g., change from Open to In Progress).</div>
+    <div class="step"><b>Step 4:</b> When resolved, mark the ticket as <strong>"Resolved"</strong> and the student will be notified.</div>
+
+    <div class="tip">The Dashboard shows a ticket widget with counts of open and urgent tickets that need your attention.</div>
+</section>
+
+<section id="discussions">
+    <h2>13. Discussions — Regional Moderation</h2>
+    <p>The Discussions section lets you moderate course discussion forums for students in your region.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"💬 Discussions"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select a course to view its discussion thread.</div>
+    <div class="step"><b>Step 3:</b> Only messages from students in your region are visible to you.</div>
+    <div class="step"><b>Step 4:</b> You can post replies to answer questions or provide guidance.</div>
+
+    <p>Discussions are a great way to engage with students and address common questions that may benefit the entire group.</p>
+</section>
+
+<section id="messaging">
+    <h2>14. Internal Messaging</h2>
+    <p>The Internal Messaging system is for communication between staff members and coordinators.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"💬 Messages"</strong> in the sidebar (available for admins and coordinators only).</div>
+    <div class="step"><b>Step 2:</b> Start a new conversation or reply to an existing one.</div>
+    <div class="step"><b>Step 3:</b> Use this to coordinate with other staff, share updates, or escalate issues to the administrator.</div>
+
+    <div class="note">Messages are internal only — students do not see this section.</div>
+</section>
+
+<section id="events">
+    <h2>15. Events Management</h2>
+    <p>The Events screen lets you view and manage events for your region.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"Events"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> View upcoming and past events in a list or calendar view.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Add Event"</strong> to create a new event with title, date, time, description, and location.</div>
+    <div class="step"><b>Step 4:</b> Events appear on the Dashboard for students in your region.</div>
+</section>
+
+<section id="alumni">
+    <h2>16. Alumni &amp; Certificates</h2>
+
+    <h3>Managing Alumni</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Alumni"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> View a list of graduated students from your region.</div>
+    <div class="step"><b>Step 3:</b> Update alumni contact information and track engagement.</div>
+
+    <h3>Viewing Certificates</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Certificates"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Browse the certificate history for students in your region.</div>
+    <div class="step"><b>Step 3:</b> View issued certificates and reprint them if needed.</div>
+</section>
+
+<section id="activities">
+    <h2>17. Chapel, Graduation, Hostel &amp; Library</h2>
+
+    <h3>Chapel Attendance</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Chapel"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select the date and record attendance for students in your region.</div>
+    <div class="step"><b>Step 3:</b> Chapel attendance is tracked separately from class attendance.</div>
+
+    <h3>Graduation</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Graduation"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> View graduation eligibility and manage applications for students in your region.</div>
+
+    <h3>Hostel Management</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Hostel"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> View hostel assignments and availability for your region's students.</div>
+
+    <h3>Library</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Library"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Browse the digital book collection available to all students and staff.</div>
+</section>
+
+<section id="reprint">
+    <h2>18. Reprinting Documents</h2>
+    <p>The Reprint function lets you re-issue official documents for students in your region.</p>
+
+    <div class="step"><b>Step 1:</b> Click <strong>"Reprint"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Search for the student whose document needs reprinting.</div>
+    <div class="step"><b>Step 3:</b> Select the document type (certificate, transcript, etc.).</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Reprint"</strong> to generate a fresh copy.</div>
+
+    <div class="warn">Only reprint documents when the original was lost or damaged. Duplicate documents are tracked in the system.</div>
+</section>
+
+<section id="troubleshooting">
+    <h2>19. Troubleshooting — Common Problems</h2>
+
+    <h3>I Cannot Log In</h3>
+    <ol>
+        <li>Check that Caps Lock is off. Passwords are case-sensitive.</li>
+        <li>Make sure you are using the correct username (email or phone number).</li>
+        <li>Clear your browser cache and cookies, then try again.</li>
+        <li>If still stuck, contact the system administrator to reset your password.</li>
+    </ol>
+
+    <h3>The Page Shows Blank or Won't Load</h3>
+    <ol>
+        <li>Press <strong>F5</strong> or <strong>Ctrl+R</strong> (Windows) / <strong>Cmd+R</strong> (Mac) to refresh.</li>
+        <li>Check your internet connection.</li>
+        <li>Clear your browser cache.</li>
+        <li>Try a different browser or an incognito/private window.</li>
+    </ol>
+
+    <h3>I Cannot See a Student's Data</h3>
+    <ol>
+        <li>Confirm the student's study center is within your assigned region.</li>
+        <li>Your access is scoped to your region only — you cannot see students from other regions.</li>
+        <li>If a student was moved to a different region, contact the administrator.</li>
+    </ol>
+
+    <h3>A Feature Is Missing from My Sidebar</h3>
+    <ol>
+        <li>Some features (Exams, Grades, Lessons) can be enabled or disabled by the administrator.</li>
+        <li>Contact the system administrator if you believe a feature should be available.</li>
+    </ol>
+
+    <h3>An Approval Won't Go Through</h3>
+    <ol>
+        <li>Check that all required fields are filled (name, phone, program, study center).</li>
+        <li>Ensure the phone number is not already registered to another student.</li>
+        <li>Make sure the student's study center belongs to your region.</li>
+    </ol>
+
+    <h3>Need More Help?</h3>
+    <p>If your issue is not listed here, contact the system administrator through the Internal Messaging system or submit a ticket.</p>
+</section>
+
+<section id="acknowledgments">
+    <h2>20. Acknowledgments</h2>
+
+    <div class="ack-box">
+        <p>This Coordinator Portal and its accompanying User Manual were made possible through the shared vision between Eternal Ministries Africa and NET Foundation Netherlands. We express our deepest gratitude to:</p>
+
+        <p><strong>NET Foundation Netherlands</strong> — <a href="https://english.netfoundation.nl" target="_blank" style="color:#d97706;">english.netfoundation.nl</a><br>
+        For generously availing their curriculum for use in training Pastors and Church leaders in Kenya and around the world.</p>
+
+        <p><strong>NET Foundation Kenya (North Rift Trainers)</strong><br>
+        For their invaluable contribution in bringing together face-to-face training with online learning, making quality theological education accessible to more students.</p>
+
+        <p><strong>Raymond Warnar — Founding Director of NET Foundation</strong><br>
+        For being an anchor to this vision with steadfast support and guidance.</p>
+
+        <p><strong>Lazarus Gatimu</strong><br>
+        For serving as the English-Speaking Countries Coordinator, bringing this system to the English-speaking African context.</p>
+
+        <p><strong>The Staff of NET Foundation</strong><br>
+        For your dedicated service in ensuring the smooth operation of this vision.</p>
+
+        <p><strong>All Trainers of NET Foundation</strong><br>
+        For heeding the call to go and make disciples of all nations.</p>
+
+        <p><strong>Lead Developer: Pastor David Wafula Wanyonyi</strong><br>
+        For leading the technical development of this platform.</p>
+
+        <p>This work is dedicated to the mission of ensuring that every person called to ministry has access to sound theological training — so that no one has an excuse for ministering without having been trained.</p>
+
+        <div class="signature-area">
+            <p><strong>Developed by:</strong> Eternal Ministries Africa Tech Team &amp; NET Foundation Kenya</p>
+            <p><strong>Lead Developer:</strong> Pastor David Wafula Wanyonyi</p>
+            <p><strong>Year:</strong> 2026</p>
+        </div>
+    </div>
+</section>
+
+<div class="footer">
+    <p>{{SCHOOL_NAME}} &middot; https://netfoundation.ke</p>
+    <p>Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}} &middot; Lead Developer: Pastor David Wafula Wanyonyi</p>
+    <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
+</div>
+
+<div class="back-cover">
+    <div class="inner">
+        <div class="logo-small">
+            <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+            <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+        </div>
+        <h3>{{SCHOOL_NAME}}</h3>
+        <p>Coordinator User Manual</p>
+        <div class="divider"></div>
+        <div class="mission-statement">
+            "Equipping ministers with sound theological training —<br>
+            so that no one has an excuse for ministering<br>
+            without having been trained."
+        </div>
+        <p>https://netfoundation.ke</p>
+        <div class="contact">
+            <p>Developed by Eternal Ministries Africa Tech Team</p>
+            <p>Lead Developer: Pastor David Wafula Wanyonyi</p>
+            <p>&copy; 2026 &middot; {{SCHOOL_NAME}} &middot; All Rights Reserved &middot; Version 1.0</p>
+        </div>
+    </div>
+</div>
+
+</div>
+<script>
+function closeManualTab() {
+    window.close();
+    setTimeout(function() { window.location.href = '/'; }, 200);
+}
+</script>
+</body>
+</html>

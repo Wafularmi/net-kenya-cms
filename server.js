@@ -1322,7 +1322,7 @@ const server = http.createServer((req, res) => {
     }
 
     // Inject branding into index.html and student-manual.html at serve-time
-    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html')) {
+    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html') || filePath.endsWith('coordinator-manual.html')) {
         fs.readFile(filePath, 'utf8', (err, html) => {
             if (err) {
                 res.writeHead(500);
