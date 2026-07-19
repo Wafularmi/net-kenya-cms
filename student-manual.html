@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student User Manual — NET Foundation College</title>
+<style>
+    :root {
+        --primary: #f59e0b;
+        --primary-dark: #d97706;
+        --text: #1e293b;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --bg: #f8fafc;
+        --border: #e2e8f0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        line-height: 1.7;
+        padding: 40px 20px;
+    }
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        padding: 48px 56px;
+    }
+    @media (max-width: 600px) {
+        body { padding: 16px; }
+        .container { padding: 24px 20px; }
+    }
+    .cover {
+        text-align: center;
+        padding: 60px 0 40px;
+        border-bottom: 3px solid var(--primary);
+        margin-bottom: 40px;
+    }
+    .cover h1 {
+        font-size: 28px;
+        color: var(--text);
+        margin-bottom: 8px;
+    }
+    .cover .subtitle {
+        font-size: 16px;
+        color: var(--text-secondary);
+    }
+    .cover .version {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 20px;
+    }
+    .toc { margin-bottom: 40px; }
+    .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
+    .toc ol { padding-left: 24px; }
+    .toc ol li { margin-bottom: 4px; }
+    .toc ol li a { color: var(--primary-dark); text-decoration: none; }
+    .toc ol li a:hover { text-decoration: underline; }
+    section { margin-bottom: 36px; }
+    section h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    section h3 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+    section p { margin-bottom: 10px; color: var(--text-secondary); }
+    section ul, section ol { padding-left: 24px; margin-bottom: 10px; }
+    section li { margin-bottom: 4px; color: var(--text-secondary); }
+    .note {
+        background: #fffbeb;
+        border-left: 4px solid var(--primary);
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .tip {
+        background: #f0fdf4;
+        border-left: 4px solid #22c55e;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .step { margin: 8px 0 8px 24px; }
+    .step b { color: var(--text); }
+    .footer {
+        text-align: center;
+        padding: 20px 0 0;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    @media print {
+        body { padding: 0; background: #fff; }
+        .container { box-shadow: none; padding: 40px; border-radius: 0; max-width: 100%; }
+        .toc { page-break-after: always; }
+        section { page-break-inside: avoid; }
+    }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF (Print → Save as PDF)</button>
+    <button onclick="history.back()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
+</div>
+<div class="cover">
+    <h1>📘 Student User Manual</h1>
+    <div class="subtitle">NET Foundation College — Student Portal Guide</div>
+    <div class="version">Version 1.0 &middot; July 2026</div>
+</div>
+
+<div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#intro">Introduction</a></li>
+        <li><a href="#login">Logging In</a></li>
+        <li><a href="#dashboard">Your Dashboard</a></li>
+        <li><a href="#profile">Your Profile</a></li>
+        <li><a href="#courses">Courses &amp; Classes</a></li>
+        <li><a href="#quizzes">Quizzes</a></li>
+        <li><a href="#exams">Exams</a></li>
+        <li><a href="#grades">Grades &amp; Transcripts</a></li>
+        <li><a href="#attendance">Attendance</a></li>
+        <li><a href="#fees">Fees &amp; Payments</a></li>
+        <li><a href="#library">Library</a></li>
+        <li><a href="#support">Support &amp; Communication</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ol>
+</div>
+
+<section id="intro">
+    <h2>1. Introduction</h2>
+    <p>Welcome to the NET Foundation College Student Portal. This portal gives you access to your courses, quizzes, exams, grades, attendance records, fee statements, and more — all in one place.</p>
+    <p>The portal works on any device with a modern web browser (Chrome, Firefox, Safari, or Edge). You can access it from your phone, tablet, or computer.</p>
+    <div class="tip">Bookmark the portal URL: <strong>https://netfoundation.ke</strong> for quick access.</div>
+</section>
+
+<section id="login">
+    <h2>2. Logging In</h2>
+
+    <h3>Your Credentials</h3>
+    <p>When you are enrolled as a student, the college creates a login account for you. Your credentials are:</p>
+    <ul>
+        <li><strong>Username:</strong> Your phone number (the one you provided during registration)</li>
+        <li><strong>Password:</strong> Your admission number (e.g., <em>NET/001/07-26/001</em>)</li>
+    </ul>
+
+    <h3>Steps to Log In</h3>
+    <div class="step">1. Open your browser and go to <strong>https://netfoundation.ke</strong></div>
+    <div class="step">2. You will see the login screen with fields for Username and Password.</div>
+    <div class="step">3. Enter your phone number as the username and your admission number as the password.</div>
+    <div class="step">4. Click <strong>"Sign In"</strong>.</div>
+    <div class="note">Passwords are case-sensitive. Type carefully. If you see "Invalid credentials," double-check your username and password.</div>
+
+    <h3>First-Time Login — Terms &amp; Conditions</h3>
+    <p>The first time you log in, you will be asked to read and accept the college's Terms and Conditions. You must accept them to proceed. You will only see this once.</p>
+
+    <h3>Forgot Your Password?</h3>
+    <p>Contact the college administration or your coordinator to have your password reset. You can also ask your study center coordinator for assistance.</p>
+</section>
+
+<section id="dashboard">
+    <h2>3. Your Dashboard</h2>
+    <p>The Dashboard is the first screen you see after logging in. It gives you a quick overview of everything important:</p>
+    <ul>
+        <li><strong>📊 Stats Cards</strong> — Shows your total courses, upcoming quizzes, registered exams, and attendance rate.</li>
+        <li><strong>📝 To Do</strong> — A list of pending quizzes and upcoming exams sorted by date.</li>
+        <li><strong>📅 Upcoming Events</strong> — Calendar of scheduled exams and important dates.</li>
+        <li><strong>📢 Notifications</strong> — Messages and alerts from the college.</li>
+    </ul>
+    <p>Use the sidebar on the left to navigate to other sections of the portal.</p>
+</section>
+
+<section id="profile">
+    <h2>4. Your Profile</h2>
+    <p>Click on your name or avatar in the top-right corner to view your profile. Here you can:</p>
+    <ul>
+        <li>View your admission number, program, year of study, and study center.</li>
+        <li>See your personal details (name, phone, email).</li>
+        <li>View your fee balance.</li>
+        <li>Change your password.</li>
+    </ul>
+    <div class="tip">Keep your contact details (phone and email) up to date so the college can reach you.</div>
+</section>
+
+<section id="courses">
+    <h2>5. Courses &amp; Classes</h2>
+    <p>The <strong>My Courses</strong> section shows all the courses you are currently enrolled in.</p>
+    <ul>
+        <li>Each course card shows the course code, name, instructor, credits, and a progress bar.</li>
+        <li>Click <strong>"View Course"</strong> to open the course and see lessons, materials, and quizzes.</li>
+        <li>Click <strong>"Class Schedule"</strong> to see your weekly timetable.</li>
+    </ul>
+
+    <h3>Lessons &amp; Materials</h3>
+    <p>Inside a course, you will find lessons organized by topic. Each lesson may include:</p>
+    <ul>
+        <li>📄 Study notes and reading materials</li>
+        <li>🎥 Video links</li>
+        <li>📎 Downloadable resources (PDFs, documents)</li>
+    </ul>
+</section>
+
+<section id="quizzes">
+    <h2>6. Quizzes</h2>
+    <p>Quizzes are short assessments that test your understanding of a topic.</p>
+
+    <h3>Taking a Quiz</h3>
+    <div class="step">1. Go to <strong>My Courses</strong> and click <strong>"View Course"</strong> on the relevant course.</div>
+    <div class="step">2. Find the quiz in the course content or go to the <strong>Quizzes</strong> section.</div>
+    <div class="step">3. Click <strong>"Start Quiz"</strong> to begin.</div>
+    <div class="step">4. Answer each question. Some quizzes are multiple-choice, others may require typed answers.</div>
+    <div class="step">5. Click <strong>"Submit"</strong> when done. Your score will appear immediately.</div>
+
+    <div class="note">Quizzes have a time limit. The timer starts when you begin. If you run out of time, your answers will be auto-submitted.</div>
+
+    <h3>Quiz Results</h3>
+    <p>After submitting, you will see your score, grade, and which questions you got right or wrong. You can retake some quizzes depending on the course settings.</p>
+</section>
+
+<section id="exams">
+    <h2>7. Exams</h2>
+    <p>Exams are formal assessments scheduled at specific dates and times.</p>
+
+    <h3>Registering for an Exam</h3>
+    <div class="step">1. Go to the <strong>Exams</strong> section from the sidebar.</div>
+    <div class="step">2. You will see a list of available exams for your enrolled courses.</div>
+    <div class="step">3. Click <strong>"Register"</strong> next to each exam you want to take.</div>
+    <div class="step">4. Your exam registration is confirmed when you see a "Registered" badge.</div>
+
+    <h3>On Exam Day</h3>
+    <ul>
+        <li>Check the exam date, time, and venue listed in the Exams section.</li>
+        <li>Arrive at least 15 minutes early.</li>
+        <li>Bring your admission number and a valid ID.</li>
+    </ul>
+
+    <h3>Retaking an Exam</h3>
+    <p>If you need to retake an exam, click <strong>"Request Retake"</strong> on the exam record. The admin will review and approve your request.</p>
+</section>
+
+<section id="grades">
+    <h2>8. Grades &amp; Transcripts</h2>
+
+    <h3>Viewing Your Grades</h3>
+    <p>Go to <strong>My Grades</strong> from the sidebar. You will see a table of all your courses with your scores, letter grades, and GPA points for each course.</p>
+
+    <h3>Your Transcript</h3>
+    <p>Click <strong>"View Transcript"</strong> to see a formal document listing all your courses, scores, grades, and cumulative GPA. You can print this or save it as a PDF from your browser.</p>
+
+    <h3>Grading Scale</h3>
+    <p>The college uses the following grading scale:</p>
+    <ul>
+        <li><strong>A</strong> (80-100%) — Excellent</li>
+        <li><strong>B</strong> (70-79%) — Good</li>
+        <li><strong>C</strong> (60-69%) — Satisfactory</li>
+        <li><strong>D</strong> (50-59%) — Pass</li>
+        <li><strong>F</strong> (below 50%) — Fail</li>
+    </ul>
+</section>
+
+<section id="attendance">
+    <h2>9. Attendance</h2>
+    <p>The <strong>My Attendance</strong> section shows your attendance record for each course.</p>
+    <ul>
+        <li>You will see the total number of sessions held, how many you attended, and your attendance percentage.</li>
+        <li>A green badge means good attendance (70% or above).</li>
+        <li>An orange or red badge means your attendance needs improvement.</li>
+    </ul>
+    <div class="tip">Regular attendance is important. Students with attendance below 70% may be flagged for follow-up by the administration.</div>
+</section>
+
+<section id="fees">
+    <h2>10. Fees &amp; Payments</h2>
+    <p>The <strong>Finance</strong> section shows your fee statement.</p>
+    <ul>
+        <li>You can see your total fee amount, total paid, and outstanding balance.</li>
+        <li><strong>Payment History</strong> lists all payments made with dates, receipt numbers, and amounts.</li>
+        <li><strong>Installment Plan</strong> — If you are on a payment plan, you will see your installment schedule and due dates.</li>
+    </ul>
+    <p>For any questions about fees or payments, contact the college finance office.</p>
+</section>
+
+<section id="library">
+    <h2>11. Library</h2>
+    <p>The <strong>Library</strong> section gives you access to digital books and reading materials provided by the college.</p>
+    <ul>
+        <li>Browse available books by title or author.</li>
+        <li>Click on a book to read it online or download it.</li>
+    </ul>
+    <p>The library is updated regularly with new materials.</p>
+</section>
+
+<section id="support">
+    <h2>12. Support &amp; Communication</h2>
+
+    <h3>Submitting a Ticket</h3>
+    <p>If you have a question, issue, or complaint, go to <strong>Support</strong> from the sidebar and click <strong>"New Ticket"</strong>. Select a category (e.g., Academic, Fee, Technical), describe your issue, and submit. The admin will respond to your ticket.</p>
+
+    <h3>WhatsApp Communication</h3>
+    <p>The college may send you WhatsApp messages for fee reminders, attendance alerts, and general announcements. You can also initiate a WhatsApp conversation from your profile or the communication center.</p>
+
+    <h3>Notifications</h3>
+    <p>The bell icon in the top-right corner shows your notifications. Click it to see messages, alerts, and updates from the college.</p>
+</section>
+
+<section id="troubleshooting">
+    <h2>13. Troubleshooting</h2>
+
+    <h3>Can't Log In</h3>
+    <ul>
+        <li>Check that Caps Lock is off.</li>
+        <li>Ensure you are using your phone number as username (with the correct country code if applicable).</li>
+        <li>Your password is your admission number — type it exactly as shown on your enrollment documents.</li>
+        <li>If still stuck, contact your study center coordinator or the college admin.</li>
+    </ul>
+
+    <h3>Page Not Loading / Blank Screen</h3>
+    <ul>
+        <li>Refresh the page (F5 or Ctrl+R).</li>
+        <li>Clear your browser cache (Settings → Privacy → Clear browsing data).</li>
+        <li>Try a different browser or an incognito/private window.</li>
+        <li>Ensure you have a stable internet connection.</li>
+    </ul>
+
+    <h3>Quiz Not Submitting</h3>
+    <ul>
+        <li>Don't close the browser tab while taking a quiz.</li>
+        <li>If the timer runs out, answers are auto-submitted.</li>
+        <li>If you experience a technical issue, contact support with the quiz name and time.</li>
+    </ul>
+
+    <h3>Contact Support</h3>
+    <p>For any issues not covered in this manual, submit a support ticket from the portal or contact the college administration directly.</p>
+</section>
+
+<div class="footer">
+    <p>NET Foundation College &middot; https://netfoundation.ke &middot; Student Portal v1.0</p>
+    <p>This manual was generated on July 2026. For the latest version, visit the Student Portal.</p>
+</div>
+
+</div>
+</body>
+</html>
