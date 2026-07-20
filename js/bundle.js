@@ -9377,7 +9377,12 @@ function formatTime(seconds) {
 }
 async function submitQuiz(quizId) {
     if (quizTimerInterval) { clearInterval(quizTimerInterval); quizTimerInterval = null; }
-    const quiz = await dbGet('quizzes', quizId);
+    let quiz = await dbGet('quizzes', quizId);
+    if (!quiz) {
+        const exam = await dbGet('exams', quizId);
+        if (!exam) return showToast('Assessment not found!');
+        quiz = { ...exam, assessmentType: 'exam', maxRetakes: exam.maxRetakes || 1 };
+    }
     const questions = await dbGetAll('questionBank');
     const quizQuestions = quiz.questionIds.map(id => questions.find(q => q.id === id)).filter(q => q);
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
