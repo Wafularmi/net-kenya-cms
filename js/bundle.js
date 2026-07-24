@@ -3812,6 +3812,7 @@ async function startExam(examId) {
     const studentLang = (await dbGet('students', studentId))?.langPref || 'en';
     showLangSelectionModal(studentId, studentLang, (chosenLang) => {
         quizTimeRemaining = exam.duration ? exam.duration * 60 : 0;
+        if (exam.duration && !exam.timeLimit) exam.timeLimit = exam.duration;
         showQuizInterface(exam, examQuestions, chosenLang);
     });
 }
