@@ -127,24 +127,19 @@ async function openApproveModal(studentId) {
     const admissionNumber = generateAdmissionNumber(student, branding, centers, seq);
     _approvalState.admissionSeq = seq;
 
-    const BUILTIN_MSG = `Dear {{name}},
+    const BUILTIN_MSG = `Welcome to {{school}}, {{name}}! 🎓
 
-Welcome to {{school}}! Your registration has been approved.
+We are excited to have you in our {{program}} program at {{center}} ({{centerCode}}, {{region}}).
 
-Below are your login details:
+Your registration was received on {{requested}} and has now been approved. Here are your login details:
+🔑 Username: {{login}}
+🔒 Password: {{admission}}
 
-Program: {{program}}
-Region: {{region}}
-Study Center: {{center}}
-Username: {{phone}}
-Admission Number: {{admissionNumber}}
-Password: {{admissionNumber}}
+Keep your admission number safe — you will need it throughout your studies.
 
-Please use the Username and Password above to log in to the student portal where you will access your courses, quizzes, and more.
+May God bless your studies and may this be a transformative season in your life.
 
-For any questions, contact the administration office.
-
-{{school}} Administration`;
+— {{school}} Administration`;
 
     const sortedTemplates = (allTemplates || []).slice().sort((a, b) => {
         const aIsWelcome = (a.id === 'tpl-welcome' || /welcome|approval|register/i.test(a.name || '')) ? 0 : 1;
@@ -750,12 +745,19 @@ async function finalizeApproval() {
         let finalMessage = message;
         const leftoverPlaceholders = (finalMessage.match(/\{\{[^}]+\}\}/g) || []);
         if (leftoverPlaceholders.length > 0) {
+            const centerObj = student.studyCenterId ? (_centerName(student.studyCenterId) || null) : null;
+            const requested = student.registrationRequestedAt ? new Date(student.registrationRequestedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
             const knownSubs = {
                 '{{admissionNumber}}': admissionNumber, '{{admission}}': admissionNumber,
                 '{{password}}': admissionNumber, '{{username}}': phone, '{{phone}}': phone,
-                '{{name}}': name, '{{email}}': email, '{{program}}': program,
+                '{{login}}': phone, '{{name}}': name, '{{email}}': email, '{{program}}': program,
                 '{{school}}': _approvalState.schoolName, '{{balance}}': '0',
-                '{{year}}': String(year), '{{min}}': '75'
+                '{{year}}': String(year), '{{min}}': '75',
+                '{{center}}': centerObj ? centerObj.name : (student.studyCenterId ? 'Study Center' : 'Main Campus'),
+                '{{centerCode}}': centerObj && centerObj.code ? centerObj.code : '',
+                '{{region}}': _regionNameFromStudent(student),
+                '{{requested}}': requested,
+                '{{fee}}': typeof student.feeAmount === 'number' ? formatCurrency(student.feeAmount) : '0'
             };
             leftoverPlaceholders.forEach(ph => {
                 if (knownSubs[ph] !== undefined) finalMessage = finalMessage.split(ph).join(knownSubs[ph]);

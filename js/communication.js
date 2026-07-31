@@ -209,7 +209,7 @@ async function previewCommMessage() {
             preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);
         }
     } else {
-        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'INST/GEN/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com');
+        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'INST/GEN/01-24/001').replace(/{{admissionNumber}}/g, 'INST/GEN/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{username}}/g, '2547XXXXXXXX').replace(/{{login}}/g, '2547XXXXXXXX').replace(/{{password}}/g, 'INST/GEN/01-24/001').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com').replace(/{{year}}/g, '1').replace(/{{region}}/g, 'Coast Region').replace(/{{center}}/g, 'Mombasa Center').replace(/{{centerCode}}/g, 'MSA').replace(/{{requested}}/g, '01 Jul 2026').replace(/{{fee}}/g, 'KES 25,000.00').replace(/{{min}}/g, '75');
     }
 
     const area = document.getElementById('comm-preview-area');

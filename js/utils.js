@@ -340,21 +340,50 @@ function timeAgo(dateStr) {
     return Math.floor(diff / 86400000) + 'd ago';
 }
 
+function _centerName(id) {
+    if (!id) return '';
+    if (window.__centerMap && window.__centerMap[id]) return window.__centerMap[id];
+    return '';
+}
+function _regionNameFromStudent(student) {
+    if (!student) return '';
+    let regionId = student.regionId;
+    if (!regionId && student.studyCenterId && window.__centerMap && window.__centerMap[student.studyCenterId]) {
+        regionId = window.__centerMap[student.studyCenterId].regionId;
+    }
+    if (regionId && window.__regionMap && window.__regionMap[regionId]) return window.__regionMap[regionId];
+    return '';
+}
 function applyTemplateVars(message, student, schoolName, balance, admissionNumber, phone) {
-    const admno = admissionNumber || (student && student.admissionNumber) || (student && student.id) || '';
+    const s = student || {};
+    const admno = admissionNumber || s.admissionNumber || s.id || '';
+    const centerObj = s.studyCenterId ? (_centerName(s.studyCenterId) || null) : null;
+    const centerName = centerObj ? centerObj.name : (s.studyCenterId ? 'Study Center' : 'Main Campus');
+    const centerCode = centerObj && centerObj.code ? centerObj.code : '';
+    const regionName = _regionNameFromStudent(s);
+    const requested = s.registrationRequestedAt ? new Date(s.registrationRequestedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : (s.enrollDate ? new Date(s.enrollDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
+    const fee = typeof s.feeAmount === 'number' ? formatCurrency(s.feeAmount) : '0';
+    const login = phone || s.phone || '';
+    const portal = 'www.nefoundation.ke';
     return message
-        .replace(/{{name}}/g, student.name)
+        .replace(/{{name}}/g, s.name)
         .replace(/{{school}}/g, schoolName)
-        .replace(/{{program}}/g, student.program || 'program')
+        .replace(/{{program}}/g, s.program || 'program')
         .replace(/{{balance}}/g, balance !== undefined ? formatCurrency(balance) : '0')
         .replace(/{{admissionNumber}}/g, admno)
         .replace(/{{admission}}/g, admno)
-        .replace(/{{phone}}/g, phone || student.phone || '')
-        .replace(/{{username}}/g, phone || student.phone || '')
+        .replace(/{{phone}}/g, login)
+        .replace(/{{username}}/g, login)
+        .replace(/{{login}}/g, login)
         .replace(/{{password}}/g, admno)
-        .replace(/{{email}}/g, student.email || '')
-        .replace(/{{year}}/g, student.year || '1')
-        .replace(/{{center}}/g, student.studyCenterId ? 'Study Center' : 'Main Campus')
+        .replace(/{{email}}/g, s.email || '')
+        .replace(/{{year}}/g, s.year || '1')
+        .replace(/{{region}}/g, regionName)
+        .replace(/{{center}}/g, centerName)
+        .replace(/{{centerCode}}/g, centerCode)
+        .replace(/{{requested}}/g, requested)
+        .replace(/{{fee}}/g, fee)
+        .replace(/{{portal}}/g, portal)
         .replace(/{{type}}/g, '')
         .replace(/{{event}}/g, '')
         .replace(/{{course}}/g, '')

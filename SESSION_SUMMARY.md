@@ -1,63 +1,37 @@
-# Session Summary — July 16, 2026
+# Session Summary — NET Kenya CMS (Jul 24, 2026)
 
-## What's Working
-- **Live site**: https://netfoundation.ke (via Cloudflare proxy, orange cloud)
-- **www**: https://www.netfoundation.ke (CNAME to 1r96dr77.up.railway.app, proxied, SSL valid)
-- **Backend**: Node.js via Dockerfile on Railway (spirited-enchantment)
-- **Database**: ~59MB server-data.json loaded from Railway volume at /data (92 students, 12 courses, 9 staff, 107 users, 286 payments, 8 regions, 9 centers)
-- **Login**: admin / admin123
-- **HTTPS**: Auto-provisioned via Railway for both root and www domains
-- **Cloudflare DNS**: @ CNAME → hcfq1dgb.up.railway.app (proxied), www CNAME → 1r96dr77.up.railway.app (proxied), TXT _railway-verify.www added
+## Completed
 
-## July 16 Fixes
-- **Admin password reset**: server.js now forces admin password hash at startup (`ADMIN_PASSWORD_RESET` log), fixing password mismatch between volume DB and known credentials
-- **Cloudflare Rocket Loader fix**: added `data-cfasync="false"` to all `<script>` tags in index.html — Rocket Loader was deferring bundle.js, causing the inline fallback login to run instead (which called `location.reload()` → infinite refresh loop)
-- **Fallback login fix**: changed `location.reload()` to `window.location.href = window.location.pathname + '?_=' + Date.now()` (cache-busting redirect)
-- **`async` bug fix (critical)**: `updateAdmissionPreview()` in bundle.js line 1955 was missing `async` keyword but used `await` inside — this caused a SyntaxError that killed the ENTIRE bundle.js execution, leaving `login` undefined (triggered the fallback loop)
-- **Cache-control for HTML**: added `<meta http-equiv="Cache-Control">` tags and server-side `Cache-Control: no-cache, no-store` headers for index.html to prevent browser caching of stale pages
-- **Cloudflare cache purged**: for all domain URLs
+### 1. Coordinator Manual Integration
+- **server.js**: Added `coordinator-manual.html` to branding injection route
+- **bundle.js**: Added `coordinator-manual` to coordinator permissions + sidebar nav item (opens in new tab)
+- **index.html**: "📘 Coordinator Manual" link in Manuals screen header
+- New file: `coordinator-manual.html` (20-section manual with branding placeholders)
 
-## July 11 Fixes (carried over)
-- Dockerfile replaced Railpack/Procfile (Node wasn't installed)
-- Volume DB copy runs before loadDB() on startup
-- Header overlap fixed: dynamic padding via JS (adjustHeaderPadding in app.js)
-- Sidebar top/height follows header dynamically
-- Logo flash fix: server injects inline `<style>` with logo via `{{LOGO_CSS}}` placeholder
-- Toast z-index raised to `10002`
-- Registration fix: `canAccessStore` whitelisted `studyCenters` + `regions` for unauthenticated GET
-- Server-side branding injection: `{{SCHOOL_NAME}}`, `{{INITIALS}}`, `{{LOGO_CSS}}`
-- Cloudflare CSS cache bypass via versioned URL (`main.144.css`)
-- T&C acceptance via localStorage `terms_accepted_<username>`
+### 2. Fixed Exam Submit Button (Unresponsive)
+- **Root cause**: `submitQuiz()` at bundle.js:11342 only looked up `dbGet('quizzes', quizId)`, but the bundled `startExam()` passes raw exam objects (not quiz objects). Exam IDs don't exist in the `quizzes` store → `null` → silent crash.
+- **Fix**: Added fallback — if quizzes lookup returns null, try `dbGet('exams', quizId)` and normalize with `assessmentType: 'exam'`.
+- **Timer fix**: Exams use `duration` (minutes) but `showQuizInterface` checks `quiz.timeLimit`. Set `exam.timeLimit = exam.duration` in `startExam` so countdown timer and auto-submit work for exams.
 
-## Features Added (previous session)
-### Regions & Coordinators
-- `coordinator` role — sub-admin scoped to region
-- Region drill-down dashboard with KPI cards
-- Center drill-down with learner problem flags (attendance <70%, outstanding fees, inactive status)
+## Files Modified
+| File | Change |
+|------|--------|
+| `server.js:1325` | Branding injection includes coordinator-manual.html |
+| `js/bundle.js:363` | Added `coordinator-manual` to coordinator permissions |
+| `js/bundle.js:877` | Nav item in Academic section |
+| `js/bundle.js:1208-1212` | `showScreen` opens coordinator manual in new tab |
+| `js/bundle.js:11342-11347` | `submitQuiz` falls back to exams store |
+| `js/bundle.js:3815` | `startExam` sets `exam.timeLimit = exam.duration` |
+| `index.html:155-157` | Coordinator manual link in Manuals screen |
 
-### Admission Number System
-- `/api/signup` endpoint with sequential admission numbers
-- Format: `SCHOOL-INITIALS / CENTER_CODE / MONTH-YEAR / SEQ`
+## New Files
+- `coordinator-manual.html` — Coordinator user manual (20 sections, front/back cover)
 
-## Credentials
-- Admin: username=`admin`, password=`admin123` (SHA-256: `240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9`)
-- Coordinators: create via Settings → Users → +Add User → role=Coordinator
+## Commits
+- `8ee05c3` — Add coordinator manual with sidebar nav link and server branding injection
+- `e8f38a9` — Fix exam submit button not responding (fallback to exams store)
+- `f681c7d` — Fix exam timer not working (set timeLimit from duration)
 
-## File Locations
-- Working copy: `C:\Users\Pastor David\Desktop\NET KENYA\`
-- Source (original .exe): `C:\Users\Pastor David\Desktop\NET CMS\dist\`
-- GitHub: https://github.com/Wafularmi/net-kenya-cms
-- Railway project: `e14263ed-e2a1-4184-89ae-766d077d12e5`
-- Railway service: `cfbf8757-206d-4b32-a2b1-6d6b99f4dbdf`
-- Railway volume: `fe778515-088d-48e6-9b3f-b967bbaef675` at /data (59MB/500MB used)
-
-## Key Architecture Notes
-- **Database**: single `server-data.json`, loaded via `loadDB()`; all CRUD via REST API (`/api/db/:store/:key`)
-- **Auth**: SHA-256 password hashing; session in sessionStorage; IndexedDB not used (all data via server API)
-- **Server**: Node.js on PORT env var (8080 on Railway); Dockerfile-based deploy
-- **Frontend**: Single-page app in `index.html` + `js/bundle.js?v=213` (all-in-one, 16k+ lines)
-- **Rocket Loader**: Cloudflare feature that defers JS — must use `data-cfasync="false"` on all critical scripts
-- **Fallback login**: inline script in index.html activates if bundle.js fails to load; avoids `location.reload()` by using cache-busting redirect
-
-## Remaining / Future
-- All domains configured and working — no remaining items
+## Deploy
+- Railway auto-deploys from GitHub `main` branch
+- Domain: netfoundation.ke (Cloudflare-proxied)
