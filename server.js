@@ -597,6 +597,71 @@ function handleAPI(req, res) {
         return json(res, 200, { stores: stats, totalRecords: total, fileSize: size, backupCount, hasBackup });
     }
 
+    // GET /api/certificate/:id/pdf — serve certificate as PDF
+    if (parts.length === 3 && parts[1] === 'certificate' && req.method === 'GET') {
+        const certId = decodeURIComponent(parts[2]);
+        const cert = db.certificates?.find(c => c.id === certId);
+        if (!cert) return json(res, 404, { error: 'Certificate not found' });
+
+        // Serve PDF via Puppeteer (async IIFE)
+        (async () => {
+            try {
+                const puppeteer = require('puppeteer-core');
+                const chromium = require('@puppeteer/browser')?.executablePath || '/usr/bin/chromium-browser';
+
+                const browser = await puppeteer.launch({
+                    executablePath: chromium,
+                    headless: 'new',
+                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                });
+                const page = await browser.newPage();
+
+                // Build full HTML with print styles
+                const html = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>${cert.docTitle || 'Certificate'}</title>
+                        <style>
+                            @page { size: A4; margin: 20mm; }
+                            body { font-family: 'DejaVu Serif', Georgia, serif; margin: 0; padding: 0; background: #fff; color: #1a1a2e; }
+                            .certificate { width: 100%; height: 100vh; display: flex; flex-direction: column; }
+                        </style>
+                    </head>
+                    <body>${cert.content}</body>
+                    </html>
+                `;
+
+                await page.setContent(html, { waitUntil: 'networkidle0' });
+                const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' } });
+                await browser.close();
+
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `inline; filename="${cert.docTitle || 'certificate'}-${certId}.pdf"`);
+                return res.end(pdfBuffer);
+            } catch (e) {
+                console.error('PDF generation failed:', e);
+                // Fallback: serve HTML with print CSS
+                res.setHeader('Content-Type', 'text/html');
+                return res.end(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>${cert.docTitle || 'Certificate'}</title>
+                        <style>
+                            @media print { @page { size: A4; margin: 20mm; } body { margin: 0; background: #fff; } .no-print { display: none !important; } }
+                            body { font-family: Georgia, serif; margin: 0; padding: 40px; background: #fff; color: #1a1a2e; line-height: 1.5; }
+                        </style>
+                    </head>
+                    <body>${cert.content}</body>
+                    </html>
+                `);
+            }
+        })();
+    }
+
     // GET /api/backups — list available timestamped backups
     if (parts.length === 2 && parts[1] === 'backups' && req.method === 'GET') {
         try {

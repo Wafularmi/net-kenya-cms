@@ -7008,14 +7008,16 @@ async function sendDocWhatsApp(certId) {
     const docType = typeLabels[cert.type] || cert.type;
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
+    const pdfUrl = window.location.origin + '/api/certificate/' + encodeURIComponent(certId) + '/pdf';
     let msg = `📄 *${docType}*\n${schoolName}\n\n`;
     msg += `Student: ${student.name}\n`;
     if (student.admissionNumber) msg += `Admission: ${student.admissionNumber}\n`;
     if (student.program) msg += `Program: ${student.program}\n`;
     msg += `\nThis document was generated on ${new Date(cert.generatedAt).toLocaleDateString('en-GB')}.\n\n`;
+    msg += `📎 Download PDF: ${pdfUrl}\n\n`;
     msg += `Please contact the administration office for any inquiries.\n\n— ${schoolName}`;
     sendWhatsApp(student.phone, msg);
-    showToast('Document summary sent to ' + student.name);
+    showToast('Document with PDF link sent to ' + student.name);
 }
 async function deleteCertificate(certId) {
     if (!await showConfirm('Confirm', 'Delete this document?')) return;
