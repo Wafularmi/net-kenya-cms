@@ -638,7 +638,7 @@ function handleAPI(req, res) {
                 await browser.close();
 
                 res.setHeader('Content-Type', 'application/pdf');
-                res.setHeader('Content-Disposition', `inline; filename="${cert.docTitle || 'certificate'}-${certId}.pdf"`);
+                res.setHeader('Content-Disposition', `attachment; filename="${cert.docTitle || 'certificate'}-${certId}.pdf"`);
                 return res.end(pdfBuffer);
             } catch (e) {
                 console.error('PDF generation failed:', e);
