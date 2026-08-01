@@ -403,6 +403,12 @@ body {
 #screen-students .data-table {
     table-layout: fixed;
 }
+#screen-students .data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-input);
+}
 #screen-students .data-table th,
 #screen-students .data-table td {
     padding: 3px 4px;
