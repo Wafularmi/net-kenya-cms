@@ -8047,7 +8047,9 @@ async function renderLessons() {
     const notes = await dbGetAll('notes');
     const files = await dbGetAll('lessonFiles');
     const courseSelect = document.getElementById('lesson-course');
+    const savedFilter = courseSelect.value;
     courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
+    courseSelect.value = savedFilter;
     const filter = courseSelect.value;
     let filtered = filter ? lessons.filter(l => l.courseId === filter) : lessons;
     const statusFilter = document.getElementById('lesson-status-filter').value;
