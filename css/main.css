@@ -415,7 +415,7 @@ body {
     font-size: 11px;
 }
 #screen-students .data-table th:nth-child(1),
-#screen-students .data-table td:nth-child(1) { width: 14%; }
+#screen-students .data-table td:nth-child(1) { width: 17%; }
 #screen-students .data-table th:nth-child(2),
 #screen-students .data-table td:nth-child(2) { width: 26%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #screen-students .data-table th:nth-child(3),
