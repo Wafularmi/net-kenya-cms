@@ -415,21 +415,23 @@ body {
     font-size: 11px;
 }
 #screen-students .data-table th:nth-child(1),
-#screen-students .data-table td:nth-child(1) { width: 10%; }
+#screen-students .data-table td:nth-child(1) { width: 40px; min-width: 40px; text-align: center; }
 #screen-students .data-table th:nth-child(2),
-#screen-students .data-table td:nth-child(2) { width: 20%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#screen-students .data-table td:nth-child(2) { width: 11%; }
 #screen-students .data-table th:nth-child(3),
-#screen-students .data-table td:nth-child(3) { width: 10%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#screen-students .data-table td:nth-child(3) { width: 20%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #screen-students .data-table th:nth-child(4),
-#screen-students .data-table td:nth-child(4) { width: 14%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#screen-students .data-table td:nth-child(4) { width: 10%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #screen-students .data-table th:nth-child(5),
-#screen-students .data-table td:nth-child(5) { width: 6%; text-align: center; }
+#screen-students .data-table td:nth-child(5) { width: 14%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #screen-students .data-table th:nth-child(6),
-#screen-students .data-table td:nth-child(6) { width: 10%; }
+#screen-students .data-table td:nth-child(6) { width: 6%; text-align: center; }
 #screen-students .data-table th:nth-child(7),
-#screen-students .data-table td:nth-child(7) { width: 8%; text-align: right; }
+#screen-students .data-table td:nth-child(7) { width: 10%; }
 #screen-students .data-table th:nth-child(8),
-#screen-students .data-table td:nth-child(8) { width: 22%; white-space: nowrap; }
+#screen-students .data-table td:nth-child(8) { width: 8%; text-align: right; }
+#screen-students .data-table th:nth-child(9),
+#screen-students .data-table td:nth-child(9) { width: 22%; white-space: nowrap; }
 
 .badge {
     display: inline-block;
