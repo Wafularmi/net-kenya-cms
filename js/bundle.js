@@ -4849,8 +4849,8 @@ function buildProfessionalTranscript(data) {
                     ${sig_director ? `<div class="signature-block"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
                 </div>
             </div>
-            <div class="page-seal-area">
-                ${isOfficial ? `<div class="seal-area"></div>
+<div class="page-seal-area">
+                ${isOfficial ? `<div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
                 <p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
             </div>
             <div class="transcript-footer">
@@ -4909,11 +4909,19 @@ function buildProfessionalTranscript(data) {
             z-index: 0;
             white-space: nowrap;
         }
-        .transcript-document .official-stamp {
+.transcript-document .official-stamp {
             position: absolute;
             top: 60px;
             right: 40px;
             z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .transcript-document .official-stamp .college-stamp-img {
+            max-width: 120px;
+            max-height: 120px;
+            object-fit: contain;
         }
         .transcript-document .stamp-border {
             width: 90px;
@@ -5685,9 +5693,9 @@ function buildFinalTranscriptDocument(data) {
                 ${sig_dean ? `<div class="signature-block"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
                 ${sig_director ? `<div class="signature-block"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
             </div>
-            <div class="official-footer">
+<div class="official-footer">
                 <p class="footer-disclaimer">This final academic transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>
-                <div class="stamp-area"></div>
+                <div class="stamp-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
             </div>
         </div>
     </div>
@@ -5774,7 +5782,8 @@ function buildFinalTranscriptDocument(data) {
         .transcript-document .signature-line { width: 100%; border-top: 1px solid #1a1a2e; margin-bottom: 3px; }
         .transcript-document .signature-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #1a1a2e; }
         .transcript-document .signature-date { font-size: 8px; color: #64748b; margin-top: 3px; }
-        .transcript-document .stamp-area { width: 28mm; height: 28mm; flex-shrink: 0; }
+.transcript-document .stamp-area { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .transcript-document .college-stamp-img { max-width: 100%; max-height: 100%; object-fit: contain; }
         .transcript-document .footer-disclaimer { font-size: 9px; color: #64748b; line-height: 1.4; margin: 0; flex: 1; padding-right: 12px; }
         .transcript-document .footer-disclaimer strong { color: #1a1a2e; font-family: 'Courier New', monospace; }
         .transcript-document .official-footer { margin: 0 25px 3mm; display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border: 2px solid ${accentColor}; border-radius: 6px; background: #fffbeb; }
@@ -12516,6 +12525,18 @@ function handleSigUpload(role, event) {
     };
     reader.readAsDataURL(file);
 }
+function handleStampUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const preview = document.getElementById('college-stamp-preview');
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+        preview.parentElement.querySelector('.sig-placeholder').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+}
 async function saveSignatures() {
     const branding = await dbGet('settings', 'branding') || { key: 'branding' };
     const roles = ['registrar', 'dean', 'director', 'finance'];
@@ -12525,9 +12546,14 @@ async function saveSignatures() {
             branding['sig_' + role] = preview.src;
         }
     });
+    // College stamp
+    const stampPreview = document.getElementById('college-stamp-preview');
+    if (stampPreview && stampPreview.src && stampPreview.style.display !== 'none') {
+        branding['college_stamp'] = stampPreview.src;
+    }
     await dbPut('settings', branding);
     loadBranding();
-    showToast('Signatures saved!');
+    showToast('Signatures & Stamp saved!');
     logAudit('updated', 'signatures', branding);
 }
 async function loadSignatures() {
@@ -12546,6 +12572,16 @@ async function loadSignatures() {
             }
         }
     });
+    // College stamp
+    if (branding.college_stamp) {
+        const preview = document.getElementById('college-stamp-preview');
+        if (preview) {
+            preview.src = branding.college_stamp;
+            preview.style.display = 'block';
+            const placeholder = preview.parentElement.querySelector('.sig-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
+        }
+    }
 }
 async function initSettings() {
     await new Promise(r => {

@@ -627,14 +627,18 @@
                         </div>
                         <button class="btn btn-primary" onclick="saveBranding()">Save Branding</button>
                     </div>
-                    <div class="card"><h3>Digital Signatures</h3>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload signature images for document signing (PNG with transparent background recommended)</div>
-                        <div class="form-group"><label>Registrar</label><div class="sig-upload"><img id="sig-registrar-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('registrar', event)"></div></div>
-                        <div class="form-group"><label>Academic Dean</label><div class="sig-upload"><img id="sig-dean-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('dean', event)"></div></div>
-                        <div class="form-group"><label>Director / Principal</label><div class="sig-upload"><img id="sig-director-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('director', event)"></div></div>
-                        <div class="form-group"><label>Finance Officer</label><div class="sig-upload"><img id="sig-finance-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('finance', event)"></div></div>
-                        <button class="btn btn-primary" onclick="saveSignatures()">Save Signatures</button>
-                    </div>
+<div class="card"><h3>Digital Signatures</h3>
+                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload signature images for document signing (PNG with transparent background recommended)</div>
+                         <div class="form-group"><label>Registrar</label><div class="sig-upload"><img id="sig-registrar-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('registrar', event)"></div></div>
+                         <div class="form-group"><label>Academic Dean</label><div class="sig-upload"><img id="sig-dean-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('dean', event)"></div></div>
+                         <div class="form-group"><label>Director / Principal</label><div class="sig-upload"><img id="sig-director-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('director', event)"></div></div>
+                         <div class="form-group"><label>Finance Officer</label><div class="sig-upload"><img id="sig-finance-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleSigUpload('finance', event)"></div></div>
+                         <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
+                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">College Stamp (Official Seal)</div>
+                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload the college rubber stamp/seal (PNG with transparent background). This will be placed on certificates and official documents.</div>
+                         <div class="form-group"><label>College Stamp / Seal</label><div class="sig-upload"><img id="college-stamp-preview" class="sig-preview" style="display:none;"><div class="sig-placeholder">Upload</div><input type="file" accept="image/*" onchange="handleStampUpload(event)"></div></div>
+                         <button class="btn btn-primary" onclick="saveSignatures()">Save Signatures & Stamp</button>
+                     </div>
                     <div class="card"><h3>Study Centers</h3>
                         <div id="campuses-list"></div>
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showStudyCenterForm()">+ Add Study Center</button>
