@@ -1,4 +1,4 @@
-const http = require('http');
+﻿const http = require('http');
 const https = require('https');
 const querystring = require('querystring');
 const fs = require('fs');
@@ -297,7 +297,7 @@ function cacheFile(cacheKey, data) {
 }
 
 
-// Online user tracking — heartbeat every 30s, expires after 90s
+// Online user tracking â€” heartbeat every 30s, expires after 90s
 const onlineUsers = new Map();
 function cleanOnlineUsers() {
     const cutoff = Date.now() - 90000;
@@ -482,7 +482,7 @@ function handleAPI(req, res) {
         return json(res, 200, { status: 'ok', uptime: process.uptime(), mpesaConfigured });
     }
 
-    // GET /api/events — SSE stream for real-time updates
+    // GET /api/events â€” SSE stream for real-time updates
     if (parts.length === 2 && parts[1] === 'events' && req.method === 'GET') {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -506,7 +506,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // GET /api/network  — list available network interfaces
+    // GET /api/network  â€” list available network interfaces
     if (parts.length === 2 && parts[1] === 'network' && req.method === 'GET') {
         const ifaces = os.networkInterfaces();
         const list = [];
@@ -520,7 +520,7 @@ function handleAPI(req, res) {
         return json(res, 200, { interfaces: list, port: PORT, uptime: process.uptime() });
     }
 
-    // GET /api/network-info — get IPs and URLs for device connection
+    // GET /api/network-info â€” get IPs and URLs for device connection
     if (parts.length === 2 && parts[1] === 'network-info' && req.method === 'GET') {
         const ips = getNetworkIPs();
         const urls = ips.flatMap(ip => buildUrls(ip.address));
@@ -528,7 +528,7 @@ function handleAPI(req, res) {
         return json(res, 200, { port: PORT, httpsPort: _httpsPort, ips, urls, hostname: os.hostname() });
     }
 
-    // GET /api/qr?url=... — generate QR code for the given URL
+    // GET /api/qr?url=... â€” generate QR code for the given URL
     if (parts.length === 2 && parts[1] === 'qr' && req.method === 'GET') {
         const qrUrl = urlObj.searchParams.get('url') || (_httpsPort ? `https://127.0.0.1:${_httpsPort}` : `http://127.0.0.1:${PORT}`);
         try {
@@ -547,7 +547,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // GET /api/backup — download full database JSON
+    // GET /api/backup â€” download full database JSON
     if (parts.length === 2 && parts[1] === 'backup' && req.method === 'GET') {
         flushDB();
         const backup = JSON.stringify(db, null, 2);
@@ -560,7 +560,7 @@ function handleAPI(req, res) {
         return res.end(backup);
     }
 
-    // POST /api/restore — upload full database JSON (replaces all data)
+    // POST /api/restore â€” upload full database JSON (replaces all data)
     if (parts.length === 2 && parts[1] === 'restore' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
@@ -571,14 +571,14 @@ function handleAPI(req, res) {
                 const count = Object.keys(data).length;
                 db = data;
                 flushDB();
-                console.log('Database restored —', count, 'stores');
+                console.log('Database restored â€”', count, 'stores');
                 json(res, 200, { ok: true, stores: count });
             } catch { json(res, 400, { error: 'Invalid JSON in backup file' }); }
         });
         return true;
     }
 
-    // GET /api/db-size — report database stats
+    // GET /api/db-size â€” report database stats
     if (parts.length === 2 && parts[1] === 'db-size' && req.method === 'GET') {
         const stats = {};
         let total = 0;
@@ -597,20 +597,20 @@ function handleAPI(req, res) {
         return json(res, 200, { stores: stats, totalRecords: total, fileSize: size, backupCount, hasBackup });
     }
 
-    // GET /api/certificate/:id/pdf — serve certificate as PDF
-    if (parts.length === 5 && parts[1] === 'api' && parts[2] === 'certificate' && parts[4] === 'pdf' && req.method === 'GET') {
-        const certId = decodeURIComponent(parts[3]);
+// GET /api/certificate/:id/pdf — serve certificate as PDF
+    if (parts.length >= 3 && parts[0] === 'api' && parts[1] === 'certificate' && req.method === 'GET') {
+        console.log('CERT ROUTE HIT:', { parts, path });
+        const isPdf = parts.length === 4 && parts[3] === 'pdf';
+        const certId = decodeURIComponent(parts[2]);
         const cert = db.certificates?.find(c => c.id === certId);
         if (!cert) return json(res, 404, { error: 'Certificate not found' });
 
         // Serve PDF via Puppeteer (async IIFE)
         (async () => {
             try {
-                const puppeteer = require('puppeteer-core');
-                const chromium = require('@puppeteer/browser')?.executablePath || '/usr/bin/chromium-browser';
+                const puppeteer = require('puppeteer');
 
                 const browser = await puppeteer.launch({
-                    executablePath: chromium,
                     headless: 'new',
                     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
                 });
@@ -662,7 +662,7 @@ function handleAPI(req, res) {
         })();
     }
 
-    // GET /api/backups — list available timestamped backups
+    // GET /api/backups â€” list available timestamped backups
     if (parts.length === 2 && parts[1] === 'backups' && req.method === 'GET') {
         try {
             ensureBackupDir();
@@ -686,7 +686,7 @@ function handleAPI(req, res) {
         } catch { return json(res, 200, { backups: [] }); }
     }
 
-    // POST /api/restore-from-backup — restore from a named timestamped backup
+    // POST /api/restore-from-backup â€” restore from a named timestamped backup
     if (parts.length === 3 && parts[1] === 'restore-from-backup' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
@@ -709,7 +709,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/login — server-side login (single round trip)
+    // POST /api/login â€” server-side login (single round trip)
     if (parts.length === 2 && parts[1] === 'login' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
@@ -787,7 +787,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/hash — SHA-256 hashing (for phones where crypto.subtle is unavailable)
+    // POST /api/hash â€” SHA-256 hashing (for phones where crypto.subtle is unavailable)
     if (parts.length === 2 && parts[1] === 'hash' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
@@ -802,7 +802,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/heartbeat — client sends username every 30s
+    // POST /api/heartbeat â€” client sends username every 30s
     if (parts.length === 2 && parts[1] === 'heartbeat' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
@@ -816,7 +816,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // GET /api/online — returns list of users active in last 90s
+    // GET /api/online â€” returns list of users active in last 90s
     if (parts.length === 2 && parts[1] === 'online' && req.method === 'GET') {
         cleanOnlineUsers();
         const list = [];
@@ -909,7 +909,7 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/send-sms — send bulk SMS via Africa's Talking
+    // POST /api/send-sms â€” send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
@@ -984,7 +984,7 @@ function handleAPI(req, res) {
     }
 
     // -----------------------------------------------------------
-    // Public signup endpoint — /api/signup  (POST)
+    // Public signup endpoint â€” /api/signup  (POST)
     // -----------------------------------------------------------
     if (parts.length === 2 && parts[1] === 'signup' && req.method === 'POST') {
         try {
@@ -1056,9 +1056,9 @@ function handleAPI(req, res) {
     }
 
     // -----------------------------------------------------------
-    // Generic DB CRUD endpoints — /api/db/:store[/:key]
+    // Generic DB CRUD endpoints â€” /api/db/:store[/:key]
     // -----------------------------------------------------------
-    // GET /api/db/batch?stores=users,students,courses  — batch fetch multiple stores
+    // GET /api/db/batch?stores=users,students,courses  â€” batch fetch multiple stores
     if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'batch' && req.method === 'GET') {
         const names = (urlObj.searchParams.get('stores') || '').split(',').filter(Boolean);
         const result = {};
@@ -1092,10 +1092,10 @@ function handleAPI(req, res) {
         // Ensure the store array exists in the DB
         if (!db[store]) db[store] = [];
 
-        // Helper to save DB after mutations — broadcast FIRST so clients get instant notification
+        // Helper to save DB after mutations â€” broadcast FIRST so clients get instant notification
         function mutate(record) { broadcastEvent('db-change', { store, record }); saveDB(); }
 
-        // GET /api/db/:store   — return all records (with optional ?index=&value= filter, ?page=&limit=)
+        // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)
         if (req.method === 'GET' && !key) {
             let results = db[store] || [];
             
@@ -1125,13 +1125,13 @@ function handleAPI(req, res) {
             return json(res, 200, results);
         }
 
-        // GET /api/db/:store/:key  — return single record or null
+        // GET /api/db/:store/:key  â€” return single record or null
         if (req.method === 'GET' && key) {
             const item = db[store].find(r => String(r[keyPath]) === key) || null;
             return json(res, 200, item);
         }
 
-        // PUT /api/db/:store  — upsert (create or replace)
+        // PUT /api/db/:store  â€” upsert (create or replace)
         if (req.method === 'PUT') {
             let body = '';
             req.on('data', c => body += c);
@@ -1155,7 +1155,7 @@ function handleAPI(req, res) {
             return true;
         }
 
-        // POST /api/db/:store  — add only (error if key exists)
+        // POST /api/db/:store  â€” add only (error if key exists)
         if (req.method === 'POST') {
             let body = '';
             req.on('data', c => body += c);
@@ -1176,14 +1176,14 @@ function handleAPI(req, res) {
             return true;
         }
 
-        // DELETE /api/db/:store  — clear entire store
+        // DELETE /api/db/:store  â€” clear entire store
         if (req.method === 'DELETE' && !key) {
             db[store] = [];
             mutate({ _cleared: true });
             return json(res, 200, { ok: true });
         }
 
-        // DELETE /api/db/:store/:key  — remove single record
+        // DELETE /api/db/:store/:key  â€” remove single record
         if (req.method === 'DELETE' && key) {
             const idx = db[store].findIndex(r => String(r[keyPath]) === key);
             if (idx >= 0) db[store].splice(idx, 1);
@@ -1198,14 +1198,14 @@ function handleAPI(req, res) {
     if (parts[1] === 'discussions') {
         const courseId = parts[2];
         
-        // GET /api/discussions/:courseId — get messages for a course
+        // GET /api/discussions/:courseId â€” get messages for a course
         if (parts.length === 3 && req.method === 'GET') {
             const discussions = db.discussions || [];
             const courseDiscussions = discussions.filter(d => d.courseId === courseId);
             return json(res, 200, { messages: courseDiscussions });
         }
         
-        // POST /api/discussions/:courseId — post a new message
+        // POST /api/discussions/:courseId â€” post a new message
         if (parts.length === 3 && req.method === 'POST') {
             let body = '';
             req.on('data', c => body += c);
@@ -1238,7 +1238,7 @@ function handleAPI(req, res) {
             return true;
         }
         
-        // PUT /api/discussions/:courseId/:messageId — moderate (pin/lock/delete) or reply/like
+        // PUT /api/discussions/:courseId/:messageId â€” moderate (pin/lock/delete) or reply/like
         if (parts.length === 4 && req.method === 'PUT') {
             const messageId = parts[3];
             let body = '';
@@ -1486,29 +1486,29 @@ server.listen(PORT, '0.0.0.0', () => {
     const primaryUrl = urls.length > 0 ? urls[0] : local;
 
     console.log('');
-    console.log('  ╔══════════════════════════════════════════════════╗');
-    console.log('  ║      College Management System Server           ║');
-    console.log('  ╠══════════════════════════════════════════════════╣');
-    console.log(`  ║  HTTP:   ${local.padEnd(43)}║`);
-    if (_httpsPort) console.log(`  ║  HTTPS:  https://127.0.0.1:${String(_httpsPort).padEnd(28)}║`);
+    console.log('  â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—');
+    console.log('  â•‘      College Management System Server           â•‘');
+    console.log('  â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£');
+    console.log(`  â•‘  HTTP:   ${local.padEnd(43)}â•‘`);
+    if (_httpsPort) console.log(`  â•‘  HTTPS:  https://127.0.0.1:${String(_httpsPort).padEnd(28)}â•‘`);
     urls.forEach(u => {
         const isHttps = u.startsWith('https');
         const isConnect = u.includes('connect.html');
         let label;
-        if (isConnect && isHttps) label = '  ║  Sec-C:';
-        else if (isConnect) label = '  ║  Connect:';
-        else if (isHttps) label = '  ║  SecNet:';
-        else label = '  ║  Network:';
+        if (isConnect && isHttps) label = '  â•‘  Sec-C:';
+        else if (isConnect) label = '  â•‘  Connect:';
+        else if (isHttps) label = '  â•‘  SecNet:';
+        else label = '  â•‘  Network:';
         const display = isHttps ? u : u;
-        console.log(`${label} ${display.padEnd(43)}║`);
+        console.log(`${label} ${display.padEnd(43)}â•‘`);
     });
-    console.log('  ╠══════════════════════════════════════════════════╣');
-    console.log('  ║  Scan QR from connect.html for mobile access    ║');
-    console.log(`  ║  Primary: ${(primaryUrl).padEnd(46)}║`);
-    console.log('  ╠══════════════════════════════════════════════════╣');
-    console.log('  ║  M-Pesa API: /api/mpesa/*                      ║');
-    console.log('  ║  Press Ctrl+C to stop the server               ║');
-    console.log('  ╚══════════════════════════════════════════════════╝');
+    console.log('  â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£');
+    console.log('  â•‘  Scan QR from connect.html for mobile access    â•‘');
+    console.log(`  â•‘  Primary: ${(primaryUrl).padEnd(46)}â•‘`);
+    console.log('  â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£');
+    console.log('  â•‘  M-Pesa API: /api/mpesa/*                      â•‘');
+    console.log('  â•‘  Press Ctrl+C to stop the server               â•‘');
+    console.log('  â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•');
     console.log('');
     // Start auto-updater
     try {
@@ -1527,16 +1527,16 @@ server.listen(PORT, '0.0.0.0', () => {
                 const ips2 = getNetworkIPs();
                 const urls2 = ips2.flatMap(ip => buildUrls(ip.address));
                 const primary2 = urls2.length > 0 ? urls2[0] : httpsLocal;
-                console.log('  ╔══════════════════════════════════════════════════╗');
-                console.log('  ║      HTTPS Enabled — Certificates Active       ║');
-                console.log('  ╠══════════════════════════════════════════════════╣');
-                console.log(`  ║  Local:   ${httpsLocal.padEnd(43)}║`);
+                console.log('  â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—');
+                console.log('  â•‘      HTTPS Enabled â€” Certificates Active       â•‘');
+                console.log('  â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£');
+                console.log(`  â•‘  Local:   ${httpsLocal.padEnd(43)}â•‘`);
                 urls2.filter(u => u.startsWith('https')).forEach(u => {
-                    const label = u.includes('connect.html') ? '  ║  Sec-C:' : '  ║  SecNet:';
-                    console.log(`${label} ${u.padEnd(43)}║`);
+                    const label = u.includes('connect.html') ? '  â•‘  Sec-C:' : '  â•‘  SecNet:';
+                    console.log(`${label} ${u.padEnd(43)}â•‘`);
                 });
-                console.log(`  ║  QR:     ${primary2.padEnd(43)}║`);
-                console.log('  ╚══════════════════════════════════════════════════╝');
+                console.log(`  â•‘  QR:     ${primary2.padEnd(43)}â•‘`);
+                console.log('  â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•');
                 console.log('');
             }
         }).catch(() => {});
@@ -1557,3 +1557,6 @@ server.listen(PORT, '0.0.0.0', () => {
         } catch (e) { /* non-critical */ }
     }, 1500);
 });
+
+
+
