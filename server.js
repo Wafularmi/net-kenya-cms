@@ -598,8 +598,8 @@ function handleAPI(req, res) {
     }
 
     // GET /api/certificate/:id/pdf — serve certificate as PDF
-    if (parts.length === 3 && parts[1] === 'certificate' && req.method === 'GET') {
-        const certId = decodeURIComponent(parts[2]);
+    if (parts.length === 5 && parts[1] === 'api' && parts[2] === 'certificate' && parts[4] === 'pdf' && req.method === 'GET') {
+        const certId = decodeURIComponent(parts[3]);
         const cert = db.certificates?.find(c => c.id === certId);
         if (!cert) return json(res, 404, { error: 'Certificate not found' });
 
