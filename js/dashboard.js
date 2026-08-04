@@ -156,8 +156,8 @@ async function renderStudentDashboard(currentUser) {
 
     const enrolledCourseIds = new Set((enrollments || []).filter(e => e.studentId === studentId).map(e => e.courseId));
     const myEnrolledCourses = courses.filter(c => enrolledCourseIds.has(c.id));
-    const today = new Date().toISOString().split('T')[0];
-    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId) && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    const today2 = new Date().toISOString().split('T')[0];
+    const myExams = (exams || []).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId) && e.date >= today2).sort((a, b) => a.date.localeCompare(b.date));
     
     const activeQuizzes = (quizzes || []).filter(q => enrolledCourseIds.has(q.courseId) && q.published);
     const mySubmissions = (submissions || []).filter(s => s.studentId === studentId);
@@ -358,10 +358,11 @@ async function showQuizRegistrationModal(studentId) {
     const submissions = await dbGetAll('submissions');
     const submittedIds = new Set(submissions.filter(s => s.studentId === studentId).map(s => s.quizId));
     const available = quizzes.filter(q => !submittedIds.has(q.id));
-    if (!available.length) return showToast('No available quizzes to join');
+if (!available.length) return showToast('No available quizzes to join');
     let html = `<div style="margin-bottom:8px;"><b>${escapeHtml(student.name)}</b></div>`;
+    const allCourses = await dbGetAll('courses');
     html += available.map(q => {
-        const course = (await dbGetAll('courses')).find(c => c.id === q.courseId);
+        const course = allCourses.find(c => c.id === q.courseId);
         return `<label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
             <input type="checkbox" value="${q.id}" class="enroll-quiz-chk">
             <div><b>${q.title}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : q.courseId}</span></div>
