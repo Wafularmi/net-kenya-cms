@@ -163,18 +163,18 @@
 
 ### Deployment Status
 
-- **GitHub**: `main` branch up to date (commit `cc11ae4`)
+- **GitHub**: `main` branch up to date (commit `1016c3c`)
 - **Railway**: Auto-deploys from GitHub `main` → `netfoundation.ke`
-- **Deploy time**: 2–5 minutes after push
+- **Deploy time**: ~1–2 minutes after push (health returns 200)
 
 ---
 
 ### Live Verification (2026-08-05) — DONE
 
 - **Health**: `https://netfoundation.ke/api/health` → `200 {"status":"ok"}`
-- **Login**: `POST /api/login` with `admin` + correct password → `200` returns admin user
-  - Note: curl `-d '...@...@...'` bodies get mangled by PowerShell (invalid JSON → 500).
-    Use a BOM-free body file or pass JSON via file: `curl.exe -d @body.json`.
+- **Login**: `POST /api/login` with `admin` + `@11097560@` → `200` returns admin user
+- **bundle.js**: full 1.23 MB restored (login, WhatsApp, certificates, college stamp, auto-year, Virtual Classroom all present, `node --check` passes)
+- **Virtual Classroom**: lesson with `virtualEnabled/virtualRoom/virtualPassword/virtualScheduled/virtualLobby/virtualRecording` saved via API (PUT → 200) and read back correctly.
 
 ---
 
