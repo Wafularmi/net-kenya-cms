@@ -503,7 +503,19 @@ async function suggestDesignColors() {
     const dominant = await getLogoDominantColor();
     return generateColorPalette(dominant);
 }
-
+function calculateYearOfStudy(student) {
+    if (!student) return 1;
+    if (student.yearAuto === false) return student.year || 1;
+    const regDate = student.registrationRequestedAt || student.enrollDate;
+    if (!regDate) return 1;
+    const reg = new Date(regDate);
+    const now = new Date();
+    let years = now.getFullYear() - reg.getFullYear();
+    const monthDiff = now.getMonth() - reg.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < reg.getDate())) years--;
+    years = Math.max(1, Math.min(3, years + 1));
+    return years;
+}
 function getPaletteStripHtml(palette, colorInputId) {
     const swatches = [
         { label: 'Primary', color: palette.primary },
