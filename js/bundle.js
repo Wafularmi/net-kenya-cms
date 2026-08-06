@@ -1755,6 +1755,21 @@ async function renderStudentDashboard(currentUser) {
     const enrolledCourseIds = new Set(enrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
     let myCourses = courses.filter(c => enrolledCourseIds.size === 0 || enrolledCourseIds.has(c.id));
     myCourses = sortCoursesByTranscriptOrder(myCourses);
+    const vcOpenLessons = (lessons || []).filter(l => l && l.virtualEnabled && l.virtualRoom && (enrolledCourseIds.size === 0 || enrolledCourseIds.has(l.courseId)) && vcJoinEnabled(l));
+    const liveBannerEl = document.getElementById('dash-live-banner');
+    if (liveBannerEl) {
+        if (vcOpenLessons.length) {
+            const vcList = vcOpenLessons.map(l => {
+                const vcCourse = courses.find(c => c.id === l.courseId);
+                return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.18);"><span style="font-size:13px;font-weight:600;">🎥 ${escapeHtml(l.title || (vcCourse ? vcCourse.name : 'Live Class'))}${l.virtualTrainer ? ' · ' + escapeHtml(l.virtualTrainer) : ''}</span><button class="btn btn-success" style="padding:6px 16px;font-weight:600;" onclick="joinLiveLesson('${l.id}')">🚀 Join Live Class</button></div>`;
+            }).join('');
+            liveBannerEl.style.display = 'block';
+            liveBannerEl.innerHTML = `<div style="background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;border-radius:10px;padding:14px 18px;margin-bottom:12px;box-shadow:0 4px 12px rgba(22,163,74,0.3);"><div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;margin-bottom:2px;"><span style="width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 0 rgba(255,255,255,0.6);animation:livePulse 1.6s infinite;"></span>🟢 LIVE NOW — Virtual Classrooms Open</div><div style="font-size:12px;opacity:0.9;margin-bottom:6px;">Sessions are open. Click to join — attendance is recorded automatically.</div>${vcList}</div><style>@keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(255,255,255,0.5)}100%{box-shadow:0 0 0 10px rgba(255,255,255,0)}}</style>`;
+        } else {
+            liveBannerEl.style.display = 'none';
+            liveBannerEl.innerHTML = '';
+        }
+    }
     const dashCard = document.getElementById('dash-recent-students')?.closest('.card');
     if (dashCard) dashCard.querySelector('h3').textContent = 'Your Courses';
     document.getElementById('dash-stats').innerHTML = `<div class="stat-card"><div class="stat-label">Welcome</div><div class="stat-value" style="font-size:16px;">${escapeHtml(me.name)}</div></div><div class="stat-card"><div class="stat-label">Admission #</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.admissionNumber || '--')}</div></div><div class="stat-card"><div class="stat-label">Program</div><div class="stat-value" style="font-size:14px;">${escapeHtml(me.program || '--')}</div></div><div class="stat-card"><div class="stat-label">Avg Grade</div><div class="stat-value" style="color:${avgGrade >= 70 ? 'var(--success)' : avgGrade >= 50 ? 'var(--warning)' : 'var(--danger)'};">${avgGrade}%</div></div><div class="stat-card"><div class="stat-label">Attendance</div><div class="stat-value" style="color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div></div><div class="stat-card"><div class="stat-label">Fee Balance</div><div class="stat-value" style="color:${balance <= 0 ? 'var(--success)' : 'var(--warning)'};">${formatCurrency(balance)}</div></div><div class="stat-card"><div class="stat-label">Quizzes Passed</div><div class="stat-value" style="color:var(--success);">${quizzesPassed}</div></div><div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${myCourses.length}</div></div>`;

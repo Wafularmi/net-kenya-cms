@@ -184,6 +184,7 @@ async function renderStudentHub() {
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('exams')"><div class="stat-label">📝 My Exams</div><div class="stat-value" style="color:var(--accent);">${c.myRegisteredExams.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('quizzes')"><div class="stat-label">📋 Pending Quizzes</div><div class="stat-value" style="color:var(--warning);">${c.pendingQuizzes.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('notes')"><div class="stat-label">📄 Study Notes</div><div class="stat-value">${c.myNotes.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('live')"><div class="stat-label">🎥 Live Classes</div><div class="stat-value" style="color:var(--danger);">${c.myLessons.filter(l => l.virtualEnabled && l.virtualRoom).length}</div></div>
             </div>
 
             <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--border);overflow-x:auto;">
@@ -192,6 +193,7 @@ async function renderStudentHub() {
                 <button class="hub-tab" data-tab="exams" onclick="switchHubTab('exams',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📝 Exams</button>
                 <button class="hub-tab" data-tab="quizzes" onclick="switchHubTab('quizzes',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📋 Quizzes</button>
                 <button class="hub-tab" data-tab="notes" onclick="switchHubTab('notes',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📄 Notes</button>
+                <button class="hub-tab" data-tab="live" onclick="switchHubTab('live',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">🎥 Live Classes</button>
                 <button class="hub-tab" data-tab="discussions" onclick="switchHubTab('discussions',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">💬 Discussions</button>
             </div>
 
@@ -200,6 +202,7 @@ async function renderStudentHub() {
             <div id="hub-tab-exams" style="display:none;"></div>
             <div id="hub-tab-quizzes" style="display:none;"></div>
             <div id="hub-tab-notes" style="display:none;"></div>
+            <div id="hub-tab-live" style="display:none;"></div>
             <div id="hub-tab-discussions" style="display:none;"><div class="card"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading discussions...</p></div></div>
         `;
         _hubRenderedTabs.overview = true;
@@ -259,6 +262,7 @@ async function switchHubTab(tab, btn) {
             else if (tab === 'exams') container.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
             else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
             else if (tab === 'notes') container.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
+            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(c.me, c.myCourses, c.myLessons);
             else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(c.me, c.data); return; }
         } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
         _hubRenderedTabs[tab] = true;
@@ -1143,6 +1147,59 @@ function hubGoToQuiz(quizId) {
             if (quizEl) quizEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 500);
     }
+}
+
+function hubVcJoinable(lesson) {
+    if (typeof vcJoinEnabled === 'function') return vcJoinEnabled(lesson);
+    if (!lesson || !lesson.virtualEnabled || !lesson.virtualRoom) return false;
+    if (!lesson.virtualScheduled) return true;
+    const start = new Date(String(lesson.virtualScheduled).replace(' ', 'T'));
+    if (isNaN(start.getTime())) return true;
+    return Date.now() >= (start.getTime() - 10 * 60 * 1000);
+}
+
+function hubVcCountdown(startMs) {
+    const diff = startMs - Date.now();
+    if (diff <= 0) return 'now';
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return mins + 'm';
+    const hrs = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return hrs + 'h' + (rem ? ' ' + rem + 'm' : '');
+}
+
+function renderHubLiveClasses(me, myCourses, myLessons) {
+    const vcLessons = (myLessons || []).filter(l => l && l.virtualEnabled && l.virtualRoom);
+    if (!vcLessons.length) {
+        return '<div class="card" style="text-align:center;padding:60px;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:12px;">🎥</div><h3 style="margin-bottom:8px;">No Live Classes Yet</h3><p>Virtual classrooms for your courses will appear here.<br>Ask your lecturers or the admin when a live session is scheduled.</p></div>';
+    }
+    const rows = vcLessons.map(l => {
+        const course = myCourses.find(c => c.id === l.courseId);
+        const sched = String(l.virtualScheduled || '');
+        const vcDate = sched ? (sched.indexOf(' ') !== -1 ? sched.split(' ')[0] : (sched.split('T')[0] || '')) : '';
+        const vcTime = sched ? (sched.indexOf(' ') !== -1 ? sched.split(' ')[1] : (sched.split('T')[1] || '')).slice(0, 5) : '';
+        const startMs = vcDate && vcTime ? new Date(vcDate.replace(/-/g, '/') + ' ' + vcTime).getTime() : NaN;
+        const joinable = hubVcJoinable(l);
+        const trainer = l.virtualTrainer ? (' · ' + esc(l.virtualTrainer)) : '';
+        const schedLine = vcDate ? (formatDate(vcDate) + (vcTime ? ' at ' + vcTime : '')) : 'Anytime';
+        const statusBadge = joinable
+            ? '<span class="badge badge-success" style="white-space:nowrap;">🟢 Live Now</span>'
+            : (!isNaN(startMs) ? '<span class="badge badge-warning" style="white-space:nowrap;">Starts in ' + hubVcCountdown(startMs) + '</span>' : '<span class="badge badge-info" style="white-space:nowrap;">Scheduled</span>');
+        const joinBtn = joinable
+            ? '<button class="btn btn-success" style="padding:8px 18px;font-weight:600;" onclick="joinLiveLesson(\'' + l.id + '\')">🚀 Join Live Class</button>'
+            : '<span style="font-size:11px;color:var(--text-muted);">Join opens 10 minutes before start time</span>';
+        return `
+            <div class="card" style="border-left:4px solid ${joinable ? 'var(--success)' : 'var(--accent)'};margin-bottom:10px;padding:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                    <div>
+                        <div style="font-weight:700;font-size:14px;">🎥 ${esc(l.title || 'Live Class')}${trainer}</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${course ? esc(course.code) + ' — ' + esc(course.name) : ''} · 📅 ${esc(schedLine)}</div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${statusBadge}${joinBtn}</div>
+                </div>
+            </div>`;
+    }).join('');
+    return '<div style="margin-bottom:14px;"><h3 style="color:var(--accent);margin:0 0 4px 0;">🎥 Live Classes</h3><div style="font-size:12px;color:var(--text-muted);">Your scheduled virtual classrooms. The join button appears 10 minutes before the start time.</div></div>' + rows;
 }
 
 function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
