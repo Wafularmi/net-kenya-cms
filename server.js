@@ -334,25 +334,41 @@ function json(res, code, data) {
 }
 
 // ---- Jitsi JWT moderator tokens (Virtual Classroom) ----
+// Uses 8x8 JaaS: tokens are RS256-signed with the tenant private key.
+// Token format per https://developer.8x8.com/jaas/docs/api-keys-jwt and the
+// official sample https://github.com/8x8/jaas_demo (header kid + alg RS256).
+// Requires JWT_APP_ID, JWT_API_KEY_ID, JWT_PRIVATE_KEY and JITSI_BASE_URL.
 const JWT_APP_ID = process.env.JWT_APP_ID || 'netkenya';
-const JWT_APP_SECRET = process.env.JWT_APP_SECRET || '';
+const JWT_API_KEY_ID = process.env.JWT_API_KEY_ID || '';
+const JWT_PRIVATE_KEY = process.env.JWT_PRIVATE_KEY || '';
 const JITSI_BASE_URL = (process.env.JITSI_BASE_URL || '').replace(/\/+$/, '');
 const PRIVILEGED_ROLES = ['admin', 'lecturer', 'trainer', 'staff', 'coordinator', 'registrar', 'teacher'];
 function isPrivilegedRole(role) {
     return PRIVILEGED_ROLES.indexOf(role || '') !== -1;
 }
-// JWT claims follow the 8x8 JaaS token format (https://developer.8x8.vc/docs)
-function buildJitsiJwt(user, host, privileged) {
+function jitsiJwtEnabled() {
+    return !!(JWT_APP_ID && JWT_API_KEY_ID && JWT_PRIVATE_KEY && JITSI_BASE_URL);
+}
+function b64url(obj) {
+    return Buffer.from(JSON.stringify(obj)).toString('base64url');
+}
+// The private key is stored as a PEM string; allow base64-encoded PEM too
+// (Railway env vars dislike literal newlines).
+function decodePrivateKey(key) {
+    const trimmed = String(key || '').trim();
+    if (/^-----BEGIN/.test(trimmed)) return trimmed;
+    try {
+        const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+        return /^-----BEGIN/.test(decoded.trim()) ? decoded : trimmed;
+    } catch { return trimmed; }
+}
+function buildJitsiJwt(user, privileged) {
     const now = Math.floor(Date.now() / 1000);
-    return signJwt({
-        iss: JWT_APP_ID,
+    const payload = {
         aud: 'jitsi',
-        sub: host,
-        room: '*',
-        exp: now + 6 * 3600,
-        nbf: now - 30,
         context: {
             user: {
+                id: user.username || '',
                 name: user.name || user.username || '',
                 email: user.email || undefined,
                 moderator: privileged ? 'true' : 'false'
@@ -360,18 +376,20 @@ function buildJitsiJwt(user, host, privileged) {
             features: {
                 livestreaming: 'true',
                 recording: 'true',
-                'outbound-call': 'true',
                 transcription: 'true',
-                'inbound-call': 'true'
+                'outbound-call': 'true'
             }
-        }
-    }, JWT_APP_SECRET);
-}
-function signJwt(payload, secret) {
-    const b64 = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
-    const header = b64({ alg: 'HS256', typ: 'JWT' });
-    const data = header + '.' + b64(payload);
-    return data + '.' + crypto.createHmac('sha256', secret).update(data).digest('base64url');
+        },
+        iss: 'chat',
+        room: '*',
+        sub: JWT_APP_ID,
+        exp: now + 6 * 3600,
+        nbf: now - 30
+    };
+    const data = b64url({ alg: 'RS256', typ: 'JWT', kid: JWT_API_KEY_ID }) + '.' + b64url(payload);
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(data);
+    return data + '.' + sign.sign(decodePrivateKey(JWT_PRIVATE_KEY), 'base64url');
 }
 
 // Financial stores that require special authorization
@@ -857,19 +875,18 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // GET /api/jitsi-token â€” mint a Jitsi JWT for the current user (moderator for staff).
-    // Only active when JWT_APP_SECRET and JITSI_BASE_URL are configured; otherwise the
-    // client falls back to the legacy password-based room URL.
+    // GET /api/jitsi-token â€” mint a JaaS JWT for the current user (moderator for staff).
+    // Only active when JWT_APP_ID, JWT_API_KEY_ID, JWT_PRIVATE_KEY and JITSI_BASE_URL are
+    // configured; otherwise the client falls back to the legacy password-based room URL.
     if (parts.length === 2 && parts[1] === 'jitsi-token' && req.method === 'GET') {
         const username = req.headers['x-user-id'] || req.headers['x-user-name'];
         const user = username && (db.users || []).find(u => u.username === username);
         if (!user) return json(res, 401, { error: 'Not authenticated' });
-        if (!JWT_APP_SECRET || !JITSI_BASE_URL) {
+        if (!jitsiJwtEnabled()) {
             return json(res, 200, { jwtEnabled: false, token: '', base: '' });
         }
-        const host = JITSI_BASE_URL.replace(/^https?:\/\//i, '');
         const privileged = isPrivilegedRole(user.role);
-        const token = buildJitsiJwt(user, host, privileged);
+        const token = buildJitsiJwt(user, privileged);
         return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, moderator: privileged });
     }
 
