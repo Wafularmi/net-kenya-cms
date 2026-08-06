@@ -40,3 +40,8 @@ build/
 seed-books-api.js
 
 seed-books-api.js
+
+# JaaS keys (never commit)
+jaasauth.key
+jaasauth.key.pub
+gen-jaas-key.js
