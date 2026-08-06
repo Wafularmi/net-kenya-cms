@@ -14900,6 +14900,11 @@ function isPrivilegedRole(role) {
 function jitsiPathEncode(p) {
     return String(p || '').split('/').map(function (seg) { return encodeURIComponent(seg); }).join('/');
 }
+// 8x8 JaaS conference names must be URL-safe; convert any room name into a stable slug
+// (lowercase, non-alphanumerics -> hyphens) so rooms with spaces/apostrophes still work.
+function jitsiRoomSlug(room) {
+    return String(room || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '') || 'room';
+}
 function getJitsiUrl(lesson, opts) {
     opts = opts || {};
     var room = (lesson && lesson.virtualRoom) || '';
@@ -14921,8 +14926,9 @@ function getJitsiUrl(lesson, opts) {
     roomPath = String(roomPath || '').replace(/^\/+/, '').trim();
     var url;
     if (opts.jitsiBase && opts.appId) {
-        // 8x8 JaaS rooms must be namespaced as <AppID>/<room> under the base URL
-        url = base + '/' + jitsiPathEncode(opts.appId) + '/' + jitsiPathEncode(roomPath);
+        // 8x8 JaaS rooms must be namespaced as <AppID>/<room> under the base URL,
+        // and the conference name must be a URL-safe slug.
+        url = base + '/' + jitsiPathEncode(opts.appId) + '/' + jitsiPathEncode(jitsiRoomSlug(roomPath));
     } else {
         url = roomPath ? base + '/' + encodeURIComponent(roomPath) : base;
     }
@@ -15005,7 +15011,7 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
         jitsiUrl = getJitsiUrl(lesson, { moderator: isTeacher, user: { displayName: user.name || user.username, avatarUrl: user.photo || '' }, token: tk.token, jitsiBase: tk.base, appId: tk.appId });
         if (tk.jwtEnabled && tk.appId && tk.token) {
             var eRoom = /^https?:\/\//i.test(lesson.virtualRoom || '') ? String(lesson.virtualRoom).replace(/^https?:\/\/[^/]+/i, '') : String(lesson.virtualRoom || '');
-            eRoom = eRoom.replace(/^\/+/, '').trim();
+            eRoom = jitsiRoomSlug(eRoom.replace(/^\/+/, '').trim());
             jitsiEmbed = {
                 base: tk.base,
                 appId: tk.appId,
@@ -15040,11 +15046,11 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
         html += '</div>';
         if (jitsiEmbed) {
             html += '<div id="' + jitsiId + '" style="width:100%;height:70vh;min-height:380px;position:relative;overflow:hidden;border-radius:10px;border:1px solid var(--border);background:#000;">';
-            html += '<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;">Loading live class...</div>';
+            html += '<div class="vc-loading" style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;z-index:0;">Loading live class...</div>';
             html += '</div>';
         } else {
             html += '<div id="' + jitsiId + '" style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);background:#000;">';
-            html += '<iframe src="' + jitsiUrl + '" id="' + jitsiId + '-iframe" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="camera;microphone;fullscreen" allowfullscreen></iframe>';
+            html += '<iframe src="' + jitsiUrl + '" id="' + jitsiId + '-iframe" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allow="camera;microphone;display-capture;fullscreen" allowfullscreen></iframe>';
             html += '</div>';
         }
         html += '<div style="margin-top:10px;font-size:11px;color:var(--text-muted);">Room: ' + (lesson.virtualRoom || '') + (lesson.virtualPassword ? ' (Password set)' : '') + '</div>';
@@ -15090,11 +15096,17 @@ async function embedJitsiIntoContainer(containerId, embed) {
     try {
         await loadJitsiExternalApi(embed.base, embed.appId);
         var domain = String(embed.base).replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-        var cfg = {};
+        var cfg = {
+            disableReactions: false,
+            disableRaisedHand: false,
+            disableScreensharing: false,
+            disableVideoSupport: false
+        };
         if (embed.moderator) {
             cfg.prejoinPageEnabled = false;
             cfg.prejoinConfig = { enabled: false };
             cfg.disableDeepLinking = true;
+            cfg.startWithVideoMuted = false;
         }
         var options = {
             roomName: embed.appId + '/' + embed.room,
@@ -15102,13 +15114,24 @@ async function embedJitsiIntoContainer(containerId, embed) {
             height: '100%',
             parentNode: document.getElementById(containerId),
             configOverwrite: cfg,
-            interfaceConfigOverwrite: { DEFAULT_BACKGROUND: '#000000' }
+            interfaceConfigOverwrite: { DEFAULT_BACKGROUND: '#000000', RAISE_HAND_ENABLED: true }
         };
         if (embed.token) options.jwt = embed.token;
         if (embed.user && embed.user.displayName) options.userInfo = { displayName: embed.user.displayName, avatarUrl: embed.user.avatarUrl || '' };
         var api = new window.JitsiMeetExternalAPI(domain, options);
         if (!window._vcJitsiApis) window._vcJitsiApis = {};
         window._vcJitsiApis[containerId] = api;
+        var el = document.getElementById(containerId);
+        if (el) {
+            var ph = el.querySelector('.vc-loading');
+            if (ph) ph.remove();
+        }
+        try {
+            api.on('videoConferenceJoined', function () {
+                var e2 = document.getElementById(containerId);
+                if (e2) { var p2 = e2.querySelector('.vc-loading'); if (p2) p2.remove(); }
+            });
+        } catch (e) {}
     } catch (e) {
         console.error('JaaS embed failed:', e);
         var el = document.getElementById(containerId);
