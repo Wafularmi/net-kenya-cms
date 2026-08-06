@@ -312,4 +312,39 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 
 ---
 
-**All systems green. Ready for live testing.**
+---
+
+### Session 2026-08-06 (continued) — Activated 8x8 JaaS (Guaranteed Moderator) ✅
+
+**Decision:** the self-hosted Railway Jitsi plan (Dockerfile.jitsi) was abandoned — a single `jitsi/web` container cannot host meetings (needs prosody/jicofo/jvb + UDP port 10000, which Railway does not support). Replaced with **8x8 JaaS (Jitsi as a Service)** — JWT-based moderator auth, non-fragile, no self-hosting.
+
+**Why the earlier HS256 code was wrong:** current JaaS requires **RS256** tokens signed with a tenant private key, plus a `kid` header. The original HS256/`JWT_APP_SECRET` implementation would have been rejected by JaaS.
+
+**What changed:**
+
+- **`server.js`** — `/api/jitsi-token` now mints **JaaS-format RS256 JWTs**:
+  - Header: `{alg:"RS256", typ:"JWT", kid:<API Key ID>}`.
+  - Body: `aud:"jitsi"`, `iss:"chat"`, `room:"*"`, `sub:<App ID>`, `nbf/exp` (6h), `context.user.{id,name,email,moderator:"true"/"false"}`, `context.features.{livestreaming,recording,transcription,outbound-call}`.
+  - Signed with Node `crypto.createSign('RSA-SHA256')` — no new dependency.
+  - `JWT_PRIVATE_KEY` accepts **PEM or base64-encoded PEM** (Railway env vars dislike literal newlines).
+  - Role check stays server-side (`isPrivilegedRole` on `db.users` lookup) — a client cannot self-escalate.
+  - Graceful fallback to `{jwtEnabled:false}` until env vars present.
+- **Commits pushed & live:** `0df9796` (JaaS-format claims) → `62cb31f` (RS256 signing) → `3186c81` (.gitignore housekeeping).
+
+**Activation (done, live):** operator created the 8x8 JaaS app and uploaded the public key. Railway web service `net-kenya-cms` now has:
+- `JWT_APP_ID=vpaas-magic-cookie-15657d7a41b745aca5927bd8ab6a0eac`
+- `JWT_API_KEY_ID=vpaas-magic-cookie-15657d7a41b745aca5927bd8ab6a0eac/42c849`
+- `JWT_PRIVATE_KEY=<base64 of the generated 4096-bit RSA private key>`
+- `JITSI_BASE_URL=https://8x8.vc`
+
+**Live verified:** `GET https://netfoundation.ke/api/jitsi-token?room=X` with `X-User-Id: admin` → `jwtEnabled:true`, RS256 token whose **signature verifies** against the uploaded public key, header `kid` matches, claims `iss:"chat"`, `room:"*"`, `sub:<AppID>`, `context.user.moderator:"true"`; student (`WAFULARMI`) → `moderator:false`; unknown user → `401`. Client already routes to `https://8x8.vc/<room>?jwt=<token>` — **staff are now guaranteed moderators regardless of join order**.
+
+**Security note:** the private key file lives only in `%TEMP%\jaasauth.key` (never in the repo); `.gitignore` now excludes `jaasauth.key`, `jaasauth.key.pub`, `gen-jaas-key.js`. The public key copy `jaasauth.key.pub` sits in the project root for reference.
+
+**Remaining housekeeping (optional):** remove the now-dead self-host files (`Dockerfile.jitsi`, `docker-entrypoint-jitsi.sh`, and the `jitsi` service def in `railway.json`) — harmless to keep, but they no longer reflect the deployed architecture.
+
+**Final live state (2026-08-06):** commits `... → 1b1688c → 6b4f82f → 0df9796 → 62cb31f → 3186c81` all on `main`; working tree clean; `netfoundation.ke` serving JaaS JWTs. Ready for operator QA of a live Virtual Classroom session.
+
+---
+
+**All systems green. Ready for live testing.****
