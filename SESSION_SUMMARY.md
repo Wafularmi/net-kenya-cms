@@ -171,14 +171,27 @@
 
 ### Live Verification (2026-08-05) — DONE
 
-- **Health**: `https://netfoundation.ke/api/health` → `200 {"status":"ok"}`
-- **Login**: `POST /api/login` with `admin` + `@11097560@` → `200` returns admin user
-- **bundle.js**: full 1.23 MB restored (login, WhatsApp, certificates, college stamp, auto-year, Virtual Classroom all present, `node --check` passes)
-- **Virtual Classroom**: lesson with `virtualEnabled/virtualRoom/virtualPassword/virtualScheduled/virtualLobby/virtualRecording` saved via API (PUT → 200) and read back correctly.
+- **Health**: `https://netfoundation.ke/api/health` → `200 {"status":"ok",...}` (HTTP 200)
+- **Login**: `POST /api/login` with `admin` / `@11097560@` → `200` returns admin user
+- **bundle.js (live)**: 1,228,940 B — contains `renderVirtualClassroomTab`, `getJitsiUrl`, `joinLiveLesson`, `switchLessonTab('virtual')` override, `vc-virtual-enabled` settings panel ✅
+- **Virtual Classroom (live API)**: lesson with `virtualEnabled/virtualRoom/virtualPassword/virtualScheduled` saved via API (PUT → 200) and read back correctly.
+- **Student access**: 📋 **My ToDo** card shows scheduled virtual classes with a **"Join Live"** badge; lesson viewer shows a prominent **🎥 Virtual Classroom / 🚀 Join Live Class** banner; course lessons list auto-appends **Join Live Class** buttons.
+
+> Note: the live build contains the core VC tab/settings. Trainer-allocation, the student todo-card VC entry, and the lesson-viewer join banner are implemented locally in `js/bundle.js` (syntax-validated with `node --check`) but **not yet committed/pushed** — will be included in the next push.
 
 ---
 
-### Server Access
+### To Continue (2026-08-05) — PAUSED for letter/handoff
+
+Status of open items:
+
+- **Virtual Classroom** fully restored & working: 📥 lesson VC settings (Room, Password, **Trainer**, Scheduled, Record, Lobby) in both the lesson-edit form and the lesson-manager 🎥 **Virtual Classroom** tab; Jitsi Meet live embed + attendance table + CSV export.
+- **How to create a VC URL / start a session**: open a lesson (manage) → 🎥 Virtual Classroom tab → ✅ "Enable Virtual Classroom" → enter a **Room Name / URL** (e.g. `netfoundation-class` or a full `https://meet.jit.si/...` URL) → (optionally set Password + Scheduled Time + Trainer) → **Save Settings**. The Jitsi embed loads instantly. Students join via the **"Join Live Class"** button on the lesson and in their 📋 My ToDo card.
+- **"Settings missing on lesson manager" finding**: the live build (commit `1016c3c`) **does** contain the VC settings tab (`vc-virtual-enabled`, `renderVirtualClassroomTab`, `switchLessonTab('virtual')`). If they don't appear: (1) the settings panel is **hidden until "Enable Virtual Classroom" is checked** — that's why it looks empty at first; (2) clear the browser cache (`bundle.js?v=213` may be stale) or hard-refresh `https://netfoundation.ke`.
+- **Local-only enhancements staged but uncommitted** (in `js/bundle.js`, pass `node --check`): trainer allocation (`virtualTrainer`) in both VC forms, live-class banner + **🚀 Join Live Class** in the student lesson viewer, and scheduled VCs surfaced on the student **📋 My ToDo** card with a Join badge.
+- **Next**: commit & push the trainer/todo/banner edits; optionally gate the "Join Live" button to show only after the scheduled start time.
+
+- **Server Access**
 
 - **Local**: `http://127.0.0.1:3000` (run `node server.js` in `C:\Users\Pastor David\Desktop\NET KENYA`)
 - **Production**: `https://netfoundation.ke` (Cloudflare-proxied, Railway)

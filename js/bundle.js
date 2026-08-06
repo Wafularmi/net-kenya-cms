@@ -1775,6 +1775,19 @@ async function renderStudentDashboard(currentUser) {
     eventList.forEach(e => {
         todoItems.push({ type: 'event', title: e.title, course: '', date: e.date, time: '', dateObj: new Date(e.date + 'T00:00'), icon: '📅' });
     });
+    (lessons || []).filter(l => {
+        if (!l || !l.virtualEnabled || !l.virtualRoom) return false;
+        if (!(enrolledCourseIds.size === 0 || enrolledCourseIds.has(l.courseId))) return false;
+        return !!l.virtualScheduled;
+    }).forEach(l => {
+        const vcCourse = courses.find(c => c.id === l.courseId);
+        const sched = String(l.virtualScheduled || '');
+        const vcDate = sched ? (sched.indexOf(' ') !== -1 ? sched.split(' ')[0] : (sched.split('T')[0] || '')) : '';
+        const vcTime = sched ? (sched.indexOf(' ') !== -1 ? sched.split(' ')[1] : (sched.split('T')[1] || '')).slice(0, 5) : '';
+        const lessonTitle = l.title || (vcCourse ? vcCourse.name : 'Lesson');
+        const vcTrainer = l.virtualTrainer ? (' · ' + escapeHtml(l.virtualTrainer)) : '';
+        todoItems.push({ type: 'vc', title: lessonTitle, course: vcCourse ? vcCourse.name : '', date: vcDate || today, time: vcTime, dateObj: vcDate ? new Date(vcDate + 'T' + vcTime) : null, icon: '🎥', lessonId: l.id, trainer: vcTrainer });
+    });
     const studentSubIds = new Set(submissions.filter(s => allStudentIds.has(s.studentId) && s.status === 'pass').map(s => s.quizId));
     const pendingQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !studentSubIds.has(q.id));
     pendingQuizzes.forEach(q => {
@@ -1802,6 +1815,9 @@ async function renderStudentDashboard(currentUser) {
         }
         const timeStr = item.time ? ` · ${item.time}` : '';
         const courseStr = item.course ? `<br><span style="font-size:10px;color:var(--text-muted);">${item.course}</span>` : '';
+        if (item.type === 'vc') {
+            return `<div class="event-item"><span><b>${item.icon} ${item.title}${item.trainer}</b>${courseStr}${item.date ? `<br><span style="font-size:10px;color:var(--text-muted);">${formatDate(item.date)}${timeStr}</span>` : ''}</span><span class="badge badge-success" style="white-space:nowrap;cursor:pointer;" onclick="joinLiveLesson('${item.lessonId}')">Join Live</span></div>`;
+        }
         return `<div class="event-item"><span><b>${item.icon} ${item.title}</b>${courseStr}${item.date ? `<br><span style="font-size:10px;color:var(--text-muted);">${formatDate(item.date)}${timeStr}</span>` : ''}</span><span class="badge ${badgeClass}" style="white-space:nowrap;">${badge}</span></div>`;
     }).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No pending tasks 🎉</div>';
     document.getElementById('dash-today-schedule').innerHTML = `<div style="max-height:350px;overflow-y:auto;">${todoHtml}</div>`;
@@ -2714,6 +2730,17 @@ async function viewStudentLesson(lessonId) {
     if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
     if (lesson.videoUrl) {
         html += `<div style="max-width:720px;margin:0 auto 16px;">${embedVideo(lesson.videoUrl)}</div>`;
+    }
+    if (lesson.virtualEnabled && lesson.virtualRoom) {
+        const vcSchedStr = lesson.virtualScheduled ? String(lesson.virtualScheduled) : '';
+        const vcDateStr = vcSchedStr ? (vcSchedStr.indexOf(' ') !== -1 ? vcSchedStr.split(' ')[0] : (vcSchedStr.split('T')[0] || '')) : '';
+        const vcTimeStr = vcSchedStr ? (vcSchedStr.indexOf(' ') !== -1 ? vcSchedStr.split(' ')[1] : (vcSchedStr.split('T')[1] || '')).slice(0, 5) : '';
+        const vcTrainer = lesson.virtualTrainer ? ` · <span style="color:var(--text-muted);">Trainer: ${escapeHtml(lesson.virtualTrainer)}</span>` : '';
+        const vcSched = vcDateStr ? ` · <span style="color:var(--text-muted);">${formatDate(vcDateStr)}${vcTimeStr ? ' ' + vcTimeStr : ''}</span>` : '';
+        html += `<div style="margin:12px 0;padding:12px;border:2px solid var(--accent);border-radius:8px;background:rgba(76,175,80,0.06);">`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><b style="font-size:15px;">🎥 Virtual Classroom${vcTrainer}${vcSched}</b>`;
+        html += `<button class="btn btn-success" onclick="joinLiveLesson('${lessonId}')">🚀 Join Live Class</button></div>`;
+        html += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Join the live Jitsi Meet session. Attendance is recorded automatically when you join.</div></div>`;
     }
     if (lessonNotes.length) {
         html += `<h4 style="color:var(--accent);margin:12px 0 6px;">📚 Notes</h4>`;
@@ -8117,6 +8144,7 @@ async function showLessonForm(lesson = null) {
     const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
 <div id="lesson-virtual-settings" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-input);">
     <div class="form-row"><div class="form-group"><label>Room Name / URL</label><input type="text" id="lesson-virtual-room" value="${lesson && lesson.virtualRoom ? lesson.virtualRoom : ''}" placeholder="e.g. netcohort or https://meet.jit.si/netcohort" style="width:100%;"></div><div class="form-group"><label>Password</label><input type="text" id="lesson-virtual-password" value="${lesson && lesson.virtualPassword ? lesson.virtualPassword : ''}"></div></div>
+    <div class="form-group"><label>Trainer / Instructor</label><input type="text" id="lesson-virtual-trainer" value="${lesson && lesson.virtualTrainer ? lesson.virtualTrainer : ''}" placeholder="e.g. Pastor David" style="width:100%;"></div>
     <div class="form-row"><div class="form-group"><label>Scheduled Time</label><input type="datetime-local" id="lesson-virtual-scheduled" value="${lesson && lesson.virtualScheduled ? lesson.virtualScheduled.replace(' ', 'T').slice(0,16) : ''}"></div>    <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;"><input type="checkbox" id="lesson-virtual-recording" ${lesson && lesson.virtualRecording ? 'checked' : ''}> <label style="margin:0;font-size:13px;">Record session</label></div></div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Integrates with Jitsi Meet. Students see "Join Live Class" in the course.</div>
 </div>
@@ -8152,6 +8180,7 @@ async function saveLesson() {
         virtualScheduled: document.getElementById('lesson-virtual-scheduled') ? document.getElementById('lesson-virtual-scheduled').value : (existing ? existing.virtualScheduled : ''),
         virtualRecording: document.getElementById('lesson-virtual-recording') ? document.getElementById('lesson-virtual-recording').checked : (existing ? !!existing.virtualRecording : false),
         virtualLobby: document.getElementById('lesson-virtual-lobby') ? document.getElementById('lesson-virtual-lobby').checked : (existing ? !!existing.virtualLobby : false),
+        virtualTrainer: document.getElementById('lesson-virtual-trainer') ? document.getElementById('lesson-virtual-trainer').value.trim() : (existing ? existing.virtualTrainer : ''),
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
@@ -14883,6 +14912,7 @@ async function saveVirtualLesson(lessonId) {
     lesson.virtualScheduled = (document.getElementById('vc-virtual-scheduled') || { value: '' }).value;
     lesson.virtualRecording = document.getElementById('vc-virtual-recording') ? document.getElementById('vc-virtual-recording').checked : false;
     lesson.virtualLobby = document.getElementById('vc-virtual-lobby') ? document.getElementById('vc-virtual-lobby').checked : false;
+    lesson.virtualTrainer = (document.getElementById('vc-virtual-trainer') || { value: '' }).value.trim();
     lesson.updatedAt = new Date().toISOString();
     await dbPut('lessons', lesson);
     showToast('Virtual Classroom settings saved', { type: 'success' });
@@ -14904,6 +14934,7 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
         html += '<div id="vc-virtual-settings" style="display:' + (enabled ? 'block' : 'none') + ';margin-top:12px;">';
         html += '<div style="margin-bottom:8px;"><label>Room Name / URL</label><input type="text" id="vc-virtual-room" value="' + esc(lesson.virtualRoom || '') + '" placeholder="e.g. netcohort or https://meet.jit.si/netcohort" style="width:100%;"></div>';
         html += '<div style="margin-bottom:8px;"><label>Password</label><input type="password" id="vc-virtual-password" value="' + esc(lesson.virtualPassword || '') + '"></div>';
+        html += '<div style="margin-bottom:8px;"><label>Trainer / Instructor</label><input type="text" id="vc-virtual-trainer" value="' + esc(lesson.virtualTrainer || '') + '" placeholder="e.g. Pastor David" style="width:100%;"></div>';
         html += '<div style="margin-bottom:8px;"><label>Scheduled Time</label><input type="datetime-local" id="vc-virtual-scheduled" value="' + (lesson.virtualScheduled ? String(lesson.virtualScheduled).replace(' ', 'T').slice(0, 16) : '') + '"></div>';
         html += '<div style="display:flex;gap:12px;"><div><input type="checkbox" id="vc-virtual-recording" ' + (lesson.virtualRecording ? 'checked' : '') + '> <label style="margin:0;font-size:13px;">Record session</label></div>';
         html += '<div><input type="checkbox" id="vc-virtual-lobby" ' + (lesson.virtualLobby ? 'checked' : '') + '> <label style="margin:0;font-size:13px;">Enable lobby</label></div></div>';
@@ -14913,7 +14944,8 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
     }
     if (enabled && jitsiUrl) {
         html += '<div style="margin-top:16px;">';
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>Live Class: ' + (lesson.title || 'Lesson') + '</b>';
+        var vcTrainer = lesson.virtualTrainer ? (' <span style="color:var(--text-muted);font-weight:normal;font-size:13px;">· Trainer: ' + esc(lesson.virtualTrainer) + '</span>') : '';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>Live Class: ' + (lesson.title || 'Lesson') + '</b>' + vcTrainer;
         if (isTeacher && canEdit) html += '<span style="font-size:11px;color:var(--text-muted);">Moderator access</span>';
         html += '</div>';
         html += '<div id="' + jitsiId + '" style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);background:#000;">';
