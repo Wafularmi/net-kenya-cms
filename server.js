@@ -341,12 +341,31 @@ const PRIVILEGED_ROLES = ['admin', 'lecturer', 'trainer', 'staff', 'coordinator'
 function isPrivilegedRole(role) {
     return PRIVILEGED_ROLES.indexOf(role || '') !== -1;
 }
-function sanitizeJitsiRoom(room) {
-    let r = String(room || '').trim();
-    if (/^https?:\/\//i.test(r)) r = r.replace(/^https?:\/\/[^/]+/i, '');
-    r = r.replace(/[^a-zA-Z0-9._~/-]/g, '');
-    r = r.replace(/^\/+|\/+$/g, '');
-    return r || '*';
+// JWT claims follow the 8x8 JaaS token format (https://developer.8x8.vc/docs)
+function buildJitsiJwt(user, host, privileged) {
+    const now = Math.floor(Date.now() / 1000);
+    return signJwt({
+        iss: JWT_APP_ID,
+        aud: 'jitsi',
+        sub: host,
+        room: '*',
+        exp: now + 6 * 3600,
+        nbf: now - 30,
+        context: {
+            user: {
+                name: user.name || user.username || '',
+                email: user.email || undefined,
+                moderator: privileged ? 'true' : 'false'
+            },
+            features: {
+                livestreaming: 'true',
+                recording: 'true',
+                'outbound-call': 'true',
+                transcription: 'true',
+                'inbound-call': 'true'
+            }
+        }
+    }, JWT_APP_SECRET);
 }
 function signJwt(payload, secret) {
     const b64 = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -848,23 +867,9 @@ function handleAPI(req, res) {
         if (!JWT_APP_SECRET || !JITSI_BASE_URL) {
             return json(res, 200, { jwtEnabled: false, token: '', base: '' });
         }
-        const room = sanitizeJitsiRoom(urlObj.searchParams.get('room') || '');
         const host = JITSI_BASE_URL.replace(/^https?:\/\//i, '');
         const privileged = isPrivilegedRole(user.role);
-        const token = signJwt({
-            iss: JWT_APP_ID,
-            aud: 'jitsi',
-            sub: host,
-            room,
-            exp: Math.floor(Date.now() / 1000) + 6 * 3600,
-            context: {
-                user: {
-                    name: user.name || user.username || username,
-                    email: user.email || undefined,
-                    moderator: privileged
-                }
-            }
-        }, JWT_APP_SECRET);
+        const token = buildJitsiJwt(user, host, privileged);
         return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, moderator: privileged });
     }
 
