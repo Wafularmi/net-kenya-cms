@@ -256,4 +256,33 @@ Operator reported students could not find the Join button / VC interface. Root c
 
 ---
 
+### Session 2026-08-06 (continued) — Staff Join as Meeting Moderator ✅
+
+**`1b1688c` — Staff/admin/lecturer/trainer now start meetings as moderator by default (committed & pushed, live):**
+
+Operator request: when logging in as admin, lecturer, trainer, or staff, they should be the **moderator** of the meeting by default and not be asked to "join" or wait to be let in.
+
+**Root cause:** meetings run on public `meet.jit.si`, where the **first person in the room becomes moderator**. Staff were joining exactly like students — through the prejoin name screen, subject to the 10-minute gate, with no identity passed — so they often ended up as ordinary participants (and got blocked by the gate or the lobby).
+
+**Fix (in `js/bundle.js`):**
+- New `isPrivilegedRole(role)` — treats `admin`, `lecturer`, `trainer`, `staff`, `coordinator`, `registrar`, `teacher` as privileged.
+- `getJitsiUrl(lesson, opts)` now accepts moderator options and builds a smarter URL:
+  - **Auto-filled display name** (`userInfo.displayName` from the logged-in user's profile) and avatar when available.
+  - **Prejoin page skipped** for moderators (`config.prejoinPageEnabled=false` + `config.prejoinConfig.enabled=false`) → one click and they're in the room, becoming moderator as the first participant.
+  - `config.disableDeepLinking=true` keeps them in the browser (no "open in app" prompt).
+  - Full-URL rooms (e.g. `https://meet.jit.si/xxx`) are now handled properly (host/path split before appending fragment config).
+- `joinLiveLesson()`:
+  - **Staff bypass the 10-minute gate** — they can start the meeting any time.
+  - Staff get the moderator URL + toast "Starting live class as moderator...".
+  - **Attendance is only recorded for students** (staff are hosts, not attendees).
+- The lesson-manager 🎥 **Virtual Classroom** tab embed also uses the moderator URL for privileged users (the "Moderator access" label is now meaningful).
+- Cache-buster bumped **`js/bundle.js?v=214 → ?v=215`**.
+- Live verified: page serves `bundle.js?v=215`; deployed bundle contains `isPrivilegedRole`, `prejoinPageEnabled=false`, "Starting live class as moderator..." ✅
+
+**Honest limitation (documented):** on public `meet.jit.si` there is no way to force "moderator" via URL for someone who joins *after* a student already opened the room (Jitsi grants moderator to the first participant). The practical fix is that staff now open/start the room with one click and are always first when they begin the session. If the operator wants a **guaranteed moderator role regardless of join order**, the next step is switching meetings to the self-hosted Railway Jitsi service with **JWT token auth** (`ENABLE_AUTH=1`, `JWT_APP_ID`/`JWT_APP_SECRET`) and issuing signed moderator tokens from `server.js` — this is a bigger infra change and is available on request.
+
+**Final live state (2026-08-06):** commits `6259281 → 3e1946b → 9acfbc7 → a200ae2 → 9cc07bf → 1b1688c` all pushed to `main`; working tree clean; `netfoundation.ke` serving all updates.
+
+---
+
 **All systems green. Ready for live testing.**
