@@ -367,4 +367,23 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 
 ---
 
+### Session 2026-08-07 (continued) — QA round 2: spaces bug, stuck loading overlay, moderator/engagement features ✅
+
+**QA feedback:** student side works; admin embed works with a clean room name (`GWS`) but **404'd with a room name containing spaces** (`GOD'S CALL TO MINISTRY`); the "Loading live class..." overlay stayed on screen; moderator wanted mute-control, emoji/reactions, trainer video visible, and screen sharing.
+
+**Root cause of the 404:** JaaS conference names must be URL-safe. Room names with spaces/apostrophes were passed raw (`<AppID>/GOD'S CALL TO MINISTRY`), so the JaaS backend rejected the conference.
+
+**What changed (`9a5087b`, live):**
+- **`js/bundle.js`** —
+  - New `jitsiRoomSlug()` converts any room name to a stable slug (lowercase, non-alphanumerics → hyphens, e.g. `GOD'S CALL TO MINISTRY` → `god-s-call-to-ministry`). Applied consistently in `getJitsiUrl` (Join Live Class/new-tab) **and** the embed `roomName`, so both join the same conference and spaces never reach JaaS.
+  - Loading overlay now has class `vc-loading` + `z-index:0` and is **removed** immediately after `JitsiMeetExternalAPI` creates its iframe (plus a `videoConferenceJoined` fallback) — fixes the stuck "Loading live class..." text (an absolutely-positioned div was painting above the static API iframe).
+  - Embed config now enables engagement features: `disableReactions:false`, `disableRaisedHand:false`, `disableScreensharing:false`, `disableVideoSupport:false`, `interfaceConfigOverwrite.RAISE_HAND_ENABLED:true`; moderators additionally get `startWithVideoMuted:false` (trainer camera on so participants see them) plus the existing prejoin skip. Legacy plain-iframe path also gained `display-capture` in its `allow` attribute for screen sharing.
+- **`index.html`** — `js/bundle.js?v=217 → ?v=218`.
+
+**Live verified post-deploy:** `netfoundation.ke` serves `v=218`; bundle contains `jitsiRoomSlug`, `disableScreensharing`, and the `vc-loading` removal logic.
+
+**Final live state (2026-08-07):** `... → 6cc604e → 9a5087b` all on `main`; ready for operator re-QA with the space-containing room name and a multi-participant moderator test.
+
+---
+
 **All systems green. Ready for live testing.****
