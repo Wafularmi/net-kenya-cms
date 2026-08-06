@@ -229,4 +229,31 @@ Status of open items:
 
 ---
 
+### Session 2026-08-06 (continued) — Student VC Visibility + HTTPS Cert Fix ✅
+
+**1. `a200ae2` — Student Virtual Classroom visibility (committed & pushed, live):**
+Operator reported students could not find the Join button / VC interface. Root cause: VC was only reachable through the dashboard My ToDo badge (gated to the 10-min window) and inside lesson note modals — no obvious student-facing entry point.
+
+**Fix — two easy-to-see locations:**
+- **Student Hub → new "🎥 Live Classes" tab** (`js/student-hub.js`):
+  - Tab button + stat card added (counts VC-enabled lessons), renders `renderHubLiveClasses()`.
+  - Lists every virtual classroom for the student's enrolled courses: course code/name, lesson title, trainer, scheduled date & time.
+  - Status badge per class: 🟢 **Live Now** (within window), **Starts in Xh Ym** countdown, or Scheduled.
+  - Big **🚀 Join Live Class** button appears 10 minutes before start (countdown shown before that) — reuses `vcJoinEnabled()`.
+- **Student dashboard → green "🟢 LIVE NOW — Virtual Classrooms Open" banner** (`js/bundle.js`):
+  - New `#dash-live-banner` element in `index.html` dashboard grid.
+  - Renders at the top of the student dashboard whenever any enrolled-class session is open, listing each class with a **🚀 Join Live Class** button; hides when none are open.
+- Cache-buster bumped **`js/student-hub.js?v=7 → ?v=8`**.
+- Live verified: page serves `bundle.js?v=214` + `student-hub.js?v=8`; deployed files contain `renderHubLiveClasses`, `hub-tab-live`, `dash-live-banner`, `vcOpenLessons` ✅
+
+**2. `9cc07bf` — HTTPS certificate verification error fix (committed & pushed):**
+- Root cause: `server-https.js` generated a one-time self-signed cert with SANs only for `localhost`/`127.0.0.1`, but `server.js` advertises LAN URLs like `https://192.168.x.x:3443` (server.js:400) — accessing via LAN IP failed browser certificate verification ("unknown certificate verification error").
+- Fix: `generateSelfSignedCerts()` now collects the machine's hostname + all active IPv4 addresses and **auto-regenerates the cert whenever it doesn't cover them** (validated via `certCovers()` parsing the existing SANs). SAN entries classify IPs (type 7) vs hostnames (type 2).
+- Regenerated local certs (`certs/` is gitignored): SANs verified via real TLS handshake → `DNS:localhost, DNS:Pastor-David, IP:172.28.128.1, IP:10.35.113.41, IP:127.0.0.1, IP:172.19.176.1`, valid to 2031.
+- Note: self-signed certs still show a one-time "connection not private" prompt; the hostname/IP mismatch error is now eliminated. Desktop copies (NET CMS/NET CMS 1) still need the same fix mirrored.
+
+**Final live state (2026-08-06):** all commits `6259281 → 3e1946b → 9acfbc7 → a200ae2 → 9cc07bf` pushed to `main`; working tree clean; `netfoundation.ke` serving all updates.
+
+---
+
 **All systems green. Ready for live testing.**
