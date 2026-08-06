@@ -21,16 +21,6 @@
         "startCommand": "node server.js",
         "healthcheckPath": "/api/health"
       }
-    },
-    "jitsi": {
-      "build": {
-        "builder": "DOCKERFILE",
-        "dockerfilePath": "Dockerfile.jitsi"
-      },
-      "deploy": {
-        "healthcheckPath": "/health",
-        "healthcheckTimeout": 100
-      }
     }
   }
 }
