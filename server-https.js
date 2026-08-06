@@ -2,6 +2,7 @@
 // Wraps the existing server.js with TLS support
 const https = require('https');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const forge = require('node-forge');
 
@@ -13,18 +14,53 @@ function log(msg) {
     console.log(`[HTTPS] ${new Date().toISOString()} - ${msg}`);
 }
 
+function isIpLiteral(name) {
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(name);
+}
+
+function collectSanNames() {
+    const names = new Set(['localhost']);
+    try { names.add(os.hostname()); } catch (e) {}
+    const ifaces = os.networkInterfaces();
+    Object.keys(ifaces || {}).forEach(k => {
+        (ifaces[k] || []).forEach(addr => {
+            if (addr && addr.address && (addr.family === 'IPv4' || addr.family === 4)) {
+                names.add(addr.address);
+            }
+        });
+    });
+    return Array.from(names);
+}
+
+function sanEntry(name) {
+    return isIpLiteral(name) ? { type: 7, ip: name } : { type: 2, value: name };
+}
+
+function certCovers(certPem, names) {
+    try {
+        const c = forge.pki.certificateFromPem(certPem);
+        const ext = c.getExtension('subjectAltName');
+        if (!ext || !ext.altNames) return false;
+        const present = ext.altNames.map(n => String(n.value || n.ip || '').toLowerCase());
+        return names.every(n => present.includes(n.toLowerCase()));
+    } catch (e) { return false; }
+}
+
 function generateSelfSignedCerts() {
     if (!fs.existsSync(CERTS_DIR)) {
         fs.mkdirSync(CERTS_DIR, { recursive: true });
     }
 
+    const sanNames = collectSanNames();
+
     if (fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE)) {
         const c = fs.readFileSync(CERT_FILE, 'utf8').trim();
         const k = fs.readFileSync(KEY_FILE, 'utf8').trim();
-        if (c && k) {
-            log('Certificates already exist');
+        if (c && k && certCovers(c, sanNames)) {
+            log('Certificates already exist and cover addresses: ' + sanNames.join(', '));
             return Promise.resolve();
         }
+        log('Certificates do not cover all current addresses, regenerating...');
     }
 
     log('Generating self-signed certificates...');
@@ -51,10 +87,7 @@ function generateSelfSignedCerts() {
             { name: 'basicConstraints', cA: false },
             { name: 'keyUsage', keyCertSign: false, digitalSignature: true, keyEncipherment: true },
             { name: 'extKeyUsage', serverAuth: true, clientAuth: true },
-            { name: 'subjectAltName', altNames: [
-                { type: 2, value: 'localhost' },
-                { type: 7, ip: '127.0.0.1' }
-            ]}
+            { name: 'subjectAltName', altNames: sanNames.map(sanEntry) }
         ]);
 
         cert.sign(keys.privateKey, forge.md.sha256.create());
