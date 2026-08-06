@@ -887,7 +887,7 @@ function handleAPI(req, res) {
         }
         const privileged = isPrivilegedRole(user.role);
         const token = buildJitsiJwt(user, privileged);
-        return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, moderator: privileged });
+        return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, appId: JWT_APP_ID, moderator: privileged });
     }
 
     // GET /api/online â€” returns list of users active in last 90s
