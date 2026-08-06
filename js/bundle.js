@@ -14894,14 +14894,36 @@ function toggleVirtualSettings(prefix) {
     var settings = document.getElementById(prefix + 'virtual-settings');
     if (enabled && settings) settings.style.display = enabled.checked ? 'block' : 'none';
 }
-function getJitsiUrl(lesson) {
+function isPrivilegedRole(role) {
+    return ['admin', 'lecturer', 'trainer', 'staff', 'coordinator', 'registrar', 'teacher'].indexOf(role || '') !== -1;
+}
+function getJitsiUrl(lesson, opts) {
+    opts = opts || {};
     var room = (lesson && lesson.virtualRoom) || '';
     if (!room) return '';
-    if (/^https?:\/\//i.test(room)) return room + (lesson.virtualPassword ? '?jwt=' + encodeURIComponent(lesson.virtualPassword) : '');
-    var origin = window.location.origin || 'https://netfoundation.ke';
-    var base = origin.replace(/:3000$/, ':8080');
-    if (base.indexOf('8080') === -1) base = 'https://meet.jit.si';
-    return base + '/' + encodeURIComponent(room) + (lesson.virtualPassword ? '?jwt=' + encodeURIComponent(lesson.virtualPassword) : '');
+    var base, roomPath;
+    if (/^https?:\/\//i.test(room)) {
+        var m = room.match(/^(https?:\/\/[^/]+)(?:\/(.*))?$/i);
+        base = m[1];
+        roomPath = (m[2] || '').trim();
+    } else {
+        var origin = window.location.origin || 'https://netfoundation.ke';
+        base = origin.replace(/:3000$/, ':8080');
+        if (base.indexOf('8080') === -1) base = 'https://meet.jit.si';
+        roomPath = room;
+    }
+    var url = roomPath ? base + '/' + encodeURIComponent(roomPath) : base;
+    if (lesson.virtualPassword) url += '?jwt=' + encodeURIComponent(lesson.virtualPassword);
+    var frag = [];
+    if (opts.user && opts.user.displayName) frag.push('userInfo.displayName=' + encodeURIComponent(opts.user.displayName));
+    if (opts.user && opts.user.avatarUrl) frag.push('userInfo.avatarUrl=' + encodeURIComponent(opts.user.avatarUrl));
+    if (opts.moderator) {
+        frag.push('config.prejoinPageEnabled=false');
+        frag.push('config.prejoinConfig.enabled=false');
+        frag.push('config.disableDeepLinking=true');
+    }
+    if (frag.length) url += '#' + frag.join('&');
+    return url;
 }
 async function loadAttendance(lessonId) {
     try {
@@ -14940,9 +14962,9 @@ async function saveVirtualLesson(lessonId) {
 async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
     var user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     var role = user.role || 'student';
-    var isTeacher = ['admin', 'registrar', 'lecturer', 'coordinator'].indexOf(role) !== -1;
+    var isTeacher = isPrivilegedRole(role);
     var enabled = !!lesson.virtualEnabled;
-    var jitsiUrl = enabled ? getJitsiUrl(lesson) : '';
+    var jitsiUrl = enabled ? getJitsiUrl(lesson, { moderator: isTeacher, user: { displayName: user.name || user.username, avatarUrl: user.photo || '' } }) : '';
     var safeLessonId = String(lessonId).replace(/[^a-zA-Z0-9]/g, '');
     var jitsiId = 'jitsi-' + safeLessonId;
     var html = '';
@@ -15040,15 +15062,18 @@ window.switchLessonTab = async function (tab, lessonId) {
 async function joinLiveLesson(lessonId) {
     var lesson = await dbGet('lessons', lessonId);
     if (!lesson || !lesson.virtualEnabled) return showToast('No virtual class for this lesson', { type: 'warning' });
-    if (!vcJoinEnabled(lesson)) return showToast('This class opens 10 minutes before its scheduled start time', { type: 'warning', duration: 4000 });
-    var url = getJitsiUrl(lesson);
+    var u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    var privileged = isPrivilegedRole(u.role || 'student');
+    if (!privileged && !vcJoinEnabled(lesson)) return showToast('This class opens 10 minutes before its scheduled start time', { type: 'warning', duration: 4000 });
+    var url = getJitsiUrl(lesson, { moderator: privileged, user: { displayName: u.name || u.username, avatarUrl: u.photo || '' } });
     if (!url) return showToast('Virtual room not configured', { type: 'warning' });
     window.open(url, '_blank');
-    showToast('Joining live class...', { type: 'info' });
-    try {
-        var u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-        await dbAdd('attendance', { id: 'ATT-' + Date.now(), lessonId: lessonId, studentId: u.username || u.studentId, student: u.studentId, status: 'present', date: new Date().toISOString(), createdAt: new Date().toISOString() });
-    } catch (e) { console.error('attendance ping:', e); }
+    showToast(privileged ? 'Starting live class as moderator...' : 'Joining live class...', { type: 'info' });
+    if (!privileged) {
+        try {
+            await dbAdd('attendance', { id: 'ATT-' + Date.now(), lessonId: lessonId, studentId: u.username || u.studentId, student: u.studentId, status: 'present', date: new Date().toISOString(), createdAt: new Date().toISOString() });
+        } catch (e) { console.error('attendance ping:', e); }
+    }
 }
 // Attach "Join Live Class" / "Manage VC" buttons to the lessons list in course view
 var _vcOrigRenderLessons = (typeof renderLessons !== 'undefined') ? renderLessons : null;
