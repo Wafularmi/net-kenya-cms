@@ -347,4 +347,24 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 
 ---
 
+### Session 2026-08-07 (continued) — Fixed in-page Virtual Classroom embed ("8x8.vc refused to connect") ✅
+
+**Problem found during QA:** opening the Virtual Classroom tab in the lesson manager showed **"8x8.vc refused to connect"**. The old client built `https://8x8.vc/<room>?jwt=<token>` (bare room, no AppID namespace) and put it in a plain `<iframe src>`. JaaS requires rooms to be **namespaced as `<AppID>/<room>`** and recommends its official IFrame API rather than a raw iframe.
+
+**What changed (`6cc604e`, live):**
+
+- **`server.js`** — `/api/jitsi-token` now also returns `appId: JWT_APP_ID` (non-secret) so the client can namespace rooms and load the API script.
+- **`js/bundle.js`** —
+  - `getJitsiUrl` now builds JaaS URLs as `https://8x8.vc/<AppID>/<room>?jwt=...` (segment-wise URL-encoding via new `jitsiPathEncode`) whenever `jitsiBase` + `appId` are present; legacy behavior unchanged otherwise.
+  - `renderVirtualClassroomTab` embeds the meeting via the **official `JitsiMeetExternalAPI`**: dynamically loads `<base>/<AppID>/external_api.js`, then `new JitsiMeetExternalAPI(domain, { roomName: '<AppID>/<room>', jwt, width/height:'100%', parentNode, userInfo, configOverwrite (moderator: prejoin off, deep-linking off) })`. Falls back to the old plain iframe when JaaS is inactive. Existing API instances are `dispose()`d on re-render (`window._vcJitsiApis`) to avoid leaks/double joins.
+  - `joinLiveLesson` (new-tab join, used by admin lesson lists and Student Hub Live Classes) also passes `appId` so its full-page URL is namespaced.
+- **`index.html`** — `js/bundle.js?v=216 → ?v=217` cache-buster.
+- Cleaned up temp probe scripts (`probe-8x8.js`, `probe-frame.js`); `git status` clean before commit.
+
+**Live verified post-deploy:** health `ok`; token endpoint returns `appId` + valid RS256 token (`moderator:true` for admin); `index.html` serves `v=217`; bundle contains `embedJitsiIntoContainer`/`jitsiPathEncode`; `https://8x8.vc/<AppID>/external_api.js` returns `200 application/javascript`; namespaced full-page join URL `https://8x8.vc/<AppID>/netcohort?jwt=...` returns `200` with **no frame-ancestors restriction**.
+
+**Final live state (2026-08-07):** commits `... → 88a2401 (dead self-host files removed) → 6cc604e (JaaS iframe embed fix)` all on `main`; `netfoundation.ke` serving the fixed embed. Ready for operator re-QA: open a lesson's Virtual Classroom tab (in-page embed) and use the "Join Live Class" button (new tab).
+
+---
+
 **All systems green. Ready for live testing.****
