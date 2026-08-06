@@ -1786,7 +1786,7 @@ async function renderStudentDashboard(currentUser) {
         const vcTime = sched ? (sched.indexOf(' ') !== -1 ? sched.split(' ')[1] : (sched.split('T')[1] || '')).slice(0, 5) : '';
         const lessonTitle = l.title || (vcCourse ? vcCourse.name : 'Lesson');
         const vcTrainer = l.virtualTrainer ? (' · ' + escapeHtml(l.virtualTrainer)) : '';
-        todoItems.push({ type: 'vc', title: lessonTitle, course: vcCourse ? vcCourse.name : '', date: vcDate || today, time: vcTime, dateObj: vcDate ? new Date(vcDate + 'T' + vcTime) : null, icon: '🎥', lessonId: l.id, trainer: vcTrainer });
+        todoItems.push({ type: 'vc', title: lessonTitle, course: vcCourse ? vcCourse.name : '', date: vcDate || today, time: vcTime, dateObj: vcDate ? new Date(vcDate + 'T' + vcTime) : null, icon: '🎥', lessonId: l.id, trainer: vcTrainer, sched: l.virtualScheduled });
     });
     const studentSubIds = new Set(submissions.filter(s => allStudentIds.has(s.studentId) && s.status === 'pass').map(s => s.quizId));
     const pendingQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !studentSubIds.has(q.id));
@@ -1816,7 +1816,9 @@ async function renderStudentDashboard(currentUser) {
         const timeStr = item.time ? ` · ${item.time}` : '';
         const courseStr = item.course ? `<br><span style="font-size:10px;color:var(--text-muted);">${item.course}</span>` : '';
         if (item.type === 'vc') {
-            return `<div class="event-item"><span><b>${item.icon} ${item.title}${item.trainer}</b>${courseStr}${item.date ? `<br><span style="font-size:10px;color:var(--text-muted);">${formatDate(item.date)}${timeStr}</span>` : ''}</span><span class="badge badge-success" style="white-space:nowrap;cursor:pointer;" onclick="joinLiveLesson('${item.lessonId}')">Join Live</span></div>`;
+            const vcJoin = vcJoinEnabled({ virtualEnabled: true, virtualRoom: true, virtualScheduled: item.sched });
+            const vcBadge = vcJoin ? `<span class="badge badge-success" style="white-space:nowrap;cursor:pointer;" onclick="joinLiveLesson('${item.lessonId}')">Join Live</span>` : `<span class="badge ${badgeClass}" style="white-space:nowrap;">${badge}</span>`;
+            return `<div class="event-item"><span><b>${item.icon} ${item.title}${item.trainer}</b>${courseStr}${item.date ? `<br><span style="font-size:10px;color:var(--text-muted);">${formatDate(item.date)}${timeStr}</span>` : ''}</span>${vcBadge}</div>`;
         }
         return `<div class="event-item"><span><b>${item.icon} ${item.title}</b>${courseStr}${item.date ? `<br><span style="font-size:10px;color:var(--text-muted);">${formatDate(item.date)}${timeStr}</span>` : ''}</span><span class="badge ${badgeClass}" style="white-space:nowrap;">${badge}</span></div>`;
     }).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No pending tasks 🎉</div>';
@@ -2737,10 +2739,12 @@ async function viewStudentLesson(lessonId) {
         const vcTimeStr = vcSchedStr ? (vcSchedStr.indexOf(' ') !== -1 ? vcSchedStr.split(' ')[1] : (vcSchedStr.split('T')[1] || '')).slice(0, 5) : '';
         const vcTrainer = lesson.virtualTrainer ? ` · <span style="color:var(--text-muted);">Trainer: ${escapeHtml(lesson.virtualTrainer)}</span>` : '';
         const vcSched = vcDateStr ? ` · <span style="color:var(--text-muted);">${formatDate(vcDateStr)}${vcTimeStr ? ' ' + vcTimeStr : ''}</span>` : '';
+        const vcJoinable = vcJoinEnabled(lesson);
         html += `<div style="margin:12px 0;padding:12px;border:2px solid var(--accent);border-radius:8px;background:rgba(76,175,80,0.06);">`;
         html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><b style="font-size:15px;">🎥 Virtual Classroom${vcTrainer}${vcSched}</b>`;
-        html += `<button class="btn btn-success" onclick="joinLiveLesson('${lessonId}')">🚀 Join Live Class</button></div>`;
-        html += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Join the live Jitsi Meet session. Attendance is recorded automatically when you join.</div></div>`;
+        html += vcJoinable ? `<button class="btn btn-success" onclick="joinLiveLesson('${lessonId}')">🚀 Join Live Class</button>` : (vcTimeStr ? `<span class="badge badge-info" style="white-space:nowrap;">Opens 10 min before ${vcTimeStr}</span>` : '');
+        html += `</div>`;
+        html += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">${vcJoinable ? 'Join the live Jitsi Meet session. ' : ''}Attendance is recorded automatically when you join.</div></div>`;
     }
     if (lessonNotes.length) {
         html += `<h4 style="color:var(--accent);margin:12px 0 6px;">📚 Notes</h4>`;
@@ -14979,6 +14983,15 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
 function esc(s) {
     var d = document.createElement('div'); d.textContent = String(s || ''); return d.innerHTML;
 }
+// A virtual class can be joined from 10 minutes before its scheduled start time (or anytime if unscheduled)
+function vcJoinEnabled(lesson) {
+    if (!lesson || !lesson.virtualEnabled || !lesson.virtualRoom) return false;
+    if (!lesson.virtualScheduled) return true;
+    var s = String(lesson.virtualScheduled).replace(' ', 'T');
+    var start = new Date(s);
+    if (isNaN(start.getTime())) return true;
+    return Date.now() >= (start.getTime() - 10 * 60 * 1000);
+}
 // Override switchLessonTab to handle the "virtual" tab (delegate others to original)
 var _vcOrigSwitchLessonTab = (typeof switchLessonTab !== 'undefined') ? switchLessonTab : null;
 window.switchLessonTab = async function (tab, lessonId) {
@@ -15012,6 +15025,7 @@ window.switchLessonTab = async function (tab, lessonId) {
 async function joinLiveLesson(lessonId) {
     var lesson = await dbGet('lessons', lessonId);
     if (!lesson || !lesson.virtualEnabled) return showToast('No virtual class for this lesson', { type: 'warning' });
+    if (!vcJoinEnabled(lesson)) return showToast('This class opens 10 minutes before its scheduled start time', { type: 'warning', duration: 4000 });
     var url = getJitsiUrl(lesson);
     if (!url) return showToast('Virtual room not configured', { type: 'warning' });
     window.open(url, '_blank');
@@ -15033,12 +15047,14 @@ window.renderLessons = async function () {
         var active = lessonsArr.filter(function (l) { return !!l.virtualEnabled; });
         if (!container || !active.length) return;
         active.forEach(function (l) {
+            var isStudent = role === 'student';
+            if (isStudent && !vcJoinEnabled(l)) return;
             if (container.querySelector('[data-vc-lesson=' + l.id + ']')) return;
             var row = document.createElement('div');
             row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;';
             var label = document.createElement('span'); label.textContent = (l.title || l.id) + ' - Live'; label.style.fontWeight = '600';
             row.appendChild(label);
-            if (role === 'student') {
+            if (isStudent) {
                 var jb = document.createElement('button'); jb.textContent = 'Join Live Class'; jb.className = 'btn btn-success btn-sm';
                 jb.onclick = (function (id) { return function () { joinLiveLesson(id); }; })(l.id);
                 row.appendChild(jb);
