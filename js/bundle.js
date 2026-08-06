@@ -14902,7 +14902,10 @@ function getJitsiUrl(lesson, opts) {
     var room = (lesson && lesson.virtualRoom) || '';
     if (!room) return '';
     var base, roomPath;
-    if (/^https?:\/\//i.test(room)) {
+    if (opts.jitsiBase) {
+        base = String(opts.jitsiBase).replace(/\/+$/, '');
+        roomPath = /^https?:\/\//i.test(room) ? room.replace(/^https?:\/\/[^/]+/i, '') : room;
+    } else if (/^https?:\/\//i.test(room)) {
         var m = room.match(/^(https?:\/\/[^/]+)(?:\/(.*))?$/i);
         base = m[1];
         roomPath = (m[2] || '').trim();
@@ -14912,8 +14915,13 @@ function getJitsiUrl(lesson, opts) {
         if (base.indexOf('8080') === -1) base = 'https://meet.jit.si';
         roomPath = room;
     }
+    roomPath = String(roomPath || '').replace(/^\/+/, '').trim();
     var url = roomPath ? base + '/' + encodeURIComponent(roomPath) : base;
-    if (lesson.virtualPassword) url += '?jwt=' + encodeURIComponent(lesson.virtualPassword);
+    if (opts.token) {
+        url += '?jwt=' + encodeURIComponent(opts.token);
+    } else if (lesson.virtualPassword) {
+        url += '?jwt=' + encodeURIComponent(lesson.virtualPassword);
+    }
     var frag = [];
     if (opts.user && opts.user.displayName) frag.push('userInfo.displayName=' + encodeURIComponent(opts.user.displayName));
     if (opts.user && opts.user.avatarUrl) frag.push('userInfo.avatarUrl=' + encodeURIComponent(opts.user.avatarUrl));
@@ -14924,6 +14932,17 @@ function getJitsiUrl(lesson, opts) {
     }
     if (frag.length) url += '#' + frag.join('&');
     return url;
+}
+async function fetchJitsiToken(room, lobby) {
+    try {
+        var u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (!u.username) return { token: '', jwtEnabled: false, base: '' };
+        var q = 'room=' + encodeURIComponent(room || '');
+        if (lobby) q += '&lobby=1';
+        var res = await fetch('/api/jitsi-token?' + q, { headers: { 'X-User-Id': u.username, 'X-User-Role': u.role || '' } });
+        if (!res.ok) return { token: '', jwtEnabled: false, base: '' };
+        return await res.json();
+    } catch (e) { return { token: '', jwtEnabled: false, base: '' }; }
 }
 async function loadAttendance(lessonId) {
     try {
@@ -14964,7 +14983,11 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
     var role = user.role || 'student';
     var isTeacher = isPrivilegedRole(role);
     var enabled = !!lesson.virtualEnabled;
-    var jitsiUrl = enabled ? getJitsiUrl(lesson, { moderator: isTeacher, user: { displayName: user.name || user.username, avatarUrl: user.photo || '' } }) : '';
+    var jitsiUrl = '';
+    if (enabled) {
+        var tk = await fetchJitsiToken(lesson.virtualRoom, !!lesson.virtualLobby);
+        jitsiUrl = getJitsiUrl(lesson, { moderator: isTeacher, user: { displayName: user.name || user.username, avatarUrl: user.photo || '' }, token: tk.token, jitsiBase: tk.base });
+    }
     var safeLessonId = String(lessonId).replace(/[^a-zA-Z0-9]/g, '');
     var jitsiId = 'jitsi-' + safeLessonId;
     var html = '';
@@ -15065,7 +15088,8 @@ async function joinLiveLesson(lessonId) {
     var u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     var privileged = isPrivilegedRole(u.role || 'student');
     if (!privileged && !vcJoinEnabled(lesson)) return showToast('This class opens 10 minutes before its scheduled start time', { type: 'warning', duration: 4000 });
-    var url = getJitsiUrl(lesson, { moderator: privileged, user: { displayName: u.name || u.username, avatarUrl: u.photo || '' } });
+    var tk = await fetchJitsiToken(lesson.virtualRoom, !!lesson.virtualLobby);
+    var url = getJitsiUrl(lesson, { moderator: privileged, user: { displayName: u.name || u.username, avatarUrl: u.photo || '' }, token: tk.token, jitsiBase: tk.base });
     if (!url) return showToast('Virtual room not configured', { type: 'warning' });
     window.open(url, '_blank');
     showToast(privileged ? 'Starting live class as moderator...' : 'Joining live class...', { type: 'info' });

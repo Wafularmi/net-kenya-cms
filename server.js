@@ -333,6 +333,28 @@ function json(res, code, data) {
     return true;
 }
 
+// ---- Jitsi JWT moderator tokens (Virtual Classroom) ----
+const JWT_APP_ID = process.env.JWT_APP_ID || 'netkenya';
+const JWT_APP_SECRET = process.env.JWT_APP_SECRET || '';
+const JITSI_BASE_URL = (process.env.JITSI_BASE_URL || '').replace(/\/+$/, '');
+const PRIVILEGED_ROLES = ['admin', 'lecturer', 'trainer', 'staff', 'coordinator', 'registrar', 'teacher'];
+function isPrivilegedRole(role) {
+    return PRIVILEGED_ROLES.indexOf(role || '') !== -1;
+}
+function sanitizeJitsiRoom(room) {
+    let r = String(room || '').trim();
+    if (/^https?:\/\//i.test(r)) r = r.replace(/^https?:\/\/[^/]+/i, '');
+    r = r.replace(/[^a-zA-Z0-9._~/-]/g, '');
+    r = r.replace(/^\/+|\/+$/g, '');
+    return r || '*';
+}
+function signJwt(payload, secret) {
+    const b64 = obj => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    const header = b64({ alg: 'HS256', typ: 'JWT' });
+    const data = header + '.' + b64(payload);
+    return data + '.' + crypto.createHmac('sha256', secret).update(data).digest('base64url');
+}
+
 // Financial stores that require special authorization
 const FINANCIAL_STORES = new Set(['payments', 'income', 'expenses', 'fees', 'invoices']);
 
@@ -814,6 +836,36 @@ function handleAPI(req, res) {
             } catch { json(res, 400, { error: 'Invalid' }); }
         });
         return true;
+    }
+
+    // GET /api/jitsi-token â€” mint a Jitsi JWT for the current user (moderator for staff).
+    // Only active when JWT_APP_SECRET and JITSI_BASE_URL are configured; otherwise the
+    // client falls back to the legacy password-based room URL.
+    if (parts.length === 2 && parts[1] === 'jitsi-token' && req.method === 'GET') {
+        const username = req.headers['x-user-id'] || req.headers['x-user-name'];
+        const user = username && (db.users || []).find(u => u.username === username);
+        if (!user) return json(res, 401, { error: 'Not authenticated' });
+        if (!JWT_APP_SECRET || !JITSI_BASE_URL) {
+            return json(res, 200, { jwtEnabled: false, token: '', base: '' });
+        }
+        const room = sanitizeJitsiRoom(urlObj.searchParams.get('room') || '');
+        const host = JITSI_BASE_URL.replace(/^https?:\/\//i, '');
+        const privileged = isPrivilegedRole(user.role);
+        const token = signJwt({
+            iss: JWT_APP_ID,
+            aud: 'jitsi',
+            sub: host,
+            room,
+            exp: Math.floor(Date.now() / 1000) + 6 * 3600,
+            context: {
+                user: {
+                    name: user.name || user.username || username,
+                    email: user.email || undefined,
+                    moderator: privileged
+                }
+            }
+        }, JWT_APP_SECRET);
+        return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, moderator: privileged });
     }
 
     // GET /api/online â€” returns list of users active in last 90s

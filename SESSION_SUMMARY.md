@@ -285,4 +285,31 @@ Operator request: when logging in as admin, lecturer, trainer, or staff, they sh
 
 ---
 
+### Session 2026-08-06 (continued) — JWT Moderator Tokens for Jitsi ✅
+
+**Guaranteed moderator role regardless of join order** — implemented and pushed.
+
+**What changed:**
+
+- **`server.js`** — new `GET /api/jitsi-token?room=<room>&lobby=1` endpoint:
+  - Looks up the caller from the `X-User-Id` header against `db.users` (server-side role is authoritative — a client cannot mint a moderator token by spoofing a role header).
+  - Signs an **HS256 JWT** with Node's built-in `crypto` (no new dependency): `iss: JWT_APP_ID`, `aud: "jitsi"`, `sub: <jitsi host>`, `room: <sanitized>`, `exp: now+6h`, `context.user.{name, email, moderator}` — `moderator: true` for admin/lecturer/trainer/staff/coordinator/registrar/teacher, `false` for students.
+  - Room names sanitized (`[a-zA-Z0-9._~/-]`, full URLs stripped to their path, fallback `*`).
+  - **Graceful fallback**: if `JWT_APP_SECRET` or `JITSI_BASE_URL` is not configured it returns `{ jwtEnabled:false, token:'', base:'' }` and the app keeps today's exact behaviour — safe to deploy now.
+- **`js/bundle.js`** — `fetchJitsiToken(room, lobby)` helper; `getJitsiUrl(lesson, opts)` now accepts `opts.token` + `opts.jitsiBase` (when a real JWT is returned it replaces the fake `?jwt=<password>` and routes the room to the self-hosted Jitsi host); wired into `renderVirtualClassroomTab()` (iframe) and `joinLiveLesson()` (all student/staff Join buttons). Moderator prejoin-skip fragment config still applied. Cache-buster bumped **`js/bundle.js?v=215 → ?v=216`**.
+- **`Dockerfile.jitsi`** + **new `docker-entrypoint-jitsi.sh`** — token auth is activated **only when `JWT_APP_SECRET` is set**: the wrapper exports `ENABLE_AUTH=1`, `AUTH_TYPE=token`, `JWT_APP_ID` (default `netkenya`) and keeps `ENABLE_GUESTS=1`, then runs `/init`. Without the secret it stays guest-only exactly as today, so the current deployment is not broken.
+
+**Verified locally:** `node --check` clean on `server.js` + `js/bundle.js`; live endpoint test → admin `200` with a valid `moderator:true` token (signature verified), unknown user → `401`, and no-env run → `{jwtEnabled:false}`. 
+
+**⚠️ OPERATOR ACTION REQUIRED to activate JWT mode (3 env vars in Railway):**
+1. **web** service: `JWT_APP_SECRET=<same value on both>`, `JWT_APP_ID=netkenya`, `JITSI_BASE_URL=https://<your-jitsi-service>.up.railway.app`
+2. **jitsi** service: `JWT_APP_SECRET=<same value>`, `JWT_APP_ID=netkenya` (the wrapper detects the secret on the next deploy/restart)
+3. Redeploy both services after pushing.
+
+Until those env vars exist, everything keeps working as before (public `meet.jit.si`, password rooms, staff-first-moderator). Once set, staff are **guaranteed moderators** by signed token and rooms run on the self-hosted Railway Jitsi.
+
+**Final live state (2026-08-06):** commits `6259281 → 3e1946b → 9acfbc7 → a200ae2 → 9cc07bf → 1b1688c → <JWT commit>` pushed to `main`; working tree clean; `netfoundation.ke` serving all updates.
+
+---
+
 **All systems green. Ready for live testing.**
