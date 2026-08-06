@@ -199,4 +199,34 @@ Status of open items:
 
 ---
 
+### Session 2026-08-06 — Committed, Pushed & Live ✅
+
+**Committed & pushed to GitHub `main` (both now live on `netfoundation.ke`):**
+
+1. **`6259281` — Add Virtual Classroom trainer allocation, student Join Live banner, and My ToDo live-class entries**
+   - Trainer / Instructor field (`virtualTrainer`) added to both the lesson-edit form and the lesson-manager 🎥 **Virtual Classroom** tab (saved via `saveLesson()` + `saveVirtualLesson()`).
+   - Student lesson viewer now shows a **🎥 Virtual Classroom** banner with **🚀 Join Live Class** button + trainer + scheduled date/time.
+   - Student 📋 **My ToDo** card surfaces scheduled virtual classes with a **Join Live** badge.
+   - Course lessons list auto-appends **Join Live Class** shortcuts.
+
+2. **`3e1946b` — Gate Virtual Classroom Join buttons + cache-buster bump**
+   - New `vcJoinEnabled(lesson)` helper: Join buttons are **hidden until 10 minutes before `virtualScheduled`** start time (unscheduled rooms stay open anytime). Verified: shown at 9 min out, hidden at 12 min out.
+   - Gate applied at all three surfaces: My ToDo "Join Live" badge (falls back to a date badge), lesson-viewer banner ("Opens 10 min before HH:MM"), and lesson-list shortcuts (rows omitted for students until the window opens). Teachers still always see **Manage VC**.
+   - `joinLiveLesson()` enforces the same gate as a safety net (toast: "This class opens 10 minutes before its scheduled start time").
+   - Cache-buster bumped **`js/bundle.js?v=213` → `?v=214`** in `index.html` (lines 14 & 883).
+
+**Live verification (2026-08-06):**
+- `https://netfoundation.ke/` → HTTP 200, serves `bundle.js?v=214`.
+- Live bundle (1,234,050 B) contains `function vcJoinEnabled`, the gate message, and `vc-virtual-trainer` field ✅
+- Working tree clean; `main` up to date with `origin/main`.
+
+**Deferred (per operator):**
+- **NET CMS** and **NET CMS 1** desktop folders on the Desktop were **left unchanged** — mirroring the code updates into those two deployment copies was deferred to a future session.
+
+**Next possible items:**
+- Mirror `js/bundle.js` + `index.html` (+ other changed files) into the `NET CMS` and `NET CMS 1` desktop folders.
+- Any further feature/development requests from the operator.
+
+---
+
 **All systems green. Ready for live testing.**
