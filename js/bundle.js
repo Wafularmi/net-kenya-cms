@@ -4817,36 +4817,28 @@ function buildProfessionalTranscript(data) {
                 <tr><td>0 – 49</td><td>F</td><td>0.00</td><td>Fail</td></tr>
             </tbody>
         </table>`;
-    const semesterGroups = {};
-    grades.forEach(g => {
-        const key = `S${g.semester}`;
-        if (!semesterGroups[key]) semesterGroups[key] = [];
-        semesterGroups[key].push(g);
+    // One row per course: use highest score across all attempts (handles retakes)
+    const courseMap = new Map();
+    (allGrades || grades || []).forEach(g => {
+        const existing = courseMap.get(g.courseId);
+        if (!existing || (g.score || 0) > (existing.score || 0)) {
+            courseMap.set(g.courseId, g);
+        }
     });
-    let semesterTablesHTML = '';
-    let grandTotalPoints = 0, grandTotalCredits = 0;
-    let semesterCount = 0;
-    for (const [semKey, semGrades] of Object.entries(semesterGroups)) {
-        semesterCount++;
-        let semPoints = 0, semCredits = 0;
-        const semNum = semKey.replace('S', '');
-        semesterTablesHTML += `<div class="semester-block"><div class="semester-header"><span class="semester-title">${isSummary ? 'Academic Record' : 'Semester ' + semNum + ' — Academic Results'}</span></div>`;
-        semesterTablesHTML += `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
-        semGrades.forEach((g, idx) => {
-            const c = courses.find(c => c.id === g.courseId);
-            const credits = c ? c.credits : 3;
-            const gpa = parseFloat(g.gpa) || 0;
-            semPoints += gpa * credits;
-            semCredits += credits;
-            const gradeClass = getGradeClass(g.grade);
-            semesterTablesHTML += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? c.code : g.courseId}</td><td class="col-title">${c ? c.name : g.courseId}</td><td class="col-credits">${credits}</td><td class="col-score">${g.score}</td><td class="col-grade ${gradeClass}">${g.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
-        });
-        const semGPA = semCredits > 0 ? (semPoints / semCredits) : 0;
-        grandTotalPoints += semPoints;
-        grandTotalCredits += semCredits;
-        semesterTablesHTML += `</tbody><tfoot><tr><td colspan="3" class="footer-label">Semester Totals</td><td class="footer-value">${semCredits}</td><td colspan="2" class="footer-label">Semester GPA</td><td class="footer-value gpa-highlight">${semGPA.toFixed(2)}</td></tr></tfoot></table></div>`;
-    }
-    const cgpa = grandTotalCredits > 0 ? (grandTotalPoints / grandTotalCredits) : 0;
+    const uniqueGrades = Array.from(courseMap.values());
+    let totalPoints = 0, totalCredits = 0;
+    let coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
+    uniqueGrades.forEach((g, idx) => {
+        const c = courses.find(c => c.id === g.courseId);
+        const credits = c ? c.credits : 3;
+        const gpa = parseFloat(g.gpa) || 0;
+        totalPoints += gpa * credits;
+        totalCredits += credits;
+        const gradeClass = getGradeClass(g.grade);
+        coursesTableHTML += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? c.code : g.courseId}</td><td class="col-title">${c ? c.name : g.courseId}</td><td class="col-credits">${credits}</td><td class="col-score">${g.score}</td><td class="col-grade ${gradeClass}">${g.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
+    });
+    const cgpa = totalCredits > 0 ? (totalPoints / totalCredits) : 0;
+    coursesTableHTML += `</tbody><tfoot><tr><td colspan="3" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table>`;
     const classification = getClassification(cgpa);
     const balance = (financial.feeAmount || 0) - financial.totalPaid;
     const feeStatus = balance <= 0 ? 'CLEARED' : 'OUTSTANDING';
@@ -4854,9 +4846,8 @@ function buildProfessionalTranscript(data) {
         <div class="summary-panel">
             <div class="summary-title">Academic Summary</div>
             <div class="summary-grid">
-                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${grades.length}</span></div>
-                <div class="summary-item"><span class="summary-label">Total Credits</span><span class="summary-value">${grandTotalCredits}</span></div>
-                <div class="summary-item"><span class="summary-label">Semesters</span><span class="summary-value">${semesterCount}</span></div>
+                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${uniqueGrades.length}</span></div>
+                <div class="summary-item"><span class="summary-label">Total Credits</span><span class="summary-value">${totalCredits}</span></div>
                 <div class="summary-item"><span class="summary-label">Cumulative GPA</span><span class="summary-value cgpa-value">${cgpa.toFixed(2)}</span></div>
                 <div class="summary-item"><span class="summary-label">Classification</span><span class="summary-value class-badge ${classification.cssClass}">${classification.label}</span></div>
                 <div class="summary-item"><span class="summary-label">Fee Status</span><span class="summary-value ${balance <= 0 ? 'status-clear' : 'status-outstanding'}">${feeStatus}</span></div>
@@ -4866,6 +4857,23 @@ function buildProfessionalTranscript(data) {
         </div>`;
     const officialStamp = isOfficial ? '' : '<div class="watermark-text">UNOFFICIAL COPY — FOR STUDENT REFERENCE ONLY</div>';
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
+    const workflowChartHTML = `
+        <div class="workflow-chart">
+            <div class="workflow-row"><div class="workflow-box workflow-raw"><div class="workflow-box-title">1. Raw Assessment Scores</div><div class="workflow-box-desc">Essay · Quiz · Exam · Attendance</div></div></div>
+            <div class="workflow-arrow">↓</div>
+            <div class="workflow-row"><div class="workflow-box workflow-best"><div class="workflow-box-title">2. Best Score per Assessment</div><div class="workflow-box-desc">Retakes → highest score used</div></div></div>
+            <div class="workflow-arrow">↓</div>
+            <div class="workflow-row"><div class="workflow-box workflow-weight"><div class="workflow-box-title">3. Apply Weightages</div><div class="workflow-box-desc">Essay×25% · Quiz×15% · Exam×50% · Attendance×10%</div></div></div>
+            <div class="workflow-arrow">↓</div>
+            <div class="workflow-row"><div class="workflow-box workflow-final"><div class="workflow-box-title">4. Final Weighted Score</div><div class="workflow-box-desc">0 – 100 scale</div></div></div>
+            <div class="workflow-arrow">↓</div>
+            <div class="workflow-row"><div class="workflow-box workflow-grade"><div class="workflow-box-title">5. Letter Grade + GPA</div><div class="workflow-box-desc">A = 4.0 · B+ = 3.5 · B = 3.0 …</div></div></div>
+        </div>`;
+    const narrativeHTML = `
+        <div class="narrative-section">
+            <div class="section-title">How Final Grades Are Computed</div>
+            <p class="narrative-text">Each course is assessed through multiple components (e.g., Essay, Quiz, Examination, Attendance), each carrying a defined weightage that reflects its contribution to the overall course grade. When a student retakes any assessment component, the <strong>highest score</strong> across all attempts is used — ensuring that retakes can only improve the final outcome. The best score for each component is multiplied by its respective weightage, and the results are summed to produce a <strong>Final Weighted Score</strong> on a 0–100 scale. This score is then mapped to a letter grade and GPA value according to the institution's grading scale. The Cumulative GPA (CGPA) is computed as the weighted average of all course GPAs, using credit hours as weights, and determines the final classification (Distinction, Upper Credit, Lower Credit, Pass, or Fail).</p>
+        </div>`;
     return `
     <div class="transcript-document" style="--accent: ${accentColor};">
         <div class="doc-watermark">${schoolName}</div>
@@ -4907,7 +4915,7 @@ function buildProfessionalTranscript(data) {
             </div>
             <div class="page-main">
                 <div class="wavy-bg">${wavyBgHTML(schoolName, accentColor)}</div>
-                ${semesterTablesHTML}
+                <div class="semester-block"><div class="semester-header"><span class="semester-title">Academic Results</span></div>${coursesTableHTML}</div>
                 ${summaryBlock}
                 <div class="signatures-section">
                     ${sig_registrar ? `<div class="signature-block"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
@@ -4915,7 +4923,7 @@ function buildProfessionalTranscript(data) {
                     ${sig_director ? `<div class="signature-block"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
                 </div>
             </div>
-<div class="page-seal-area">
+            <div class="page-seal-area">
                 ${isOfficial ? `<div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
                 <p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
             </div>
@@ -4939,6 +4947,8 @@ function buildProfessionalTranscript(data) {
                 </div>
                 <div class="header-divider"></div>
             </div>
+            ${narrativeHTML}
+            ${workflowChartHTML}
             <div class="grading-scale-section grading-scale-section-page2">
                 <div class="section-title">Grading Scale Reference</div>
                 ${gradeScaleHTML}
@@ -5430,7 +5440,7 @@ function buildProfessionalTranscript(data) {
             margin: 0;
         }
         .transcript-document .transcript-footer {
-            margin-top: 0;
+            margin-top: auto;
             padding: 5px 35px;
             background: #1a1a2e;
             color: #fff;
@@ -5455,6 +5465,58 @@ function buildProfessionalTranscript(data) {
             overflow: hidden;
             page-break-after: always;
             break-after: page;
+        }
+        .transcript-document .narrative-section {
+            margin: 20px 35px 10px;
+        }
+        .transcript-document .narrative-text {
+            font-size: 9px;
+            color: #475569;
+            line-height: 1.6;
+            text-align: justify;
+        }
+        .transcript-document .workflow-chart {
+            margin: 10px 35px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .transcript-document .workflow-row {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        .transcript-document .workflow-box {
+            width: 65%;
+            padding: 8px 14px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1.5px solid;
+        }
+        .transcript-document .workflow-box-title {
+            font-size: 9px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+        .transcript-document .workflow-box-desc {
+            font-size: 7.5px;
+            color: #64748b;
+        }
+        .transcript-document .workflow-raw { background: #eff6ff; border-color: #bfdbfe; }
+        .transcript-document .workflow-raw .workflow-box-title { color: #2563eb; }
+        .transcript-document .workflow-best { background: #f0fdf4; border-color: #bbf7d0; }
+        .transcript-document .workflow-best .workflow-box-title { color: #16a34a; }
+        .transcript-document .workflow-weight { background: #fefce8; border-color: #fde68a; }
+        .transcript-document .workflow-weight .workflow-box-title { color: #d97706; }
+        .transcript-document .workflow-final { background: #fdf2f8; border-color: #fbcfe8; }
+        .transcript-document .workflow-final .workflow-box-title { color: #db2777; }
+        .transcript-document .workflow-grade { background: #f5f3ff; border-color: #ddd6fe; }
+        .transcript-document .workflow-grade .workflow-box-title { color: #7c3aed; }
+        .transcript-document .workflow-arrow {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1;
         }
         .transcript-document .transcript-page:last-child {
             page-break-after: auto;
