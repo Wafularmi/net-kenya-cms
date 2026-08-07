@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=222" as="script">
+    <link rel="preload" href="js/bundle.js?v=223" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
@@ -631,7 +631,7 @@
                     </div>
 <div class="card"><h3>Diploma PDF Template</h3>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload a designed diploma PDF template. Student details will be overlaid at the positions you configure below.</div>
-                         <div class="form-group"><label>Diploma Template (PDF)</label><div class="sig-upload" style="flex-direction:column;align-items:flex-start;"><div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);">No template uploaded</div><input type="file" id="diploma-pdf-upload" accept="application/pdf" onchange="handleDiplomaPdfUpload(event)"></div></div>
+                         <div class="form-group"><label>Diploma Template (PDF)</label><div style="display:flex;flex-direction:column;gap:8px;"><div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);">No template uploaded</div><label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">📄 Choose PDF File<input type="file" id="diploma-pdf-upload" accept="application/pdf" onchange="handleDiplomaPdfUpload(event)" style="display:none;"></label></div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from top-left)</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
@@ -657,9 +657,9 @@
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Diploma Signatures (optional)</div>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload signature images for the diploma template. These are separate from the document signatures above.</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-                             <div class="form-group"><label>Registrar Sig</label><div class="sig-upload"><img id="diploma-sig-registrar-preview" class="sig-preview" style="display:none;"><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('registrar', event)"></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-registrar-x" placeholder="X" value="40" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-registrar-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-registrar-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div></div>
-                             <div class="form-group"><label>Dean Sig</label><div class="sig-upload"><img id="diploma-sig-dean-preview" class="sig-preview" style="display:none;"><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('dean', event)"></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-dean-x" placeholder="X" value="105" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-dean-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-dean-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div></div>
-                             <div class="form-group"><label>Director Sig</label><div class="sig-upload"><img id="diploma-sig-director-preview" class="sig-preview" style="display:none;"><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('director', event)"></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-director-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div></div>
+                             <div class="form-group"><label>Registrar Sig</label><div class="sig-upload"><img id="diploma-sig-registrar-preview" class="sig-preview" style="display:none;"><label class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('registrar', event)"></div></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-registrar-x" placeholder="X" value="40" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-registrar-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-registrar-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div></div>
+                             <div class="form-group"><label>Dean Sig</label><div class="sig-upload"><img id="diploma-sig-dean-preview" class="sig-preview" style="display:none;"><label class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('dean', event)"></div></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-dean-x" placeholder="X" value="105" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-dean-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-dean-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div></div>
+                             <div class="form-group"><label>Director Sig</label><div class="sig-upload"><img id="diploma-sig-director-preview" class="sig-preview" style="display:none;"><label class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('director', event)"></div></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-director-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div></div>
                          </div>
                          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
                              <button class="btn btn-primary" onclick="saveDiplomaPdfConfig()">Save Config</button>
@@ -920,7 +920,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=222"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=223"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=8"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

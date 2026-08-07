@@ -6623,13 +6623,19 @@ async function showDiplomaPdfGenerator() {
     const config = await dbGet('settings', 'diplomaPdfConfig');
     if (!config || !config.template) return showToast('Upload and save a PDF template first!', { type: 'danger' });
     const students = await dbGetAll('students');
-    const content = `<div class="form-group"><label>Student</label><select id="diploma-pdf-student"><option value="">Select student...</option>${students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber || s.id})</option>`).join('')}</select></div>
+    const certificates = await dbGetAll('certificates');
+    const generatedStudentIds = new Set(certificates.filter(c => c.type === 'diploma').map(c => c.studentId));
+    const availableStudents = students.filter(s => s.status === 'active' && !generatedStudentIds.has(s.id));
+    if (!availableStudents.length) return showToast('No students available - all active students already have diplomas generated.', { type: 'warning' });
+    const content = `<div class="form-group"><label>Student</label><select id="diploma-pdf-student"><option value="">Select student...</option>${availableStudents.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber || s.id})</option>`).join('')}</select></div>
+        <div class="form-group"><label>Student Name on Diploma <span style="font-size:10px;color:var(--text-muted);">(override - leave blank to use student record name)</span></label><input type="text" id="diploma-pdf-name-override" placeholder="Optional: type name differently from student record"></div>
         <div class="form-group"><label>Graduation Date *</label><input type="date" id="diploma-pdf-date" required></div>`;
     showModal('Generate Diploma PDF', content, `<button class="btn btn-primary" onclick="generateDiplomaPdf()">Generate</button>`);
 }
 async function generateDiplomaPdf() {
     const studentId = document.getElementById('diploma-pdf-student').value;
     const gradDate = document.getElementById('diploma-pdf-date').value;
+    const nameOverride = document.getElementById('diploma-pdf-name-override').value.trim();
     if (!studentId) return showToast('Select a student!');
     if (!gradDate) return showToast('Enter graduation date!');
     const config = await dbGet('settings', 'diplomaPdfConfig');
@@ -6650,6 +6656,7 @@ async function generateDiplomaPdf() {
         const txtColor = rgb(r, g, b);
         const mmToPt = 2.83465;
         const student = await dbGet('students', studentId);
+        const displayName = nameOverride || student.name;
         const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         const vCode = generateVerificationCode();
         const dateStr = new Date(gradDate + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -6659,7 +6666,7 @@ async function generateDiplomaPdf() {
             const textWidth = font.widthOfTextAtSize(text, size);
             page.drawText(text, { x: field.x * mmToPt - textWidth / 2, y: (297 - field.y) * mmToPt, size: size, font: font, color: txtColor });
         };
-        drawField(student.name, config.fields.name);
+        drawField(displayName, config.fields.name);
         drawField(student.admissionNumber || student.id, config.fields.adm);
         drawField(dateStr, config.fields.date);
         drawField('Doc ID: ' + docId, config.fields.docid);
@@ -6679,11 +6686,11 @@ async function generateDiplomaPdf() {
         const blob = new Blob([outBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
-        showModal('Diploma Certificate — ' + student.name, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${student.name}')">Download</button>`);
+        showModal('Diploma Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${displayName}')">Download</button>`);
         const cert = { id: 'CERT-' + Date.now(), studentId, type: 'diploma', content: '', docId, vCode, generatedAt: new Date().toISOString() };
         await dbPut('certificates', cert);
         logAudit('generated', 'diploma', { studentId, docId });
-        showToast('Diploma generated!');
+        showToast('Diploma generated! ' + displayName + ' removed from dropdown.');
     } catch (err) {
         console.error('Diploma PDF error:', err);
         showToast('Failed to generate diploma: ' + err.message, { type: 'danger' });
