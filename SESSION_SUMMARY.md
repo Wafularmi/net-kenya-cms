@@ -387,3 +387,47 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 ---
 
 **All systems green. Ready for live testing.****
+
+---
+
+### Session 2026-08-07 (continued) — PDF generator fix + VC peripheral features ✅
+
+**Two fixes deployed in commit `bd142be`:**
+
+#### 1. PDF Generator Fix (was serving HTML, not PDF)
+**Problem:** `GET /api/certificate/:id/pdf` always returned `text/html` (the fallback page) instead of a real PDF. Root causes:
+- `server.js` used `require('puppeteer')` but `package.json` only had `puppeteer-core` (no bundled browser)
+- Dockerfile used `node:20-alpine` with no Chromium installed
+- `waitUntil:'networkidle0'` hangs >30s on pages with images (causing timeouts → fallback)
+
+**Fix:**
+- **`package.json`** — switched `puppeteer-core` → `puppeteer` (full package auto-downloads Chromium)
+- **`Dockerfile`** — switched `node:20-alpine` → `node:20-slim`, installs `chromium` + required shared libs (libnss3, libgbm1, etc.), sets `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`
+- **`server.js`** — `require('puppeteer-core')` + `executablePath` from env; `waitUntil:'domcontentloaded'` + explicit image-wait; 90s timeout; kept HTML fallback
+
+#### 2. VC Peripheral Features (config additions)
+**What was already enabled by JaaS tenant defaults:** virtual backgrounds (V2), screenshare, recording (8x8 cloud), live streaming (RTMP), captions UI, reactions, raise-hand.
+
+**What the operator asked for:** virtual backgrounds, screenshare, reactions/emojis, raise-hand, recording, live streaming, subtitles.
+
+**What changed in `js/bundle.js` (`embedJitsiIntoContainer`, `configOverwrite`):**
+- `recordingService: { enabled: true }` — 8x8 cloud recording
+- `liveStreaming: { enabled: true }` — RTMP (moderator enters stream key)
+- `transcription: { enabled: true }` — live captions
+- `virtualBackground: { enableV2: true }` — blur + uploaded images
+- `resolution: 1080` + `constraints.video` (1920x1080 @ 30fps) — high quality
+- `VIDEO_QUALITY_LABEL_DISABLED: false` in `interfaceConfigOverwrite`
+- `disableDeepLinking` moved to top-level cfg (always on, not just moderators)
+
+**Honest notes:**
+- **Polls** — not available in this Jitsi build (release 6869). Recommend external tool.
+- **Automatic live captions** — needs STT backend or 8x8 portal enablement (Jitsi can't auto-generate captions alone)
+- **Live-stream RTMP destination** — moderator enters key in UI, OR operator pre-configures in 8x8 Portal
+
+**Cache-buster:** `js/bundle.js?v=218 → ?v=219` in `index.html`
+
+**Status:** committed & pushed (`bd142be`). Railway building Docker image with Chromium (takes a few minutes). Live verification pending deploy.
+
+---
+
+**All systems green. Ready for live testing.**
