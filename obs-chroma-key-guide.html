@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OBS Green Screen Setup Guide — NET KENYA</title>
+<style>
+:root { --accent:#2563eb; --success:#16a34a; --warning:#d97706; --danger:#dc2626; --bg:#f8fafc; --card:#fff; --text:#1e293b; --muted:#64748b; --border:#e2e8f0; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; padding:24px; }
+.container { max-width:800px; margin:0 auto; }
+h1 { font-size:24px; margin-bottom:4px; }
+.subtitle { color:var(--muted); margin-bottom:24px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px; margin-bottom:16px; }
+.card h2 { font-size:16px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.step-num { background:var(--accent); color:#fff; width:26px; height:26px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; flex-shrink:0; }
+.step { display:flex; gap:12px; margin-bottom:16px; }
+.step:last-child { margin-bottom:0; }
+.step-content h3 { font-size:14px; margin-bottom:4px; }
+.step-content p { font-size:13px; color:var(--muted); }
+.step-content ul { font-size:13px; color:var(--muted); margin-top:6px; padding-left:18px; }
+.step-content li { margin-bottom:3px; }
+.tip { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px 16px; font-size:13px; color:#166534; margin-bottom:16px; }
+.tip.warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+.tip strong { display:block; margin-bottom:4px; }
+kbd { background:#f1f5f9; border:1px solid var(--border); border-radius:4px; padding:1px 6px; font-size:12px; font-family:monospace; }
+.flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.flow-item { background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:6px 12px; font-size:12px; font-weight:600; color:var(--accent); }
+.flow-arrow { color:var(--muted); font-size:16px; }
+img.diagram { width:100%; border:1px solid var(--border); border-radius:8px; margin:12px 0; }
+@media print { body { padding:0; background:#fff; } .card { break-inside:avoid; border:none; padding:12px 0; border-bottom:1px solid #ddd; margin-bottom:12px; } .tip { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>OBS Green Screen (Chroma Key) Setup</h1>
+<p class="subtitle">NET KENYA Virtual Classroom — replace your physical green screen with any background image or video, then feed it into Jitsi as your camera.</p>
+
+<div class="flow">
+  <span class="flow-item">Physical Green Screen</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-item">Webcam</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-item">OBS Studio</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-item">OBS Virtual Camera</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-item">Jitsi (8x8)</span>
+</div>
+
+<div class="card">
+<h2><span class="step-num">1</span> What You Need</h2>
+<div class="step">
+  <div class="step-content">
+    <h3>Physical green screen</h3>
+    <p>A green (or blue) fabric backdrop, painted wall, or collapsible green screen panel. Even lighting on it is critical — no wrinkles, no shadows.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Webcam</h3>
+    <p>Any USB webcam (built-in laptop cam works). Position it so you fill most of the frame with the green screen behind you.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>OBS Studio (free)</h3>
+    <p>Download from <strong>obsproject.com</strong>. Windows, Mac, Linux. The Virtual Camera feature is built into OBS 28+.</p>
+  </div>
+</div>
+</div>
+
+<div class="card">
+<h2><span class="step-num">2</span> Set Up OBS Scene</h2>
+<div class="step">
+  <div class="step-content">
+    <h3>Add your webcam</h3>
+    <p>In the <strong>Sources</strong> box (bottom), click <strong>+</strong> → <strong>Video Capture Device</strong> → select your webcam. You should see yourself with the green screen behind you.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Add your background image/video</h3>
+    <p>Click <strong>+</strong> in Sources → <strong>Image</strong> (for a still image) or <strong>Media Source</strong> (for a looping video). Select your background file. <strong>Drag this source BELOW the webcam source</strong> in the list so it sits behind you.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Apply the Chroma Key filter</h3>
+    <p>Right-click the <strong>webcam source</strong> in the list → <strong>Filters</strong>. Under <strong>Effect Filters</strong>, click <strong>+</strong> → <strong>Chroma Key</strong>. The green background should disappear immediately, revealing your background image behind you.</p>
+    <ul>
+      <li><strong>Key Color Type:</strong> Green (or pick "Custom" and use the eyedropper to click the green in your preview)</li>
+      <li><strong>Similarity:</strong> Start at 400, adjust up/down until green is gone but your edges aren't eaten away</li>
+      <li><strong>Smoothness:</strong> 80–120 (softens the edge)</li>
+      <li><strong>Key Color Spill Reduction:</strong> 100–200 (removes green tint on your skin/hair)</li>
+      <li><strong>Opacity:</strong> 100 (leave at 100)</li>
+    </ul>
+  </div>
+</div>
+</div>
+
+<div class="card">
+<h2><span class="step-num">3</span> Fine-Tune the Chroma Key</h2>
+<div class="tip warn">
+  <strong>Most common problem: uneven lighting on the green screen.</strong>
+  If parts of the green screen look darker or lighter, the single chroma key won't cleanly remove all of it. Fix the lighting first — two soft lights aimed at the green screen from 45° angles, one on each side.
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Use the preview</h3>
+    <p>Watch the OBS preview (not your raw camera). Adjust <strong>Similarity</strong> and <strong>Smoothness</strong> until:</p>
+    <ul>
+      <li>Green is 100% gone (no green fringes)</li>
+      <li>Your hair, shoulders, edges are clean (no "bites" taken out of you)</li>
+      <li>No green spill on your skin or clothes</li>
+    </ul>
+  </div>
+</div>
+</div>
+
+<div class="card">
+<h2><span class="step-num">4</span> Start the Virtual Camera</h2>
+<div class="step">
+  <div class="step-content">
+    <h3>Click "Start Virtual Camera"</h3>
+    <p>In OBS, look at the <strong>Controls</strong> panel (bottom-right). Click <strong>Start Virtual Camera</strong>. The button will change to "Stop Virtual Camera" when active.</p>
+  </div>
+</div>
+<div class="tip">
+  <strong>If you don't see the button:</strong> You're on an old OBS version. Update to OBS 28+ from obsproject.com. On Linux, you may need to install <kbd>v4l2loopback</kbd> kernel module first.
+</div>
+</div>
+
+<div class="card">
+<h2><span class="step-num">5</span> Select OBS Camera in Jitsi</h2>
+<div class="step">
+  <div class="step-content">
+    <h3>Join your Jitsi class as usual</h3>
+    <p>Open the Virtual Classroom in NET KENYA and join the meeting.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Switch the camera</h3>
+    <p>In the Jitsi meeting, click the <strong>camera icon</strong> (or <strong>⋯ → Settings → Devices</strong>) and select <strong>OBS Virtual Camera</strong> as your camera. Your Jitsi participants will now see you with the clean background — no green screen visible to them.</p>
+  </div>
+</div>
+</div>
+
+<div class="card">
+<h2><span class="step-num">6</span> Quick Troubleshooting</h2>
+<div class="step">
+  <div class="step-content">
+    <h3>Green still showing</h3>
+    <p>Increase <strong>Similarity</strong>. Use the eyedropper to pick the exact green shade from the preview.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Edges of you are disappearing</h3>
+    <p>Decrease <strong>Similarity</strong>. Your green screen may not be evenly lit — add more light to the dark spots.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Green tint on skin/hair</h3>
+    <p>Increase <strong>Key Color Spill Reduction</strong>. Also move closer to the camera and further from the green screen.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>OBS Virtual Camera not showing in Jitsi</h3>
+    <p>Make sure you clicked <strong>Start Virtual Camera</strong> in OBS <em>before</em> joining Jitsi. Refresh Jitsi's device list.</p>
+  </div>
+</div>
+<div class="step">
+  <div class="step-content">
+    <h3>Background image looks stretched</h3>
+    <p>Right-click the image source in OBS → <strong>Transform → Fit to screen</strong> (or <strong>Stretch to screen</strong>). Use a 1920×1080 image for best results.</p>
+  </div>
+</div>
+</div>
+
+<div class="card">
+<h2>Summary</h2>
+<p style="font-size:13px; color:var(--muted);">Once set up, your workflow for each class is: <strong>OBS open → Start Virtual Camera → join Jitsi in NET KENYA → select OBS Virtual Camera</strong>. The chroma key runs in OBS, so Jitsi just sees a clean feed. No Jitsi-side configuration needed.</p>
+</div>
+
+</div>
+</body>
+</html>
