@@ -4778,7 +4778,7 @@ async function generateTranscript() {
         return credits > 0 ? (points / credits) : 0;
     })() : 0;
     const html = buildProfessionalTranscript({
-        student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor },
+        student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, college_stamp: branding.college_stamp },
         docType, semester, year, docId, generatedDate, generatedTime, center, vCode,
         financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
         academic: { chapel: studentChapel, attendancePct },
@@ -4793,7 +4793,7 @@ async function generateTranscript() {
 }
 function buildProfessionalTranscript(data) {
     const { student, grades, courses, branding, docType, semester, year, docId, vCode, generatedDate, generatedTime, center, financial, academic, allGrades, academicSettings } = data;
-    const { schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, postalAddress, city, phone, email, website } = branding;
+    const { schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, postalAddress, city, phone, email, website, college_stamp } = branding;
     const addrParts = [];
     if (postalAddress || city) addrParts.push([postalAddress, city].filter(Boolean).join(', '));
     if (phone) addrParts.push('Tel: ' + phone);
@@ -5639,7 +5639,8 @@ async function generateFinalTranscript() {
         sig_registrar, sig_dean, sig_director, center, academic,
         cgpa, classification, totalCredits, totalGPAPoints,
         docId, vCode, generatedDate, generatedTime, feeBalance,
-        postalAddress, city, phone, email, website
+        postalAddress, city, phone, email, website,
+        college_stamp: branding.college_stamp
     });
     const courseHash = await sha256(courseResults.map(r => r.course.id + ':' + r.weightedScore + ':' + r.gradeInfo?.grade).join('|'));
     const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: classification.label, totalCredits, generatedAt: new Date().toISOString(), courseHash };
@@ -5657,7 +5658,7 @@ async function generateFinalTranscript() {
     }
 }
 function buildFinalTranscriptDocument(data) {
-    const { student, courseResults, schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, center, academic, cgpa, classification, totalCredits, totalGPAPoints, docId, vCode, generatedDate, generatedTime, feeBalance, postalAddress, city, phone, email, website } = data;
+    const { student, courseResults, schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, center, academic, cgpa, classification, totalCredits, totalGPAPoints, docId, vCode, generatedDate, generatedTime, feeBalance, postalAddress, city, phone, email, website, college_stamp } = data;
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
     let rowsHtml = '';
     courseResults.forEach((cr, idx) => {
