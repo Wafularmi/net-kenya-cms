@@ -15100,12 +15100,24 @@ async function embedJitsiIntoContainer(containerId, embed) {
             disableReactions: false,
             disableRaisedHand: false,
             disableScreensharing: false,
-            disableVideoSupport: false
+            disableVideoSupport: false,
+            // Video quality: 1080p with simulcast adaptive for high quality + compression
+            resolution: 1080,
+            constraints: { video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } } },
+            // Recording (8x8 cloud recording)
+            recordingService: { enabled: true },
+            // Live streaming (RTMP) - moderator enters stream key in UI
+            liveStreaming: { enabled: true },
+            // Transcription / live captions
+            transcription: { enabled: true },
+            // Virtual backgrounds (V2 - blur + uploaded images)
+            virtualBackground: { enableV2: true },
+            // Disable deep linking for moderators
+            disableDeepLinking: embed.moderator
         };
         if (embed.moderator) {
             cfg.prejoinPageEnabled = false;
             cfg.prejoinConfig = { enabled: false };
-            cfg.disableDeepLinking = true;
             cfg.startWithVideoMuted = false;
         }
         var options = {
@@ -15114,7 +15126,7 @@ async function embedJitsiIntoContainer(containerId, embed) {
             height: '100%',
             parentNode: document.getElementById(containerId),
             configOverwrite: cfg,
-            interfaceConfigOverwrite: { DEFAULT_BACKGROUND: '#000000', RAISE_HAND_ENABLED: true }
+            interfaceConfigOverwrite: { DEFAULT_BACKGROUND: '#000000', RAISE_HAND_ENABLED: true, VIDEO_QUALITY_LABEL_DISABLED: false }
         };
         if (embed.token) options.jwt = embed.token;
         if (embed.user && embed.user.displayName) options.userInfo = { displayName: embed.user.displayName, avatarUrl: embed.user.avatarUrl || '' };

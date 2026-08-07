@@ -667,11 +667,13 @@ function handleAPI(req, res) {
         // Serve PDF via Puppeteer (async IIFE)
         (async () => {
             try {
-                const puppeteer = require('puppeteer');
+                const puppeteer = require('puppeteer-core');
+                const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
 
                 const browser = await puppeteer.launch({
                     headless: 'new',
-                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                    executablePath,
+                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
                 });
                 const page = await browser.newPage();
 
@@ -686,13 +688,21 @@ function handleAPI(req, res) {
                             @page { size: A4; margin: 20mm; }
                             body { font-family: 'DejaVu Serif', Georgia, serif; margin: 0; padding: 0; background: #fff; color: #1a1a2e; }
                             .certificate { width: 100%; height: 100vh; display: flex; flex-direction: column; }
+                            img { max-width: 100%; height: auto; }
                         </style>
                     </head>
                     <body>${cert.content}</body>
                     </html>
                 `;
 
-                await page.setContent(html, { waitUntil: 'networkidle0' });
+                await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 90000 });
+                await page.evaluate(() => {
+                    const imgs = Array.from(document.images);
+                    return Promise.all(imgs.map(img => {
+                        if (img.complete) return Promise.resolve();
+                        return new Promise(resolve => { img.onload = img.onerror = resolve; });
+                    }));
+                });
                 const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' } });
                 await browser.close();
 
