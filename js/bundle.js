@@ -1276,7 +1276,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); break;
+        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); break;
     }
 }
 function initTabs() {
@@ -6539,6 +6539,161 @@ function renderDiplomaImages(images) {
     return images.map((img, i) =>
         `<img src="${img.src}" style="position:absolute;z-index:2;left:${img.x || 0}%;top:${img.y || 0}%;width:${img.w || 100}%;height:${img.h || 100}%;opacity:${img.opacity || 0.6};pointer-events:none;object-fit:contain;">`
     ).join('');
+}
+
+// ===== PDF-TEMPLATE DIPLOMA SYSTEM =====
+async function handleDiplomaPdfUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const arr = new Uint8Array(e.target.result);
+        let b64 = '';
+        for (let i = 0; i < arr.length; i++) b64 += String.fromCharCode(arr[i]);
+        window._diplomaPdfTemplate = btoa(b64);
+        const preview = document.getElementById('diploma-pdf-preview');
+        preview.textContent = 'Template: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+        preview.style.color = 'var(--success)';
+    };
+    reader.readAsArrayBuffer(file);
+}
+async function handleDiplomaSigUpload(role, event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        if (!window._diplomaSigs) window._diplomaSigs = {};
+        window._diplomaSigs[role] = e.target.result;
+        const preview = document.getElementById('diploma-sig-' + role + '-preview');
+        if (preview) { preview.src = e.target.result; preview.style.display = 'block'; }
+    };
+    reader.readAsDataURL(file);
+}
+async function saveDiplomaPdfConfig() {
+    const config = {
+        template: window._diplomaPdfTemplate || null,
+        fields: {
+            name: { x: +document.getElementById('diploma-fx-name').value, y: +document.getElementById('diploma-fy-name').value, size: +document.getElementById('diploma-fs-name').value },
+            adm: { x: +document.getElementById('diploma-fx-adm').value, y: +document.getElementById('diploma-fy-adm').value, size: +document.getElementById('diploma-fs-adm').value },
+            date: { x: +document.getElementById('diploma-fx-date').value, y: +document.getElementById('diploma-fy-date').value, size: +document.getElementById('diploma-fs-date').value },
+            docid: { x: +document.getElementById('diploma-fx-docid').value, y: +document.getElementById('diploma-fy-docid').value, size: +document.getElementById('diploma-fs-docid').value },
+            vcode: { x: +document.getElementById('diploma-fx-vcode').value, y: +document.getElementById('diploma-fy-vcode').value, size: +document.getElementById('diploma-fs-vcode').value }
+        },
+        font: document.getElementById('diploma-font').value,
+        color: document.getElementById('diploma-text-color').value,
+        sigs: {
+            registrar: { img: (window._diplomaSigs || {}).registrar || null, x: +document.getElementById('diploma-sig-registrar-x').value, y: +document.getElementById('diploma-sig-registrar-y').value, w: +document.getElementById('diploma-sig-registrar-w').value },
+            dean: { img: (window._diplomaSigs || {}).dean || null, x: +document.getElementById('diploma-sig-dean-x').value, y: +document.getElementById('diploma-sig-dean-y').value, w: +document.getElementById('diploma-sig-dean-w').value },
+            director: { img: (window._diplomaSigs || {}).director || null, x: +document.getElementById('diploma-sig-director-x').value, y: +document.getElementById('diploma-sig-director-y').value, w: +document.getElementById('diploma-sig-director-w').value }
+        }
+    };
+    await dbSet('settings', 'diplomaPdfConfig', config);
+    showToast('Diploma PDF configuration saved!');
+}
+async function loadDiplomaPdfConfig() {
+    const config = await dbGet('settings', 'diplomaPdfConfig');
+    if (!config) return showToast('No saved config found');
+    window._diplomaPdfTemplate = config.template;
+    window._diplomaSigs = config.sigs || {};
+    const f = config.fields;
+    if (f.name) { document.getElementById('diploma-fx-name').value = f.name.x; document.getElementById('diploma-fy-name').value = f.name.y; document.getElementById('diploma-fs-name').value = f.name.size; }
+    if (f.adm) { document.getElementById('diploma-fx-adm').value = f.adm.x; document.getElementById('diploma-fy-adm').value = f.adm.y; document.getElementById('diploma-fs-adm').value = f.adm.size; }
+    if (f.date) { document.getElementById('diploma-fx-date').value = f.date.x; document.getElementById('diploma-fy-date').value = f.date.y; document.getElementById('diploma-fs-date').value = f.date.size; }
+    if (f.docid) { document.getElementById('diploma-fx-docid').value = f.docid.x; document.getElementById('diploma-fy-docid').value = f.docid.y; document.getElementById('diploma-fs-docid').value = f.docid.size; }
+    if (f.vcode) { document.getElementById('diploma-fx-vcode').value = f.vcode.x; document.getElementById('diploma-fy-vcode').value = f.vcode.y; document.getElementById('diploma-fs-vcode').value = f.vcode.size; }
+    if (config.font) document.getElementById('diploma-font').value = config.font;
+    if (config.color) document.getElementById('diploma-text-color').value = config.color;
+    if (config.sigs) {
+        ['registrar', 'dean', 'director'].forEach(role => {
+            const s = config.sigs[role];
+            if (!s) return;
+            document.getElementById('diploma-sig-' + role + '-x').value = s.x;
+            document.getElementById('diploma-sig-' + role + '-y').value = s.y;
+            document.getElementById('diploma-sig-' + role + '-w').value = s.w;
+            if (s.img) { const p = document.getElementById('diploma-sig-' + role + '-preview'); if (p) { p.src = s.img; p.style.display = 'block'; } }
+        });
+    }
+    const preview = document.getElementById('diploma-pdf-preview');
+    preview.textContent = config.template ? 'Template loaded' : 'No template uploaded';
+    preview.style.color = config.template ? 'var(--success)' : 'var(--text-muted)';
+    showToast('Config loaded');
+}
+async function showDiplomaPdfGenerator() {
+    const config = await dbGet('settings', 'diplomaPdfConfig');
+    if (!config || !config.template) return showToast('Upload and save a PDF template first!', { type: 'danger' });
+    const students = await dbGetAll('students');
+    const content = `<div class="form-group"><label>Student</label><select id="diploma-pdf-student"><option value="">Select student...</option>${students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber || s.id})</option>`).join('')}</select></div>
+        <div class="form-group"><label>Graduation Date *</label><input type="date" id="diploma-pdf-date" required></div>`;
+    showModal('Generate Diploma PDF', content, `<button class="btn btn-primary" onclick="generateDiplomaPdf()">Generate</button>`);
+}
+async function generateDiplomaPdf() {
+    const studentId = document.getElementById('diploma-pdf-student').value;
+    const gradDate = document.getElementById('diploma-pdf-date').value;
+    if (!studentId) return showToast('Select a student!');
+    if (!gradDate) return showToast('Enter graduation date!');
+    const config = await dbGet('settings', 'diplomaPdfConfig');
+    if (!config || !config.template) return showToast('Upload a PDF template first!', { type: 'danger' });
+    try {
+        closeModal();
+        showToast('Generating diploma...', { type: 'info' });
+        const { PDFDocument, StandardFonts, rgb } = PDFLib;
+        const pdfBytes = Uint8Array.from(atob(config.template), c => c.charCodeAt(0));
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const page = pdfDoc.getPages()[0];
+        const fontMap = { 'Times Roman': StandardFonts.TimesRoman, 'Helvetica': StandardFonts.Helvetica, 'Courier': StandardFonts.Courier };
+        const font = await pdfDoc.embedFont(fontMap[config.font] || StandardFonts.TimesRoman);
+        const colorHex = config.color || '#1a1a2e';
+        const r = parseInt(colorHex.slice(1, 3), 16) / 255;
+        const g = parseInt(colorHex.slice(3, 5), 16) / 255;
+        const b = parseInt(colorHex.slice(5, 7), 16) / 255;
+        const txtColor = rgb(r, g, b);
+        const mmToPt = 2.83465;
+        const student = await dbGet('students', studentId);
+        const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
+        const vCode = generateVerificationCode();
+        const dateStr = new Date(gradDate + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        const drawField = (text, field) => {
+            if (!field) return;
+            const size = field.size || 12;
+            const textWidth = font.widthOfTextAtSize(text, size);
+            page.drawText(text, { x: field.x * mmToPt - textWidth / 2, y: (297 - field.y) * mmToPt, size: size, font: font, color: txtColor });
+        };
+        drawField(student.name, config.fields.name);
+        drawField(student.admissionNumber || student.id, config.fields.adm);
+        drawField(dateStr, config.fields.date);
+        drawField('Doc ID: ' + docId, config.fields.docid);
+        drawField('Verify: ' + vCode, config.fields.vcode);
+        for (const role of ['registrar', 'dean', 'director']) {
+            const sig = config.sigs && config.sigs[role];
+            if (!sig || !sig.img) continue;
+            try {
+                const sigBytes = Uint8Array.from(atob(sig.img.split(',')[1]), c => c.charCodeAt(0));
+                const sigImg = await pdfDoc.embedPng(sigBytes);
+                const sigW = sig.w * mmToPt;
+                const sigH = sigW * (sigImg.height / sigImg.width);
+                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: (297 - sig.y) * mmToPt - sigH / 2, width: sigW, height: sigH });
+            } catch (e) {}
+        }
+        const outBytes = await pdfDoc.save();
+        const blob = new Blob([outBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
+        showModal('Diploma Certificate — ' + student.name, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${student.name}')">Download</button>`);
+        const cert = { id: 'CERT-' + Date.now(), studentId, type: 'diploma', content: '', docId, vCode, generatedAt: new Date().toISOString() };
+        await dbPut('certificates', cert);
+        logAudit('generated', 'diploma', { studentId, docId });
+        showToast('Diploma generated!');
+    } catch (err) {
+        console.error('Diploma PDF error:', err);
+        showToast('Failed to generate diploma: ' + err.message, { type: 'danger' });
+    }
+}
+function downloadDiplomaPdfBlob(url, name) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Diploma_' + (name || 'certificate').replace(/\s+/g, '_') + '.pdf';
+    a.click();
 }
 
 async function renderHostels() {
