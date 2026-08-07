@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=223" as="script">
+    <link rel="preload" href="js/bundle.js?v=224" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
@@ -729,6 +729,19 @@
                         </div>
                         <button class="btn btn-primary" onclick="saveBranding()">Save Protection Setting</button>
                     </div>
+                    <div class="card"><h3>🛠 Maintenance Mode</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, visitors and all non-admin users are shown a maintenance page with your logo instead of the system. Only administrators can sign in while maintenance is active. Turn it ON while you are updating the system, then turn it OFF when you are done.</div>
+                        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+                            <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                <input type="checkbox" id="settings-maintenance" onchange="setMaintenanceMode(this.checked)" style="opacity:0;width:0;height:0;">
+                                <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                            </label>
+                            <span id="maintenance-status" style="font-size:13px;font-weight:600;color:var(--success);">OFF</span>
+                        </div>
+                        <div class="form-group"><label>Custom Message (optional)</label><textarea id="settings-maintenance-message" rows="3" placeholder="e.g., We are upgrading our systems and will be back shortly. Thank you for your patience."></textarea></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">This message is shown on the maintenance page. Leave it empty to use the default text.</div>
+                        <button class="btn btn-primary" onclick="saveMaintenanceMode()">Save Maintenance Settings</button>
+                    </div>
                     <div class="card"><h3>Academic Settings</h3>
                         <div class="form-group"><label>Current Academic Year</label><input type="text" id="settings-academic-year"></div>
                         <div class="form-row"><div class="form-group"><label>Semester</label><select id="settings-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select></div><div class="form-group"><label>Grading Scale</label><select id="settings-grading"><option value="standard">Standard (A-F, B+, B-)</option><option value="gpa4">GPA 4.0 Scale</option><option value="gpa5">GPA 5.0 Scale</option><option value="ects">ECTS (A-F)</option><option value="percent">Percentage Only</option></select></div></div>
@@ -920,7 +933,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=223"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=224"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=8"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

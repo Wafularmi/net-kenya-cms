@@ -685,6 +685,40 @@ async function setProtection() {
     showToast('Protection ' + (enabled ? 'ON' : 'OFF'));
 }
 
+async function loadMaintenanceMode() {
+    try {
+        var rec = await dbGet('settings', 'maintenance');
+        var v = (rec && rec.value) || {};
+        var cb = document.getElementById('settings-maintenance');
+        if (cb) cb.checked = !!v.active;
+        var status = document.getElementById('maintenance-status');
+        if (status) {
+            status.textContent = v.active ? 'ON' : 'OFF';
+            status.style.color = v.active ? 'var(--danger)' : 'var(--success)';
+        }
+        var msg = document.getElementById('settings-maintenance-message');
+        if (msg) msg.value = v.message || '';
+    } catch (e) {}
+}
+
+async function setMaintenanceMode(checked) {
+    var msg = document.getElementById('settings-maintenance-message');
+    var rec = null;
+    try { rec = await dbGet('settings', 'maintenance'); } catch (e) {}
+    var cur = (rec && rec.value) || {};
+    var value = { active: !!checked, message: (msg && msg.value ? msg.value.trim() : '') || cur.message || '' };
+    await dbPut('settings', { key: 'maintenance', value: value, updatedAt: new Date().toISOString(), updatedBy: (JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || '') });
+    showToast(checked ? 'Maintenance mode ON — visitors will see the maintenance page.' : 'Maintenance mode OFF — the system is live again.', { type: checked ? 'warning' : 'success' });
+    loadMaintenanceMode();
+}
+
+async function saveMaintenanceMode() {
+    var cb = document.getElementById('settings-maintenance');
+    var enabled = !!(cb && cb.checked);
+    await setMaintenanceMode(enabled);
+    showToast('Maintenance settings saved.');
+}
+
 async function initAuth() {
     try {
         const adminExists = await dbGet('users', 'admin');
@@ -789,6 +823,9 @@ async function login() {
         const user = data.user;
         if (!user) return showLoginError('Login failed');
         sessionStorage.setItem('currentUser', JSON.stringify(user));
+        if (user.mt_bypass) {
+            try { document.cookie = 'mt_bypass=' + user.mt_bypass + '; path=/; max-age=' + (12 * 3600) + '; SameSite=Lax'; } catch (e) {}
+        }
         showLoginError('');
         document.getElementById('login-pass').value = '';
         var key = 'terms_accepted_' + (user.username || user.id);
@@ -891,6 +928,7 @@ function logout() {
     logAudit('logout', 'user', { username: user.username });
     sessionStorage.removeItem('currentUser');
     sessionStorage.removeItem('lastScreen');
+    try { document.cookie = 'mt_bypass=; path=/; max-age=0; SameSite=Lax'; } catch (e) {}
     location.reload();
 }
 function buildNavigation(user) {
@@ -1276,7 +1314,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); break;
+        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); break;
     }
 }
 function initTabs() {

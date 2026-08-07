@@ -427,6 +427,60 @@ function canAccessStore(user, store, method) {
     return false;
 }
 
+// ---- Maintenance mode ----
+// When active, non-admin users are shown a maintenance page and all data APIs
+// are locked down. Admins can still sign in and work (bypass cookie issued on login).
+const maintenanceBypassTokens = new Map(); // token -> { username, expires }
+
+function getMaintenanceSetting() {
+    const rec = (db.settings || []).find(s => s.key === 'maintenance');
+    return rec && rec.value && typeof rec.value === 'object' ? rec.value : { active: false, message: '' };
+}
+
+function isMaintenanceActive() {
+    return getMaintenanceSetting().active === true;
+}
+
+function parseCookies(req) {
+    const out = {};
+    const header = req.headers['cookie'] || '';
+    header.split(';').forEach(part => {
+        const idx = part.indexOf('=');
+        if (idx === -1) return;
+        const k = part.slice(0, idx).trim();
+        const v = part.slice(idx + 1).trim();
+        if (k) { try { out[k] = decodeURIComponent(v); } catch { out[k] = v; } }
+    });
+    return out;
+}
+
+function issueMaintenanceBypass(username) {
+    const token = crypto.randomBytes(24).toString('hex');
+    maintenanceBypassTokens.set(token, { username, expires: Date.now() + 12 * 3600 * 1000 });
+    return token;
+}
+
+function hasMaintenanceBypass(req) {
+    const token = parseCookies(req).mt_bypass;
+    if (!token) return false;
+    const entry = maintenanceBypassTokens.get(token);
+    if (!entry || entry.expires < Date.now()) {
+        maintenanceBypassTokens.delete(token);
+        return false;
+    }
+    const user = (db.users || []).find(u => u.username === entry.username);
+    return !!(user && user.role === 'admin' && (!user.status || user.status === 'active'));
+}
+
+function isAdminRequest(req) {
+    const user = getRequestUser(req);
+    return !!(user && user.role === 'admin');
+}
+
+function maintenanceBlocked(res) {
+    return json(res, 503, { error: 'The system is currently under maintenance. Please check back later.' });
+}
+
 function getNetworkIPs() {
     const ifs = os.networkInterfaces();
     const ips = [];
@@ -608,6 +662,7 @@ function handleAPI(req, res) {
 
     // GET /api/backup â€” download full database JSON
     if (parts.length === 2 && parts[1] === 'backup' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         flushDB();
         const backup = JSON.stringify(db, null, 2);
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -621,6 +676,7 @@ function handleAPI(req, res) {
 
     // POST /api/restore â€” upload full database JSON (replaces all data)
     if (parts.length === 2 && parts[1] === 'restore' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
@@ -757,6 +813,7 @@ function handleAPI(req, res) {
 
     // POST /api/restore-from-backup â€” restore from a named timestamped backup
     if (parts.length === 3 && parts[1] === 'restore-from-backup' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
@@ -835,6 +892,11 @@ function handleAPI(req, res) {
                 if (user.status === 'inactive') return json(res, 403, { error: 'Account is inactive. Contact administration.' });
                 if (user.status === 'pending') return json(res, 403, { error: 'Account pending approval. Please wait for admin confirmation.' });
 
+                // Maintenance mode: only admins can sign in
+                if (isMaintenanceActive() && user.role !== 'admin') {
+                    return json(res, 503, { error: 'The system is currently under maintenance. Please check back later.' });
+                }
+
                 user.lastLogin = new Date().toISOString();
                 safeWriteJSON(db);
 
@@ -849,6 +911,10 @@ function handleAPI(req, res) {
                 delete safeUser.password;
                 delete safeUser.warned1;
                 delete safeUser.warned2;
+
+                // Admins get a maintenance bypass token so they can refresh the page
+                // and still load the app while maintenance mode is active.
+                if (user.role === 'admin') safeUser.mt_bypass = issueMaintenanceBypass(user.username);
 
                 json(res, 200, { user: safeUser });
             } catch (e) { process.stderr.write('LOGIN_ERROR: ' + (e && e.stack || e) + '\n'); json(res, 500, { error: 'Login failed' }); }
@@ -934,6 +1000,7 @@ function handleAPI(req, res) {
 
     // POST /api/mpesa/stkpush
     if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'stkpush' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
@@ -969,6 +1036,7 @@ function handleAPI(req, res) {
 
     // POST /api/mpesa/query
     if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'query' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
@@ -995,6 +1063,7 @@ function handleAPI(req, res) {
 
     // POST /api/send-sms â€” send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
@@ -1071,6 +1140,7 @@ function handleAPI(req, res) {
     // Public signup endpoint â€” /api/signup  (POST)
     // -----------------------------------------------------------
     if (parts.length === 2 && parts[1] === 'signup' && req.method === 'POST') {
+        if (isMaintenanceActive()) return maintenanceBlocked(res);
         try {
             let body = '';
             req.on('data', chunk => body += chunk);
@@ -1144,6 +1214,7 @@ function handleAPI(req, res) {
     // -----------------------------------------------------------
     // GET /api/db/batch?stores=users,students,courses  â€” batch fetch multiple stores
     if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'batch' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         const names = (urlObj.searchParams.get('stores') || '').split(',').filter(Boolean);
         const result = {};
         for (const name of names) {
@@ -1156,6 +1227,9 @@ function handleAPI(req, res) {
     if (parts.length >= 2 && parts[1] === 'db') {
         const store = decodeURIComponent(parts[2]);
         const key = parts[3] ? decodeURIComponent(parts[3]) : null;
+
+        // Maintenance mode: only admins can touch data
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
 
         // Authorization check
         const user = getRequestUser(req);
@@ -1224,6 +1298,9 @@ function handleAPI(req, res) {
                     const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
+                    if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
+                        return json(res, 403, { error: 'Only administrators can change maintenance mode' });
+                    }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) {
                         console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(value));
@@ -1248,6 +1325,9 @@ function handleAPI(req, res) {
                     const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
+                    if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
+                        return json(res, 403, { error: 'Only administrators can change maintenance mode' });
+                    }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     const exists = db[store].some(r => r[keyPath] === pk);
@@ -1437,6 +1517,11 @@ const server = http.createServer((req, res) => {
 
     if (url === '/') url = '/index.html';
 
+    // Maintenance mode: show the maintenance page to everyone except admins (bypass cookie)
+    if (isMaintenanceActive() && !hasMaintenanceBypass(req) && (url === '/index.html' || url === '/student-manual.html' || url === '/coordinator-manual.html')) {
+        url = '/maintenance.html';
+    }
+
     // In pkg mode, check for external files first (allows hot-updating HTML/JS/CSS)
     let filePath;
     if (process.pkg && ROOT !== DATA_ROOT) {
@@ -1455,8 +1540,8 @@ const server = http.createServer((req, res) => {
         return res.end('Forbidden');
     }
 
-    // Inject branding into index.html and student-manual.html at serve-time
-    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html') || filePath.endsWith('coordinator-manual.html')) {
+    // Inject branding into index.html and manual pages at serve-time
+    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html') || filePath.endsWith('coordinator-manual.html') || filePath.endsWith('maintenance.html')) {
         fs.readFile(filePath, 'utf8', (err, html) => {
             if (err) {
                 res.writeHead(500);
@@ -1470,12 +1555,17 @@ const server = http.createServer((req, res) => {
             if (branding && branding.logo) {
                 logoCss = '<style>#login-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover;text-indent:-9999px}#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover}</style>';
             }
+            const maintSetting = getMaintenanceSetting();
+            const maintMsg = maintSetting.message && String(maintSetting.message).trim()
+                ? String(maintSetting.message).trim()
+                : 'We are carrying out scheduled maintenance and improvements. The system will be back shortly. Thank you for your patience.';
             html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName)
                        .replace(/\{\{INITIALS\}\}/g, initials)
                        .replace(/\{\{LOGO_CSS\}\}/g, logoCss)
                        .replace(/\{\{LOGO_DATA\}\}/g, logoData)
                        .replace(/\{\{LOGO_VISIBLE\}\}/g, logoData ? 'block' : 'none')
-                       .replace(/\{\{INITIALS_VISIBLE\}\}/g, logoData ? 'none' : 'block');
+                       .replace(/\{\{INITIALS_VISIBLE\}\}/g, logoData ? 'none' : 'block')
+                       .replace(/\{\{MAINTENANCE_MESSAGE\}\}/g, maintMsg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.setHeader('CDN-Cache-Control', 'no-store');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
