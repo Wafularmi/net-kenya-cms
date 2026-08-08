@@ -460,43 +460,41 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 
 ---
 
-### Session 2026-08-08 — Security Hardening: Data-Theft Protection (IN PROGRESS)
+### Session 2026-08-08 — Security Hardening: Data-Theft Protection ✅
 
-**Goal:** the operator asked "how else can you protect data from being stolen from the system?" and chose **"All of the above"** — a single security pass. Everything below is implemented in `server.js` + `js/bundle.js` locally but **NOT yet committed/pushed** (working tree dirty). Test suite is **39/41 passing**, with the last 2 failures actively being debugged.
+**Goal:** the operator asked "how else can you protect data from being stolen from the system?" and chose **"All of the above"** — a single security pass. **COMPLETE: implemented, committed (`fe87963`), pushed to `main`, and verified live on `netfoundation.ke`.**
 
-#### The two critical holes being closed
+#### The two critical holes closed
 1. **`GET /api/backup` had ZERO auth** when maintenance was off — anyone could download the whole DB.
 2. **Every API trusted spoofable `X-User-Id` / `X-User-Role` headers** — any user could impersonate admin.
 
 #### Implemented in `server.js`
-- **Server-verified sessions** — `sessions` Map (32-byte hex token, 12h TTL, reaper), `issueSession()` at login, `getSessionUser(req)` reads `Authorization: Bearer` or `session` cookie and validates against `db.users` (rejects locked/inactive). `getRequestUser` = session first, then the server-verified maintenance-bypass cookie. **Legacy header spoofing is dead.**
-- **Student data isolation** — `STUDENT_DENY_STORES` (staff, alumni, payroll, audit, counters, certificates, idCards, backups, smsLog, smsSettings, mpesaSettings, mpesaTransactions, income, expenses, fees, invoices, installments, whatsappTemplates, whatsappLog, expenseCategories, gradRequirements) and `STUDENT_WRITE_STORES` (submissions, quizRegistrations, examRegistrations, retakeRequests, seating, borrows, tickets). `filterStoreForUser()` lets students see **only their own** `students`/`users`/`payments` rows; students get 403 on denied stores and on non-GET writes elsewhere.
-- **Admin-gated backup/restore (always)** — `/api/backup` (now also 405 on non-GET), `/api/restore`, `/api/backups`, `/api/restore-from-backup` all require `role === 'admin'`, else 403; audit-logged.
+- **Server-verified sessions** — `sessions` Map (32-byte hex token, 12h TTL, reaper every 10m), `issueSession()` at login, `getSessionUser(req)` reads `Authorization: Bearer` or `session` cookie and validates against `db.users` (rejects locked/inactive). `getRequestUser` = session first, then the server-verified maintenance-bypass cookie. **Legacy header spoofing is dead.** `sessionUserForToken()` helper lets the SSE endpoint validate a raw `?token=` param (EventSource can't send headers).
+- **Student data isolation** — `STUDENT_DENY_STORES` (staff, alumni, payroll, audit, counters, certificates, idCards, backups, smsLog, smsSettings, mpesaSettings, mpesaTransactions, income, expenses, fees, invoices, installments, whatsappTemplates, whatsappLog, expenseCategories, gradRequirements) and `STUDENT_WRITE_STORES` (submissions, quizRegistrations, examRegistrations, retakeRequests, seating, borrows, tickets). `filterStoreForUser()` lets students see **only their own** `students`/`users`/`payments` rows (matched by logged-in `studentId`); students get 403 on denied stores and on non-GET writes elsewhere; settings responses have `smsSettings` stripped.
+- **Admin-gated backup/restore (always)** — `/api/backup` (405 on non-GET), `/api/restore`, `/api/backups`, `/api/restore-from-backup` all require `role === 'admin'`, else 403; audit-logged.
 - **Login rate-limit** — per-IP (`x-forwarded-for`) attempts map, `LOGIN_MAX_ATTEMPTS`/`LOGIN_WINDOW_MS`/`LOGIN_BLOCK_MS` (defaults 10 / 15m / 15m, env-overridable); 429 when blocked; success clears the counter.
-- **Server-side audit log** — `auditLog()` writes `source:'server'` entries (login, login-failed, backup-download, restore, db deletes/clears), 20k cap.
+- **Server-side audit log** — `auditLog()` writes `source:'server'` entries (login, login-failed, backup-download, restore, db deletes/clears, mpesa-settings-update), 20k cap.
 - **Security headers** on all JSON + HTML responses — `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Cache-Control: no-store`.
 - **At-rest encryption** — `ENC_KEY` derived from `DATA_ENCRYPTION_KEY` env (base64→hex→sha256 fallback), AES-256-GCM `encryptSecret`/`decryptSecret` (`enc:iv:tag:ciphertext`); MPesa consumerKey/consumerSecret/passkey encrypted on `POST /api/mpesa/settings`, decrypted on GET/stkpush/query; `/api/send-sms` decrypts the SMS API key. **Without the env var everything stays plaintext (backward compatible).**
 - **`/api/jitsi-token`** now authenticates via `getRequestUser(req)` instead of headers.
+- **New endpoint gates added during the pass:** `GET`/`POST /api/mpesa/settings` → admin-only (403 + audit); `GET /api/events` SSE → authenticated (401; accepts `?token=` OR `Authorization`/`session` cookie); `GET /api/online` → authenticated (401); `POST /api/heartbeat` → session-verified AND posted `username` must equal the token's username (401 on mismatch). **`db-change` SSE broadcasts no longer leak full record payloads** — stripped to `{ store }` only; clients refetch via the existing fallback, and server-side row filtering keeps students isolated.
 
 #### Implemented in `js/bundle.js`
-- `getAuthHeaders()` sends only `Authorization: Bearer <session_token>`; `dbClear()` and the `/api/jitsi-token` fetch use it.
+- `getAuthHeaders()` sends only `Authorization: Bearer <session_token>`; used by `dbClear()`, `/api/jitsi-token`, `saveMpesaSettings()`/`loadMpesaSettings()`, `heartbeat()`, and `renderOnlineUsers()`. SSE now connects to `/api/events?token=...`.
 
-#### Test suite `diag-security-test.js` (temp, spawns server on port 3910, injects/restores `server-data.json`)
-- **39/41 PASS:** security headers; anonymous/spoofed-header 403s (incl. POST backup → 405); admin login + token + backup/backups/income 200; student login; own-row filtering (students/users/**payments**); single-record null; batch filtering; denied stores 403; write lockdown (PUT/DELETE/POST); spoofed role + valid token still enforced; mpesa round-trip decrypt; server audit entries; wrong-password 401; brute-force 429.
-- **2 FAIL (in progress):** `mpesa secret/passkey encrypted at rest` — the on-disk `db.mpesaSettings` still holds the **original real settings** even though the in-memory db has the test values and `saveDB()` is called. Isolated probe (`diag-mpesa.js`) confirmed the same: POST → in-memory updated, GET round-trips `SECRET-PASS`, but after a 1.5s wait the file is unchanged. `saveDB()` is debounced 500ms; `safeWriteJSON` writes `.tmp` then renames. Root cause not yet found (no node processes linger; `updater.js` doesn't touch the DB; `loadDB()` only runs at startup). Note: the server's `console.log` output goes to a pipe we were ignoring — latest probe was capturing it to catch `safeWriteJSON: rename failed after 15 retries` / backup-write errors. **Hypothesis being tested next: the write/rename path is silently failing or being superseded; verify file mtime before/after the debounced write.**
-- FIXES ALREADY APPLIED this round: backup route now returns **405** on non-GET; student payments filtering now uses the logged-in user's `studentId` (`user.user.studentId`) instead of looking the student up by phone.
+#### Test suite (temp `diag-security-test.js`, port 3910, injected/restored `server-data.json`) — **54/54 PASS**
+- Security headers; anonymous/spoofed-header 403s (incl. POST backup → 405); admin login + token + backup/backups/income 200; student login; own-row filtering (students/users/**payments** by studentId); single-record null; batch filtering (denied stores → `[]`); denied stores 403; write lockdown (PUT/DELETE/POST); spoofed role + valid token still enforced; mpesa round-trip decrypt + **at-rest `enc:` prefix confirmed on disk via `GET /api/backup` flush**; server audit entries; wrong-password 401; brute-force 429; SSE `?token=` auth (401 anonymous, 200 with token); `GET /api/online` + `POST /api/heartbeat` auth (401 anonymous, 200 authenticated, 401 on username mismatch).
+- Key debugging finding: `saveDB()` is **debounced 500ms**, so tests must call `GET /api/backup` (synchronous `flushDB()`) *before* reading the DB from disk — this was the earlier "encrypted at rest" false failure. `DB_VOLUME_SYNC_FAILED ... 'C:\data\...'` messages are benign locally (volume path only exists on Railway).
 
-#### Remaining endpoints still unauthenticated (needs a decision)
-- `GET`/`POST /api/mpesa/settings` — no auth gate (students/anonymous can still read or overwrite MPesa credentials; recommend admin-only).
-- `GET /api/events` (SSE) — broadcasts `db-change` payloads with full records to any anonymous client (client uses `EventSource`, which can't set headers — would need `?token=` query param or cookie-based session).
-- `POST /api/hash`, `POST /api/heartbeat`, `GET /api/online` — low-risk but unauthenticated; online/heartbeat expose usernames.
+#### Live verification on `https://netfoundation.ke` (all passed)
+- `/api/health` → 200 (uptime resets on fresh deploy); index serves `bundle.js?v=225` (cache-buster bumped `?v=224 → ?v=225`).
+- Anonymous `/api/backup` → **403**; spoofed `X-User-Role: admin` → **403**; anonymous `GET /api/mpesa/settings` → **403**; anonymous `GET /api/online` → **401**; anonymous `POST /api/heartbeat` → **401**.
+- Real admin login → 200, returns `user.session_token`; with token: `GET /api/mpesa/settings` → 200 (real shortcode `3172274`, NET FOUNDATION KENYA), `GET /api/online` → 200, `GET /api/backup` → 200 (full DB JSON), `POST /api/heartbeat` → 200, `GET /api/backups` → 200 `{ backups: [] }`.
 
-#### Still to do
-1. Fix the mpesa at-rest persistence bug + confirm encryption lands on disk (`enc:` prefix) → test should go 41/41.
-2. Gate the remaining endpoints (at minimum MPesa settings admin-only; decide on SSE/online/heartbeat/hash).
-3. Bump `index.html` cache-buster `?v=224 → ?v=225` (bundle.js changed).
-4. Delete temp files (`diag-security-test.js`, `diag-mpesa.js`, `diag-grep.js`, `diag-dump.js`).
-5. Commit + push to `main`; verify live (`bundle.js?v=225`, spoofed-header exploit → 403).
-6. Update this summary to DONE.
+#### Remaining decisions (deferred)
+- `POST /api/hash` left unauthenticated deliberately — it only returns a SHA-256 hash of a client-supplied password (fallback for browsers without `crypto.subtle`); no sensitive data exposure.
 
-**Operators will need:** add `DATA_ENCRYPTION_KEY` to Railway (web service) to actually encrypt MPesa/SMS credentials at rest in production; local admin password is `admin` / `admin123`.
+#### Operators will need
+1. **Add `DATA_ENCRYPTION_KEY` to the Railway web service** (e.g. a base64 32-byte value like `openssl rand -base64 32`) to actually encrypt MPesa/SMS credentials at rest in production — until then they remain plaintext (fully backward compatible either way).
+2. **Live admin credentials differ from local dev** (`admin` / local `server-data.json` uses `admin123`). Session tokens now expire after 12h; users re-login as before.
+3. Cache-buster discipline: any future `js/bundle.js` change requires bumping `index.html` `?v=225` (both the preload link and the script tag).
