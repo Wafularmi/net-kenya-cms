@@ -327,7 +327,11 @@ function json(res, code, data) {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'SAMEORIGIN',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Cache-Control': 'no-store, max-age=0'
     });
     res.end(JSON.stringify(data));
     return true;
@@ -398,12 +402,37 @@ const FINANCIAL_STORES = new Set(['payments', 'income', 'expenses', 'fees', 'inv
 // Roles allowed to access ALL financial data
 const FINANCE_ADMIN_ROLES = new Set(['admin', 'finance', 'registrar']);
 
-// Extract user from request headers (sent by client)
+// Stores with sensitive records that students must never read.
+// (students/users are handled separately via per-row filtering below)
+const STUDENT_DENY_STORES = new Set([
+    'staff', 'alumni', 'payroll', 'audit', 'counters',
+    'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
+    'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
+    'invoices', 'installments', 'whatsappTemplates', 'whatsappLog',
+    'expenseCategories', 'gradRequirements'
+]);
+
+// Stores a student is allowed to write to (their own activity records)
+const STUDENT_WRITE_STORES = new Set([
+    'submissions', 'quizRegistrations', 'examRegistrations',
+    'retakeRequests', 'seating', 'borrows', 'tickets'
+]);
+
+// Extract the authenticated user from the request (server-verified).
+// Legacy X-User-Id / X-User-Role headers are NO LONGER trusted — a caller must
+// present a valid session token (Authorization: Bearer <token> or the `session`
+// cookie) that was issued at login. Admins carrying a valid maintenance-bypass
+// cookie are also accepted (that cookie is itself server-verified).
 function getRequestUser(req) {
-    const role = req.headers['x-user-role'];
-    const username = req.headers['x-user-id'] || req.headers['x-user-name'];
-    if (!role || !username) return null;
-    return { role, username };
+    const sessionUser = getSessionUser(req);
+    if (sessionUser) return { role: sessionUser.role, username: sessionUser.username, user: sessionUser };
+    if (hasMaintenanceBypass(req)) {
+        const token = parseCookies(req).mt_bypass;
+        const entry = token && maintenanceBypassTokens.get(token);
+        const user = entry && (db.users || []).find(u => u.username === entry.username);
+        if (user) return { role: user.role, username: user.username, user };
+    }
+    return null;
 }
 
 // Check if user can access a store
@@ -412,12 +441,16 @@ function canAccessStore(user, store, method) {
     if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
     if (FINANCE_ADMIN_ROLES.has(user.role)) return true;
-    if (!FINANCIAL_STORES.has(store)) return true;
-    
-    // Students can only read their own payment records
-    if (user.role === 'student' && store === 'payments' && method === 'GET') {
-        return true; // Filtering happens in the handler
+
+    if (user.role === 'student') {
+        if (STUDENT_DENY_STORES.has(store)) return false;
+        if (method !== 'GET' && !STUDENT_WRITE_STORES.has(store)) return false;
+        if (method === 'GET' && store === 'payments') return true; // filtering happens in the handler
+        return true;
     }
+
+    if (!FINANCIAL_STORES.has(store)) return true;
+
     // Coordinator: sub-admin scoped to their region
     if (user.role === 'coordinator') {
         if (['settings','regions','users','counters'].includes(store)) return false;
@@ -425,6 +458,162 @@ function canAccessStore(user, store, method) {
         return true;
     }
     return false;
+}
+
+// Restrict which rows of a store a user may see. Students only ever see their
+// own student record and their own login record (users store).
+function filterStoreForUser(user, store, rows) {
+    if (!user || user.role !== 'student') return rows;
+    const su = user.user || {};
+    const uid = String(user.username || '');
+    const sid = su.studentId;
+    if (store === 'students') {
+        return rows.filter(r => r && (
+            String(r.id) === String(sid) ||
+            String(r.phone) === uid ||
+            String(r.admissionNumber) === uid ||
+            String(r.email) === uid ||
+            String(r.id) === uid
+        ));
+    }
+    if (store === 'users') {
+        return rows.filter(r => r && String(r.username) === uid);
+    }
+    return rows;
+}
+
+// Server-verified session tokens (issued at login, 12h lifetime).
+const sessions = new Map(); // token -> { username, expires, createdAt }
+const SESSION_TTL = 12 * 3600 * 1000;
+setInterval(() => {
+    const now = Date.now();
+    for (const [token, s] of sessions) if (s.expires < now) sessions.delete(token);
+}, 10 * 60 * 1000);
+
+function issueSession(username) {
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, { username, expires: Date.now() + SESSION_TTL, createdAt: Date.now() });
+    return token;
+}
+
+function sessionUserForToken(token) {
+    if (!token) return null;
+    const s = sessions.get(token);
+    if (!s || s.expires < Date.now()) {
+        sessions.delete(token);
+        return null;
+    }
+    const user = (db.users || []).find(u => u.username === s.username);
+    if (!user || (user.status && user.status !== 'active')) return null;
+    return user;
+}
+
+function getSessionUser(req) {
+    const auth = req.headers['authorization'] || '';
+    let token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) token = parseCookies(req).session || '';
+    return sessionUserForToken(token);
+}
+
+// Brute-force protection for /api/login
+const loginAttempts = new Map(); // ip -> { count, windowStart, blockedUntil }
+const LOGIN_MAX_ATTEMPTS = parseInt(process.env.LOGIN_MAX_ATTEMPTS) || 10;
+const LOGIN_WINDOW_MS = (parseInt(process.env.LOGIN_WINDOW_MS) || 15) * 60 * 1000;
+const LOGIN_BLOCK_MS = (parseInt(process.env.LOGIN_BLOCK_MS) || 15) * 60 * 1000;
+
+function clientIp(req) {
+    return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+}
+
+function loginRateBlocked(req) {
+    const ip = clientIp(req);
+    const rec = loginAttempts.get(ip);
+    if (!rec) return false;
+    if (rec.blockedUntil && rec.blockedUntil > Date.now()) return true;
+    if (Date.now() - rec.windowStart > LOGIN_WINDOW_MS) {
+        loginAttempts.delete(ip);
+        return false;
+    }
+    return false;
+}
+
+function loginRateFail(req) {
+    const ip = clientIp(req);
+    const now = Date.now();
+    let rec = loginAttempts.get(ip);
+    if (!rec || now - rec.windowStart > LOGIN_WINDOW_MS) rec = { count: 0, windowStart: now, blockedUntil: 0 };
+    rec.count++;
+    if (rec.count >= LOGIN_MAX_ATTEMPTS) rec.blockedUntil = now + LOGIN_BLOCK_MS;
+    loginAttempts.set(ip, rec);
+}
+
+function loginRateSuccess(req) {
+    loginAttempts.delete(clientIp(req));
+}
+
+// Server-side audit trail for security-relevant events
+function auditLog(action, entity, details, user) {
+    try {
+        if (!Array.isArray(db.audit)) db.audit = [];
+        db.audit.push({
+            id: 'SVR-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+            source: 'server',
+            userId: user || 'system',
+            action,
+            entity,
+            details: details ? JSON.stringify(details).slice(0, 2000) : '',
+            date: new Date().toISOString(),
+            timestamp: Date.now()
+        });
+        if (db.audit.length > 20000) db.audit = db.audit.slice(-15000);
+        saveDB();
+    } catch (e) {}
+}
+
+// ---- Optional at-rest encryption for stored credentials ----
+// Active only when DATA_ENCRYPTION_KEY is set (32-byte value, hex or base64).
+// Sensitive fields are AES-256-GCM encrypted on disk and decrypted on use.
+// Without the env var, values are stored as plaintext (fully backward compatible),
+// so existing deployments can adopt encryption by adding the var and restarting.
+const ENC_KEY = (function () {
+    const raw = process.env.DATA_ENCRYPTION_KEY || '';
+    if (!raw) return null;
+    let b = Buffer.from(raw, 'base64');
+    if (b.length !== 32) b = Buffer.from(raw, 'hex');
+    if (b.length !== 32) b = crypto.createHash('sha256').update(raw).digest();
+    return b;
+})();
+
+function encryptSecret(plain) {
+    if (!ENC_KEY || plain === undefined || plain === null || plain === '') return plain;
+    try {
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+        const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+        const tag = cipher.getAuthTag();
+        return 'enc:' + iv.toString('base64') + ':' + tag.toString('base64') + ':' + enc.toString('base64');
+    } catch { return plain; }
+}
+
+function decryptSecret(stored) {
+    if (!ENC_KEY || typeof stored !== 'string' || !stored.startsWith('enc:')) return stored;
+    try {
+        const parts = stored.slice(4).split(':');
+        if (parts.length !== 3) return stored;
+        const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, Buffer.from(parts[0], 'base64'));
+        decipher.setAuthTag(Buffer.from(parts[1], 'base64'));
+        return Buffer.concat([decipher.update(Buffer.from(parts[2], 'base64')), decipher.final()]).toString('utf8');
+    } catch { return stored; }
+}
+
+function mpesaSettingsPlain() {
+    const s = db.mpesaSettings || {};
+    return {
+        ...s,
+        consumerKey: decryptSecret(s.consumerKey),
+        consumerSecret: decryptSecret(s.consumerSecret),
+        passkey: decryptSecret(s.passkey)
+    };
 }
 
 // ---- Maintenance mode ----
@@ -595,8 +784,11 @@ function handleAPI(req, res) {
         return json(res, 200, { status: 'ok', uptime: process.uptime(), mpesaConfigured });
     }
 
-    // GET /api/events â€” SSE stream for real-time updates
+    // GET /api/events â€” SSE stream for real-time updates (authenticated only)
     if (parts.length === 2 && parts[1] === 'events' && req.method === 'GET') {
+        const qUser = sessionUserForToken(urlObj.searchParams.get('token'));
+        const hUser = getSessionUser(req);
+        if (!qUser && !hUser) return json(res, 401, { error: 'Not authenticated' });
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -660,12 +852,15 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // GET /api/backup â€” download full database JSON
-    if (parts.length === 2 && parts[1] === 'backup' && req.method === 'GET') {
-        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+    // GET /api/backup â€” download full database JSON (admin only)
+    if (parts.length === 2 && parts[1] === 'backup') {
+        if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
         flushDB();
         const backup = JSON.stringify(db, null, 2);
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        auditLog('backup-download', 'database', { bytes: backup.length }, authUser.username);
         res.writeHead(200, {
             'Content-Type': 'application/json',
             'Content-Disposition': `attachment; filename="backup-${ts}.json"`,
@@ -674,9 +869,10 @@ function handleAPI(req, res) {
         return res.end(backup);
     }
 
-    // POST /api/restore â€” upload full database JSON (replaces all data)
+    // POST /api/restore â€” upload full database JSON (replaces all data) (admin only)
     if (parts.length === 2 && parts[1] === 'restore' && req.method === 'POST') {
-        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
@@ -686,6 +882,7 @@ function handleAPI(req, res) {
                 const count = Object.keys(data).length;
                 db = data;
                 flushDB();
+                auditLog('restore', 'database', { stores: count }, authUser.username);
                 console.log('Database restored â€”', count, 'stores');
                 json(res, 200, { ok: true, stores: count });
             } catch { json(res, 400, { error: 'Invalid JSON in backup file' }); }
@@ -787,8 +984,10 @@ function handleAPI(req, res) {
         })();
     }
 
-    // GET /api/backups â€” list available timestamped backups
+    // GET /api/backups â€” list available timestamped backups (admin only)
     if (parts.length === 2 && parts[1] === 'backups' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
         try {
             ensureBackupDir();
             const files = fs.readdirSync(DB_BACKUP_DIR)
@@ -811,9 +1010,10 @@ function handleAPI(req, res) {
         } catch { return json(res, 200, { backups: [] }); }
     }
 
-    // POST /api/restore-from-backup â€” restore from a named timestamped backup
+    // POST /api/restore-from-backup â€” restore from a named timestamped backup (admin only)
     if (parts.length === 3 && parts[1] === 'restore-from-backup' && req.method === 'POST') {
-        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
@@ -828,6 +1028,7 @@ function handleAPI(req, res) {
                 fs.writeFileSync(DB_BACKUP, JSON.stringify(data, null, 2), 'utf8');
                 db = data;
                 flushDB();
+                auditLog('restore-from-backup', 'database', { name }, authUser.username);
                 console.log('Database restored from backup:', name);
                 json(res, 200, { ok: true, stores: Object.keys(data).length });
             } catch { json(res, 400, { error: 'Restore failed' }); }
@@ -841,6 +1042,9 @@ function handleAPI(req, res) {
         req.on('data', c => body += c);
         req.on('end', () => {
             try {
+                if (loginRateBlocked(req)) {
+                    return json(res, 429, { error: 'Too many failed attempts. Please try again in 15 minutes.' });
+                }
                 const { input, password } = JSON.parse(body);
                 if (!input || !password) return json(res, 400, { error: 'Enter username and password' });
 
@@ -875,7 +1079,7 @@ function handleAPI(req, res) {
                     }
                 }
 
-                if (!user) return json(res, 401, { error: 'Invalid username or password' });
+                if (!user) { loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
                 const pwHash = hash(password);
                 let pwMatch = user.password === pwHash || user.password === password;
@@ -885,7 +1089,7 @@ function handleAPI(req, res) {
                     if (s && s.admissionNumber) pwMatch = hash(s.admissionNumber) === pwHash || s.admissionNumber === password;
                 }
 
-                if (!pwMatch) return json(res, 401, { error: 'Invalid username or password' });
+                if (!pwMatch) { loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
                 if (user.password !== pwHash) { user.password = pwHash; safeWriteJSON(db); }
                 if (user.status === 'locked') return json(res, 403, { error: 'Account locked due to inactivity. Contact administration to reactivate.' });
@@ -916,6 +1120,12 @@ function handleAPI(req, res) {
                 // and still load the app while maintenance mode is active.
                 if (user.role === 'admin') safeUser.mt_bypass = issueMaintenanceBypass(user.username);
 
+                // Server-verified session token for ALL authenticated API calls.
+                safeUser.session_token = issueSession(user.username);
+
+                loginRateSuccess(req);
+                auditLog('login', 'user', { username: user.username, role: user.role }, user.username);
+
                 json(res, 200, { user: safeUser });
             } catch (e) { process.stderr.write('LOGIN_ERROR: ' + (e && e.stack || e) + '\n'); json(res, 500, { error: 'Login failed' }); }
         });
@@ -937,14 +1147,18 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/heartbeat â€” client sends username every 30s
+    // POST /api/heartbeat â€” client sends username every 30s (session-verified)
     if (parts.length === 2 && parts[1] === 'heartbeat' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
             try {
-                const { username, name, role } = JSON.parse(body);
-                if (username) onlineUsers.set(username, { name: name || username, role: role || 'unknown', lastSeen: Date.now(), ip: req.connection.remoteAddress || req.socket.remoteAddress });
+                const authUser = getRequestUser(req);
+                if (!authUser) return json(res, 401, { error: 'Not authenticated' });
+                const { username } = JSON.parse(body);
+                if (!username || username !== authUser.username) return json(res, 401, { error: 'Not authenticated' });
+                const u = authUser.user || {};
+                onlineUsers.set(username, { name: u.name || username, role: u.role || 'unknown', lastSeen: Date.now(), ip: req.connection.remoteAddress || req.socket.remoteAddress });
                 json(res, 200, { ok: true, online: onlineUsers.size });
             } catch { json(res, 400, { error: 'Invalid' }); }
         });
@@ -955,8 +1169,8 @@ function handleAPI(req, res) {
     // Only active when JWT_APP_ID, JWT_API_KEY_ID, JWT_PRIVATE_KEY and JITSI_BASE_URL are
     // configured; otherwise the client falls back to the legacy password-based room URL.
     if (parts.length === 2 && parts[1] === 'jitsi-token' && req.method === 'GET') {
-        const username = req.headers['x-user-id'] || req.headers['x-user-name'];
-        const user = username && (db.users || []).find(u => u.username === username);
+        const authUser = getRequestUser(req);
+        const user = authUser && authUser.user;
         if (!user) return json(res, 401, { error: 'Not authenticated' });
         if (!jitsiJwtEnabled()) {
             return json(res, 200, { jwtEnabled: false, token: '', base: '' });
@@ -966,8 +1180,10 @@ function handleAPI(req, res) {
         return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, appId: JWT_APP_ID, moderator: privileged });
     }
 
-    // GET /api/online â€” returns list of users active in last 90s
+    // GET /api/online â€” returns list of users active in last 90s (authenticated only)
     if (parts.length === 2 && parts[1] === 'online' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser) return json(res, 401, { error: 'Not authenticated' });
         cleanOnlineUsers();
         const list = [];
         for (const [username, data] of onlineUsers) {
@@ -977,24 +1193,33 @@ function handleAPI(req, res) {
         return json(res, 200, { count: list.length, users: list });
     }
 
-    // POST /api/mpesa/settings
+    // POST /api/mpesa/settings (admin only)
     if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'settings' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
             try {
                 const data = JSON.parse(body);
-                db.mpesaSettings = data;
+                const stored = { ...data };
+                if (data.consumerKey) stored.consumerKey = encryptSecret(data.consumerKey);
+                if (data.consumerSecret) stored.consumerSecret = encryptSecret(data.consumerSecret);
+                if (data.passkey) stored.passkey = encryptSecret(data.passkey);
+                db.mpesaSettings = stored;
                 saveDB();
+                auditLog('mpesa-settings', 'mpesa', { saved: true }, authUser.username);
                 json(res, 200, { success: true });
             } catch { json(res, 400, { error: 'Invalid JSON' }); }
         });
         return true;
     }
 
-    // GET /api/mpesa/settings
+    // GET /api/mpesa/settings (admin only)
     if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'settings' && req.method === 'GET') {
-        json(res, 200, db.mpesaSettings || {});
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
+        json(res, 200, mpesaSettingsPlain());
         return true;
     }
 
@@ -1006,7 +1231,7 @@ function handleAPI(req, res) {
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body);
-                const s = db.mpesaSettings || {};
+                const s = mpesaSettingsPlain();
                 if (!s.shortcode || !s.consumerKey || !s.consumerSecret || !s.passkey) {
                     return json(res, 400, { error: 'M-Pesa not configured. Save settings first.' });
                 }
@@ -1042,7 +1267,7 @@ function handleAPI(req, res) {
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body);
-                const s = db.mpesaSettings || {};
+                const s = mpesaSettingsPlain();
                 if (!s.shortcode || !s.consumerKey || !s.consumerSecret || !s.passkey) {
                     return json(res, 400, { error: 'M-Pesa not configured.' });
                 }
@@ -1071,7 +1296,7 @@ function handleAPI(req, res) {
                 const { recipients, logEntries } = JSON.parse(body);
                 const smsSettings = db.settings && db.settings.find(s => s.key === 'smsSettings');
                 if (!smsSettings || !smsSettings.value) return json(res, 400, { error: 'SMS not configured. Save settings first.' });
-                const cfg = smsSettings.value;
+                const cfg = { ...smsSettings.value, apiKey: decryptSecret(smsSettings.value.apiKey) };
                 if (!cfg.apiKey || !cfg.username) return json(res, 400, { error: 'SMS API key or username missing.' });
 
                 if (!db.smsLog) db.smsLog = [];
@@ -1191,7 +1416,7 @@ function handleAPI(req, res) {
                     };
                     db.students.push(student);
                     saveDB();
-                    broadcastEvent('db-change', { store: 'students', record: student });
+                    broadcastEvent('db-change', { store: 'students' });
                     // Create admin alert
                     if (!db.alerts) db.alerts = [];
                     db.alerts.push({
@@ -1215,11 +1440,17 @@ function handleAPI(req, res) {
     // GET /api/db/batch?stores=users,students,courses  â€” batch fetch multiple stores
     if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'batch' && req.method === 'GET') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
         const names = (urlObj.searchParams.get('stores') || '').split(',').filter(Boolean);
         const result = {};
         for (const name of names) {
             if (!db[name]) db[name] = [];
-            result[name] = db[name];
+            if (!canAccessStore(user, name, 'GET')) { result[name] = []; continue; }
+            let rows = filterStoreForUser(user, name, db[name]);
+            if (name === 'settings' && (!user || user.role !== 'admin')) {
+                rows = rows.filter(r => r && r.key !== 'smsSettings');
+            }
+            result[name] = rows;
         }
         return json(res, 200, result);
     }
@@ -1251,7 +1482,7 @@ function handleAPI(req, res) {
         if (!db[store]) db[store] = [];
 
         // Helper to save DB after mutations â€” broadcast FIRST so clients get instant notification
-        function mutate(record) { broadcastEvent('db-change', { store, record }); saveDB(); }
+        function mutate(record) { broadcastEvent('db-change', { store }); saveDB(); }
 
         // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)
         if (req.method === 'GET' && !key) {
@@ -1259,12 +1490,20 @@ function handleAPI(req, res) {
             
             // Students can only see their own payments
             if (user && user.role === 'student' && store === 'payments') {
-                const student = (db.students || []).find(s => s.phone === user.username || s.id === user.username || s.email === user.username);
-                if (student) {
-                    results = results.filter(r => r.studentId === student.id || r.studentPhone === student.phone);
+                const sid = (user.user || {}).studentId;
+                if (sid) {
+                    results = results.filter(r => String(r.studentId) === String(sid) || String(r.studentPhone) === String(user.username));
                 } else {
                     results = [];
                 }
+            }
+
+            // Students only see their own student/user records
+            results = filterStoreForUser(user, store, results);
+
+            // Non-admins must not read credential-bearing settings records
+            if (store === 'settings' && (!user || user.role !== 'admin')) {
+                results = results.filter(r => r && r.key !== 'smsSettings');
             }
             
             const indexParam = urlObj.searchParams.get('index');
@@ -1285,7 +1524,14 @@ function handleAPI(req, res) {
 
         // GET /api/db/:store/:key  â€” return single record or null
         if (req.method === 'GET' && key) {
-            const item = db[store].find(r => String(r[keyPath]) === key) || null;
+            let item = db[store].find(r => String(r[keyPath]) === key) || null;
+            if (item && user && user.role === 'student') {
+                const filtered = filterStoreForUser(user, store, [item]);
+                item = filtered.length ? filtered[0] : null;
+            }
+            if (item && store === 'settings' && key === 'smsSettings' && (!user || user.role !== 'admin')) {
+                item = null;
+            }
             return json(res, 200, item);
         }
 
@@ -1342,8 +1588,10 @@ function handleAPI(req, res) {
 
         // DELETE /api/db/:store  â€” clear entire store
         if (req.method === 'DELETE' && !key) {
+            const before = db[store].length;
             db[store] = [];
             mutate({ _cleared: true });
+            auditLog('clear-store', store, { records: before }, user && user.username);
             return json(res, 200, { ok: true });
         }
 
@@ -1352,6 +1600,7 @@ function handleAPI(req, res) {
             const idx = db[store].findIndex(r => String(r[keyPath]) === key);
             if (idx >= 0) db[store].splice(idx, 1);
             mutate({ [keyPath]: key, _deleted: true });
+            auditLog('delete', store, { key }, user && user.username);
             return json(res, 200, { ok: true, deleted: idx >= 0 });
         }
 
@@ -1571,6 +1820,9 @@ const server = http.createServer((req, res) => {
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+            res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
             res.end(html);
         });
         return;

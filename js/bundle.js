@@ -3,8 +3,7 @@ const API_BASE = '/api/db';
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const headers = { 'Content-Type': 'application/json' };
-    if (user.username) headers['X-User-Id'] = user.username;
-    if (user.role) headers['X-User-Role'] = user.role;
+    if (user.session_token) headers['Authorization'] = 'Bearer ' + user.session_token;
     return headers;
 }
 async function openDB() {
@@ -70,7 +69,8 @@ async function dbDelete(store, key) {
 }
 async function dbClear(store) {
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error(`dbClear ${store} failed: ${res.status}`);
 }
@@ -1395,7 +1395,7 @@ function startAutoRefresh() {
     _refreshTimers.push(setInterval(renderOnlineUsers, 30000));
     try {
         if (_sseConnection) { _sseConnection.close(); _sseConnection = null; }
-        _sseConnection = new EventSource('/api/events');
+        _sseConnection = new EventSource('/api/events?token=' + encodeURIComponent((JSON.parse(sessionStorage.getItem('currentUser') || '{}').session_token) || ''));
         _sseConnection.addEventListener('db-change', (e) => {
             _sseConnected = true;
             try {
@@ -1412,13 +1412,13 @@ function startAutoRefresh() {
     } catch {}
 }
 async function heartbeat(user) {
-    try { await fetch('/api/heartbeat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user.username, name: user.name, role: user.role }) }); } catch {}
+    try { await fetch('/api/heartbeat', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ username: user.username, name: user.name, role: user.role }) }); } catch {}
 }
 async function renderOnlineUsers() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (u.role === 'student') return;
-        const res = await fetch('/api/online');
+        const res = await fetch('/api/online', { headers: getAuthHeaders() });
         const data = await res.json();
         const el = document.getElementById('dash-online');
         if (!el) return;
@@ -13016,7 +13016,7 @@ async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };
     await dbPut('settings', s);
     try {
-        const res = await fetch('/api/mpesa/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shortcode: s.shortcode, businessName: s.businessName, consumerKey: s.consumerKey, consumerSecret: s.consumerSecret, passkey: s.passkey, environment: s.environment, transactionType: s.transactionType }) });
+        const res = await fetch('/api/mpesa/settings', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ shortcode: s.shortcode, businessName: s.businessName, consumerKey: s.consumerKey, consumerSecret: s.consumerSecret, passkey: s.passkey, environment: s.environment, transactionType: s.transactionType }) });
         if (!res.ok) showToast('Saved locally but failed to sync to server: ' + (await res.json()).error, { type: 'warning' });
     } catch {
         showToast('Saved locally but server not reachable. Start the server for M-Pesa to work.', { type: 'warning' });
@@ -13026,7 +13026,7 @@ async function saveMpesaSettings() {
 async function loadMpesaSettings() {
     let s = await dbGet('settings', 'mpesa');
     try {
-        const res = await fetch('/api/mpesa/settings');
+        const res = await fetch('/api/mpesa/settings', { headers: getAuthHeaders() });
         if (res.ok) { const serverS = await res.json(); if (serverS && serverS.shortcode) { s = serverS; s.key = 'mpesa'; await dbPut('settings', s); } }
     } catch {}
     if (!s) return;
@@ -15217,7 +15217,7 @@ async function fetchJitsiToken(room, lobby) {
         if (!u.username) return { token: '', jwtEnabled: false, base: '' };
         var q = 'room=' + encodeURIComponent(room || '');
         if (lobby) q += '&lobby=1';
-        var res = await fetch('/api/jitsi-token?' + q, { headers: { 'X-User-Id': u.username, 'X-User-Role': u.role || '' } });
+        var res = await fetch('/api/jitsi-token?' + q, { headers: getAuthHeaders() });
         if (!res.ok) return { token: '', jwtEnabled: false, base: '' };
         return await res.json();
     } catch (e) { return { token: '', jwtEnabled: false, base: '' }; }

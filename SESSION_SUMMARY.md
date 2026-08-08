@@ -431,3 +431,72 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 ---
 
 **All systems green. Ready for live testing.**
+
+---
+
+### Session 2026-08-07 (continued) — Server-Enforced Maintenance Mode ✅
+
+**Commit `68b1785`, pushed to `main`, live on `netfoundation.ke`.**
+
+**What it does:** Settings → **🛠 Maintenance Mode** card (right after the Protection Switch) lets the admin toggle maintenance ON/OFF with a custom message. When ON, all non-admin visitors see a branded maintenance page (school logo + friendly message + animated gears/wrench/pulse + moving-stripe progress bar + admin sign-in form). Admins keep full access.
+
+**Server-enforced (client-only hiding was rejected after the Settings layout bleed taught us it's insufficient):**
+- **Bypass = server-verified.** On admin login the server issues a random 48-char hex token (in-memory `maintenanceBypassTokens` Map, 12h expiry) returned as `safeUser.mt_bypass`; the client stores it in an `mt_bypass` cookie. The server validates the cookie against the Map + `user.role === 'admin'` on every request — never trusts client-supplied `X-User-Role`/`X-User-Id` headers (spoofable).
+- **Static rewrite:** `/`, `/index.html`, `/student-manual.html`, `/coordinator-manual.html` all serve `maintenance.html` when active (no bypass). Branding injection now also handles `maintenance.html` (logo/initials/message, `{{MAINTENANCE_MESSAGE}}` HTML-escaped).
+- **API lockdown (non-admin → 503):** `/api/login` (non-admin), `/api/db/*` + `/api/db/batch`, `/api/backup`, `/api/restore`, `/api/restore-from-backup`, `/api/mpesa/stkpush`, `/api/mpesa/query`, `/api/send-sms`, `/api/signup` (everyone). `PUT/POST` of a settings record with `key === 'maintenance'` is admin-only (403).
+- **Admin recovery path:** the maintenance page has an admin sign-in form → `POST /api/login` → sets cookie + `sessionStorage.currentUser` → redirects to `/` (still on the app because of the bypass cookie).
+
+**Maintenance page details (`maintenance.html`, new file):** school logo or initials from branding, heading + custom message, animated **gears, wrench, pulsing dot** (CSS keyframes) with "Work in progress…" label, moving-stripe **progress bar**, admin sign-in form. No external assets (fully offline-safe).
+
+**Files changed:** `server.js` (helpers: `getMaintenanceSetting`, `isMaintenanceActive`, `parseCookies`, `issueMaintenanceBypass`, `hasMaintenanceBypass`, `isAdminRequest`, `maintenanceBlocked`; gated endpoints; static rewrite; branding injection), `maintenance.html` (new), `index.html` (Maintenance Mode card + `bundle.js?v=223 → ?v=224`), `js/bundle.js` (`loadMaintenanceMode`, `setMaintenanceMode`, `saveMaintenanceMode`; login sets cookie, logout clears it; `showScreen('settings')` hooks the loader).
+
+**Testing:** 25-pass Puppeteer E2E suite (server start, admin login + bypass cookie, settings toggle, maintenance page served with heading/message/gears/progress/admin link, student login 503, anonymous + student db/users 503, signup 503, admin db/users 200, fresh browser sees maintenance page, admin login via maintenance page reaches app, admin refresh keeps access, maintenance OFF restores login screen, student login allowed again). Temp test scripts deleted after passing.
+
+**Local server admin password (as requested by operator):** username `admin`, password **`admin123`** (set & verified against the local DB; change after use if desired).
+
+**Live verified post-deploy:** health 200; `index.html` serves `bundle.js?v=224`; bundle contains `loadMaintenanceMode` + `mt_bypass`; `/maintenance.html` serves 200 (66 KB). Maintenance is currently **OFF** (setting removed from DB), so the live site behaves normally — toggling ON in Settings immediately hides the public site.
+
+**Final live state (2026-08-07):** `... → bd142be → 68b1785` all on `main`; working tree clean; `netfoundation.ke` serving the feature.
+
+---
+
+### Session 2026-08-08 — Security Hardening: Data-Theft Protection (IN PROGRESS)
+
+**Goal:** the operator asked "how else can you protect data from being stolen from the system?" and chose **"All of the above"** — a single security pass. Everything below is implemented in `server.js` + `js/bundle.js` locally but **NOT yet committed/pushed** (working tree dirty). Test suite is **39/41 passing**, with the last 2 failures actively being debugged.
+
+#### The two critical holes being closed
+1. **`GET /api/backup` had ZERO auth** when maintenance was off — anyone could download the whole DB.
+2. **Every API trusted spoofable `X-User-Id` / `X-User-Role` headers** — any user could impersonate admin.
+
+#### Implemented in `server.js`
+- **Server-verified sessions** — `sessions` Map (32-byte hex token, 12h TTL, reaper), `issueSession()` at login, `getSessionUser(req)` reads `Authorization: Bearer` or `session` cookie and validates against `db.users` (rejects locked/inactive). `getRequestUser` = session first, then the server-verified maintenance-bypass cookie. **Legacy header spoofing is dead.**
+- **Student data isolation** — `STUDENT_DENY_STORES` (staff, alumni, payroll, audit, counters, certificates, idCards, backups, smsLog, smsSettings, mpesaSettings, mpesaTransactions, income, expenses, fees, invoices, installments, whatsappTemplates, whatsappLog, expenseCategories, gradRequirements) and `STUDENT_WRITE_STORES` (submissions, quizRegistrations, examRegistrations, retakeRequests, seating, borrows, tickets). `filterStoreForUser()` lets students see **only their own** `students`/`users`/`payments` rows; students get 403 on denied stores and on non-GET writes elsewhere.
+- **Admin-gated backup/restore (always)** — `/api/backup` (now also 405 on non-GET), `/api/restore`, `/api/backups`, `/api/restore-from-backup` all require `role === 'admin'`, else 403; audit-logged.
+- **Login rate-limit** — per-IP (`x-forwarded-for`) attempts map, `LOGIN_MAX_ATTEMPTS`/`LOGIN_WINDOW_MS`/`LOGIN_BLOCK_MS` (defaults 10 / 15m / 15m, env-overridable); 429 when blocked; success clears the counter.
+- **Server-side audit log** — `auditLog()` writes `source:'server'` entries (login, login-failed, backup-download, restore, db deletes/clears), 20k cap.
+- **Security headers** on all JSON + HTML responses — `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Cache-Control: no-store`.
+- **At-rest encryption** — `ENC_KEY` derived from `DATA_ENCRYPTION_KEY` env (base64→hex→sha256 fallback), AES-256-GCM `encryptSecret`/`decryptSecret` (`enc:iv:tag:ciphertext`); MPesa consumerKey/consumerSecret/passkey encrypted on `POST /api/mpesa/settings`, decrypted on GET/stkpush/query; `/api/send-sms` decrypts the SMS API key. **Without the env var everything stays plaintext (backward compatible).**
+- **`/api/jitsi-token`** now authenticates via `getRequestUser(req)` instead of headers.
+
+#### Implemented in `js/bundle.js`
+- `getAuthHeaders()` sends only `Authorization: Bearer <session_token>`; `dbClear()` and the `/api/jitsi-token` fetch use it.
+
+#### Test suite `diag-security-test.js` (temp, spawns server on port 3910, injects/restores `server-data.json`)
+- **39/41 PASS:** security headers; anonymous/spoofed-header 403s (incl. POST backup → 405); admin login + token + backup/backups/income 200; student login; own-row filtering (students/users/**payments**); single-record null; batch filtering; denied stores 403; write lockdown (PUT/DELETE/POST); spoofed role + valid token still enforced; mpesa round-trip decrypt; server audit entries; wrong-password 401; brute-force 429.
+- **2 FAIL (in progress):** `mpesa secret/passkey encrypted at rest` — the on-disk `db.mpesaSettings` still holds the **original real settings** even though the in-memory db has the test values and `saveDB()` is called. Isolated probe (`diag-mpesa.js`) confirmed the same: POST → in-memory updated, GET round-trips `SECRET-PASS`, but after a 1.5s wait the file is unchanged. `saveDB()` is debounced 500ms; `safeWriteJSON` writes `.tmp` then renames. Root cause not yet found (no node processes linger; `updater.js` doesn't touch the DB; `loadDB()` only runs at startup). Note: the server's `console.log` output goes to a pipe we were ignoring — latest probe was capturing it to catch `safeWriteJSON: rename failed after 15 retries` / backup-write errors. **Hypothesis being tested next: the write/rename path is silently failing or being superseded; verify file mtime before/after the debounced write.**
+- FIXES ALREADY APPLIED this round: backup route now returns **405** on non-GET; student payments filtering now uses the logged-in user's `studentId` (`user.user.studentId`) instead of looking the student up by phone.
+
+#### Remaining endpoints still unauthenticated (needs a decision)
+- `GET`/`POST /api/mpesa/settings` — no auth gate (students/anonymous can still read or overwrite MPesa credentials; recommend admin-only).
+- `GET /api/events` (SSE) — broadcasts `db-change` payloads with full records to any anonymous client (client uses `EventSource`, which can't set headers — would need `?token=` query param or cookie-based session).
+- `POST /api/hash`, `POST /api/heartbeat`, `GET /api/online` — low-risk but unauthenticated; online/heartbeat expose usernames.
+
+#### Still to do
+1. Fix the mpesa at-rest persistence bug + confirm encryption lands on disk (`enc:` prefix) → test should go 41/41.
+2. Gate the remaining endpoints (at minimum MPesa settings admin-only; decide on SSE/online/heartbeat/hash).
+3. Bump `index.html` cache-buster `?v=224 → ?v=225` (bundle.js changed).
+4. Delete temp files (`diag-security-test.js`, `diag-mpesa.js`, `diag-grep.js`, `diag-dump.js`).
+5. Commit + push to `main`; verify live (`bundle.js?v=225`, spoofed-header exploit → 403).
+6. Update this summary to DONE.
+
+**Operators will need:** add `DATA_ENCRYPTION_KEY` to Railway (web service) to actually encrypt MPesa/SMS credentials at rest in production; local admin password is `admin` / `admin123`.
