@@ -6587,6 +6587,7 @@ async function handleDiplomaPdfUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
     if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
+    window._diplomaPdfUploading = true;
     const reader = new FileReader();
     reader.onload = function(e) {
         const arr = new Uint8Array(e.target.result);
@@ -6596,6 +6597,11 @@ async function handleDiplomaPdfUpload(event) {
         const preview = document.getElementById('diploma-pdf-preview');
         preview.textContent = 'Template: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
         preview.style.color = 'var(--success)';
+        window._diplomaPdfUploading = false;
+    };
+    reader.onerror = function() {
+        window._diplomaPdfUploading = false;
+        showToast('Failed to read PDF file', { type: 'danger' });
     };
     reader.readAsArrayBuffer(file);
 }
@@ -6612,6 +6618,11 @@ async function handleDiplomaSigUpload(role, event) {
     reader.readAsDataURL(file);
 }
 async function saveDiplomaPdfConfig() {
+    if (window._diplomaPdfUploading) {
+        showToast('Please wait for PDF upload to finish...', { type: 'warning' });
+        await new Promise(r => setTimeout(r, 500));
+        if (window._diplomaPdfUploading) return showToast('Upload still in progress, try again in a moment', { type: 'warning' });
+    }
     const config = {
         template: window._diplomaPdfTemplate || null,
         fields: {
