@@ -6619,9 +6619,13 @@ async function handleDiplomaSigUpload(role, event) {
 }
 async function saveDiplomaPdfConfig() {
     if (window._diplomaPdfUploading) {
-        showToast('Please wait for PDF upload to finish...', { type: 'warning' });
-        await new Promise(r => setTimeout(r, 500));
-        if (window._diplomaPdfUploading) return showToast('Upload still in progress, try again in a moment', { type: 'warning' });
+        showToast('Waiting for PDF upload to finish...', { type: 'info' });
+        let waited = 0;
+        while (window._diplomaPdfUploading && waited < 10000) {
+            await new Promise(r => setTimeout(r, 200));
+            waited += 200;
+        }
+        if (window._diplomaPdfUploading) return showToast('Upload timed out, please try again', { type: 'danger' });
     }
     const config = {
         template: window._diplomaPdfTemplate || null,
