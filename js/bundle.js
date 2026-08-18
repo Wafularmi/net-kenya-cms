@@ -6619,6 +6619,61 @@ async function handleDiplomaSigUpload(role, event) {
     };
     reader.readAsDataURL(file);
 }
+}
+
+async function detectDiplomaFieldsWithAI() {
+    const fileInput = document.getElementById('diploma-pdf-upload');
+    if (!fileInput.files || !fileInput.files[0]) {
+        showToast('Please upload a PDF template first!', { type: 'danger' });
+        return;
+    }
+    const file = fileInput.files[0];
+    if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
+
+    const btn = document.querySelector('button[onclick="detectDiplomaFieldsWithAI()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '🔍 Detecting...'; }
+
+    try {
+        showToast('Analyzing PDF with AI...', { type: 'info' });
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+                const res = await fetch('/api/ai/detect-fields', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ pdfBase64: base64 })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'AI detection failed');
+
+                if (data.fields) {
+                    // Fill in the detected coordinates
+                    for (const [field, coords] of Object.entries(data.fields)) {
+                        const xEl = document.getElementById('diploma-fx-' + field);
+                        const yEl = document.getElementById('diploma-fy-' + field);
+                        const sizeEl = document.getElementById('diploma-fs-' + field);
+                        if (xEl) xEl.value = Math.round(coords.x);
+                        if (yEl) yEl.value = Math.round(coords.y);
+                        if (sizeEl && coords.size) sizeEl.value = coords.size;
+                    }
+                    showToast('AI detected and filled field positions!', { type: 'success' });
+                } else {
+                    showToast('No fields detected. Please set manually.', { type: 'warning' });
+                }
+            } catch (e) {
+                showToast('AI detection error: ' + e.message, { type: 'danger' });
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '🔍 Detect Fields with AI'; }
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    } catch (e) {
+        showToast('Error: ' + e.message, { type: 'danger' });
+        if (btn) { btn.disabled = false; btn.textContent = '🔍 Detect Fields with AI'; }
+    }
+}
+
 async function saveDiplomaPdfConfig() {
     if (window._diplomaPdfUploading) {
         showToast('Waiting for PDF upload to finish...', { type: 'info' });

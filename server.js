@@ -570,6 +570,82 @@ function auditLog(action, entity, details, user) {
 } catch (e) {}
 }
 
+    // Helper: Extract field positions from Azure Form Recognizer layout result
+function extractFieldPositions(analyzeResult) {
+    const fields = {};
+    const pages = analyzeResult.pages || [];
+
+    for (const page of pages) {
+        const words = page.words || [];
+        const lines = page.lines || [];
+
+        // Look for label-value patterns (e.g., "Name: [blank]", "Date: [blank]")
+        for (const line of lines) {
+            const content = line.content || '';
+            const polygon = line.polygon || [];
+
+            // Look for common diploma field labels
+            const fieldLabels = {
+                name: ['name', 'student name', 'full name', 'candidate name'],
+                adm: ['admission', 'admission no', 'adm no', 'reg no', 'registration'],
+                date: ['date', 'graduation date', 'award date', 'issue date'],
+                docid: ['doc id', 'document id', 'certificate no', 'cert no'],
+                vcode: ['verify', 'verification code', 'v-code', 'vcode'],
+            };
+
+            const lowerContent = content.toLowerCase();
+            for (const [field, labels] of Object.entries(fieldLabels)) {
+                if (labels.some(l => lowerContent.includes(l))) {
+                    const centerX = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length;
+                    const centerY = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length;
+
+                    // Estimate field position to the right of label
+                    const fieldWidth = 100; // mm
+                    const fieldHeight = 10; // mm
+
+                    if (!fields[field]) {
+                        fields[field] = {
+                            x: Math.round(centerX + 30), // mm, offset from label
+                            y: Math.round(centerY),
+                            size: 12
+                        };
+                    }
+                }
+            }
+        }
+
+        // Also detect blank/underlined areas (potential fill-in fields)
+        for (const line of lines) {
+            const content = line.content || '';
+            if (content.includes('_') || content.match(/_{3,}/) || content.match(/□|☐/)) {
+                const polygon = line.polygon || [];
+                const centerX = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length;
+                const centerY = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length;
+
+                // Assign to nearest unlabeled field
+                const unassignedFields = ['name', 'adm', 'date', 'docid', 'vcode']
+                    .filter(f => !fields[f]);
+                if (unassignedFields.length > 0) {
+                    fields[unassignedFields[0]] = {
+                        x: Math.round(centerX),
+                        y: Math.round(centerY),
+                        size: 12
+                    };
+                }
+            }
+        }
+    }
+
+    // Convert coordinates from points (1/72 inch) to mm
+    const ptToMm = 25.4 / 72;
+    for (const field of Object.values(fields)) {
+        field.x = Math.round(field.x * ptToMm);
+        field.y = Math.round(field.y * ptToMm);
+    }
+
+    return fields;
+}
+
     // ---- Optional at-rest encryption for stored credentials ----
 // Active only when DATA_ENCRYPTION_KEY is set (32-byte value, hex or base64).
 // Sensitive fields are AES-256-GCM encrypted on disk and decrypted on use.
@@ -867,6 +943,76 @@ function handleAPI(req, res) {
             'Content-Length': Buffer.byteLength(backup)
         });
         return res.end(backup);
+    }
+
+    // POST /api/ai/detect-fields — AI field detection on PDF template
+    if (parts.length >= 2 && parts[1] === 'ai' && parts[2] === 'detect-fields' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
+
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', async () => {
+            try {
+                const { pdfBase64 } = JSON.parse(body);
+                if (!pdfBase64) return json(res, 400, { error: 'pdfBase64 required' });
+
+                // Call Azure Form Recognizer / Azure Document Intelligence
+                const endpoint = process.env.AZURE_FORM_RECOGNIZER_ENDPOINT;
+                const key = process.env.AZURE_FORM_RECOGNIZER_KEY;
+                const modelId = process.env.AZURE_FORM_RECOGNIZER_MODEL_ID || 'prebuilt-layout';
+
+                if (!endpoint || !key) {
+                    return json(res, 503, { error: 'Azure Form Recognizer not configured' });
+                }
+
+                const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+
+                // Analyze document with Azure Form Recognizer
+                const analyzeUrl = `${endpoint}/formrecognizer/documentModels/${modelId}:analyze?api-version=2023-07-31`;
+                const analyzeRes = await fetch(analyzeUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/pdf',
+                        'Ocp-Apim-Subscription-Key': key
+                    },
+                    body: pdfBuffer
+                });
+
+                if (!analyzeRes.ok) {
+                    const err = await analyzeRes.text();
+                    console.error('Azure analyze error:', err);
+                    return json(res, 502, { error: 'Azure analysis failed' });
+                }
+
+                const operationLocation = analyzeRes.headers.get('operation-location');
+                if (!operationLocation) return json(res, 502, { error: 'No operation location' });
+
+                // Poll for results
+                let result;
+                for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    const pollRes = await fetch(operationLocation, {
+                        headers: { 'Ocp-Apim-Subscription-Key': key }
+                    });
+                    const pollData = await pollRes.json();
+                    if (pollData.status === 'succeeded') { result = pollData; break; }
+                    if (pollData.status === 'failed') return json(res, 502, { error: 'Analysis failed' });
+                }
+
+                if (!result) return json(res, 504, { error: 'Analysis timeout' });
+
+                // Extract field positions from layout
+                const fields = extractFieldPositions(result.analyzeResult);
+                return json(res, 200, { fields });
+
+            } catch (e) {
+                console.error('AI detect-fields error:', e);
+                return json(res, 500, { error: e.message });
+            }
+        });
+        return true;
     }
 
     // POST /api/restore â€” upload full database JSON (replaces all data) (admin only)
