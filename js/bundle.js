@@ -75,7 +75,7 @@ async function dbClear(store) {
     if (!res.ok) throw new Error(`dbClear ${store} failed: ${res.status}`);
 }
 async function dbSet(store, key, value) {
-    return dbPut(store, { key, value });
+    return dbPut(store, { ...value, key });
 }
 async function getNextCounter(key, prefix = '') {
     let counter = await dbGet('counters', key);
