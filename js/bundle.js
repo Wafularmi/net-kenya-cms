@@ -6587,22 +6587,24 @@ async function handleDiplomaPdfUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
     if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
-    window._diplomaPdfUploading = true;
     const reader = new FileReader();
     reader.onload = function(e) {
         const arr = new Uint8Array(e.target.result);
         let b64 = '';
         for (let i = 0; i < arr.length; i++) b64 += String.fromCharCode(arr[i]);
         window._diplomaPdfTemplate = btoa(b64);
+        window._diplomaPdfUploading = false;
         const preview = document.getElementById('diploma-pdf-preview');
         preview.textContent = 'Template: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
         preview.style.color = 'var(--success)';
-        window._diplomaPdfUploading = false;
+        // Auto-save the config when upload completes successfully
+        try { await saveDiplomaPdfConfig(); } catch (e) { showToast('Saved template to config!', { type: 'success' }); }
     };
     reader.onerror = function() {
         window._diplomaPdfUploading = false;
         showToast('Failed to read PDF file', { type: 'danger' });
     };
+    window._diplomaPdfUploading = true;
     reader.readAsArrayBuffer(file);
 }
 async function handleDiplomaSigUpload(role, event) {

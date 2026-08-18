@@ -567,7 +567,24 @@ function auditLog(action, entity, details, user) {
         });
         if (db.audit.length > 20000) db.audit = db.audit.slice(-15000);
         saveDB();
-    } catch (e) {}
+} catch (e) {}
+}
+
+// API: Prune audit log (admin only)
+if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'prune-audit' && req.method === 'DELETE') {
+    const user = getRequestUser(req);
+    if (!canAccessStore(user, 'settings', req.method) || user.role !== 'admin') {
+        return json(res, 403, { error: 'Admin only' });
+    }
+    const keepCount = parseInt(urlObj.searchParams.get('keep')) || 0;
+    if (keepCount > 0) {
+        db.audit = db.audit.slice(-keepCount);
+    } else {
+        db.audit = [];
+    }
+    saveDB();
+    json(res, 200, { ok: true, remaining: db.audit.length });
+    return true;
 }
 
 // ---- Optional at-rest encryption for stored credentials ----
