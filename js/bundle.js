@@ -6588,7 +6588,7 @@ async function handleDiplomaPdfUpload(event) {
     if (!file) return;
     if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         const arr = new Uint8Array(e.target.result);
         let b64 = '';
         for (let i = 0; i < arr.length; i++) b64 += String.fromCharCode(arr[i]);
