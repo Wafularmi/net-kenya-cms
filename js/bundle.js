@@ -6598,7 +6598,7 @@ async function handleDiplomaPdfUpload(event) {
         preview.textContent = 'Template: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
         preview.style.color = 'var(--success)';
         // Auto-save the config when upload completes successfully
-        try { await saveDiplomaPdfConfig(); } catch (e) { showToast('Saved template to config!', { type: 'success' }); }
+        try { await saveDiplomaPdfConfig(); showToast('Template saved to config!', { type: 'success' }); } catch (e) { showToast('Failed to save template: ' + e.message, { type: 'danger' }); }
     };
     reader.onerror = function() {
         window._diplomaPdfUploading = false;
@@ -6688,7 +6688,7 @@ async function showDiplomaPdfGenerator() {
     const content = `<div class="form-group"><label>Student</label><select id="diploma-pdf-student"><option value="">Select student...</option>${availableStudents.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber || s.id})</option>`).join('')}</select></div>
         <div class="form-group"><label>Student Name on Diploma <span style="font-size:10px;color:var(--text-muted);">(override - leave blank to use student record name)</span></label><input type="text" id="diploma-pdf-name-override" placeholder="Optional: type name differently from student record"></div>
         <div class="form-group"><label>Graduation Date *</label><input type="date" id="diploma-pdf-date" required></div>`;
-    showModal('Generate Diploma PDF', content, `<button class="btn btn-primary" onclick="generateDiplomaPdf()">Generate</button>`);
+    showModal('Generate Diploma PDF', content, `<button class="btn btn-primary" onclick="generateDiplomaPdf()">Generate</button> <button class="btn btn-outline" onclick="loadDiplomaPdfConfig(); showModal('Generate Diploma PDF', document.querySelector('#modal-content .modal-body').innerHTML, document.querySelector('#modal-content .modal-actions').innerHTML)">↻ Reload Config</button>`);
 }
 async function generateDiplomaPdf() {
     const studentId = document.getElementById('diploma-pdf-student').value;
