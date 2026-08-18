@@ -570,24 +570,7 @@ function auditLog(action, entity, details, user) {
 } catch (e) {}
 }
 
-// API: Prune audit log (admin only)
-if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'prune-audit' && req.method === 'DELETE') {
-    const user = getRequestUser(req);
-    if (!canAccessStore(user, 'settings', req.method) || user.role !== 'admin') {
-        return json(res, 403, { error: 'Admin only' });
-    }
-    const keepCount = parseInt(urlObj.searchParams.get('keep')) || 0;
-    if (keepCount > 0) {
-        db.audit = db.audit.slice(-keepCount);
-    } else {
-        db.audit = [];
-    }
-    saveDB();
-    json(res, 200, { ok: true, remaining: db.audit.length });
-    return true;
-}
-
-// ---- Optional at-rest encryption for stored credentials ----
+    // ---- Optional at-rest encryption for stored credentials ----
 // Active only when DATA_ENCRYPTION_KEY is set (32-byte value, hex or base64).
 // Sensitive fields are AES-256-GCM encrypted on disk and decrypted on use.
 // Without the env var, values are stored as plaintext (fully backward compatible),
@@ -1469,7 +1452,24 @@ function handleAPI(req, res) {
             }
             result[name] = rows;
         }
-        return json(res, 200, result);
+return json(res, 200, result);
+    }
+
+    // DELETE /api/db/settings/prune-audit?keep=N  â€” admin only prune audit log
+    if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'settings' && parts[3] === 'prune-audit' && req.method === 'DELETE') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!canAccessStore(user, 'settings', req.method) || user.role !== 'admin') {
+            return json(res, 403, { error: 'Admin only' });
+        }
+        const keepCount = parseInt(urlObj.searchParams.get('keep')) || 0;
+        if (keepCount > 0) {
+            db.audit = db.audit.slice(-keepCount);
+        } else {
+            db.audit = [];
+        }
+        saveDB();
+        return json(res, 200, { ok: true, remaining: db.audit.length });
     }
 
     if (parts.length >= 2 && parts[1] === 'db') {
