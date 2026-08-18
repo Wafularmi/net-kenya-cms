@@ -6694,13 +6694,16 @@ async function generateDiplomaPdf() {
     const studentId = document.getElementById('diploma-pdf-student').value;
     const gradDate = document.getElementById('diploma-pdf-date').value;
     const nameOverride = document.getElementById('diploma-pdf-name-override').value.trim();
+    const generateBtn = document.querySelector('#modal-content .btn-primary');
     if (!studentId) return showToast('Select a student!');
     if (!gradDate) return showToast('Enter graduation date!');
     const config = await dbGet('settings', 'diplomaPdfConfig');
     if (!config || !config.template) return showToast('Upload a PDF template first!', { type: 'danger' });
+    // Disable button and show loading
+    if (generateBtn) { generateBtn.disabled = true; generateBtn.textContent = 'Generating...'; }
+    showToast('Generating diploma...', { type: 'info' });
     try {
         closeModal();
-        showToast('Generating diploma...', { type: 'info' });
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
         const pdfBytes = Uint8Array.from(atob(config.template), c => c.charCodeAt(0));
         const pdfDoc = await PDFDocument.load(pdfBytes);
@@ -6752,6 +6755,8 @@ async function generateDiplomaPdf() {
     } catch (err) {
         console.error('Diploma PDF error:', err);
         showToast('Failed to generate diploma: ' + err.message, { type: 'danger' });
+    } finally {
+        if (generateBtn) { generateBtn.disabled = false; generateBtn.textContent = 'Generate'; }
     }
 }
 function downloadDiplomaPdfBlob(url, name) {
