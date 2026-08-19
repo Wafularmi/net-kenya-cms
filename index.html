@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=235" as="script">
+    <link rel="preload" href="js/bundle.js?v=236" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
@@ -766,11 +766,12 @@
                              <div class="form-group"><label>Director Sig</label><div class="sig-upload"><img id="diploma-sig-director-preview" class="sig-preview" style="display:none;"><label class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label><input type="file" accept="image/*" onchange="handleDiplomaSigUpload('director', event)"></div></div><div style="display:flex;gap:4px;margin-top:4px;"><input type="number" id="diploma-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:50px;"><input type="number" id="diploma-sig-director-y" placeholder="Y" value="240" min="0" max="297" style="width:50px;"><input type="number" id="diploma-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:50px;"></div>
                          </div>
                          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-                             <button class="btn btn-primary" onclick="saveDiplomaPdfConfig()">Save Config</button>
+                             <button class="btn btn-primary" id="btn-save-diploma-config" onclick="saveDiplomaPdfConfig()"><span class="btn-text">Save Template</span><span class="btn-loading" style="display:none;">⏳ Saving...</span></button>
                              <button class="btn btn-info" onclick="detectDiplomaFieldsWithAI()">🔍 Detect Fields with AI</button>
-                             <button class="btn btn-outline" onclick="loadDiplomaPdfConfig()">Reload</button>
+                             <button class="btn btn-outline" onclick="loadDiplomaPdfConfig()">Reload Config</button>
                              <button class="btn btn-success" onclick="showDiplomaPdfGenerator()">Generate Diploma</button>
                          </div>
+                         <div id="diploma-save-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                      </div>
                      <!-- Alumni Management Section -->
                      <div class="card" style="margin-top:16px;">
@@ -1049,7 +1050,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=235"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=236"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=8"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

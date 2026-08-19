@@ -6587,6 +6587,7 @@ async function handleDiplomaPdfUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
     if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
+    window._diplomaPdfUploading = true;
     const reader = new FileReader();
     reader.onload = async function(e) {
         const arr = new Uint8Array(e.target.result);
@@ -6597,10 +6598,17 @@ async function handleDiplomaPdfUpload(event) {
         const preview = document.getElementById('diploma-pdf-preview');
         preview.textContent = 'Template: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
         preview.style.color = 'var(--success)';
+        
         // Render PDF on canvas for visual coordinate picking
         await renderPdfOnCanvas(window._diplomaPdfTemplate);
+        
         // Auto-save the config when upload completes successfully
-        try { await saveDiplomaPdfConfig(); } catch (e) { showToast('Saved template to config!', { type: 'success' }); }
+        try { 
+            await saveDiplomaPdfConfig(); 
+            showToast('Template saved to config!', { type: 'success' }); 
+        } catch (e) { 
+            showToast('Failed to save template: ' + e.message, { type: 'danger' }); 
+        }
     };
     reader.onerror = function() {
         window._diplomaPdfUploading = false;
@@ -6870,6 +6878,17 @@ async function saveDiplomaPdfConfig() {
         }
         if (window._diplomaPdfUploading) return showToast('Upload timed out, please try again', { type: 'danger' });
     }
+    
+    if (!window._diplomaPdfTemplate) {
+        showToast('No PDF template uploaded. Please upload a PDF first.', { type: 'danger' });
+        return;
+    }
+
+    const btn = document.getElementById('btn-save-diploma-config');
+    const statusEl = document.getElementById('diploma-save-status');
+    if (btn) { btn.disabled = true; btn.querySelector('.btn-text').textContent = 'Saving...'; btn.querySelector('.btn-loading').style.display = 'inline'; }
+    if (statusEl) { statusEl.textContent = 'Saving...'; statusEl.style.color = 'var(--accent)'; }
+
     const config = {
         template: window._diplomaPdfTemplate || null,
         fields: {
@@ -6887,8 +6906,17 @@ async function saveDiplomaPdfConfig() {
             director: { img: (window._diplomaSigs || {}).director || null, x: +document.getElementById('diploma-sig-director-x').value, y: +document.getElementById('diploma-sig-director-y').value, w: +document.getElementById('diploma-sig-director-w').value }
         }
     };
-    await dbSet('settings', 'diplomaPdfConfig', config);
-    showToast('Diploma PDF configuration saved!');
+    try {
+        await dbSet('settings', 'diplomaPdfConfig', config);
+        showToast('Diploma PDF configuration saved!', { type: 'success' });
+        if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
+    } catch (e) {
+        showToast('Failed to save: ' + e.message, { type: 'danger' });
+        if (statusEl) { statusEl.textContent = '✗ Save failed'; statusEl.style.color = 'var(--danger)'; }
+    } finally {
+        const btn = document.getElementById('btn-save-diploma-config');
+        if (btn) { btn.disabled = false; btn.querySelector('.btn-text').textContent = 'Save Template'; btn.querySelector('.btn-loading').style.display = 'none'; }
+    }
 }
 
 // Alumni Management Functions
