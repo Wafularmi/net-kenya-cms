@@ -6597,6 +6597,8 @@ async function handleDiplomaPdfUpload(event) {
         const preview = document.getElementById('diploma-pdf-preview');
         preview.textContent = 'Template: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
         preview.style.color = 'var(--success)';
+        // Render PDF on canvas for visual coordinate picking
+        await renderPdfOnCanvas(window._diplomaPdfTemplate);
         // Auto-save the config when upload completes successfully
         try { await saveDiplomaPdfConfig(); } catch (e) { showToast('Saved template to config!', { type: 'success' }); }
     };
