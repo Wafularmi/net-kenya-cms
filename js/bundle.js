@@ -6617,8 +6617,238 @@ async function handleDiplomaSigUpload(role, event) {
         const preview = document.getElementById('diploma-sig-' + role + '-preview');
         if (preview) { preview.src = e.target.result; preview.style.display = 'block'; }
     };
-    reader.readAsDataURL(file);
+reader.readAsDataURL(file);
 }
+
+// PDF Canvas rendering and coordinate picking
+let _diplomaCanvasScale = 1;
+
+async function renderPdfOnCanvas(base64Pdf) {
+    if (typeof PDFLib === 'undefined') {
+        console.warn('PDFLib not loaded, skipping canvas render');
+        return;
+    }
+    try {
+        const pdfBytes = Uint8Array.from(atob(base64Pdf), c => c.charCodeAt(0));
+        window._diplomaPdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+        const page = window._diplomaPdfDoc.getPages()[0];
+
+        const pageWidth = page.getWidth();
+        const pageHeight = page.getHeight();
+
+        const maxWidth = 595;
+        const maxHeight = 842;
+        const scaleX = maxWidth / pageWidth;
+        const scaleY = maxHeight / pageHeight;
+        window._diplomaCanvasScale = Math.min(scaleX, scaleY);
+
+        const canvasWidth = Math.round(pageWidth * window._diplomaCanvasScale);
+        const canvasHeight = Math.round(pageHeight * window._diplomaCanvasScale);
+
+        const canvas = document.getElementById('diploma-pdf-canvas');
+        const preview = document.getElementById('diploma-pdf-preview');
+        const crosshair = document.getElementByIdmentById('diploma-crosshair');
+
+        if (canvas) {
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvas.style.display = 'block';
+            if (crosshair) crosshair.style.display = 'block';
+        }
+        if (preview) preview.style.display = 'none';
+
+        if (typeof pdfjsLib !== 'undefined') {
+            try {
+                const pdfData = Uint8Array.from(atob(window._diplomaPdfTemplate), c => c.charCodeAt(0));
+                const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+                const page = await pdf.getPage(1);
+                const viewport = page.getViewport({ scale: window._diplomaCanvasScale });
+                const canvas = document.getElementById('diploma-pdf-canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+            } catch (e) {
+                console.warn('pdf.js render failed, using placeholder:', e);
+                drawPlaceholderCanvas();
+            }
+        } else {
+            drawPlaceholderCanvas();
+        }
+
+        if (canvas) {
+            canvas.onclick = function(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+
+                const pdfX = clickX / window._diplomaCanvasScale / 2.83465;
+                const pdfY = clickY / window._diplomaCanvasScale / 2.83465;
+
+                setActiveFieldCoords(pdfX, pdfY);
+            };
+        }
+
+        crosshair = document.getElementByIdmentById('diploma-crosshair');
+        if (crosshair) {
+            const canvas = document.getElementById('diploma-pdf-canvas');
+            if (canvas) {
+                crosshair.style.left = '0px';
+                crosshair.style.top = '0px';
+                crosshair.style.width = canvas.width + 'px';
+                crosshair.style.height = canvas.height + 'px';
+            }
+        }
+
+    } catch (e) {
+        console.error('renderPdfOnCanvas error:', e);
+    }
+}
+
+function drawPlaceholderCanvas() {
+    const canvas = document.getElementById('diploma-pdf-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+    ctx.font = '14px system-ui';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.fillText('PDF Preview - Click to set coordinates', canvas.width / 2, canvas.height / 2);
+}
+
+function setActiveFieldCoords(pdfX, pdfY) {
+    const fields = ['name', 'adm', 'date', 'docid', 'vcode'];
+    let activeField = null;
+
+    for (const field of ['name', 'adm', 'date', 'docid', 'vcode']) {
+        const xEl = document.getElementById('diploma-fx-' + field);
+        if (xEl && (xEl === document.activeElement || xEl.dataset.recentlyChanged)) {
+            activeField = field;
+            break;
+        }
+    }
+
+    if (!activeField) {
+        for (const field of ['name', 'adm', 'date', 'docid', 'vcode']) {
+            const xEl = document.getElementById('diploma-fx-' + field);
+            if (xEl && (!xEl.value || xEl.value == '105')) {
+                activeField = field;
+                break;
+            }
+        }
+    }
+
+    if (activeField) {
+        const xEl = document.getElementById('diploma-fx-' + activeField);
+        const yEl = document.getElementById('diploma-fy-' + activeField);
+        if (xEl && yEl) {
+            xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
+            yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
+            showToast('Set ' + activeField + ' position: X=' + xEl.value + 'mm, Y=' + yEl.value + 'mm', { type: 'success' });
+        }
+    }
+}
+
+function clearDiplomaPdfPreview() {
+    window._diplomaPdfTemplate = null;
+    window._diplomaPdfDoc = null;
+    const preview = document.getElementById('diploma-pdf-preview');
+    const canvas = document.getElementById('diploma-pdf-canvas');
+    crosshair = document.getElementById;
+        const fileInput = document.getElementById('diploma-pdf-upload');
+    if (preview) { preview.textContent = 'No template uploaded'; preview.style.display = 'block'; preview.style.color = 'var(--text-muted)'; }
+    if (canvas) canvas.style.display = 'none';
+    if (crosshair) crosshair.style.display = 'none';
+    if (fileInput) fileInput.value = '';
+}
+
+function applyPresetCoords(preset) {
+    const presets = {
+        portrait: {
+            name: { x: 105, y: 120, size: 24 },
+            adm: { x: 105, y: 140, size: 14 },
+            date: { x: 105, y: 200, size: 14 },
+            docid: { x: 70, y: 280, size: 10 },
+            vcode: { x: 140, y: 280, size: 10 }
+        },
+        landscape: {
+            name: { x: 148, y: 105, size: 24 },
+            adm: { x: 148, y: 125, size: 14 },
+            date: { x: 148, y: 185, size: 14 },
+            docid: { x: 100, y: 250, size: 10 },
+            vcode: { x: 196, y: 250, size: 10 }
+        }
+    };
+    const coords = presets[preset];
+    if (coords) {
+        for (const [field, coords] of Object.entries(coords)) {
+            const xEl = document.getElementById('diploma-fx-' + field);
+            const yEl = document.getElementById('diploma-fy-' + field);
+            const sizeEl = document.getElementById('diploma-fs-' + field);
+            if (xEl) xEl.value = coords.x;
+            if (yEl) yEl.value = coords.y;
+            if (sizeEl) sizeEl.value = coords.size;
+        }
+        showToast('Applied ' + preset + ' preset coordinates', { type: 'success' });
+    }
+}
+
+async function detectDiplomaFieldsWithAI() {
+    const fileInput = document.getElementById('diploma-pdf-upload');
+    if (!fileInput.files || !fileInput.files[0]) {
+        showToast('Please upload a PDF template first!', { type: 'danger' });
+        return;
+    }
+    const file = fileInput.files[0];
+    if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
+
+    const btn = document.querySelector('button[onclick="detectDiplomaFieldsWithAI()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '🔍 Detecting...'; }
+
+    try {
+        showToast('Analyzing PDF with AI...', { type: 'info' });
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+                const res = await fetch('/api/ai/detect-fields', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ pdfBase64: base64 })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'AI detection failed');
+
+                if (data.fields) {
+                    for (const [field, coords] of Object.entries(data.fields)) {
+                        const xEl = document.getElementById('diploma-fx-' + field);
+                        const yEl = document.getElementById('diploma-fy-' + field);
+                        const sizeEl = document.getElementById('diploma-fs-' + field);
+                        if (xEl) xEl.value = Math.round(coords.x);
+                        if (yEl) yEl.value = Math.round(coords.y);
+                        if (sizeEl && coords.size) sizeEl.value = coords.size;
+                    }
+                    showToast('AI detected and filled field positions!', { type: 'success' });
+                } else {
+                    showToast('No fields detected. Please set manually.', { type: 'warning' });
+                }
+            } catch (e) {
+                showToast('AI detection error: ' + e.message, { type: 'danger' });
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '🔍 Detect Fields with AI'; }
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    } catch (e) {
+        showToast('Error: ' + e.message, { type: 'danger' });
+        if (btn) { btn.disabled = false; btn.textContent = '🔍 Detect Fields with AI'; }
+    }
+}
+
 async function saveDiplomaPdfConfig() {
     if (window._diplomaPdfUploading) {
         showToast('Waiting for PDF upload to finish...', { type: 'info' });
