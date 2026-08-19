@@ -6720,6 +6720,15 @@ function drawPlaceholderCanvas() {
     ctx.fillText('PDF Preview - Click to set coordinates', canvas.width / 2, canvas.height / 2);
 }
 
+function uint8ArrayToBase64(uint8Array) {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk);
+    }
+    return btoa(binary);
+}
 function setActiveFieldCoords(pdfX, pdfY) {
     const fields = ['name', 'adm', 'date', 'docid', 'vcode'];
     let activeField = null;
@@ -6814,7 +6823,7 @@ async function detectDiplomaFieldsWithAI() {
         const reader = new FileReader();
         reader.onload = async function(e) {
             try {
-                const base64 = btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+                const base64 = uint8ArrayToBase64(new Uint8Array(e.target.result));
                 const res = await fetch('/api/ai/detect-fields', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
