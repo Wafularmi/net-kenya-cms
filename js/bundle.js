@@ -6665,7 +6665,8 @@ async function renderPdfOnCanvas(base64Pdf) {
             canvas.style.display = 'block';
             if (crosshair) crosshair.style.display = 'block';
         }
-        if (preview) preview.style.display = 'none';
+        // Keep preview visible so user sees the green filename
+        // if (preview) preview.style.display = 'none';
 
         if (typeof pdfjsLib !== 'undefined') {
             try {
@@ -6777,8 +6778,8 @@ function clearDiplomaPdfPreview() {
     window._diplomaPdfDoc = null;
     const preview = document.getElementById('diploma-pdf-preview');
     const canvas = document.getElementById('diploma-pdf-canvas');
-    crosshair = document.getElementById;
-        const fileInput = document.getElementById('diploma-pdf-upload');
+    const crosshair = document.getElementById('diploma-crosshair');
+    const fileInput = document.getElementById('diploma-pdf-upload');
     if (preview) { preview.textContent = 'No template uploaded'; preview.style.display = 'block'; preview.style.color = 'var(--text-muted)'; }
     if (canvas) canvas.style.display = 'none';
     if (crosshair) crosshair.style.display = 'none';
