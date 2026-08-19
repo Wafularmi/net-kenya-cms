@@ -634,14 +634,17 @@
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload a designed diploma PDF template. Student details will be overlaid at the positions you configure below.</div>
                          <div class="form-group"><label>Diploma Template (PDF)</label><div style="display:flex;flex-direction:column;gap:8px;">
 <div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);">No template uploaded</div>
-<canvas id="diploma-pdf-canvas" style="display:none;max-width:100%;border:1px solid var(--border);border-radius:4px;cursor:crosshair;background:#fff;" width="595" height="842"></canvas>
+<div style="position:relative;max-width:100%;margin:8px 0;">
+<canvas id="diploma-pdf-canvas" style="display:block;max-width:100%;border:2px solid var(--accent);border-radius:8px;cursor:crosshair;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.1);" width="595" height="842"></canvas>
 <div id="diploma-crosshair" style="display:none;position:absolute;pointer-events:none;z-index:10;">
 <div style="width:1px;height:100%;background:var(--accent);position:absolute;left:50%;transform:translateX(-50%);"></div>
 <div style="height:1px;width:100%;background:var(--accent);position:absolute;top:50%;transform:translateY(-50%);"></div>
 <div style="width:20px;height:20px;border:2px solid var(--accent);border-radius:50%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);"></div>
 </div>
+</div>
+<div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);margin-top:8px;">No template uploaded</div>
 <label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">📄 Choose PDF File<input type="file" id="diploma-pdf-upload" accept="application/pdf" onchange="handleDiplomaPdfUpload(event)" style="display:none;"></label>
-<div style="display:flex;gap:8px;margin-top:8px;">
+<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
 <button class="btn btn-outline btn-sm" onclick="clearDiplomaPdfPreview()">✕ Clear Preview</button>
 <button class="btn btn-outline btn-sm" onclick="applyPresetCoords('portrait')">📐 Portrait Preset</button>
 <button class="btn btn-outline btn-sm" onclick="applyPresetCoords('landscape')">📄 Landscape Preset</button>
@@ -649,22 +652,108 @@
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from top-left)</div>
-                         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-                             <div class="form-group"><label>Name X</label><input type="number" id="diploma-fx-name" value="105" min="0" max="210"></div>
-                             <div class="form-group"><label>Name Y</label><input type="number" id="diploma-fy-name" value="120" min="0" max="297"></div>
-                             <div class="form-group"><label>Name Size</label><input type="number" id="diploma-fs-name" value="24" min="8" max="72"></div>
-                             <div class="form-group"><label>Adm No X</label><input type="number" id="diploma-fx-adm" value="105" min="0" max="210"></div>
-                             <div class="form-group"><label>Adm No Y</label><input type="number" id="diploma-fy-adm" value="140" min="0" max="297"></div>
-                             <div class="form-group"><label>Adm No Size</label><input type="number" id="diploma-fs-adm" value="14" min="8" max="72"></div>
-                             <div class="form-group"><label>Date X</label><input type="number" id="diploma-fx-date" value="105" min="0" max="210"></div>
-                             <div class="form-group"><label>Date Y</label><input type="number" id="diploma-fy-date" value="200" min="0" max="297"></div>
-                             <div class="form-group"><label>Date Size</label><input type="number" id="diploma-fs-date" value="14" min="8" max="72"></div>
-                             <div class="form-group"><label>Doc ID X</label><input type="number" id="diploma-fx-docid" value="70" min="0" max="210"></div>
-                             <div class="form-group"><label>Doc ID Y</label><input type="number" id="diploma-fy-docid" value="280" min="0" max="297"></div>
-                             <div class="form-group"><label>Doc ID Size</label><input type="number" id="diploma-fs-docid" value="10" min="8" max="72"></div>
-                             <div class="form-group"><label>Verify X</label><input type="number" id="diploma-fx-vcode" value="140" min="0" max="210"></div>
-                             <div class="form-group"><label>Verify Y</label><input type="number" id="diploma-fy-vcode" value="280" min="0" max="297"></div>
-                             <div class="form-group"><label>Verify Size</label><input type="number" id="diploma-fs-vcode" value="10" min="8" max="72"></div>
+                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning</div>
+                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                             <div class="form-group">
+                                 <label>Name Position</label>
+                                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
+                                     <div><label>X</label><input type="number" id="diploma-fx-name" value="105" min="0" max="210" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="diploma-fy-name" value="120" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Size</label><input type="number" id="diploma-fs-name" value="24" min="8" max="72" style="width:60px;"></div>
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>X: <span id="diploma-fx-name-slider-val">105</label></label>
+                                     <input type="range" id="diploma-fx-name-slider" min="0" max="210" value="105" oninput="document.getElementById('diploma-fx-name').value=this.value; document.getElementById('diploma-fx-name-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Y: <span id="diploma-fy-name-slider-val">120</label></label>
+                                     <input type="range" id="diploma-fy-name-slider" min="0" max="297" value="120" oninput="document.getElementById('diploma-fy-name').value=this.value; document.getElementById('diploma-fy-name-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Size: <span id="diploma-fs-name-slider-val">24</label></label>
+                                     <input type="range" id="diploma-fs-name-slider" min="8" max="72" value="24" oninput="document.getElementById('diploma-fs-name').value=this.value; document.getElementById('diploma-fs-name-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                             </div>
+                             <div class="form-group">
+                                 <label>Adm No Position</label>
+                                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
+                                     <div><label>X</label><input type="number" id="diploma-fx-adm" value="105" min="0" max="210" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="diploma-fy-adm" value="140" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Size</label><input type="number" id="diploma-fs-adm" value="14" min="8" max="72" style="width:60px;"></div>
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>X: <span id="diploma-fx-adm-slider-val">105</label></label>
+                                     <input type="range" id="diploma-fx-adm-slider" min="0" max="210" value="105" oninput="document.getElementById('diploma-fx-adm').value=this.value; document.getElementById('diploma-fx-adm-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Y: <span id="diploma-fy-adm-slider-val">140</label></label>
+                                     <input type="range" id="diploma-fy-adm-slider" min="0" max="297" value="140" oninput="document.getElementById('diploma-fy-adm').value=this.value; document.getElementById('diploma-fy-adm-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Size: <span id="diploma-fs-adm-slider-val">14</label></label>
+                                     <input type="range" id="diploma-fs-adm-slider" min="8" max="72" value="14" oninput="document.getElementById('diploma-fs-adm').value=this.value; document.getElementById('diploma-fs-adm-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                             </div>
+                             <div class="form-group">
+                                 <label>Date Position</label>
+                                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
+                                     <div><label>X</label><input type="number" id="diploma-fx-date" value="105" min="0" max="210" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="diploma-fy-date" value="200" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Size</label><input type="number" id="diploma-fs-date" value="14" min="8" max="72" style="width:60px;"></div>
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>X: <span id="diploma-fx-date-slider-val">105</label></label>
+                                     <input type="range" id="diploma-fx-date-slider" min="0" max="210" value="105" oninput="document.getElementById('diploma-fx-date').value=this.value; document.getElementById('diploma-fx-date-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Y: <span id="diploma-fy-date-slider-val">200</label></label>
+                                     <input type="range" id="diploma-fy-date-slider" min="0" max="297" value="200" oninput="document.getElementById('diploma-fy-date').value=this.value; document.getElementById('diploma-fy-date-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Size: <span id="diploma-fs-date-slider-val">14</label></label>
+                                     <input type="range" id="diploma-fs-date-slider" min="8" max="72" value="14" oninput="document.getElementById('diploma-fs-date').value=this.value; document.getElementById('diploma-fs-date-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                             </div>
+                             <div class="form-group">
+                                 <label>Doc ID Position</label>
+                                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
+                                     <div><label>X</label><input type="number" id="diploma-fx-docid" value="70" min="0" max="210" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="diploma-fy-docid" value="280" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Size</label><input type="number" id="diploma-fs-docid" value="10" min="8" max="72" style="width:60px;"></div>
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>X: <span id="diploma-fx-docid-slider-val">70</label></label>
+                                     <input type="range" id="diploma-fx-docid-slider" min="0" max="210" value="70" oninput="document.getElementById('diploma-fx-docid').value=this.value; document.getElementById('diploma-fx-docid-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Y: <span id="diploma-fy-docid-slider-val">280</label></label>
+                                     <input type="range" id="diploma-fy-docid-slider" min="0" max="297" value="280" oninput="document.getElementById('diploma-fy-docid').value=this.value; document.getElementById('diploma-fy-docid-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Size: <span id="diploma-fs-docid-slider-val">10</label></label>
+                                     <input type="range" id="diploma-fs-docid-slider" min="8" max="72" value="10" oninput="document.getElementById('diploma-fs-docid').value=this.value; document.getElementById('diploma-fs-docid-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                             </div>
+                             <div class="form-group">
+                                 <label>Verify Position</label>
+                                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
+                                     <div><label>X</label><input type="number" id="diploma-fx-vcode" value="140" min="0" max="210" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="diploma-fy-vcode" value="280" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Size</label><input type="number" id="diploma-fs-vcode" value="10" min="8" max="72" style="width:60px;"></div>
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>X: <span id="diploma-fx-vcode-slider-val">140</label></label>
+                                     <input type="range" id="diploma-fx-vcode-slider" min="0" max="210" value="140" oninput="document.getElementById('diploma-fx-vcode').value=this.value; document.getElementById('diploma-fx-vcode-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Y: <span id="diploma-fy-vcode-slider-val">280</label></label>
+                                     <input type="range" id="diploma-fy-vcode-slider" min="0" max="297" value="280" oninput="document.getElementById('diploma-fy-vcode').value=this.value; document.getElementById('diploma-fy-vcode-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                                 <div style="margin-top:4px;">
+                                     <label>Size: <span id="diploma-fs-vcode-slider-val">10</label></label>
+                                     <input type="range" id="diploma-fs-vcode-slider" min="8" max="72" value="10" oninput="document.getElementById('diploma-fs-vcode').value=this.value; document.getElementById('diploma-fs-vcode-slider-val').textContent=this.value;" style="width:100%;">
+                                 </div>
+                             </div>
                          </div>
                          <div class="form-group" style="margin-top:8px;"><label>Font Family</label><select id="diploma-font"><option value="Times Roman">Times Roman</option><option value="Helvetica">Helvetica</option><option value="Courier">Courier</option></select></div>
                          <div class="form-group"><label>Text Color (hex)</label><input type="color" id="diploma-text-color" value="#1a1a2e" style="height:36px;width:60px;padding:2px;"></div>
@@ -682,6 +771,17 @@
                              <button class="btn btn-outline" onclick="loadDiplomaPdfConfig()">Reload</button>
                              <button class="btn btn-success" onclick="showDiplomaPdfGenerator()">Generate Diploma</button>
                          </div>
+                     </div>
+                     <!-- Alumni Management Section -->
+                     <div class="card" style="margin-top:16px;">
+                         <h3>🎓 Alumni Management</h3>
+                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Move students between Current and Alumni status</div>
+                         <div style="display:flex;gap:8px;margin-bottom:12px;">
+                             <button class="btn btn-outline btn-sm" onclick="loadAlumniManagement()">🔄 Refresh</button>
+                             <button class="btn btn-outline btn-sm" onclick="showMoveToAlumniModal()">➕ Move to Alumni</button>
+                             <button class="btn btn-outline btn-sm" onclick="showRestoreFromAlumniModal()">⤴ Restore from Alumni</button>
+                         </div>
+                         <div id="alumni-management-list" style="max-height:300px;overflow-y:auto;"></div>
                      </div>
                      <div class="card"><h3>Digital Signatures</h3>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload signature images for document signing (PNG with transparent background recommended)</div>

@@ -6888,6 +6888,129 @@ async function saveDiplomaPdfConfig() {
     await dbSet('settings', 'diplomaPdfConfig', config);
     showToast('Diploma PDF configuration saved!');
 }
+
+// Alumni Management Functions
+async function loadAlumniManagement() {
+    const students = await dbGetAll('students');
+    const alumni = students.filter(s => s.status === 'alumni');
+    const currentStudents = students.filter(s => s.status === 'active');
+    
+    const listEl = document.getElementById('alumni-management-list');
+    if (!listEl) return;
+    
+    let html = '<h4 style="margin-bottom:8px;">Current Students (' + currentStudents.length + ')</h4>';
+    if (currentStudents.length === 0) {
+        html += '<p style="color:var(--text-muted);padding:8px;">No current students</p>';
+    } else {
+        html += '<div style="max-height:200px;overflow-y:auto;">';
+        currentStudents.forEach(s => {
+            html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border);">' +
+                '<div><strong>' + escapeHtml(s.name) + '</strong><br><small style="color:var(--text-muted);">' + (s.admissionNumber || 'No Adm#') + ' • ' + (s.program || 'No Program') + '</small></div>' +
+                '<button class="btn btn-outline btn-sm" onclick="moveToAlumni(\'' + escapeHtml(s.id) + '\')">Move to Alumni</button>' +
+                '</div>';
+        });
+        html += '</div>';
+    }
+    
+    html += '<h4 style="margin:16px 0 8px;">Alumni (' + alumni.length + ')</h4>';
+    if (alumni.length === 0) {
+        html += '<p style="color:var(--text-muted);padding:8px;">No alumni</p>';
+    } else {
+        html += '<div style="max-height:200px;overflow-y:auto;">';
+        alumni.forEach(s => {
+            html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border);">' +
+                '<div><strong>' + escapeHtml(s.name) + '</strong><br><small style="color:var(--text-muted);">' + (s.admissionNumber || 'No Adm#') + ' • ' + (s.program || 'No Program') + '</small></div>' +
+                '<button class="btn btn-primary btn-sm" onclick="restoreFromAlumni(\'' + escapeHtml(s.id) + '\')">Restore</button>' +
+                '</div>';
+        });
+        html += '</div>';
+    }
+    
+    listEl.innerHTML = html;
+}
+
+async function moveToAlumni(studentId) {
+    if (!confirm('Move this student to Alumni?')) return;
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found', { type: 'danger' });
+    student.status = 'alumni';
+    await dbPut('students', student);
+    await loadAlumniManagement();
+    showToast('Student moved to Alumni', { type: 'success' });
+}
+
+async function restoreFromAlumni(studentId) {
+    if (!confirm('Restore this student to Current?')) return;
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found', { type: 'danger' });
+    student.status = 'active';
+    await dbPut('students', student);
+    await loadAlumniManagement();
+    showToast('Student restored to Current', { type: 'success' });
+}
+
+async function showMoveToAlumniModal() {
+    const students = await dbGetAll('students');
+    const current = students.filter(s => s.status === 'active');
+    if (current.length === 0) return showToast('No current students to move', { type: 'warning' });
+    
+    const content = '<div style="max-height:300px;overflow-y:auto;">' +
+        current.map(s => '<label style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border);">' +
+            '<input type="checkbox" value="' + escapeHtml(s.id) + '" style="width:18px;height:18px;">' +
+            '<div><strong>' + escapeHtml(s.name) + '</strong><br><small style="color:var(--text-muted);">' + (s.admissionNumber || 'No Adm#') + '</small></div>' +
+        '</label>').join('') + '</div>';
+    
+    showModal('Move to Alumni', content, 
+        '<button class="btn btn-primary" onclick="moveSelectedToAlumni()">Move Selected</button> ' +
+        '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>');
+}
+
+async function moveSelectedToAlumni() {
+    const checkboxes = document.querySelectorAll('#modal-content input[type="checkbox"]:checked');
+    if (checkboxes.length === 0) return showToast('Select at least one student', { type: 'warning' });
+    
+    for (const cb of checkboxes) {
+        const student = await dbGet('students', cb.value);
+        if (student) {
+            student.status = 'alumni';
+            await dbPut('students', student);
+        }
+    }
+    closeModal();
+    await loadAlumniManagement();
+    showToast(checkboxes.length + ' student(s) moved to Alumni', { type: 'success' });
+}
+
+async function showRestoreFromAlumniModal() {
+    const alumni = (await dbGetAll('students')).filter(s => s.status === 'alumni');
+    if (alumni.length === 0) return showToast('No alumni to restore', { type: 'warning' });
+    
+    const content = '<div style="max-height:300px;overflow-y:auto;">' +
+        alumni.map(s => '<label style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border);">' +
+            '<input type="checkbox" value="' + escapeHtml(s.id) + '" style="width:18px;height:18px;">' +
+            '<div><strong>' + escapeHtml(s.name) + '</strong><br><small style="color:var(--text-muted);">' + (s.admissionNumber || 'No Adm#') + '</small></div>' +
+        '</label>').join('') + '</div>';
+    
+    showModal('Restore from Alumni', content,
+        '<button class="btn btn-primary" onclick="restoreSelectedFromAlumni()">Restore Selected</button> ' +
+        '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>');
+}
+
+async function restoreSelectedFromAlumni() {
+    const checkboxes = document.querySelectorAll('#modal-content input[type="checkbox"]:checked');
+    if (checkboxes.length === 0) return showToast('Select at least one student', { type: 'warning' });
+    
+    for (const cb of checkboxes) {
+        const student = await dbGet('students', cb.value);
+        if (student) {
+            student.status = 'active';
+            await dbPut('students', student);
+        }
+    }
+    closeModal();
+    await loadAlumniManagement();
+    showToast(checkboxes.length + ' student(s) restored', { type: 'success' });
+}
 async function loadDiplomaPdfConfig() {
     const config = await dbGet('settings', 'diplomaPdfConfig');
     if (!config) return showToast('No saved config found');
