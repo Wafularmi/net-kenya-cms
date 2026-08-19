@@ -6657,7 +6657,7 @@ async function renderPdfOnCanvas(base64Pdf) {
 
         const canvas = document.getElementById('diploma-pdf-canvas');
         const preview = document.getElementById('diploma-pdf-preview');
-        const crosshair = document.getElementByIdmentById('diploma-crosshair');
+        const crosshair = document.getElementById('diploma-crosshair');
 
         if (canvas) {
             canvas.width = canvasWidth;
@@ -6699,7 +6699,7 @@ async function renderPdfOnCanvas(base64Pdf) {
             };
         }
 
-        crosshair = document.getElementByIdmentById('diploma-crosshair');
+        crosshair = document.getElementById('diploma-crosshair');
         if (crosshair) {
             const canvas = document.getElementById('diploma-pdf-canvas');
             if (canvas) {
