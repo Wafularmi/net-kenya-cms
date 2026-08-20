@@ -7219,6 +7219,12 @@ async function loadDiplomaPdfConfig() {
     const preview = document.getElementById('diploma-pdf-preview');
     preview.textContent = config.template ? 'Template loaded' : 'No template uploaded';
     preview.style.color = config.template ? 'var(--success)' : 'var(--text-muted)';
+    
+    // Render PDF on canvas if template exists
+    if (config.template) {
+        await renderPdfOnCanvas(config.template);
+    }
+    
     showToast('Config loaded');
 }
 async function showDiplomaPdfGenerator() {
