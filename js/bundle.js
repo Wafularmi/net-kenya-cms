@@ -6929,10 +6929,12 @@ function clearDiplomaPdfPreview() {
     const canvas = document.getElementById('diploma-pdf-canvas');
     const crosshair = document.getElementById('diploma-crosshair');
     const fileInput = document.getElementById('diploma-pdf-upload');
+    const overlay = document.getElementById('diploma-field-overlay');
     if (preview) { preview.textContent = 'No template uploaded'; preview.style.display = 'block'; preview.style.color = 'var(--text-muted)'; }
     if (canvas) canvas.style.display = 'none';
     if (crosshair) crosshair.style.display = 'none';
     if (fileInput) fileInput.value = '';
+    if (overlay) overlay.innerHTML = '';
 }
 
 function applyPresetCoords(preset) {
