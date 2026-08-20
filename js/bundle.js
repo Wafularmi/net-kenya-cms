@@ -6678,6 +6678,9 @@ async function renderPdfOnCanvas(base64Pdf) {
                 const ctx = canvas.getContext('2d');
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
+                // Fill with white background first to ensure PDF is visible
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
                 await page.render({ canvasContext: ctx, viewport: viewport }).promise;
             } catch (e) {
                 console.warn('pdf.js render failed, using placeholder:', e);
@@ -6713,6 +6716,9 @@ async function renderPdfOnCanvas(base64Pdf) {
                 crosshair.style.height = canvas.height + 'px';
             }
         }
+
+        // Create field overlay elements after PDF is rendered
+        createFieldOverlayElements();
 
     } catch (e) {
         console.error('renderPdfOnCanvas error:', e);
@@ -16079,3 +16085,12 @@ window.renderLessons = async function () {
     } catch (e) { console.error('vc renderLessons attach:', e); }
 };
 // ==================== End Virtual Classroom Module ====================
+
+// Initialize diploma PDF template on page load
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await loadDiplomaPdfConfig();
+    } catch (e) {
+        console.error('Failed to load diploma PDF config:', e);
+    }
+});
