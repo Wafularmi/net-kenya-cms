@@ -498,3 +498,40 @@ Until those env vars exist, everything keeps working as before (public `meet.jit
 1. **Add `DATA_ENCRYPTION_KEY` to the Railway web service** (e.g. a base64 32-byte value like `openssl rand -base64 32`) to actually encrypt MPesa/SMS credentials at rest in production — until then they remain plaintext (fully backward compatible either way).
 2. **Live admin credentials differ from local dev** (`admin` / local `server-data.json` uses `admin123`). Session tokens now expire after 12h; users re-login as before.
 3. Cache-buster discipline: any future `js/bundle.js` change requires bumping `index.html` `?v=225` (both the preload link and the script tag).
+
+---
+
+### Diploma / Certificate PDF Generator — Era 2026-08-09 → 2026-08-21 (38 commits, LIVE ✅)
+
+The major work after security hardening was the **Diploma PDF generation system** (the certificate/diploma feature, independent of payments). All 38 commits from `fe87963` (security) to `226745c` are on `main`, pushed, and live on `netfoundation.ke`.
+
+#### Feature set delivered
+- **Persistent diploma config** (`diplomaPdfConfig` setting): sidebar **Graduation** button opens the PDF generator; uploads a diploma PDF template and stores field positions.
+- **AI field detection**: `detectDiplomaFieldsWithAI` — Azure Form Recognizer integration (env `AZURE_FORM_RECOGNIZER_*`); chunked base64 for large PDFs (stack-overflow fix).
+- **Visual coordinate picker**: canvas crosshair, click-to-set, presets; plus slider controls for field X/Y/size.
+- **Layered PDF preview**: renders the uploaded PDF on a `<canvas>` via pdf.js (UMD build exposing `pdfjsLib` globally), with **draggable field-label overlays** (`createFieldOverlayElements`) for precise positioning; canvas background `#f0f0f0`; overlay layers.
+- **Generate Diploma button** on the Certificates screen with loading state / button-disable UX, auto-save toast, Reload Config button.
+- **Copyright text**: updated to "Developed by Eternal Ministries Africa".
+- **Alumni management**: move-to / restore-from Alumni store added alongside the diploma work.
+- **Server**: `handleDiplomaPdfUpload` (async upload race-condition fixes, auto-retry up to 10s), `prune-audit` endpoint moved into request handler (crash fix).
+- **Cache-buster**: `index.html` bumped through `?v=243` during this era.
+
+#### Key bug-fix thread (pdf.js preview)
+Multiple iterations to make the preview render: UMD build for global `pdfjsLib` → remove invalid integrity hash → ensure global available → keep filename visible → fix `clearDiplomaPdfPreview` → load on page load (`loadDiplomaPdfConfig`) → fix duplicate `ctx`/else block in `renderPdfOnCanvas` → change canvas background to light gray for visibility → finalize layered preview + hard-refresh `v243`.
+
+#### Live infra
+- Several Railway **502 Bad Gateway** incidents → force-redeploy commits (`25bc37b`, `4936254`, `8be07c9`, `74f5645`) to clear the build queue; resolved.
+- Azure Form Recognizer env vars added to Railway (`f79bd0b`).
+
+#### Uncommitted at status-check (2026-08-21)
+- `index.html`: pdf.js `GlobalWorkerOptions.workerSrc` set defensively (window-load + immediate) so the worker loads even when the CDN global is already present. **This is a legit fix, committed during cleanup.**
+- Two leftover debug scripts (`fix-overlay.js`, `check-live-diploma.ps1`) were deleted — `fix-overlay.js`'s `createFieldOverlayElements` patch was already applied to `js/bundle.js` (line 8436); the probe `.ps1` was a one-off.
+
+#### Deferred / still open
+- **Mirror `NET KENYA` source into the `NET CMS` and `NET CMS 1` desktop deployment folders** (they are stale copies from ~2026-06-14, pre-dating the entire diploma + security + JaaS work). Source files to mirror: `index.html`, `js/*`, `css/*`, `server.js`, `server-https.js`, `package.json`/`package-lock.json`, `Dockerfile`, `maintenance.html`, `*.html`, `updater.js`, `version.json`, `AGENTS.md`, `certs/`, build scripts, `*.bat`/`*.vbs`. Exclude `node_modules`, `dist`, `installer*`, `backups`, `server-data*`.
+- **Operator env vars (cannot be done from repo):** `DATA_ENCRYPTION_KEY` (MPesa/SMS at-rest encryption) and the 8x8 JaaS JWT vars (`JWT_APP_ID`, `JWT_API_KEY_ID`, `JWT_PRIVATE_KEY`, `JITSI_BASE_URL`) — already live per earlier session but noted for completeness.
+- Dead self-host files (`Dockerfile.jitsi`, `docker-entrypoint-jitsi.sh`) and the `jitsi` service in `railway.json` were **already removed** (`88a2401`); confirmed absent at status-check.
+
+---
+
+**Status (2026-08-21):** Diploma PDF generator complete and live; security hardening complete; JaaS Virtual Classroom live. Working tree clean after committing the `index.html` pdf.js fix and deleting debug scripts. The only outstanding repo task is mirroring the two desktop folders.
