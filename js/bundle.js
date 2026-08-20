@@ -6687,6 +6687,9 @@ async function renderPdfOnCanvas(base64Pdf) {
             drawPlaceholderCanvas();
         }
 
+        // Create field overlay elements after PDF is rendered
+        createFieldOverlayElements();
+
         if (canvas) {
             canvas.onclick = function(e) {
                 const rect = canvas.getBoundingClientRect();
@@ -6731,7 +6734,153 @@ function drawPlaceholderCanvas() {
     ctx.fillText('PDF Preview - Click to set coordinates', canvas.width / 2, canvas.height / 2);
 }
 
-function uint8ArrayToBase64(uint8Array) {
+// Create field overlay elements on top of the PDF canvas
+function createFieldOverlayElements() {
+    const overlay = document.getElementById('diploma-field-overlay');
+    if (!overlay) return;
+    
+    // Clear existing overlay elements
+    overlay.innerHTML = '';
+    
+    const fields = [
+        { id: 'name', label: 'Student Name', color: '#3b82f6' },
+        { id: 'adm', label: 'Adm No', color: '#f59e0b' },
+        { id: 'date', label: 'Date', color: '#10b981' },
+        { id: 'docid', label: 'Doc ID', color: '#8b5cf6' },
+        { id: 'vcode', label: 'Verify Code', color: '#ef4444' }
+    ];
+    
+    // Get current coordinates from input fields
+    const fieldsData = ['name', 'adm', 'date', 'docid', 'vcode'].reduce((acc, field) => {
+        const xEl = document.getElementById('diploma-fx-' + field);
+        const yEl = document.getElementById('diploma-fy-' + field);
+        const sizeEl = document.getElementById('diploma-fs-' + field);
+        if (xEl && yEl) {
+            acc[field] = {
+                x: parseFloat(xEl.value) || 105,
+                y: parseFloat(yEl.value) || 120,
+                size: parseInt(sizeEl?.value) || 12
+            };
+        }
+        return acc;
+    }, {});
+    
+    const canvas = document.getElementById('diploma-pdf-canvas');
+    if (!canvas) return;
+    
+    const scale = window._diplomaCanvasScale || 1;
+    
+    const fieldsConfig = [
+        { id: 'name', label: 'Student Name', color: '#3b82f6' },
+        { id: 'adm', label: 'Adm No', color: '#f59e0b' },
+        { id: 'date', label: 'Date', color: '#10b981' },
+        { id: 'docid', label: 'Doc ID', color: '#8b5cf6' },
+        { id: 'vcode', label: 'Verify Code', color: '#ef4444' }
+    ];
+    
+    fieldsConfig.forEach(field => {
+        const data = (['name', 'adm', 'date', 'docid', 'vcode'].reduce((acc, field) => {
+            const xEl = document.getElementById('diploma-fx-' + field);
+            const yEl = document.getElementById('diploma-fy-' + field);
+            const sizeEl = document.getElementById('diploma-fs-' + field);
+            if (xEl && yEl) {
+                acc[field] = {
+                    x: parseFloat(xEl.value) || 105,
+                    y: parseFloat(yEl.value) || 120,
+                    size: parseInt(sizeEl?.value) || 12
+                };
+            }
+            return acc;
+        }, {})[field.id]) || { x: 105, y: 120, size: 12 };
+        
+        const el = document.createElement('div');
+        el.className = 'diploma-field-label';
+        el.id = 'diploma-field-overlay-' + field.id;
+        el.draggable = true;
+        el.style.cssText = `
+            position: absolute;
+            left: ${data.x * window._diplomaCanvasScale}px;
+            top: ${data.y * window._diplomaCanvasScale}px;
+            font-size: ${(data.size || 12) * 0.8}px;
+            font-weight: 600;
+            color: ${field.color};
+            background: rgba(255,255,255,0.9);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid ${field.color};
+            pointer-events: auto;
+            cursor: move;
+            z-index: 30;
+            user-select: none;
+            white-space: nowrap;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: box-shadow 0.1s, transform 0.1s;
+        `;
+        el.innerHTML = field.label;
+        el.dataset.field = field.id;
+        
+        // Make draggable
+        let isDragging = false;
+        
+        el.onmousedown = (e) => {
+            if (e.button !== 0) return;
+            isDragging = true;
+            const rect = el.getBoundingClientRect();
+            const canvasRect = document.getElementById('diploma-pdf-canvas').getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            el.style.zIndex = '100';
+            el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+            e.preventDefault();
+        };
+        
+        document.onmousemove = (e) => {
+            if (!isDragging) return;
+            const newX = e.clientX - canvasRect.left - window._diplomaCanvasScale * 10;
+            const newY = e.clientY - canvasRect.top - window._diplomaCanvasScale * 10;
+            
+            const maxX = document.getElementById('diploma-pdf-canvas').width;
+            const maxY = document.getElementById('diploma-pdf-canvas').height;
+            
+            const newXConstrained = Math.max(0, Math.min(newX, maxX - el.offsetWidth));
+            const newYConstrained = Math.max(0, Math.min(newY, maxY - el.offsetHeight));
+            
+            el.style.left = newXConstrained + 'px';
+            el.style.top = newYConstrained + 'px';
+        };
+        
+        document.onmouseup = () => {
+            if (isDragging) {
+                isDragging = false;
+                const el = document.querySelector('.diploma-field-label[style*="z-index: 100"]');
+                if (el) {
+                    el.style.zIndex = '30';
+                    el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                    // Update input fields with new position
+                    const fieldId = el.dataset.field;
+                    const canvasRect = document.getElementById('diploma-pdf-canvas').getBoundingClientRect();
+                    const elRect = el.getBoundingClientRect();
+                    const canvasRect2 = document.getElementById('diploma-pdf-canvas').getBoundingClientRect();
+                    
+                    const pdfX = (elRect.left - canvasRect.left) / window._diplomaCanvasScale / 2.83465;
+                    const pdfY = (elRect.top - canvasRect.top) / window._diplomaCanvasScale / 2.83465;
+                    
+                    const xEl = document.getElementById('diploma-fx-' + fieldId);
+                    const yEl = document.getElementById('diploma-fy-' + fieldId);
+                    if (xEl && yEl) {
+                        xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
+                        yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
+                        showToast('Updated ' + fieldId + ' position', { type: 'success' });
+                    }
+                }
+            }
+        };
+        
+        overlay.appendChild(el);
+    });
+}
+
+function setActiveFieldCoords(pdfX, pdfY) {
     let binary = '';
     const chunkSize = 0x8000;
     for (let i = 0; i < uint8Array.length; i += chunkSize) {

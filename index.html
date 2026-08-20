@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=240" as="script">
+    <link rel="preload" href="js/bundle.js?v=241" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js" integrity="sha512-xxx" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -641,10 +641,11 @@
                     </div>
 <div class="card"><h3>Diploma PDF Template</h3>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload a designed diploma PDF template. Student details will be overlaid at the positions you configure below.</div>
-                         <div class="form-group"><label>Diploma Template (PDF)</label><div style="display:flex;flex-direction:column;gap:8px;">
+<div class="form-group"><label>Diploma Template (PDF)</label><div style="display:flex;flex-direction:column;gap:8px;">
 <div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);">No template uploaded</div>
 <div style="position:relative;max-width:100%;margin:8px 0;">
-<canvas id="diploma-pdf-canvas" style="display:block;max-width:100%;border:2px solid var(--accent);border-radius:8px;cursor:crosshair;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.1);" width="595" height="842"></canvas>
+<canvas id="diploma-pdf-canvas" style="display:block;max-width:100%;border:2px solid var(--accent);border-radius:8px;cursor:crosshair;background:#fff;" width="595" height="842"></canvas>
+<div id="diploma-field-overlay" style="position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:20;"></div>
 <div id="diploma-crosshair" style="display:none;position:absolute;pointer-events:none;z-index:10;">
 <div style="width:1px;height:100%;background:var(--accent);position:absolute;left:50%;transform:translateX(-50%);"></div>
 <div style="height:1px;width:100%;background:var(--accent);position:absolute;top:50%;transform:translateY(-50%);"></div>
@@ -653,7 +654,7 @@
 </div>
 <div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);margin-top:8px;">No template uploaded</div>
 <label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">📄 Choose PDF File<input type="file" id="diploma-pdf-upload" accept="application/pdf" onchange="handleDiplomaPdfUpload(event)" style="display:none;"></label>
-<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+<div style="display:flex;gap:8px;margin-top:8px;">
 <button class="btn btn-outline btn-sm" onclick="clearDiplomaPdfPreview()">✕ Clear Preview</button>
 <button class="btn btn-outline btn-sm" onclick="applyPresetCoords('portrait')">📐 Portrait Preset</button>
 <button class="btn btn-outline btn-sm" onclick="applyPresetCoords('landscape')">📄 Landscape Preset</button>
@@ -1059,7 +1060,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=240"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=241"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=8"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
