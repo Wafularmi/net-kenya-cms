@@ -8390,10 +8390,9 @@ if (typeof pdfjsLib !== 'undefined') {
                 const rect = canvas.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const clickY = e.clientY - rect.top;
-
-                const pdfX = clickX / window._diplomaCanvasScale / 2.83465;
-                const pdfY = clickY / window._diplomaCanvasScale / 2.83465;
-
+                const mmToPx = diplomaMmToPx();
+                const pdfX = clickX / mmToPx;
+                const pdfY = clickY / mmToPx;
                 setActiveFieldCoords(pdfX, pdfY);
             };
         }
@@ -8494,11 +8493,10 @@ function createFieldOverlayElements() {
         const el = document.createElement('div');
         el.className = 'diploma-field-label';
         el.id = 'diploma-field-overlay-' + field.id;
-        el.draggable = true;
         el.style.cssText = `
             position: absolute;
-            left: ${data.x * window._diplomaCanvasScale}px;
-            top: ${data.y * window._diplomaCanvasScale}px;
+            left: ${data.x * diplomaMmToPx()}px;
+            top: ${data.y * diplomaMmToPx()}px;
             font-size: ${(data.size || 12) * 0.8}px;
             font-weight: 600;
             color: ${field.color};
@@ -8517,106 +8515,119 @@ function createFieldOverlayElements() {
         el.innerHTML = field.label;
         el.dataset.field = field.id;
         
-        // Make draggable
-        let isDragging = false;
-        
-        el.onmousedown = (e) => {
+        // Enable drag; actual move/up handled by global listeners in wireDiplomaOverlay()
+        el.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
-            isDragging = true;
-            const rect = el.getBoundingClientRect();
-            const canvasRect = document.getElementById('diploma-pdf-canvas').getBoundingClientRect();
-            offsetX = e.clientX - rect.left;
-            offsetY = e.clientY - rect.top;
-            el.style.zIndex = '100';
-            el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
             e.preventDefault();
-        };
-        
-        document.onmousemove = (e) => {
-            if (!isDragging) return;
-            const newX = e.clientX - canvasRect.left - window._diplomaCanvasScale * 10;
-            const newY = e.clientY - canvasRect.top - window._diplomaCanvasScale * 10;
-            
-            const maxX = document.getElementById('diploma-pdf-canvas').width;
-            const maxY = document.getElementById('diploma-pdf-canvas').height;
-            
-            const newXConstrained = Math.max(0, Math.min(newX, maxX - el.offsetWidth));
-            const newYConstrained = Math.max(0, Math.min(newY, maxY - el.offsetHeight));
-            
-            el.style.left = newXConstrained + 'px';
-            el.style.top = newYConstrained + 'px';
-        };
-        
-        document.onmouseup = () => {
-            if (isDragging) {
-                isDragging = false;
-                const el = document.querySelector('.diploma-field-label[style*="z-index: 100"]');
-                if (el) {
-                    el.style.zIndex = '30';
-                    el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-                    // Update input fields with new position
-                    const fieldId = el.dataset.field;
-                    const canvasRect = document.getElementById('diploma-pdf-canvas').getBoundingClientRect();
-                    const elRect = el.getBoundingClientRect();
-                    const canvasRect2 = document.getElementById('diploma-pdf-canvas').getBoundingClientRect();
-                    
-                    const pdfX = (elRect.left - canvasRect.left) / window._diplomaCanvasScale / 2.83465;
-                    const pdfY = (elRect.top - canvasRect.top) / window._diplomaCanvasScale / 2.83465;
-                    
-                    const xEl = document.getElementById('diploma-fx-' + fieldId);
-                    const yEl = document.getElementById('diploma-fy-' + fieldId);
-                    if (xEl && yEl) {
-                        xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
-                        yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
-                        showToast('Updated ' + fieldId + ' position', { type: 'success' });
-                    }
-                }
-            }
-        };
+            const rect = el.getBoundingClientRect();
+            window._dragEl = el;
+            window._activeDiplomaField = field.id;
+            window._dragOffX = e.clientX - rect.left;
+            window._dragOffY = e.clientY - rect.top;
+            el.style.zIndex = '100';
+            el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.25)';
+        });
         
         overlay.appendChild(el);
     });
+    
+    // Wire global drag listeners + live X/Y input updates once
+    wireDiplomaOverlay();
 }
 
-function setActiveFieldCoords(pdfX, pdfY) {
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-        const chunk = uint8Array.subarray(i, i + chunkSize);
-        binary += String.fromCharCode.apply(null, chunk);
-    }
-    return btoa(binary);
+function diplomaMmToPx() {
+    const c = document.getElementById('diploma-pdf-canvas');
+    if (!c) return 2.83465;
+    const w = c.getBoundingClientRect().width || c.width;
+    return w / 210;
 }
-function setActiveFieldCoords(pdfX, pdfY) {
-    const fields = ['name', 'adm', 'date', 'docid', 'vcode'];
-    let activeField = null;
 
-    for (const field of ['name', 'adm', 'date', 'docid', 'vcode']) {
+function positionOverlayLabels() {
+    const mmToPx = diplomaMmToPx();
+    ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
+        const el = document.getElementById('diploma-field-overlay-' + field);
+        if (!el) return;
         const xEl = document.getElementById('diploma-fx-' + field);
-        if (xEl && (xEl === document.activeElement || xEl.dataset.recentlyChanged)) {
-            activeField = field;
-            break;
-        }
-    }
+        const yEl = document.getElementById('diploma-fy-' + field);
+        const xs = parseFloat(xEl && xEl.value) || 105;
+        const ys = parseFloat(yEl && yEl.value) || 120;
+        el.style.left = (xs * mmToPx) + 'px';
+        el.style.top = (ys * mmToPx) + 'px';
+    });
+}
 
-    if (!activeField) {
-        for (const field of ['name', 'adm', 'date', 'docid', 'vcode']) {
-            const xEl = document.getElementById('diploma-fx-' + field);
-            if (xEl && (!xEl.value || xEl.value == '105')) {
-                activeField = field;
-                break;
+function wireDiplomaOverlay() {
+    if (window._diplomaOverlayWired) return;
+    window._diplomaOverlayWired = true;
+    const reposition = () => positionOverlayLabels();
+    ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
+        ['x', 'y'].forEach(ax => {
+            const inp = document.getElementById('diploma-f' + ax + '-' + field);
+            if (inp) {
+                inp.addEventListener('input', reposition);
+                inp.addEventListener('focus', () => { window._activeDiplomaField = field; });
             }
-        }
-    }
-
-    if (activeField) {
-        const xEl = document.getElementById('diploma-fx-' + activeField);
-        const yEl = document.getElementById('diploma-fy-' + activeField);
+            const sld = document.getElementById('diploma-f' + ax + '-' + field + '-slider');
+            if (sld) sld.addEventListener('input', reposition);
+        });
+    });
+    document.addEventListener('mousemove', (e) => {
+        const el = window._dragEl;
+        if (!el) return;
+        const canvas = document.getElementById('diploma-pdf-canvas');
+        if (!canvas) return;
+        const canvasRect = canvas.getBoundingClientRect();
+        const newX = e.clientX - canvasRect.left - (window._dragOffX || 0);
+        const newY = e.clientY - canvasRect.top - (window._dragOffY || 0);
+        const maxX = canvasRect.width - el.offsetWidth;
+        const maxY = canvasRect.height - el.offsetHeight;
+        const cx = Math.max(0, Math.min(newX, maxX));
+        const cy = Math.max(0, Math.min(newY, maxY));
+        el.style.left = cx + 'px';
+        el.style.top = cy + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+        const el = window._dragEl;
+        if (!el) return;
+        window._dragEl = null;
+        el.style.zIndex = '30';
+        el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+        const canvas = document.getElementById('diploma-pdf-canvas');
+        if (!canvas) return;
+        const canvasRect = canvas.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const mmToPx = diplomaMmToPx();
+        const pdfX = (elRect.left - canvasRect.left) / mmToPx;
+        const pdfY = (elRect.top - canvasRect.top) / mmToPx;
+        const fieldId = el.dataset.field;
+        window._activeDiplomaField = fieldId;
+        const xEl = document.getElementById('diploma-fx-' + fieldId);
+        const yEl = document.getElementById('diploma-fy-' + fieldId);
         if (xEl && yEl) {
             xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
             yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
-            showToast('Set ' + activeField + ' position: X=' + xEl.value + 'mm, Y=' + yEl.value + 'mm', { type: 'success' });
+            const sld = document.getElementById('diploma-fx-' + fieldId + '-slider');
+            const sldY = document.getElementById('diploma-fy-' + fieldId + '-slider');
+            if (sld) sld.value = xEl.value;
+            if (sldY) sldY.value = yEl.value;
+            positionOverlayLabels();
+            showToast('Updated ' + fieldId + ' position', { type: 'success' });
         }
+    });
+}
+function setActiveFieldCoords(pdfX, pdfY) {
+    const activeField = window._activeDiplomaField || 'name';
+    const xEl = document.getElementById('diploma-fx-' + activeField);
+    const yEl = document.getElementById('diploma-fy-' + activeField);
+    if (xEl && yEl) {
+        xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
+        yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
+        const sld = document.getElementById('diploma-fx-' + activeField + '-slider');
+        const sldY = document.getElementById('diploma-fy-' + activeField + '-slider');
+        if (sld) sld.value = xEl.value;
+        if (sldY) sldY.value = yEl.value;
+        positionOverlayLabels();
+        showToast('Moved ' + activeField + ' to X=' + xEl.value + ', Y=' + yEl.value, { type: 'success' });
     }
 }
 
