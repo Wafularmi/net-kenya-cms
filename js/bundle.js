@@ -8903,7 +8903,8 @@ async function restoreSelectedFromAlumni() {
     showToast(checkboxes.length + ' student(s) restored', { type: 'success' });
 }
 async function loadDiplomaPdfConfig() {
-    const config = await dbGet('settings', 'diplomaPdfConfig');
+    const rec = await dbGet('settings', 'diplomaPdfConfig');
+    const config = (rec && rec.value) ? rec.value : rec;
     if (!config) return showToast('No saved config found');
     window._diplomaPdfTemplate = config.template;
     window._diplomaSigs = config.sigs || {};
@@ -8937,7 +8938,8 @@ async function loadDiplomaPdfConfig() {
     showToast('Config loaded');
 }
 async function showDiplomaPdfGenerator() {
-    const config = await dbGet('settings', 'diplomaPdfConfig');
+    const rec = await dbGet('settings', 'diplomaPdfConfig');
+    const config = (rec && rec.value) ? rec.value : rec;
     if (!config || !config.template) return showToast('Upload and save a PDF template first!', { type: 'danger' });
     const students = await dbGetAll('students');
     const certificates = await dbGetAll('certificates');
@@ -8955,7 +8957,8 @@ async function generateDiplomaPdf() {
     const nameOverride = document.getElementById('diploma-pdf-name-override').value.trim();
     if (!studentId) return showToast('Select a student!');
     if (!gradDate) return showToast('Enter graduation date!');
-    const config = await dbGet('settings', 'diplomaPdfConfig');
+    const rec = await dbGet('settings', 'diplomaPdfConfig');
+    const config = (rec && rec.value) ? rec.value : rec;
     if (!config || !config.template) return showToast('Upload a PDF template first!', { type: 'danger' });
     try {
         closeModal();
