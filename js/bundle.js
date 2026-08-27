@@ -8980,11 +8980,13 @@ async function generateDiplomaPdf() {
         const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         const vCode = generateVerificationCode();
         const dateStr = new Date(gradDate + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        const pageW = page.getWidth();
+        const pageH = page.getHeight();
         const drawField = (text, field) => {
             if (!field) return;
             const size = field.size || 12;
             const textWidth = font.widthOfTextAtSize(text, size);
-            page.drawText(text, { x: field.x * mmToPt - textWidth / 2, y: (297 - field.y) * mmToPt, size: size, font: font, color: txtColor });
+            page.drawText(text, { x: field.x * mmToPt - textWidth / 2, y: pageH - field.y * mmToPt, size: size, font: font, color: txtColor });
         };
         drawField(displayName, config.fields.name);
         drawField(student.admissionNumber || student.id, config.fields.adm);
@@ -8993,13 +8995,17 @@ async function generateDiplomaPdf() {
         drawField('Verify: ' + vCode, config.fields.vcode);
         for (const role of ['registrar', 'dean', 'director']) {
             const sig = config.sigs && config.sigs[role];
-            if (!sig || !sig.img) continue;
+            let imgData = sig && sig.img;
+            if (imgData && typeof imgData === 'object') imgData = imgData.img || imgData.data || null;
+            if (!sig || !imgData || typeof imgData !== 'string' || !imgData.startsWith('data:')) continue;
             try {
-                const sigBytes = Uint8Array.from(atob(sig.img.split(',')[1]), c => c.charCodeAt(0));
-                const sigImg = await pdfDoc.embedPng(sigBytes);
+                const b64 = imgData.split(',')[1];
+                const sigBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+                const isPng = imgData.includes('image/png');
+                const sigImg = isPng ? await pdfDoc.embedPng(sigBytes) : await pdfDoc.embedJpg(sigBytes);
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
-                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: (297 - sig.y) * mmToPt - sigH / 2, width: sigW, height: sigH });
+                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
             } catch (e) {}
         }
         const outBytes = await pdfDoc.save();
