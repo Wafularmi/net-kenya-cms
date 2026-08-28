@@ -8535,11 +8535,19 @@ function createFieldOverlayElements() {
     wireDiplomaOverlay();
 }
 
+function getDiplomaPageSize() {
+    try {
+        const pg = window._diplomaPdfDoc && window._diplomaPdfDoc.getPages()[0];
+        if (pg) return { w: pg.getWidth(), h: pg.getHeight(), wMm: pg.getWidth() / 2.83465, hMm: pg.getHeight() / 2.83465 };
+    } catch (e) {}
+    return { w: 595, h: 842, wMm: 210, hMm: 297 };
+}
 function diplomaMmToPx() {
     const c = document.getElementById('diploma-pdf-canvas');
     if (!c) return 2.83465;
-    const w = c.getBoundingClientRect().width || c.width;
-    return w / 210;
+    const cssW = c.getBoundingClientRect().width || c.width;
+    const ps = getDiplomaPageSize();
+    return cssW / ps.wMm;
 }
 
 function positionOverlayLabels() {
@@ -8604,8 +8612,9 @@ function wireDiplomaOverlay() {
         const xEl = document.getElementById('diploma-fx-' + fieldId);
         const yEl = document.getElementById('diploma-fy-' + fieldId);
         if (xEl && yEl) {
-            xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
-            yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
+            const ps = getDiplomaPageSize();
+            xEl.value = Math.round(Math.max(0, Math.min(ps.wMm, pdfX)));
+            yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, pdfY)));
             const sld = document.getElementById('diploma-fx-' + fieldId + '-slider');
             const sldY = document.getElementById('diploma-fy-' + fieldId + '-slider');
             if (sld) sld.value = xEl.value;
@@ -8620,8 +8629,9 @@ function setActiveFieldCoords(pdfX, pdfY) {
     const xEl = document.getElementById('diploma-fx-' + activeField);
     const yEl = document.getElementById('diploma-fy-' + activeField);
     if (xEl && yEl) {
-        xEl.value = Math.round(Math.max(0, Math.min(210, pdfX)));
-        yEl.value = Math.round(Math.max(0, Math.min(297, pdfY)));
+        const ps = getDiplomaPageSize();
+        xEl.value = Math.round(Math.max(0, Math.min(ps.wMm, pdfX)));
+        yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, pdfY)));
         const sld = document.getElementById('diploma-fx-' + activeField + '-slider');
         const sldY = document.getElementById('diploma-fy-' + activeField + '-slider');
         if (sld) sld.value = xEl.value;
