@@ -8543,11 +8543,8 @@ function getDiplomaPageSize() {
     return { w: 595, h: 842, wMm: 210, hMm: 297 };
 }
 function diplomaMmToPx() {
-    const c = document.getElementById('diploma-pdf-canvas');
-    if (!c) return 2.83465;
-    const cssW = c.getBoundingClientRect().width || c.width;
-    const ps = getDiplomaPageSize();
-    return cssW / ps.wMm;
+    const scale = window._diplomaCanvasScale || 1;
+    return 2.83465 * scale;
 }
 
 function positionOverlayLabels() {
