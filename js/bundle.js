@@ -9016,11 +9016,12 @@ async function generateDiplomaPdf() {
             } catch (e) {}
         }
         const outBytes = await pdfDoc.save();
+        const pdfB64 = btoa(String.fromCharCode(...new Uint8Array(outBytes)));
         const blob = new Blob([outBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
         showModal('Diploma Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${displayName}')">Download</button>`);
-        const cert = { id: 'CERT-' + Date.now(), studentId, type: 'diploma', content: '', docId, vCode, generatedAt: new Date().toISOString() };
+        const cert = { id: 'CERT-' + Date.now(), studentId, type: 'diploma', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
         await dbPut('certificates', cert);
         logAudit('generated', 'diploma', { studentId, docId });
         showToast('Diploma generated! ' + displayName + ' removed from dropdown.');
