@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=249" as="script">
+    <link rel="preload" href="js/bundle.js?v=250" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -452,6 +452,7 @@
                     <button class="btn btn-outline" onclick="renderAudit()">Filter</button>
                     <button class="btn btn-outline" onclick="exportAudit()">Export</button>
                     <button class="btn btn-outline" onclick="pruneAudit()">Prune</button>
+                    <button class="btn btn-danger" onclick="clearAllAudit()" style="margin-left:4px;">Clear All</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Date/Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody id="audit-body"></tbody></table></div></div>
             </section>
@@ -862,6 +863,16 @@
                         </div>
                         <button class="btn btn-primary" onclick="saveBranding()">Save Protection Setting</button>
                     </div>
+                    </div>
+                    <div class="card"><h3>📋 Audit Log</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Manage the system audit trail. View all activities, export to CSV, prune old entries, or clear the entire log.</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                            <button class="btn btn-outline" onclick="showScreen('audit')">View Audit Log</button>
+                            <button class="btn btn-outline" onclick="exportAudit()">Export CSV</button>
+                            <button class="btn btn-outline" onclick="pruneAudit()">Prune Old Entries</button>
+                            <button class="btn btn-danger" onclick="clearAllAudit()">Clear All Audit Log</button>
+                        </div>
+                    </div>
                     <div class="card"><h3>🛠 Maintenance Mode</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, visitors and all non-admin users are shown a maintenance page with your logo instead of the system. Only administrators can sign in while maintenance is active. Turn it ON while you are updating the system, then turn it OFF when you are done.</div>
                         <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
@@ -1066,7 +1077,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=249"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=250"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=8"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
