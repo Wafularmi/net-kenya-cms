@@ -25,12 +25,17 @@
             overflow-x: hidden;
         }
         .logo-area { margin-bottom: 18px; }
-        #login-logo.login-logo-placeholder {
+        #login-logo {
             width: 96px; height: 96px; margin: 0 auto 16px; border-radius: 20px;
             background: #1a1a2e; color: var(--accent, #f59e0b);
             display: flex; align-items: center; justify-content: center;
             font-size: 30px; font-weight: 800; letter-spacing: 1px;
             box-shadow: 0 0 0 1px rgba(245,158,11,.35), 0 12px 40px rgba(0,0,0,.45);
+        }
+        #login-logo[style*="background-image"] {
+            background-color: transparent !important;
+            text-indent: -9999px;
+            overflow: hidden;
         }
         .school-name { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: .3px; }
 
@@ -127,7 +132,7 @@
 </head>
 <body>
     <div class="logo-area">
-        <div id="login-logo" class="login-logo-placeholder">{{INITIALS}}</div>
+        <div id="login-logo">{{INITIALS}}</div>
         <div class="school-name">{{SCHOOL_NAME}}</div>
     </div>
 
