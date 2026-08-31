@@ -10788,6 +10788,16 @@ async function reprintDocument() {
         }
         const generatedDate = cert.generatedAt ? new Date(cert.generatedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
         const label = cert.studentName || cert.docTitle || 'Document';
+        
+        // Fetch all certificates for navigation
+        let allCertsForNav = [];
+        try {
+            allCertsForNav = (await dbGetAll('certificates'))
+                .filter(c => c.type === 'diploma' || c.type === 'certificate')
+                .sort((a, b) => new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0));
+        } catch (e) {}
+        const currentIndex = allCertsForNav.findIndex(c => (c.id === cert.id || c.docId === cert.docId) && c.vCode === cert.vCode);
+        
         resultDiv.innerHTML = `
             <div style="border:1px solid var(--success);border-radius:8px;overflow:hidden;">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#f0fdf4;border-bottom:1px solid #bbf7d0;">
@@ -10797,6 +10807,8 @@ async function reprintDocument() {
                     </div>
                     <div style="display:flex;gap:8px;">
                         <button class="btn btn-outline" onclick="clearReprintResult()">✕ Close</button>
+                        <button class="btn btn-outline" onclick="navigateReprint(${currentIndex - 1}, ${allCertsForNav.length})" ${currentIndex <= 0 ? 'disabled' : ''}>← Prev</button>
+                        <button class="btn btn-outline" onclick="navigateReprint(${currentIndex + 1}, ${allCertsForNav.length})" ${currentIndex >= allCertsForNav.length - 1 ? 'disabled' : ''}>Next →</button>
                         <button class="btn btn-primary" onclick="printReprintedDocument()">🖨️ Print</button>
                     </div>
                 </div>
@@ -10818,6 +10830,17 @@ function clearReprintResult() {
     document.getElementById('reprint-docid').value = '';
     document.getElementById('reprint-vcode').value = '';
     document.getElementById('reprint-result').innerHTML = '';
+}
+async function navigateReprint(index, total) {
+    if (index < 0 || index >= total) return;
+    const allCerts = (await dbGetAll('certificates'))
+        .filter(c => c.type === 'diploma' || c.type === 'certificate')
+        .sort((a, b) => new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0));
+    const cert = allCerts[index];
+    if (!cert) return;
+    document.getElementById('reprint-docid').value = cert.docId || cert.id;
+    document.getElementById('reprint-vcode').value = cert.vCode;
+    await reprintDocument();
 }
 
 async function generateIDCards() {
