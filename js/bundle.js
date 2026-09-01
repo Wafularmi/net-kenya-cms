@@ -9205,19 +9205,94 @@ async function loadDiplomaPdfConfig() {
     
     showToast('Config loaded');
 }
+let _diplomaGenRestored = [];
+let _diplomaGenStudents = [];
+let _diplomaGenUsed = [];
+
+function _diplomaSavedRestored() { try { return JSON.parse(localStorage.getItem('diploma_restored_ids') || '[]'); } catch { return []; } }
+function _diplomaPersistRestored() { try { localStorage.setItem('diploma_restored_ids', JSON.stringify(_diplomaGenRestored)); } catch {} }
+
 async function showDiplomaPdfGenerator() {
     const rec = await dbGet('settings', 'diplomaPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
     if (!config || !config.template) return showToast('Upload and save a PDF template first!', { type: 'danger' });
     const students = await dbGetAll('students');
     const certificates = await dbGetAll('certificates');
-    const generatedStudentIds = new Set(certificates.filter(c => c.type === 'diploma').map(c => c.studentId));
-    const availableStudents = students.filter(s => s.status === 'active' && !generatedStudentIds.has(s.id));
-    if (!availableStudents.length) return showToast('No students available - all active students already have diplomas generated.', { type: 'warning' });
-    const content = `<div class="form-group"><label>Student</label><select id="diploma-pdf-student"><option value="">Select student...</option>${availableStudents.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber || s.id})</option>`).join('')}</select></div>
+    const active = students.filter(s => s.status === 'active');
+    if (!active.length) return showToast('No active students available.', { type: 'warning' });
+    const diplomaCerts = certificates.filter(c => c.type === 'diploma');
+    const usedIds = new Set(diplomaCerts.map(c => c.studentId));
+    _diplomaGenStudents = active;
+    _diplomaGenUsed = active
+        .filter(s => usedIds.has(s.id))
+        .map(s => ({
+            id: s.id, name: s.name, admissionNumber: s.admissionNumber || s.id,
+            generatedAt: diplomaCerts.filter(c => c.studentId === s.id).map(c => c.generatedAt || c.createdAt || '').sort().pop() || ''
+        }))
+        .sort((a, b) => (b.generatedAt || '').localeCompare(a.generatedAt || ''));
+    _diplomaGenRestored = _diplomaSavedRestored().filter(id => active.some(s => s.id === id));
+    _diplomaPersistRestored();
+
+    const content = `<div class="form-group"><label>Student</label><select id="diploma-pdf-student"></select></div>
         <div class="form-group"><label>Student Name on Diploma <span style="font-size:10px;color:var(--text-muted);">(override - leave blank to use student record name)</span></label><input type="text" id="diploma-pdf-name-override" placeholder="Optional: type name differently from student record"></div>
-        <div class="form-group"><label>Graduation Date *</label><input type="date" id="diploma-pdf-date" required></div>`;
-    showModal('Generate Diploma PDF', content, `<button class="btn btn-primary" onclick="generateDiplomaPdf()">Generate</button>`);
+        <div class="form-group"><label>Graduation Date *</label><input type="date" id="diploma-pdf-date" required></div>
+        <div class="form-group" style="border-top:1px solid var(--border);padding-top:10px;">
+            <label>Recycle used names</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+                <input type="number" id="diploma-restore-count" min="1" max="${Math.max(1, _diplomaGenUsed.length)}" value="${Math.min(5, Math.max(1, _diplomaGenUsed.length))}" style="width:70px;">
+                <button type="button" class="btn btn-outline btn-sm" onclick="restoreDiplomaNamesCount(event)">Restore N used names</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="restoreDiplomaNamesAll(event)">Restore all (${_diplomaGenUsed.length})</button>
+            </div>
+            <div id="diploma-restored-list" style="margin-top:6px;"></div>
+            <small style="color:var(--text-muted);">Restored names reappear in the dropdown marked "(reprint)" and stay available even after generating.</small>
+        </div>`;
+    showModal('Generate Diploma PDF', content, `<button type="button" class="btn btn-primary" onclick="generateDiplomaPdf()">Generate</button>`);
+    renderDiplomaGenDropdown();
+}
+
+function renderDiplomaGenDropdown() {
+    const sel = document.getElementById('diploma-pdf-student');
+    if (!sel) return;
+    const restored = new Set(_diplomaGenRestored);
+    const usedMap = new Map(_diplomaGenUsed.map(u => [u.id, u]));
+    const opts = _diplomaGenStudents
+        .filter(s => !usedMap.has(s.id) || restored.has(s.id))
+        .map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(s.admissionNumber || s.id)})${restored.has(s.id) && usedMap.has(s.id) ? ' — reprint' : ''}</option>`);
+    sel.innerHTML = '<option value="">Select student...</option>' + opts.join('');
+    const listEl = document.getElementById('diploma-restored-list');
+    if (listEl) {
+        const items = _diplomaGenUsed.filter(u => restored.has(u.id));
+        listEl.innerHTML = items.length
+            ? items.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:2px 8px;margin:2px;font-size:12px;">${escapeHtml(u.name)}<a href="#" onclick="removeRestoredDiplomaName('${String(u.id).replace(/['"\\]/g, '')}');return false;" title="Remove from dropdown" style="color:var(--danger);text-decoration:none;">✕</a></span>`).join(' ')
+            : '<small style="color:var(--text-muted);">No used names restored yet.</small>';
+    }
+}
+
+function restoreDiplomaNamesCount(ev) {
+    if (ev) ev.preventDefault();
+    if (!_diplomaGenUsed.length) return showToast('No used names to restore.', { type: 'warning' });
+    const inp = document.getElementById('diploma-restore-count');
+    const n = Math.max(1, parseInt(inp && inp.value, 10) || 1);
+    const toAdd = _diplomaGenUsed.slice(0, n).map(u => u.id);
+    _diplomaGenRestored = Array.from(new Set([..._diplomaGenRestored, ...toAdd]));
+    _diplomaPersistRestored();
+    renderDiplomaGenDropdown();
+    showToast('Restored ' + toAdd.length + ' used name(s) to dropdown.', { type: 'success' });
+}
+
+function restoreDiplomaNamesAll(ev) {
+    if (ev) ev.preventDefault();
+    if (!_diplomaGenUsed.length) return showToast('No used names to restore.', { type: 'warning' });
+    _diplomaGenRestored = Array.from(new Set([..._diplomaGenRestored, ..._diplomaGenUsed.map(u => u.id)]));
+    _diplomaPersistRestored();
+    renderDiplomaGenDropdown();
+    showToast('Restored all ' + _diplomaGenUsed.length + ' used name(s).', { type: 'success' });
+}
+
+function removeRestoredDiplomaName(id) {
+    _diplomaGenRestored = _diplomaGenRestored.filter(x => x !== id);
+    _diplomaPersistRestored();
+    renderDiplomaGenDropdown();
 }
 async function generateDiplomaPdf() {
     const studentId = document.getElementById('diploma-pdf-student').value;
