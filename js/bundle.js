@@ -1398,7 +1398,11 @@ function startAutoRefresh() {
     _refreshTimers.push(setInterval(renderOnlineUsers, 30000));
     try {
         if (_sseConnection) { _sseConnection.close(); _sseConnection = null; }
-        _sseConnection = new EventSource('/api/events?token=' + encodeURIComponent((JSON.parse(sessionStorage.getItem('currentUser') || '{}').session_token) || ''));
+        const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const sessionToken = currentUser.session_token || '';
+        const authHeaders = getAuthHeaders();
+        const authToken = authHeaders['Authorization'] ? authHeaders['Authorization'].replace('Bearer ', '') : sessionToken;
+        _sseConnection = new EventSource('/api/events?token=' + encodeURIComponent(authToken));
         _sseConnection.addEventListener('db-change', (e) => {
             _sseConnected = true;
             try {
@@ -8971,8 +8975,27 @@ async function generateDiplomaPdf() {
         closeModal();
         showToast('Generating diploma...', { type: 'info' });
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
-        const pdfBytes = Uint8Array.from(atob(config.template), c => c.charCodeAt(0));
-        const pdfDoc = await PDFDocument.load(pdfBytes);
+        
+        // Validate template
+        if (!config.template || typeof config.template !== 'string') {
+            throw new Error('No valid PDF template configured. Please upload and save a template first.');
+        }
+        
+        let pdfBytes;
+        try {
+            pdfBytes = Uint8Array.from(atob(config.template), c => c.charCodeAt(0));
+        } catch (e) {
+            throw new Error('Invalid PDF template encoding. Please re-upload the template.');
+        }
+        
+        let pdfDoc;
+        try {
+            pdfDoc = await PDFDocument.load(pdfBytes);
+        } catch (e) {
+            console.error('PDF load error:', e);
+            throw new Error('Failed to load PDF template. The template may be corrupted or have circular references. Please re-upload a simpler PDF.');
+        }
+        
         const page = pdfDoc.getPages()[0];
         const fontMap = { 'Times Roman': StandardFonts.TimesRoman, 'Helvetica': StandardFonts.Helvetica, 'Courier': StandardFonts.Courier };
         const font = await pdfDoc.embedFont(fontMap[config.font] || StandardFonts.TimesRoman);
@@ -9013,9 +9036,15 @@ async function generateDiplomaPdf() {
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
                 page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
-            } catch (e) {}
+            } catch (e) { console.warn('Signature embed failed for ' + role + ':', e); }
         }
-        const outBytes = await pdfDoc.save();
+        let outBytes;
+        try {
+            outBytes = await pdfDoc.save();
+        } catch (e) {
+            console.error('PDF save error:', e);
+            throw new Error('Failed to save PDF. The document may be too complex. Try a simpler template.');
+        }
         const pdfB64 = btoa(String.fromCharCode(...new Uint8Array(outBytes)));
         const blob = new Blob([outBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);

@@ -1528,7 +1528,7 @@ function startHubLiveSync() {
     _hubTimestampInterval = setInterval(_updateHubRefreshButton, 1000);
 
     try {
-        _hubSSE = new EventSource('/api/events');
+        _hubSSE = new EventSource('/api/events?token=' + encodeURIComponent((JSON.parse(sessionStorage.getItem('currentUser') || '{}').session_token) || ''));
         _hubSSE.addEventListener('db-change', (e) => {
             try {
                 const { store } = JSON.parse(e.data || '{}');
