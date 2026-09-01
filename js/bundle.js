@@ -357,7 +357,7 @@ function getRoleColor(role) {
 }
 function getRolePermissions(role) {
     const perms = {
-        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
+        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
@@ -942,7 +942,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1302,6 +1302,7 @@ function showScreen(id) {
         case 'certificates': renderDocumentHistory(); break;
         case 'events': renderEvents(); break;
         case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); break;
+        case 'sms': renderSMSTemplates(); renderSMSLog(); break;
         case 'audit': renderAudit(); renderUsers(); break;
         case 'idcards': break;
         case 'questions': renderQuestionBank(); break;
@@ -1313,11 +1314,12 @@ function showScreen(id) {
         case 'pending': renderPendingRegistrations(); break;
         case 'tickets': renderTickets(); break;
         case 'communication': loadCommunicationPage(); break;
+        case 'messages': renderMessages(); break;
         case 'discussions': renderDiscussions(); break;
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); break;
     }
 }
 function initTabs() {
@@ -2001,6 +2003,249 @@ document.getElementById('students-body').innerHTML = filtered.map(s => {
         return `<tr><td><b>${s.admissionNumber || s.id}</b>${s.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || ''}</div></td><td>${center ? center.name : 'Main'}</td><td>${s.program || '--'}</td><td>Year ${s.year || 1}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span></td><td style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:600;">${formatCurrency(balance)}</td><td><button class="btn btn-outline btn-sm" onclick="viewStudent('${s.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">Edit</button> <button class="btn btn-primary btn-sm" onclick="adminEnrollStudentInCourse('${s.id}')" title="Enroll in Course">📚</button> <button class="btn btn-warning btn-sm" onclick="adminRegisterStudentForExam('${s.id}')" title="Register for Exam">📝</button> <button class="btn btn-info btn-sm" onclick="adminEnrollStudentInQuiz('${s.id}')" title="Join Quiz">📋</button> <button class="btn btn-secondary btn-sm" onclick="adminChangeStudentProgram('${s.id}')" title="Change Program">🎓</button> ${phone ? `<div class="wa-dropdown" style="display:inline-block;position:relative;"><button class="btn btn-success btn-sm" onclick="toggleWADropdown(event, '${s.id}')">📱</button><div id="wa-drop-${s.id}" class="wa-drop-menu" style="display:none;position:absolute;right:0;top:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px;min-width:180px;z-index:50;box-shadow:var(--shadow-lg);"><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}')">💬 Custom Message</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-fee')">💰 Fee Reminder</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-attendance')">⚠️ Attendance Alert</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-welcome')">👋 Welcome</div></div></div>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')" title="Delete">🗑</button></td></tr>`;
     }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No students found. Click "+ Add Student" to enroll.</td></tr>';
 }
+async function adminEnrollStudentInCourse(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found');
+    const courses = await dbGetAll('courses');
+    const enrollments = await dbGetAll('enrollments');
+    const enrolledIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const available = courses.filter(c => c.published !== false && !enrolledIds.has(c.id));
+    const enrolled = courses.filter(c => enrolledIds.has(c.id));
+    let html = `<div style="margin-bottom:8px;"><b>${escapeHtml(student.name)}</b> — ${escapeHtml(student.admissionNumber || student.id)}</div>`;
+    if (enrolled.length) {
+        html += `<div style="margin-bottom:12px;"><h4 style="color:var(--success);margin-bottom:6px;">Currently Enrolled (${enrolled.length})</h4>`;
+        html += enrolled.map(c => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg-input);border-radius:4px;margin-bottom:4px;"><span><b>${c.code}</b> — ${c.name}</span><button class="btn btn-danger btn-xs" onclick="adminDeregisterStudentFromCourse('${studentId}','${c.id}')">✖ Remove</button></div>`).join('');
+        html += `</div>`;
+    }
+    if (!available.length) {
+        html += '<div style="color:var(--text-muted);padding:10px;">No available courses to enroll in</div>';
+    } else {
+        html += `<div style="margin-bottom:6px;"><label><input type="checkbox" onchange="document.querySelectorAll('.admin-enroll-chk:not(:disabled)').forEach(c=>c.checked=this.checked)"> Select All</label></div>`;
+        html += available.map(c => `<label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
+            <input type="checkbox" value="${c.id}" class="admin-enroll-chk">
+            <div><b>${c.code}</b> — ${c.name}<br><span style="font-size:11px;color:var(--text-muted);">${c.description ? c.description.substring(0, 80) : ''}</span></div>
+        </label>`).join('');
+    }
+    showModal('Enroll Student in Course', html, available.length ? `<button class="btn btn-primary" onclick="adminSaveCourseEnrollment('${studentId}')">Enroll Selected</button>` : '');
+}
+
+async function adminSaveCourseEnrollment(studentId) {
+    const checked = Array.from(document.querySelectorAll('.admin-enroll-chk:checked')).map(cb => cb.value);
+    if (!checked.length) return showToast('Select at least one course');
+    for (const courseId of checked) {
+        await dbPut('enrollments', { id: `ENR-${courseId}-${studentId}`, courseId, studentId, enrolledAt: new Date().toISOString() });
+    }
+    closeModal();
+    renderStudents();
+    showToast(`Enrolled in ${checked.length} course(s)`);
+    logAudit('created', 'enrollment', { studentId, courses: checked });
+}
+
+async function adminDeregisterStudentFromCourse(studentId, courseId) {
+    if (!await showConfirm('Remove Enrollment', 'Remove this student from the course?')) return;
+    const enrollments = await dbGetAll('enrollments');
+    const enrollment = enrollments.find(e => e.studentId === studentId && e.courseId === courseId);
+    if (enrollment) await dbDelete('enrollments', enrollment.id);
+    closeModal();
+    renderStudents();
+    showToast('Removed from course');
+    logAudit('deleted', 'enrollment', { studentId, courseId });
+}
+
+async function adminRegisterStudentForExam(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found');
+    const enrollments = await dbGetAll('enrollments');
+    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const exams = (await dbGetAll('exams')).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && (!student.studyCenterId || !e.studyCenterId || e.studyCenterId === student.studyCenterId));
+    const examRegs = await dbGetAll('examRegistrations');
+    const registeredIds = new Set(examRegs.filter(r => r.studentId === studentId).map(r => r.examId));
+    const available = exams.filter(e => !registeredIds.has(e.id));
+    const registered = exams.filter(e => registeredIds.has(e.id));
+    const courses = await dbGetAll('courses');
+    let html = `<div style="margin-bottom:8px;"><b>${escapeHtml(student.name)}</b></div>`;
+    if (registered.length) {
+        html += `<div style="margin-bottom:12px;"><h4 style="color:var(--success);margin-bottom:6px;">Currently Registered (${registered.length})</h4>`;
+        html += registered.map(e => {
+            const course = courses.find(c => c.id === e.courseId);
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg-input);border-radius:4px;margin-bottom:4px;"><span><b>${e.title || (course ? course.code : '') || e.courseId}</b> — ${formatDate(e.date)}</span><button class="btn btn-danger btn-xs" onclick="adminDeregisterStudentFromExam('${studentId}','${e.id}')">✖ Remove</button></div>`;
+        }).join('');
+        html += `</div>`;
+    }
+    if (!available.length) {
+        html += '<div style="color:var(--text-muted);padding:10px;">No available exams to register for</div>';
+    } else {
+        html += available.map(e => {
+            const course = courses.find(c => c.id === e.courseId);
+            return `<label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
+                <input type="checkbox" value="${e.id}" class="admin-exam-chk">
+                <div><b>${e.title || (course ? course.code : '') || e.courseId}</b><br><span style="font-size:11px;color:var(--text-muted);">${formatDate(e.date)} ${e.time || ''} — ${e.venue || 'TBA'}</span></div>
+            </label>`;
+        }).join('');
+    }
+    showModal('Register for Exams', html, available.length ? `<button class="btn btn-primary" onclick="adminSaveExamRegistration('${studentId}')">Register Selected</button>` : '');
+}
+
+async function adminSaveExamRegistration(studentId) {
+    const checked = Array.from(document.querySelectorAll('.admin-exam-chk:checked')).map(cb => cb.value);
+    if (!checked.length) return showToast('Select at least one exam');
+    for (const examId of checked) {
+        await dbPut('examRegistrations', { id: `EXREG-${examId}-${studentId}`, examId, studentId, registeredAt: new Date().toISOString() });
+        const existingSeat = (await dbGetAll('seating')).find(s => s.examId === examId && s.studentId === studentId);
+        if (!existingSeat) {
+            const allSeats = (await dbGetAll('seating')).filter(s => s.examId === examId);
+            const maxSeat = allSeats.reduce((m, s) => Math.max(m, s.seatNumber || 0), 0);
+            await dbPut('seating', { id: `SEAT-${examId}-${studentId}`, examId, studentId, seatNumber: maxSeat + 1, createdAt: new Date().toISOString() });
+        }
+    }
+    closeModal();
+    renderStudents();
+    showToast(`Registered for ${checked.length} exam(s)`);
+    logAudit('created', 'examRegistration', { studentId, exams: checked });
+}
+
+async function adminDeregisterStudentFromExam(studentId, examId) {
+    if (!await showConfirm('Remove Exam Registration', 'Remove this student from the exam?')) return;
+    const reg = (await dbGetAll('examRegistrations')).find(r => r.studentId === studentId && r.examId === examId);
+    if (reg) await dbDelete('examRegistrations', reg.id);
+    const seat = (await dbGetAll('seating')).find(s => s.examId === examId && s.studentId === studentId);
+    if (seat) await dbDelete('seating', seat.id);
+    closeModal();
+    renderStudents();
+    showToast('Removed from exam');
+    logAudit('deleted', 'examRegistration', { studentId, examId });
+}
+
+async function adminEnrollStudentInQuiz(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found');
+    const enrollments = await dbGetAll('enrollments');
+    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const quizzes = (await dbGetAll('quizzes')).filter(q => q.published && enrolledCourseIds.has(q.courseId));
+    const submissions = await dbGetAll('submissions');
+    const submittedIds = new Set(submissions.filter(s => s.studentId === studentId).map(s => s.quizId));
+    const available = quizzes.filter(q => !submittedIds.has(q.id));
+    const completed = quizzes.filter(q => submittedIds.has(q.id));
+    const courses = await dbGetAll('courses');
+    let html = `<div style="margin-bottom:8px;"><b>${escapeHtml(student.name)}</b></div>`;
+    if (completed.length) {
+        html += `<div style="margin-bottom:12px;"><h4 style="color:var(--text-muted);margin-bottom:6px;">Already Submitted (${completed.length})</h4>`;
+        html += completed.map(q => {
+            const course = courses.find(c => c.id === q.courseId);
+            return `<div style="padding:6px 8px;background:var(--bg-input);border-radius:4px;margin-bottom:4px;font-size:12px;"><b>${q.title}</b> — ${course ? course.name : ''}</div>`;
+        }).join('');
+        html += `</div>`;
+    }
+    if (!available.length) {
+        html += '<div style="color:var(--text-muted);padding:10px;">No available quizzes to join</div>';
+    } else {
+        html += available.map(q => {
+            const course = courses.find(c => c.id === q.courseId);
+            return `<label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;">
+                <input type="checkbox" value="${q.id}" class="admin-quiz-chk">
+                <div><b>${q.title}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : q.courseId}</span></div>
+            </label>`;
+        }).join('');
+    }
+    showModal('Join Quizzes', html, available.length ? `<button class="btn btn-primary" onclick="adminSaveQuizEnrollment('${studentId}')">Join Selected</button>` : '');
+}
+
+async function adminSaveQuizEnrollment(studentId) {
+    const checked = Array.from(document.querySelectorAll('.admin-quiz-chk:checked')).map(cb => cb.value);
+    if (!checked.length) return showToast('Select at least one quiz');
+    closeModal();
+    renderStudents();
+    showToast(`Joined ${checked.length} quiz(es) — student can start from portal`);
+    logAudit('created', 'quizEnrollment', { studentId, quizzes: checked });
+}
+
+async function adminChangeStudentProgram(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found');
+    const programs = await getProgramsList();
+    const content = `<div class="form-group"><label>Student</label><div><b>${escapeHtml(student.name)}</b> — ${escapeHtml(student.admissionNumber || student.id)}</div></div><div class="form-group"><label>Current Program</label><div>${escapeHtml(student.program || '--')}</div></div><div class="form-group"><label>New Program *</label><select id="admin-new-program"><option value="">Select Program...</option>${programs.map(p => `<option value="${p}" ${student.program === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div><div class="form-group"><label>Year</label><input type="number" id="admin-new-year" value="${student.year || 1}" min="1" max="5"></div>`;
+    showModal('Change Program', content, `<button class="btn btn-primary" onclick="adminSaveProgramChange('${studentId}')">Update Program</button>`);
+}
+
+async function adminSaveProgramChange(studentId) {
+    const newProgram = document.getElementById('admin-new-program').value;
+    const newYear = parseInt(document.getElementById('admin-new-year').value) || 1;
+    if (!newProgram) return showToast('Select a program');
+    const student = await dbGet('students', studentId);
+    if (!student) return;
+    const oldProgram = student.program;
+    student.program = newProgram;
+    student.year = newYear;
+    const newFee = await getProgramFee(newProgram);
+    student.feeAmount = newFee || student.feeAmount;
+    await dbPut('students', student);
+    closeModal();
+    renderStudents();
+    showToast(`Program changed: ${oldProgram} → ${newProgram}`);
+    logAudit('updated', 'student-program', { studentId, oldProgram, newProgram, newYear });
+}
+
+async function showStudentDirectory() {
+    const students = await dbGetAll('students');
+    const centers = await getCenters();
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding ? branding.schoolName : 'College Management System';
+    if (!students.length) return showToast('No students to print');
+    const rows = students.map(s => {
+        const center = centers.find(c => c.id === s.studyCenterId);
+        return `<tr><td>${escapeHtml(s.admissionNumber || s.id)}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.program || '--')}</td><td>${s.year || 1}</td><td>${center ? escapeHtml(center.name) : 'Main'}</td><td>${escapeHtml(s.status || 'active')}</td></tr>`;
+    }).join('');
+    const content = `<div id="directory-print">
+        <h3 style="text-align:center;margin:0 0 2px;">${escapeHtml(schoolName)}</h3>
+        <p style="text-align:center;color:var(--text-muted);margin:0 0 12px;">Student Directory — Generated ${new Date().toLocaleDateString()}</p>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="border:1px solid #ccc;padding:5px;text-align:left;">Admission #</th><th style="border:1px solid #ccc;padding:5px;text-align:left;">Name</th><th style="border:1px solid #ccc;padding:5px;text-align:left;">Program</th><th style="border:1px solid #ccc;padding:5px;">Year</th><th style="border:1px solid #ccc;padding:5px;text-align:left;">Center</th><th style="border:1px solid #ccc;padding:5px;text-align:left;">Status</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+    showModal('Print Student Directory', content, `<button class="btn btn-primary" onclick="printDirectory()">🖨 Print</button>`);
+    logAudit('printed', 'student-directory', { count: students.length });
+}
+function printDirectory() {
+    const el = document.getElementById('directory-print');
+    if (!el) return;
+    const win = window.open('', '_blank', 'width=900,height=700');
+    win.document.write(`<html><head><title>Student Directory</title></head><body>${el.outerHTML}</body></html>`);
+    win.document.close();
+    win.print();
+}
+async function exportCoursesCSV() {
+    const courses = await dbGetAll('courses');
+    const staff = await dbGetAll('staff');
+    const enrollments = await dbGetAll('enrollments');
+    const staffById = {};
+    staff.forEach(s => { staffById[s.id] = s; });
+    let csv = 'Code,Name,Credits,Department,Instructor,Students,Status\n';
+    courses.forEach(c => {
+        const count = enrollments.filter(e => e.courseId === c.id).length;
+        const inst = c.instructor ? staffById[c.instructor] : null;
+        csv += `"${c.code || c.id}","${c.name}","${c.credits || 3}","${c.department || ''}","${inst ? inst.name : (c.instructor || '')}",${count},"${c.status || 'active'}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'courses_' + new Date().toISOString().split('T')[0] + '.csv'; a.click();
+    showToast('Courses exported!'); logAudit('exported', 'courses-csv', {});
+}
+async function exportFinanceCSV() {
+    const payments = await dbGetAll('payments');
+    const students = await dbGetAll('students');
+    const income = await dbGetAll('income');
+    const expenses = await dbGetAll('expenses');
+    const studentById = {};
+    students.forEach(s => { studentById[s.id] = s; });
+    let csv = 'Type,Date,Reference,Description,Amount\n';
+    payments.forEach(p => {
+        const st = p.studentId ? studentById[p.studentId] : null;
+        csv += `Payment,${p.date || ''},${p.receiptNo || ''},"${st ? st.name : (p.studentId || '')} (${p.method || ''})",${p.amount || 0}\n`;
+    });
+    income.forEach(i => { csv += `Income,${i.date || ''},${i.id || ''},"${i.description || i.category || ''}",${i.amount || 0}\n`; });
+    expenses.forEach(e => { csv += `Expense,${e.date || ''},${e.id || ''},"${e.description || e.category || ''}",${e.amount || 0}\n`; });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'finance_' + new Date().toISOString().split('T')[0] + '.csv'; a.click();
+    showToast('Finance exported!'); logAudit('exported', 'finance-csv', {});
+}
+
 async function showStudentForm(student = null) {
     const isEdit = !!student;
     const centers = await getCenters();
@@ -2099,6 +2344,7 @@ async function saveStudent() {
     const name = document.getElementById('student-name').value.trim();
     if (!name) return showToast('Name is required!');
     const editId = document.getElementById('student-edit-id').value;
+    const existingRecord = editId ? await dbGet('students', editId) : null;
     const id = editId || generateId('STU');
     const email = document.getElementById('student-email').value.trim();
     if (email) {
@@ -2158,7 +2404,7 @@ async function saveStudent() {
     const enrollDate = document.getElementById('adm-date').value || new Date().toISOString().split('T')[0];
     const photoPreview = document.getElementById('student-photo-preview');
     const photoImg = photoPreview ? photoPreview.querySelector('img') : null;
-    const photo = photoImg ? photoImg.src : (editId ? (await dbGet('students', editId)).photo || '' : '');
+    const photo = photoImg ? photoImg.src : (existingRecord ? existingRecord.photo || '' : '');
     const student = {
         id,
         admissionNumber,
@@ -2174,8 +2420,8 @@ async function saveStudent() {
         year: calculateYearOfStudy({ 
             yearAuto: document.getElementById('student-year-auto')?.checked !== false,
             year: parseInt(document.getElementById('student-year').value) || 1,
-            registrationRequestedAt: student?.registrationRequestedAt,
-            enrollDate: student?.enrollDate
+            registrationRequestedAt: existingRecord?.registrationRequestedAt,
+            enrollDate: existingRecord?.enrollDate
         }),
         yearAuto: document.getElementById('student-year-auto')?.checked !== false,
         feeAmount,
@@ -9953,6 +10199,18 @@ async function openQuickSend(templateId) {
         document.getElementById('qs-student-select').style.display = this.value === 'selected' ? 'block' : 'none';
     });
 }
+async function copyQSMessage() {
+    const msg = document.getElementById('qs-message');
+    if (!msg || !msg.value) return showToast('Nothing to copy');
+    try {
+        await navigator.clipboard.writeText(msg.value);
+        showToast('Message copied to clipboard!', { type: 'success' });
+    } catch (e) {
+        msg.select();
+        document.execCommand('copy');
+        showToast('Message copied to clipboard!', { type: 'success' });
+    }
+}
 async function previewQSMessage() {
     const msg = document.getElementById('qs-message').value;
     const recipients = document.getElementById('qs-recipients').value;
@@ -15425,6 +15683,16 @@ async function loadBranding() {
         if (settings.receiptLogo) {
             if (receiptLogoPreview) { receiptLogoPreview.src = settings.receiptLogo; receiptLogoPreview.style.display = 'block'; receiptLogoPlaceholder.style.display = 'none'; }
         }
+        ['partner1', 'partner2'].forEach(which => {
+            const pImg = document.getElementById(`settings-${which}-preview`);
+            const pPh = document.getElementById(`settings-${which}-placeholder`);
+            if (settings[`${which}Logo`]) {
+                if (pImg) { pImg.src = settings[`${which}Logo`]; pImg.style.display = 'block'; }
+                if (pPh) pPh.style.display = 'none';
+            }
+            const pName = document.getElementById(`settings-${which}-name`);
+            if (pName) pName.value = settings[`${which}Name`] || '';
+        });
         ['postalAddress', 'city', 'phone', 'email', 'website'].forEach(f => {
             const el = document.getElementById('settings-' + f);
             if (el) el.value = settings[f] || '';
@@ -15460,6 +15728,12 @@ async function saveBranding() {
         const existing = await dbGet('settings', 'branding');
         if (existing && existing.receiptLogo) branding.receiptLogo = existing.receiptLogo;
     }
+    ['partner1', 'partner2'].forEach(which => {
+        const pImg = document.getElementById(`settings-${which}-preview`);
+        const pName = document.getElementById(`settings-${which}-name`);
+        if (pName) branding[`${which}Name`] = pName.value.trim();
+        if (pImg && pImg.style.display !== 'none' && pImg.src && pImg.src.startsWith('data:')) branding[`${which}Logo`] = pImg.src;
+    });
     const prev = await dbGet('settings', 'branding');
     if (prev && prev.termsContent !== branding.termsContent) {
         branding.termsVersion = (prev.termsVersion || 0) + 1;
@@ -15485,6 +15759,18 @@ function handleReceiptLogoUpload(event) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => { document.getElementById('settings-receipt-logo-preview').src = e.target.result; document.getElementById('settings-receipt-logo-preview').style.display = 'block'; document.getElementById('settings-receipt-logo-placeholder').style.display = 'none'; };
+    reader.readAsDataURL(file);
+}
+function handlePartnerLogoUpload(event, which) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = document.getElementById(`settings-${which}-preview`);
+        const placeholder = document.getElementById(`settings-${which}-placeholder`);
+        if (img) { img.src = e.target.result; img.style.display = 'block'; }
+        if (placeholder) placeholder.style.display = 'none';
+    };
     reader.readAsDataURL(file);
 }
 function handleSigUpload(role, event) {
@@ -15834,6 +16120,100 @@ function updateProgramFilter() {
     if (select) select.value = current;
     if (gradProgram) gradProgram.innerHTML = '<option value="">Select Program...</option>' + programs.map(p => `<option value="${p}">${p}</option>`).join('');
 }
+async function saveSMSSettings() {
+    const settings = { key: 'smsSettings', value: { apiKey: document.getElementById('settings-sms-apikey').value.trim(), username: document.getElementById('settings-sms-username').value.trim(), senderId: document.getElementById('settings-sms-senderid').value.trim() } };
+    await dbPut('settings', settings); showToast('SMS settings saved!'); logAudit('updated', 'sms-settings', { username: settings.value.username, senderId: settings.value.senderId });
+}
+async function loadSMSSettings() {
+    const settings = await dbGet('settings', 'smsSettings');
+    if (settings && settings.value) {
+        const keyInput = document.getElementById('settings-sms-apikey');
+        const userInput = document.getElementById('settings-sms-username');
+        const senderInput = document.getElementById('settings-sms-senderid');
+        if (keyInput) keyInput.value = settings.value.apiKey || '';
+        if (userInput) userInput.value = settings.value.username || '';
+        if (senderInput) senderInput.value = settings.value.senderId || '';
+    }
+    renderSMSTemplates();
+    renderSMSLog();
+}
+async function renderSMSTemplates() {
+    const container = document.getElementById('sms-templates');
+    if (!container) return;
+    const templates = await dbGetAll('smsTemplates');
+    container.innerHTML = templates.length ? templates.map(t => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;"><div><b>${escapeHtml(t.name)}</b><div style="font-size:11px;color:var(--text-muted);">${escapeHtml((t.message || '').substring(0, 60))}</div></div><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" onclick="showSMSTemplateForm('${t.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="useSMSTemplate('${t.id}')">Use</button> <button class="btn btn-danger btn-sm" onclick="deleteSMSTemplate('${t.id}')">Del</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;padding:10px;">No SMS templates yet.</div>';
+}
+function showSMSTemplateForm(id = null) {
+    (async () => {
+        const tpl = id ? await dbGet('smsTemplates', id) : null;
+        const content = `<div class="form-group"><label>Template Name *</label><input type="text" id="smstpl-name" value="${tpl ? escapeHtml(tpl.name) : ''}" placeholder="e.g., Fee Reminder"></div><div class="form-group"><label>Message *</label><textarea id="smstpl-message" rows="4">${tpl ? escapeHtml(tpl.message || '') : ''}</textarea></div><p style="font-size:11px;color:var(--text-muted);">Variables: {{name}}, {{admission}}, {{program}}, {{center}}, {{school}}</p>`;
+        showModal(id ? 'Edit SMS Template' : 'Add SMS Template', content, `<button class="btn btn-primary" onclick="saveSMSTemplate('${id || ''}')">Save</button>`);
+    })();
+}
+async function saveSMSTemplate(id = null) {
+    const name = document.getElementById('smstpl-name').value.trim();
+    const message = document.getElementById('smstpl-message').value.trim();
+    if (!name || !message) return showToast('Name and message required!');
+    const tplId = id || generateId('SMSTPL');
+    await dbPut('smsTemplates', { id: tplId, name, message, createdAt: new Date().toISOString() });
+    closeModal(); renderSMSTemplates(); showToast('SMS template saved!'); logAudit(id ? 'updated' : 'created', 'sms-template', { id: tplId, name });
+}
+async function deleteSMSTemplate(id) {
+    if (!await showConfirm('Delete Template', 'Delete this SMS template?')) return;
+    await dbDelete('smsTemplates', id);
+    renderSMSTemplates(); showToast('SMS template deleted'); logAudit('deleted', 'sms-template', { id });
+}
+async function useSMSTemplate(id) {
+    const tpl = await dbGet('smsTemplates', id);
+    if (!tpl) return;
+    showSMSBroadcast(tpl.message);
+}
+function showSMSBroadcast(initialMessage = '') {
+    (async () => {
+        const students = (await dbGetAll('students')).filter(s => s.status === 'active' && s.phone);
+        const branding = await dbGet('settings', 'branding');
+        const schoolName = branding ? branding.schoolName : 'College Management System';
+        const content = `<div class="form-group"><label>Recipients</label><select id="sms-recipients"><option value="all-active">All Active Students with phone (${students.length})</option></select></div><div class="form-group"><label>Message *</label><textarea id="sms-message" rows="5" placeholder="Enter your message... Use {{name}}, {{admission}}, {{program}}, {{center}}, {{school}}">${escapeHtml(initialMessage)}</textarea></div><div id="sms-preview" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"></div><p style="font-size:11px;color:var(--text-muted);">Send via Africa's Talking (configure SMS Settings in the Settings tab).</p>`;
+        showModal('Bulk SMS Broadcast', content, `<button class="btn btn-primary" onclick="sendSmsBroadcast('${escapeHtml(schoolName).replace(/'/g, '')}')">🚀 Send SMS (${students.length})</button>`);
+        document.getElementById('sms-message').addEventListener('input', () => {
+            const val = document.getElementById('sms-message').value;
+            document.getElementById('sms-preview').innerHTML = 'Character count: <b>' + val.length + '</b>' + (val.length > 160 ? ' <span style="color:var(--warning);">(multipart SMS: ~' + Math.ceil(val.length / 160) + ' parts)</span>' : '');
+        });
+    })();
+}
+async function sendSmsBroadcast(schoolName) {
+    const message = document.getElementById('sms-message').value.trim();
+    const students = (await dbGetAll('students')).filter(s => s.status === 'active' && s.phone);
+    if (!message) return showToast('Enter a message first!');
+    if (!students.length) return showToast('No recipients with phone numbers!');
+    const centers = await getCenters();
+    const recipients = students.map(s => {
+        const center = centers.find(c => c.id === s.studyCenterId);
+        return { phone: String(s.phone).replace(/[^0-9]/g, ''), message: message.replace(/\{\{name\}\}/g, s.name || '').replace(/\{\{admission\}\}/g, s.admissionNumber || '').replace(/\{\{program\}\}/g, s.program || '').replace(/\{\{center\}\}/g, center ? center.name : '').replace(/\{\{school\}\}/g, schoolName || '') };
+    }).filter(r => r.phone.length >= 9);
+    if (!recipients.length) return showToast('No valid phone numbers found!');
+    showToast('Sending ' + recipients.length + ' SMS...', { type: 'info' });
+    const logEntries = recipients.map(r => ({ name: '', phone: r.phone, message: r.message }));
+    try {
+        const res = await fetch('/api/send-sms', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ recipients, logEntries }) });
+        const data = await res.json().catch(() => ({}));
+        closeModal();
+        if (data.error) return showToast(data.error, { type: 'error' });
+        showToast(`Sent: ${data.sent || 0}, Failed: ${data.failed || 0}`, { type: data.sent || 0 ? 'success' : 'error' });
+        renderSMSLog();
+        logAudit('created', 'sms-broadcast', { total: data.total || recipients.length, sent: data.sent || 0, failed: data.failed || 0 });
+    } catch (e) {
+        closeModal();
+        showToast('SMS send failed: ' + (e.message || e), { type: 'error' });
+    }
+}
+async function renderSMSLog() {
+    const container = document.getElementById('sms-log');
+    if (!container) return;
+    let log = [];
+    try { log = await dbGetAll('smsLog'); } catch (e) { log = []; }
+    container.innerHTML = log.length ? log.slice().reverse().slice(0, 100).map(e => `<div class="whatsapp-log-entry"><span style="font-weight:600;">${formatDate(e.createdAt || e.date)} ${e.time || ''}</span> <span class="badge badge-success" style="font-size:9px;">SMS</span><br>→ ${escapeHtml(e.phone || e.name || '')}<br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml((e.message || '').substring(0, 120))}</span></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px;">No SMS sent yet.</div>';
+}
 async function downloadBackup() {
     return backupData();
 }
@@ -15847,6 +16227,9 @@ async function backupData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'college_backup_' + new Date().toISOString().split('T')[0] + '.json'; a.click();
     showToast('Backup downloaded!'); logAudit('exported', 'backup', { date: data.date });
+}
+async function handleRestoreFile(event) {
+    await restoreData(event);
 }
 async function restoreData(event) {
     const file = event.target.files[0]; if (!file) return;
@@ -17852,14 +18235,14 @@ async function fetchJitsiToken(room, lobby) {
         return await res.json();
     } catch (e) { return { token: '', jwtEnabled: false, base: '' }; }
 }
-async function loadAttendance(lessonId) {
+async function loadLessonAttendance(lessonId) {
     try {
         var records = await dbGetAll('attendance');
         return records.filter(function (a) { return a.lessonId === lessonId; }).sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
-    } catch (e) { console.error('loadAttendance:', e); return []; }
+    } catch (e) { console.error('loadLessonAttendance:', e); return []; }
 }
 async function exportAttendanceCsv(lessonId) {
-    var rows = await loadAttendance(lessonId);
+    var rows = await loadLessonAttendance(lessonId);
     var header = 'Student,Status,Date,Lesson ID';
     var lines = rows.map(function (r) {
         return [(r.studentId || r.student || ''), (r.status || ''), (r.date || r.createdAt || ''), r.lessonId || lessonId].join(',');
@@ -17952,7 +18335,7 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
         html += '<div style="display:flex;justify-content:space-between;align-items:center;"><b>Attendance</b><button class="btn btn-outline btn-sm" onclick="exportAttendanceCsv(\'' + lessonId + '\')">Export CSV</button></div>';
         html += '<div id="vc-attendance-' + safeLessonId + '" style="margin-top:8px;font-size:12px;color:var(--text-muted);">Loading...</div>';
         html += '</div>';
-        loadAttendance(lessonId).then(function (recs) {
+        loadLessonAttendance(lessonId).then(function (recs) {
             var box = document.getElementById('vc-attendance-' + safeLessonId);
             if (!box) return;
             if (!recs.length) { box.innerHTML = '<p style="color:var(--text-muted);">No attendance records yet.</p>'; return; }

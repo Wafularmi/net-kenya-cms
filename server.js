@@ -1965,7 +1965,7 @@ const server = http.createServer((req, res) => {
             const logoData = branding && branding.logo ? branding.logo : '';
             let logoCss = '';
             if (branding && branding.logo) {
-                logoCss = '<style>#login-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover;text-indent:-9999px}#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover}</style>';
+                logoCss = '<style>#login-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover !important;text-indent:-9999px!important;background-color:transparent!important}#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover}</style>';
             }
             const maintSetting = getMaintenanceSetting();
             const maintMsg = maintSetting.message && String(maintSetting.message).trim()
