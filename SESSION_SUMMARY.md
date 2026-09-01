@@ -535,3 +535,72 @@ Multiple iterations to make the preview render: UMD build for global `pdfjsLib` 
 ---
 
 **Status (2026-08-21):** Diploma PDF generator complete and live; security hardening complete; JaaS Virtual Classroom live. Working tree clean after committing the `index.html` pdf.js fix and deleting debug scripts. The only outstanding repo task is mirroring the two desktop folders.
+
+---
+
+### Session 2026-08-22 → 2026-08-29 — Diploma Coordinate Unity, Reprint Fix & Tooling
+
+#### 1. Diploma Coordinate Unity (v249, live pending)
+**Problem:** Preview labels used `diplomaMmToPx()` based on canvas CSS width, but pdf.js rendered at `_diplomaCanvasScale`. On landscape templates this caused labels to render at wrong positions vs final PDF.
+
+**Fix:** `diplomaMmToPx()` now returns `2.83465 * _diplomaCanvasScale` — the exact same scale pdf.js uses for rendering. Preview and generation now share identical coordinate math.
+
+**Files:** `js/bundle.js` (`diplomaMmToPx`, `getDiplomaPageSize`, `positionOverlayLabels`, `wireDiplomaOverlay`, `setActiveFieldCoords`, `renderPdfOnCanvas` canvas onclick).
+
+#### 2. Diploma Reprint Fixed (v251, live pending)
+**Root cause:** `generateDiplomaPdf()` saved certificates with `content: ''` (empty). Reprint looked up `cert.content`, found empty string, showed "No Content".
+
+**Fix:** After `pdfDoc.save()`, encode bytes to base64 and store in `cert.content`. Reprint now renders the saved PDF.
+
+**Files:** `js/bundle.js` (`generateDiplomaPdf` lines 9018-9024).
+
+#### 3. Diploma Label Interactions Polished (v249)
+- **Drag:** Fixed broken `document.onmousemove`/`onmouseup` overwriting per-field; now uses global listeners with proper closure
+- **Click-to-move:** Click canvas → moves last-selected label to that position
+- **Live X/Y inputs:** Typing in number inputs or dragging sliders updates label position instantly
+- **Active field tracking:** Drag/focus sets `window._activeDiplomaField`; click uses that field
+
+#### 4. Landscape Template Support Verified
+Live template is A4 landscape (842×595 pt = 297×210 mm). Coordinates now correctly map:
+- Name: 69,93mm → draw at (83.7, 331.6)
+- Adm: 122,81mm → (300.3, 365.6)
+- Date: 202,123mm → (528.3, 246.5)
+- DocID: 203,26mm → (510.1, 521.5)
+- Verify: 202,35mm → (527.7, 496.0)
+
+Local test script (`test-diploma-local.js`) generates PDF with red markers at exact label positions for visual verification.
+
+#### 5. Audit Log: Clear All Button (v250)
+- Added **"Clear All"** button in Audit tab header (next to Prune)
+- Added **Audit Log card** in Settings with View/Export/Prune/Clear All buttons
+- Reuses existing `clearAllAudit()` (modal confirm + bulk delete)
+
+#### 6. Mirror Script for Desktop Folders
+Created `mirror-desktop.ps1` — robust PowerShell script using robocopy:
+- Excludes: node_modules, .git, dist, installer*, backups, server-data*, logs, runtime, certs
+- Preserves each target's deployment artifacts (node_modules, server-data.json, builds)
+- Multi-threaded, retries, dry-run mode
+- Tested dry-run successfully on both `NET CMS` and `NET CMS 1`
+
+#### 7. Local Verification Tooling
+- `test-diploma-local.js`: Fetches live config/template, generates test diploma with red markers at label positions, saves `test-diploma-output.pdf` for visual verification
+- Confirmed landscape (297×210mm) coordinate mapping works correctly
+
+#### Deployment Status
+| Version | Commit | Status |
+|---------|--------|--------|
+| v248 | af8dd72 | **LIVE** (pdf.js 3.11.174 UMD) |
+| v249 | 63547fc | Queued (coordinate unity + label polish) |
+| v250 | 252fb3d | Queued (Audit Clear All + Settings card) |
+| v251 | c1661ef | Queued (Reprint fix) |
+
+Railway build queue processing sequentially (health 200). Will auto-complete.
+
+#### Deferred / Still Open
+- **Mirror `NET KENYA` source into `NET CMS` / `NET CMS 1`** — script ready, will run after v251 lands
+- **Operator env vars:** `DATA_ENCRYPTION_KEY` (MPesa/SMS encryption), JaaS JWT vars (already live)
+- Dead self-host files already removed
+
+---
+
+**Status (2026-08-29):** Diploma coordinate unity, reprint fix, label interactions, audit clear-all, mirror script, and test tooling all complete. Awaiting Railway queue to clear (v249→v250→v251) then single batch push with mirror execution.

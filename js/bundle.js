@@ -2004,7 +2004,8 @@ document.getElementById('students-body').innerHTML = filtered.map(s => {
 async function showStudentForm(student = null) {
     const isEdit = !!student;
     const centers = await getCenters();
-    const branding = await dbGet('settings', 'branding');
+    const _brandingRec = await dbGet('settings', 'branding');
+    const branding = (_brandingRec && typeof _brandingRec === 'object' && _brandingRec.value && typeof _brandingRec.value === 'object') ? _brandingRec.value : _brandingRec;
     const initials = (branding && branding.initials) ? branding.initials : 'XX';
     const now = new Date();
     const defaultMonth = now.getMonth() + 1;
@@ -2233,9 +2234,14 @@ async function saveStudent() {
     logAudit(editId ? 'updated' : 'created', 'student', { id, admissionNumber, name });
 }
 async function editStudent(id) {
-    const student = await dbGet('students', id);
-    if (!student) return;
-    showStudentForm(student);
+    try {
+        const student = await dbGet('students', id);
+        if (!student) { showToast('Student not found.', { type: 'danger' }); return; }
+        await showStudentForm(student);
+    } catch (e) {
+        console.error('editStudent error:', e);
+        showToast('Failed to open edit form: ' + (e && e.message ? e.message : e), { type: 'danger' });
+    }
 }
 async function viewStudent(id) {
     const student = await dbGet('students', id);
@@ -9045,7 +9051,13 @@ async function generateDiplomaPdf() {
             console.error('PDF save error:', e);
             throw new Error('Failed to save PDF. The document may be too complex. Try a simpler template.');
         }
-        const pdfB64 = btoa(String.fromCharCode(...new Uint8Array(outBytes)));
+        const _outBytesArr = new Uint8Array(outBytes);
+        let _bin = '';
+        const _chunk = 0x8000;
+        for (let _i = 0; _i < _outBytesArr.length; _i += _chunk) {
+            _bin += String.fromCharCode.apply(null, _outBytesArr.subarray(_i, _i + _chunk));
+        }
+        const pdfB64 = btoa(_bin);
         const blob = new Blob([outBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
@@ -12727,7 +12739,7 @@ if (typeof window.notifDropdownOpen === 'undefined') { window.notifDropdownOpen 
 async function updateNotificationBadge() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudent = currentUser.role === 'student';
-    const tickets = await dbGetAll('tickets');
+    const tickets = await dbGetAll('tickets').catch(() => []);
     const alerts = await dbGetAll('alerts').catch(() => []);
     let count = 0;
     if (isStudent) {
@@ -12754,7 +12766,7 @@ async function toggleNotificationDropdown() {
     window.notifDropdownOpen = true;
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudent = currentUser.role === 'student';
-    const tickets = await dbGetAll('tickets');
+    const tickets = await dbGetAll('tickets').catch(() => []);
     const alerts = await dbGetAll('alerts').catch(() => []);
     let items = [];
     // Tickets
