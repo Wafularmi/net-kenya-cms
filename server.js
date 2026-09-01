@@ -1024,7 +1024,28 @@ function handleAPI(req, res) {
 
                 // Extract field positions from layout
                 const fields = extractFieldPositions(result.analyzeResult);
-                return json(res, 200, { fields });
+                const dbg = req.query && req.query.debug === '1';
+                let debugInfo = null;
+                if (dbg) {
+                    const raw = result.analyzeResult || {};
+                    const page = (raw.pages || [])[0] || {};
+                    const l0 = (page.lines || [])[0] || {};
+                    const w0 = (page.words || [])[0] || {};
+                    debugInfo = {
+                        hasPages: Array.isArray(raw.pages),
+                        hasReadResults: Array.isArray(raw.readResults),
+                        pages: (raw.pages || []).length,
+                        readResults: (raw.readResults || []).length,
+                        units: page.units, pageWidth: page.width, pageHeight: page.height,
+                        lineCount: (page.lines || []).length, wordCount: (page.words || []).length,
+                        firstLineContent: l0.content || l0.text,
+                        firstLinePoly: (l0.polygon || []).slice(0, 6),
+                        firstLineBbox: (l0.boundingBox || []).slice(0, 8),
+                        firstWordPoly: (w0.polygon || []).slice(0, 6),
+                        firstWordSpan: w0.span || null
+                    };
+                }
+                return json(res, 200, { fields, ...(debugInfo ? { debug: debugInfo } : {}) });
 
             } catch (e) {
                 console.error('AI detect-fields error:', e);
