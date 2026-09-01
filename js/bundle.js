@@ -8941,53 +8941,58 @@ function applyPresetCoords(preset) {
 }
 
 async function detectDiplomaFieldsWithAI() {
-    const fileInput = document.getElementById('diploma-pdf-upload');
-    if (!fileInput.files || !fileInput.files[0]) {
-        showToast('Please upload a PDF template first!', { type: 'danger' });
-        return;
-    }
-    const file = fileInput.files[0];
-    if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
-
     const btn = document.querySelector('button[onclick="detectDiplomaFieldsWithAI()"]');
     if (btn) { btn.disabled = true; btn.textContent = '🔍 Detecting...'; }
 
     try {
-        showToast('Analyzing PDF with AI...', { type: 'info' });
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-            try {
-                const base64 = uint8ArrayToBase64(new Uint8Array(e.target.result));
-                const res = await fetch('/api/ai/detect-fields', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ pdfBase64: base64 })
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'AI detection failed');
+        // Use a freshly selected file first, else the already-uploaded/saved template
+        let base64 = '';
+        const fileInput = document.getElementById('diploma-pdf-upload');
+        if (fileInput.files && fileInput.files[0]) {
+            const file = fileInput.files[0];
+            if (file.type !== 'application/pdf') return showToast('Please upload a PDF file', { type: 'danger' });
+            base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(uint8ArrayToBase64(new Uint8Array(e.target.result)));
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        } else if (window._diplomaPdfTemplate) {
+            base64 = window._diplomaPdfTemplate;
+        } else {
+            const rec = await dbGet('settings', 'diplomaPdfConfig');
+            const config = (rec && rec.value) ? rec.value : rec;
+            if (config && config.template) base64 = config.template;
+        }
+        if (!base64) {
+            return showToast('No PDF template available. Please upload and save a PDF first.', { type: 'danger' });
+        }
 
-                if (data.fields) {
-                    for (const [field, coords] of Object.entries(data.fields)) {
-                        const xEl = document.getElementById('diploma-fx-' + field);
-                        const yEl = document.getElementById('diploma-fy-' + field);
-                        const sizeEl = document.getElementById('diploma-fs-' + field);
-                        if (xEl && Number.isFinite(coords.x)) xEl.value = Math.round(coords.x);
-                        if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(coords.y);
-                        if (sizeEl && coords.size) sizeEl.value = coords.size;
-                    }
-                    showToast('AI detected and filled field positions!', { type: 'success' });
-                } else {
-                    showToast('No fields detected. Please set manually.', { type: 'warning' });
-                }
-            } catch (e) {
-                showToast('AI detection error: ' + e.message, { type: 'danger' });
-            } finally {
-                if (btn) { btn.disabled = false; btn.textContent = '🔍 Detect Fields with AI'; }
+        showToast('Analyzing PDF with AI...', { type: 'info' });
+        const res = await fetch('/api/ai/detect-fields', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ pdfBase64: base64 })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'AI detection failed');
+
+        if (data.fields && Object.keys(data.fields).length) {
+            for (const [field, coords] of Object.entries(data.fields)) {
+                const xEl = document.getElementById('diploma-fx-' + field);
+                const yEl = document.getElementById('diploma-fy-' + field);
+                const sizeEl = document.getElementById('diploma-fs-' + field);
+                if (xEl && Number.isFinite(coords.x)) xEl.value = Math.round(coords.x);
+                if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(coords.y);
+                if (sizeEl && coords.size) sizeEl.value = coords.size;
             }
-        };
-        reader.readAsArrayBuffer(file);
+            showToast('AI detected and filled field positions!', { type: 'success' });
+        } else {
+            showToast('No fields detected. Please set manually.', { type: 'warning' });
+        }
     } catch (e) {
-        showToast('Error: ' + e.message, { type: 'danger' });
+        showToast('AI detection error: ' + e.message, { type: 'danger' });
+    } finally {
         if (btn) { btn.disabled = false; btn.textContent = '🔍 Detect Fields with AI'; }
     }
 }
