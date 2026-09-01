@@ -8803,6 +8803,58 @@ function diplomaMmToPx() {
     return 2.83465 * scale;
 }
 
+function resolveDiplomaPaperMm(paper) {
+    if (!paper || !paper.kind || paper.kind === 'auto') return null;
+    if (paper.kind === 'custom') {
+        const w = parseFloat(paper.wMm);
+        const h = parseFloat(paper.hMm);
+        if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) return { wMm: w, hMm: h };
+        return null;
+    }
+    const sizes = {
+        a4_portrait: { wMm: 210, hMm: 297 }, a4_landscape: { wMm: 297, hMm: 210 },
+        a3_portrait: { wMm: 297, hMm: 420 }, a3_landscape: { wMm: 420, hMm: 297 },
+        a5_portrait: { wMm: 148, hMm: 210 }, a5_landscape: { wMm: 210, hMm: 148 },
+        letter_portrait: { wMm: 215.9, hMm: 279.4 }, letter_landscape: { wMm: 279.4, hMm: 215.9 }
+    };
+    return sizes[paper.kind] || null;
+}
+
+function onDiplomaPaperSizeChange() {
+    const kind = document.getElementById('diploma-paper-size').value;
+    const cust = document.getElementById('diploma-custom-paper');
+    if (cust) cust.style.display = kind === 'custom' ? 'flex' : 'none';
+}
+
+async function embedTemplateOnPaperPage(pdfDoc, srcPage, tgtW, tgtH, templateB64) {
+    if (typeof pdfjsLib === 'undefined') {
+        srcPage.setSize(tgtW, tgtH);
+        return srcPage;
+    }
+    const srcW = srcPage.getWidth();
+    const srcH = srcPage.getHeight();
+    const ratio = Math.min(tgtW / srcW, tgtH / srcH);
+    const renderScale = ratio * 2;
+    const pdfData = Uint8Array.from(atob(templateB64), c => c.charCodeAt(0));
+    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: renderScale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(viewport.width));
+    canvas.height = Math.max(1, Math.round(viewport.height));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+    const newPage = pdfDoc.addPage([tgtW, tgtH]);
+    const img = await pdfDoc.embedPng(canvas.toDataURL('image/png'));
+    const imgW = srcW * ratio;
+    const imgH = srcH * ratio;
+    newPage.drawImage(img, { x: (tgtW - imgW) / 2, y: (tgtH - imgH) / 2, width: imgW, height: imgH });
+    pdfDoc.removePage(0);
+    return newPage;
+}
+
 function positionOverlayLabels() {
     const mmToPx = diplomaMmToPx();
     ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
@@ -9029,6 +9081,11 @@ async function saveDiplomaPdfConfig() {
         },
         font: document.getElementById('diploma-font').value,
         color: document.getElementById('diploma-text-color').value,
+        paper: (() => {
+            const kind = document.getElementById('diploma-paper-size').value;
+            if (kind === 'custom') return { kind: 'custom', wMm: +document.getElementById('diploma-paper-w').value, hMm: +document.getElementById('diploma-paper-h').value };
+            return { kind: kind || 'auto' };
+        })(),
         sigs: {
             registrar: { img: (window._diplomaSigs || {}).registrar || null, x: +document.getElementById('diploma-sig-registrar-x').value, y: +document.getElementById('diploma-sig-registrar-y').value, w: +document.getElementById('diploma-sig-registrar-w').value },
             dean: { img: (window._diplomaSigs || {}).dean || null, x: +document.getElementById('diploma-sig-dean-x').value, y: +document.getElementById('diploma-sig-dean-y').value, w: +document.getElementById('diploma-sig-dean-w').value },
@@ -9184,6 +9241,12 @@ async function loadDiplomaPdfConfig() {
     if (f.vcode) { document.getElementById('diploma-fx-vcode').value = f.vcode.x; document.getElementById('diploma-fy-vcode').value = f.vcode.y; document.getElementById('diploma-fs-vcode').value = f.vcode.size; }
     if (config.font) document.getElementById('diploma-font').value = config.font;
     if (config.color) document.getElementById('diploma-text-color').value = config.color;
+    if (config.paper) {
+        if (config.paper.kind) document.getElementById('diploma-paper-size').value = config.paper.kind;
+        if (config.paper.wMm) document.getElementById('diploma-paper-w').value = config.paper.wMm;
+        if (config.paper.hMm) document.getElementById('diploma-paper-h').value = config.paper.hMm;
+        onDiplomaPaperSizeChange();
+    }
     if (config.sigs) {
         ['registrar', 'dean', 'director'].forEach(role => {
             const s = config.sigs[role];
@@ -9328,7 +9391,7 @@ async function generateDiplomaPdf() {
             throw new Error('Failed to load PDF template. The template may be corrupted or have circular references. Please re-upload a simpler PDF.');
         }
         
-        const page = pdfDoc.getPages()[0];
+        let page = pdfDoc.getPages()[0];
         const fontMap = { 'Times Roman': StandardFonts.TimesRoman, 'Helvetica': StandardFonts.Helvetica, 'Courier': StandardFonts.Courier };
         const font = await pdfDoc.embedFont(fontMap[config.font] || StandardFonts.TimesRoman);
         const colorHex = config.color || '#1a1a2e';
@@ -9337,6 +9400,18 @@ async function generateDiplomaPdf() {
         const b = parseInt(colorHex.slice(5, 7), 16) / 255;
         const txtColor = rgb(r, g, b);
         const mmToPt = 2.83465;
+        const paperMm = resolveDiplomaPaperMm(config.paper);
+        if (paperMm) {
+            const tgtWpt = paperMm.wMm * mmToPt;
+            const tgtHpt = paperMm.hMm * mmToPt;
+            if (Math.abs(page.getWidth() - tgtWpt) > 1 || Math.abs(page.getHeight() - tgtHpt) > 1) {
+                try {
+                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, config.template);
+                } catch (ee) {
+                    console.warn('Paper resize failed, using template page size:', ee);
+                }
+            }
+        }
         const student = await dbGet('students', studentId);
         const displayName = nameOverride || student.name;
         const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
