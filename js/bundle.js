@@ -8971,8 +8971,8 @@ async function detectDiplomaFieldsWithAI() {
                         const xEl = document.getElementById('diploma-fx-' + field);
                         const yEl = document.getElementById('diploma-fy-' + field);
                         const sizeEl = document.getElementById('diploma-fs-' + field);
-                        if (xEl) xEl.value = Math.round(coords.x);
-                        if (yEl) yEl.value = Math.round(coords.y);
+                        if (xEl && Number.isFinite(coords.x)) xEl.value = Math.round(coords.x);
+                        if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(coords.y);
                         if (sizeEl && coords.size) sizeEl.value = coords.size;
                     }
                     showToast('AI detected and filled field positions!', { type: 'success' });
@@ -9267,8 +9267,8 @@ async function generateDiplomaPdf() {
         const drawField = (text, field) => {
             if (!field) return;
             const size = field.size || 12;
-            const textWidth = font.widthOfTextAtSize(text, size);
-            page.drawText(text, { x: field.x * mmToPt - textWidth / 2, y: pageH - field.y * mmToPt, size: size, font: font, color: txtColor });
+            const topToBaseline = font.heightAtSize(size) * 0.78;
+            page.drawText(text, { x: field.x * mmToPt, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
         };
         drawField(displayName, config.fields.name);
         drawField(student.admissionNumber || student.id, config.fields.adm);

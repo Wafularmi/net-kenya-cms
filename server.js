@@ -574,73 +574,65 @@ function auditLog(action, entity, details, user) {
 function extractFieldPositions(analyzeResult) {
     const fields = {};
     const pages = analyzeResult.pages || [];
+    const ptToMm = 25.4 / 72;
+
+    const fieldLabels = {
+        name: ['name', 'student name', 'full name', 'candidate name'],
+        adm: ['admission', 'admission no', 'adm no', 'reg no', 'registration'],
+        date: ['date', 'graduation date', 'award date', 'issue date'],
+        docid: ['doc id', 'document id', 'certificate no', 'cert no'],
+        vcode: ['verify', 'verification code', 'v-code', 'vcode'],
+    };
+
+    const bboxOf = pts => {
+        if (!Array.isArray(pts) || !pts.length) return null;
+        let xs = [], ys = [];
+        for (const p of pts) {
+            if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) { xs.push(p.x); ys.push(p.y); }
+        }
+        if (!xs.length) return null;
+        return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+    };
 
     for (const page of pages) {
         const words = page.words || [];
         const lines = page.lines || [];
 
-        // Look for label-value patterns (e.g., "Name: [blank]", "Date: [blank]")
-        for (const line of lines) {
-            const content = line.content || '';
-            const polygon = line.polygon || [];
+        // Word polygons are the most reliable geometry; line.polygon can be
+        // empty on some models, so group words under their owning line via spans.
+        const wordsByLine = new Map();
+        for (let i = 0; i < lines.length; i++) {
+            const span = lines[i].spans && lines[i].spans[0];
+            if (!span) continue;
+            const set = [];
+            for (const w of words) {
+                const ws = w.span || (w.spans && w.spans[0]) || null;
+                if (ws && ws.offset >= span.offset && (ws.offset + ws.length) <= (span.offset + span.length)) set.push(w);
+            }
+            wordsByLine.set(i, set);
+        }
 
-            // Look for common diploma field labels
-            const fieldLabels = {
-                name: ['name', 'student name', 'full name', 'candidate name'],
-                adm: ['admission', 'admission no', 'adm no', 'reg no', 'registration'],
-                date: ['date', 'graduation date', 'award date', 'issue date'],
-                docid: ['doc id', 'document id', 'certificate no', 'cert no'],
-                vcode: ['verify', 'verification code', 'v-code', 'vcode'],
-            };
-
-            const lowerContent = content.toLowerCase();
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const content = (line.content || '').toLowerCase();
             for (const [field, labels] of Object.entries(fieldLabels)) {
-                if (labels.some(l => lowerContent.includes(l))) {
-                    const centerX = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length;
-                    const centerY = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length;
+                if (fields[field] || !labels.some(l => content.includes(l))) continue;
 
-                    // Estimate field position to the right of label
-                    const fieldWidth = 100; // mm
-                    const fieldHeight = 10; // mm
+                let box = null;
+                const mem = wordsByLine.get(i);
+                if (mem && mem.length) box = bboxOf(mem.flatMap(w => w.polygon || []));
+                if (!box) box = bboxOf(line.polygon || []);
+                if (!box) continue;
 
-                    if (!fields[field]) {
-                        fields[field] = {
-                            x: Math.round(centerX + 30), // mm, offset from label
-                            y: Math.round(centerY),
-                            size: 12
-                        };
-                    }
-                }
+                const pageW = Number(page.width) || 595;
+                const fieldX = Math.min(box.maxX + 15, pageW);
+                fields[field] = {
+                    x: Math.round(fieldX * ptToMm),
+                    y: Math.round(box.minY * ptToMm),
+                    size: 12
+                };
             }
         }
-
-        // Also detect blank/underlined areas (potential fill-in fields)
-        for (const line of lines) {
-            const content = line.content || '';
-            if (content.includes('_') || content.match(/_{3,}/) || content.match(/□|☐/)) {
-                const polygon = line.polygon || [];
-                const centerX = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length;
-                const centerY = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length;
-
-                // Assign to nearest unlabeled field
-                const unassignedFields = ['name', 'adm', 'date', 'docid', 'vcode']
-                    .filter(f => !fields[f]);
-                if (unassignedFields.length > 0) {
-                    fields[unassignedFields[0]] = {
-                        x: Math.round(centerX),
-                        y: Math.round(centerY),
-                        size: 12
-                    };
-                }
-            }
-        }
-    }
-
-    // Convert coordinates from points (1/72 inch) to mm
-    const ptToMm = 25.4 / 72;
-    for (const field of Object.values(fields)) {
-        field.x = Math.round(field.x * ptToMm);
-        field.y = Math.round(field.y * ptToMm);
     }
 
     return fields;
