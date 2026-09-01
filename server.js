@@ -573,7 +573,6 @@ function auditLog(action, entity, details, user) {
     // Helper: Extract field positions from Azure Form Recognizer layout result
 function extractFieldPositions(analyzeResult) {
     const fields = {};
-    const pages = analyzeResult.pages || [];
     const ptToMm = 25.4 / 72;
 
     const fieldLabels = {
@@ -584,22 +583,38 @@ function extractFieldPositions(analyzeResult) {
         vcode: ['verify', 'verification code', 'v-code', 'vcode'],
     };
 
+    // Accept geometry in any shape Azure emits: object-point polygon arrays,
+    // flat numeric boundingBox arrays ([x1,y1,x2,y2,...]), or [x,y] pairs.
     const bboxOf = pts => {
         if (!Array.isArray(pts) || !pts.length) return null;
         let xs = [], ys = [];
         for (const p of pts) {
-            if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) { xs.push(p.x); ys.push(p.y); }
+            if (typeof p === 'number') {
+                if (Number.isFinite(p)) (xs.length <= ys.length ? xs : ys).push(p);
+            } else if (Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])) {
+                xs.push(p[0]); ys.push(p[1]);
+            } else if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+                xs.push(p.x); ys.push(p.y);
+            }
         }
-        if (!xs.length) return null;
+        if (!xs.length || xs.length !== ys.length) return null;
         return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
     };
 
-    for (const page of pages) {
-        const words = page.words || [];
-        const lines = page.lines || [];
+    const mergeBox = (box, wb) => {
+        if (!box) return wb;
+        if (!wb) return box;
+        return { minX: Math.min(box.minX, wb.minX), maxX: Math.max(box.maxX, wb.maxX), minY: Math.min(box.minY, wb.minY), maxY: Math.max(box.maxY, wb.maxY) };
+    };
 
-        // Word polygons are the most reliable geometry; line.polygon can be
-        // empty on some models, so group words under their owning line via spans.
+    const processLines = (lines, words, pageW, pageUnits) => {
+        // Page width in its reported unit, used only to clamp X. Coordinates are
+        // converted to mm after clamping via unitScale.
+        const norm = (pageW == null) ? null : Number(pageW);
+        const pageWraw = (norm != null && Number.isFinite(norm)) ? norm : null;
+        // Coordinate scale to points: 'pixel' geometry is in px (300 DPI),
+        // 'inch' geometry is in inches, 'point'/absent geometry already in points.
+        const unitScale = pageUnits === 'pixel' ? (72 / 300) : (pageUnits === 'inch' ? 72 : 1);
         const wordsByLine = new Map();
         for (let i = 0; i < lines.length; i++) {
             const span = lines[i].spans && lines[i].spans[0];
@@ -614,25 +629,34 @@ function extractFieldPositions(analyzeResult) {
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const content = (line.content || '').toLowerCase();
+            const content = (line.content || line.text || '').toLowerCase();
             for (const [field, labels] of Object.entries(fieldLabels)) {
                 if (fields[field] || !labels.some(l => content.includes(l))) continue;
 
                 let box = null;
                 const mem = wordsByLine.get(i);
-                if (mem && mem.length) box = bboxOf(mem.flatMap(w => w.polygon || []));
-                if (!box) box = bboxOf(line.polygon || []);
+                if (mem && mem.length) {
+                    for (const w of mem) box = mergeBox(box, bboxOf(w.polygon) || bboxOf(w.boundingBox));
+                }
+                if (!box) box = bboxOf(line.polygon) || bboxOf(line.boundingBox);
                 if (!box) continue;
 
-                const pageW = Number(page.width) || 595;
-                const fieldX = Math.min(box.maxX + 15, pageW);
+                const rawX = pageWraw != null ? Math.min(box.maxX + 15, pageWraw) : box.maxX + 15;
                 fields[field] = {
-                    x: Math.round(fieldX * ptToMm),
-                    y: Math.round(box.minY * ptToMm),
+                    x: Math.round(rawX * unitScale * ptToMm),
+                    y: Math.round(box.minY * unitScale * ptToMm),
                     size: 12
                 };
             }
         }
+    };
+
+    for (const page of analyzeResult.pages || []) {
+        processLines(page.lines || [], page.words || [], page.width, page.units);
+    }
+    // Legacy v2.1 shape: readResults with text + flat boundingBox
+    for (const r of analyzeResult.readResults || []) {
+        processLines(r.lines || [], r.words || [], r.width, r.unit);
     }
 
     return fields;
@@ -950,10 +974,13 @@ function handleAPI(req, res) {
                 const { pdfBase64 } = JSON.parse(body);
                 if (!pdfBase64) return json(res, 400, { error: 'pdfBase64 required' });
 
-                // Call Azure Form Recognizer / Azure Document Intelligence
+                // Call Azure Form Recognizer / Azure Document Intelligence.
+                // Field position detection requires the layout model, which always
+                // returns word/line geometry (polygons). Custom/read models can
+                // return text without any coordinates.
                 const endpoint = process.env.AZURE_FORM_RECOGNIZER_ENDPOINT;
                 const key = process.env.AZURE_FORM_RECOGNIZER_KEY;
-                const modelId = process.env.AZURE_FORM_RECOGNIZER_MODEL_ID || 'prebuilt-layout';
+                const modelId = process.env.AZURE_DIPLOMA_DETECT_MODEL || 'prebuilt-layout';
 
                 if (!endpoint || !key) {
                     return json(res, 503, { error: 'Azure Form Recognizer not configured' });
