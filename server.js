@@ -666,10 +666,11 @@ function extractFieldPositions(analyzeResult) {
     };
 
     const dateValuePatterns = [
-        /\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b/,
         /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b/i,
         /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd)?,?\s+\d{4}\b/i,
         /\b\d{4}[\-\/]\d{1,2}[\-\/]\d{1,2}\b/,
+        // numeric date like 12/03/2024 or 12-03-2024, but NOT inside an alphanumeric ID
+        /(?<![A-Za-z0-9])[0-3]?\d[\/\-\.][0-1]?\d[\/\-\.](?:19|20)\d{2}(?![A-Za-z0-9])/,
     ];
 
     const cleanTokens = s => (s || '').replace(/[^\w\-]/g, ' ').trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -697,6 +698,9 @@ function extractFieldPositions(analyzeResult) {
     };
 
     // Score how label-like a line is for a given field (higher = better).
+    // A line is only treated as a real field label if it carries a strong label
+    // signal: a trailing colon, a "No./#/Number/ID/Code" keyword. This prevents
+    // decorative prose (headers, body text) from false-matching.
     const scoreLine = (content, rule) => {
         const c = content.trim();
         if (!c) return 0;
@@ -708,6 +712,10 @@ function extractFieldPositions(analyzeResult) {
         for (const t of toks) {
             if (rule.exactTokens.includes(t)) { score += 2; break; }
         }
+        // Strong label signals: must have a colon OR a No./#/number/id/code keyword
+        const hasColon = /[:：]/.test(c);
+        const hasNumberKw = /\b(?:no|#|num|number|id|code|cert(?:(?:ificate)?\.?\s*no)?|adm)\b|[:：]/i.test(c);
+        if (!hasColon && !hasNumberKw) return 0;
         // Penalise long prose lines that merely contain a keyword (headers, body text)
         if (toks.length > 3) score -= 1;
         // Penalise if it ends with a common non-label word
@@ -771,6 +779,42 @@ function extractFieldPositions(analyzeResult) {
                         }
                         break;
                     }
+                }
+            }
+
+            // ---- Anchor-based detection for decorative templates ----
+            // These templates omit literal field labels ("Name:", "Date:") and instead
+            // embed example/recipient data. We detect the recipient line (the name) and
+            // the document/date values by their structural position.
+            const lower = content.toLowerCase();
+
+            // name: the recipient is the text line immediately following a
+            // "presented to / awarded to / certify that" line. We place the name
+            // field at that following line's location.
+            if (!fields.name && /presented\s*to|awarded\s*to|hereby\s*award|\bcertif(?:y|ies)\s+that|named\s+as/i.test(lower)) {
+                const nextLine = lines[i + 1];
+                if (nextLine) {
+                    let nxtBox = bboxOf(nextLine.polygon) || bboxOf(nextLine.boundingBox);
+                    if (nxtBox) {
+                        fields.name = {
+                            x: Math.round((nxtBox.minX + 2) * unitScale * ptToMm),
+                            y: Math.round(nxtBox.minY * unitScale * ptToMm),
+                            size: 16
+                        };
+                    }
+                }
+            }
+
+            // adm / docid: an ID-looking value (letters+digits with '/' or '-').
+            if (!fields.adm && !fields.docid && /\b\d/.test(content) && /[\/\-]/.test(content) && /\b[A-Z0-9]{2,}\//i.test(content)) {
+                let box = bboxOf(line.polygon) || bboxOf(line.boundingBox);
+                if (box) {
+                    const target = !fields.adm ? 'adm' : 'docid';
+                    fields[target] = {
+                        x: Math.round((box.minX + 2) * unitScale * ptToMm),
+                        y: Math.round(box.minY * unitScale * ptToMm),
+                        size: 8
+                    };
                 }
             }
         }
@@ -1139,28 +1183,11 @@ function handleAPI(req, res) {
 
                                 if (result && result.analyzeResult) {
                                     const azureFields = extractFieldPositions(result.analyzeResult);
-                                    // Debug: dump raw line geometry to understand coordinate units
-                                    const rawDebug = [];
-                                    for (const pg of (result.analyzeResult.pages || [])) {
-                                        const unit = pg.units || pg.unit || '?';
-                                        const w = pg.width, h = pg.height;
-                                        for (const ln of (pg.lines || []).slice(0, 15)) {
-                                            rawDebug.push({ t: (ln.content || ln.text || '').slice(0, 30), unit, pageW: w, pageH: h, poly: (ln.polygon || ln.boundingBox || []).slice(0, 2) });
-                                        }
-                                    }
-                                    for (const r of (result.analyzeResult.readResults || []).slice(0, 5)) {
-                                        for (const ln of (r.lines || []).slice(0, 15)) {
-                                            rawDebug.push({ t: (ln.text || '').slice(0, 30), unit: r.unit || r.units || '?', pageW: r.width, pageH: r.height, poly: (ln.boundingBox || []).slice(0, 2) });
-                                        }
-                                    }
-                                    if (rawDebug.length) console.log('AZURE_RAW:', JSON.stringify(rawDebug));
-                                    // Merge: Azure fields fill gaps, don't overwrite PDF.js results
                                     for (const [k, v] of Object.entries(azureFields)) {
                                         if (!fields[k]) fields[k] = v;
                                     }
                                     method = Object.keys(fields).length > Object.keys(azureFields).length ? 'pdfjs+azure' : 'azure';
                                     confidence = Object.keys(fields).length >= 3 ? 'high' : 'medium';
-                                    debugInfo = { raw: rawDebug, azureFields, unit: ((result.analyzeResult.pages || [])[0] && ((result.analyzeResult.pages)[0].units || (result.analyzeResult.pages)[0].unit)) || ((result.analyzeResult.readResults || [])[0] && (result.analyzeResult.readResults)[0].unit), pageShape: { w: (result.analyzeResult.pages || [])[0] && (result.analyzeResult.pages)[0].width, h: (result.analyzeResult.pages || [])[0] && (result.analyzeResult.pages)[0].height } };
                                 }
                             }
                         }
@@ -1173,8 +1200,7 @@ function handleAPI(req, res) {
                 console.log(`Field detection: method=${method}, fields=${Object.keys(fields).length}, confidence=${confidence}`);
                 console.log('Detected fields:', JSON.stringify(fields));
 
-                const dbg = (typeof debugInfo !== 'undefined') ? debugInfo : null;
-                return json(res, 200, { fields, method, confidence, debug: dbg });
+                return json(res, 200, { fields, method, confidence });
 
             } catch (e) {
                 console.error('AI detect-fields error:', e);
