@@ -790,27 +790,37 @@ function extractFieldPositions(analyzeResult) {
 
             // name: the recipient is the text line immediately following a
             // "presented to / awarded to / certify that" line. We place the name
-            // field at that following line's location.
+            // field at that following line's location, skipping over ID-ish lines
+            // (which are more likely the admission/no) and falling back to one
+            // line-height below the anchor phrase when no clean name line exists.
             if (!fields.name && /presented\s*to|awarded\s*to|hereby\s*award|\bcertif(?:y|ies)\s+that|named\s+as/i.test(lower)) {
-                const nextLine = lines[i + 1];
-                if (nextLine) {
-                    let nxtBox = bboxOf(nextLine.polygon) || bboxOf(nextLine.boundingBox);
-                    if (nxtBox) {
-                        fields.name = {
-                            x: Math.round((nxtBox.minX + 2) * unitScale * ptToMm),
-                            y: Math.round(nxtBox.minY * unitScale * ptToMm),
-                            size: 16
-                        };
-                    }
+                const skipIfId = c => /\b[A-Z0-9]{2,}[\/\-]/.test(c);
+                let nameLine = null;
+                let k = i + 1;
+                while (k < lines.length) {
+                    const cand = (lines[k].content || lines[k].text || '').trim();
+                    if (cand && !skipIfId(cand)) { nameLine = lines[k]; break; }
+                    k++;
+                }
+                const baseLine = nameLine || line;
+                let nb = bboxOf(baseLine.polygon) || bboxOf(baseLine.boundingBox);
+                let ob = bboxOf(line.polygon) || bboxOf(line.boundingBox);
+                if (nb) {
+                    let nY = nb.minY;
+                    if (!nameLine && ob) nY = ob.minY + 0.42;
+                    fields.name = {
+                        x: Math.round((nb.minX + 2) * unitScale * ptToMm),
+                        y: Math.round(nY * unitScale * ptToMm),
+                        size: 16
+                    };
                 }
             }
 
             // adm / docid: an ID-looking value (letters+digits with '/' or '-').
             if (!fields.adm && !fields.docid && /\b\d/.test(content) && /[\/\-]/.test(content) && /\b[A-Z0-9]{2,}\//i.test(content)) {
                 let box = bboxOf(line.polygon) || bboxOf(line.boundingBox);
-                if (box) {
-                    const target = !fields.adm ? 'adm' : 'docid';
-                    fields[target] = {
+                if (box && !fields.adm) {
+                    fields.adm = {
                         x: Math.round((box.minX + 2) * unitScale * ptToMm),
                         y: Math.round(box.minY * unitScale * ptToMm),
                         size: 8
@@ -1183,14 +1193,7 @@ function handleAPI(req, res) {
 
                                 if (result && result.analyzeResult) {
                                     const azureFields = extractFieldPositions(result.analyzeResult);
-                                    const _dbg = [];
-                                    for (const pg of (result.analyzeResult.pages || [])) {
-                                        for (const ln of (pg.lines || [])) {
-                                            _dbg.push({ t: (ln.content || ln.text || ''), un: pg.units || pg.unit, pw: pg.width, ph: pg.height, poly: ln.polygon || null, bb: ln.boundingBox || null });
-                                        }
-                                    }
-                                    console.log('AZURE_FULL:', JSON.stringify(_dbg.slice(0, 40)));
-                                    __lastAzure = _dbg;
+                                    delete global.__lastAzure;
                                     for (const [k, v] of Object.entries(azureFields)) {
                                         if (!fields[k]) fields[k] = v;
                                     }
@@ -1208,7 +1211,7 @@ function handleAPI(req, res) {
                 console.log(`Field detection: method=${method}, fields=${Object.keys(fields).length}, confidence=${confidence}`);
                 console.log('Detected fields:', JSON.stringify(fields));
 
-                return json(res, 200, { fields, method, confidence, azureRaw: (typeof __lastAzure !== 'undefined' && __lastAzure) ? __lastAzure.slice(0, 40) : undefined });
+                return json(res, 200, { fields, method, confidence });
 
             } catch (e) {
                 console.error('AI detect-fields error:', e);
