@@ -831,10 +831,10 @@ function extractFieldPositions(analyzeResult) {
     };
 
     for (const page of analyzeResult.pages || []) {
-        processLines(page.lines || [], page.words || [], page.width, page.units);
+        processLines(page.lines || [], page.words || [], page.width, page.units || page.unit);
     }
     for (const r of analyzeResult.readResults || []) {
-        processLines(r.lines || [], r.words || [], r.width, r.unit);
+        processLines(r.lines || [], r.words || [], r.width, r.units || r.unit);
     }
 
     return fields;
