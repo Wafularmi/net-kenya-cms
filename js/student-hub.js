@@ -383,11 +383,18 @@ function _hubCachePush(store, record) {
     const idx = studentHubCache[store].findIndex(r => r.id === record.id);
     if (idx >= 0) studentHubCache[store][idx] = record;
     else studentHubCache[store].push(record);
+    // Invalidate the derived/computed cache: the in-memory data changed but
+    // studentHubCache.loadedAt did not, so renderStudentHub would otherwise
+    // keep reusing a stale myCourses/availableCourses snapshot.
+    _hubComputedCache = null;
+    _hubComputed = null;
 }
 
 function _hubCacheRemove(store, id) {
     if (!studentHubCache || !studentHubCache[store]) return;
     studentHubCache[store] = studentHubCache[store].filter(r => r.id !== id);
+    _hubComputedCache = null;
+    _hubComputed = null;
 }
 
 async function hubEnrollCourse(courseId, studentName) {

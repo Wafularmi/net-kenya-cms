@@ -20,6 +20,108 @@ const DATA_ROOT = process.pkg ? path.dirname(process.execPath) : __dirname;
 let _mpesaSettings = null;
 let _httpsPort = null; // set after HTTPS starts
 
+// ---- Externalized document store (PDF blobs moved out of server-data.json) ----
+// Large base64 PDFs inflate the single JSON database (~33% overhead) and are
+// parsed/rewritten on every request, which does not scale. We keep the heavy
+// bytes on disk under DOC_STORE_DIR and reference them by path on the record.
+//
+// TWO-PHASE ROLLOUT (non-destructive by default):
+//   Phase 1 (current): the PDF is written to disk AND the inline base64 copy is
+//   KEPT in the JSON record as a backup/rollback source. Reads prefer the disk
+//   file (via /api/doc-content) and fall back to the inline copy if it's absent.
+//   Phase 2 (later, opt-in): set DOC_STRIP_INLINE=1 to remove the inline base64
+//   on read once disk backups are confirmed -> the JSON DB shrinks for real.
+const DOC_STORE_DIR = process.env.DOC_STORE_DIR || path.join(DATA_ROOT, 'docs');
+const DOC_STRIP_INLINE = process.env.DOC_STRIP_INLINE === '1';
+function docSafeKey(key) {
+    return String(key || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200) || ('doc-' + Date.now());
+}
+function docPath(key) { return path.join(DOC_STORE_DIR, docSafeKey(key) + '.pdf'); }
+function ensureDocStore() {
+    try { if (!fs.existsSync(DOC_STORE_DIR)) fs.mkdirSync(DOC_STORE_DIR, { recursive: true }); } catch (e) { console.error('docstore mkdir failed:', e); }
+}
+// Copy the inline base64 PDF to disk (idempotent) and stamp the record with a
+// contentPath. Non-destructive in phase 1: we keep the inline `content` as the
+// backup copy. Returns { record, stored }. Safe for HTML docs (no-op).
+function externalizeCertificate(cert) {
+    if (!cert || typeof cert.content !== 'string') return { record: cert, stored: false };
+    const c = String(cert.content).trim();
+    const isPdf = /^JVBERi0/.test(c) || /^%PDF-/.test(c);
+    if (!isPdf) return { record: cert, stored: false };
+    const b64 = c.startsWith('data:') ? (c.split(',')[1] || '') : c;
+    if (!b64) return { record: cert, stored: false };
+    ensureDocStore();
+    const key = cert.id || cert.docId || cert.vCode;
+    const file = docPath(key);
+    const rec = Object.assign({}, cert);
+    rec.contentPath = '/api/doc-content/' + encodeURIComponent(key);
+    if (fs.existsSync(file)) return { record: rec, stored: true };
+    try {
+        const buf = Buffer.from(b64, 'base64');
+        fs.writeFileSync(file, buf);
+        return { record: rec, stored: true };
+    } catch (e) { console.error('externalizeCertificate failed:', key, e); return { record: cert, stored: false }; }
+}
+// Apply phase-2 stripping during a GET read: remove the inline base64 backup
+// copy once the disk file is confirmed present and DOC_STRIP_INLINE is enabled.
+function maybeStripInline(cert) {
+    if (!DOC_STRIP_INLINE || !cert || typeof cert.content !== 'string') return cert;
+    if (!cert.contentPath) return cert;
+    const file = docPath(cert.id || cert.docId || cert.vCode);
+    if (!fs.existsSync(file)) return cert; // never lose data if disk file missing
+    const out = Object.assign({}, cert);
+    delete out.content;
+    return out;
+}
+// Lazily externalize the inline PDF of every certificate/idCard record on read,
+// so legacy records get a disk copy + contentPath without a full migration job.
+// Returns records safe to serialize back to the client. Triggers a saveDB only
+// when at least one record was actually updated in the DB.
+function externalizeStoreRecords(store, rows) {
+    if (store !== 'certificates' && store !== 'idCards' && store !== 'idcards') return rows;
+    let changed = false;
+    const out = [];
+    for (const r of rows) {
+        if (!r || !r.content) { out.push(maybeStripInline(r)); continue; }
+        const res = externalizeCertificate(r);
+        const gainedPath = !!res.record.contentPath && res.record.contentPath !== r.contentPath;
+        if (gainedPath) {
+            const idx = db[store].findIndex(x => x === r);
+            if (idx >= 0) { db[store][idx] = res.record; changed = true; }
+        }
+        out.push(maybeStripInline(res.record));
+    }
+    if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
+    return out;
+}
+const CERT_ID_PREFIX = { diploma: 'DIP', admission: 'ADL', completion: 'CMP', enrollment: 'ENL', recommendation: 'REC', 'fee-statement': 'FEE', transcript: 'TRX', 'final-transcript': 'FTR', certificate: 'CERT' };
+function certDocId(cert) {
+    const p = (CERT_ID_PREFIX[(cert || {}).type] || 'DOC').toUpperCase();
+    return p + '-' + String(Date.now().toString(36)).toUpperCase() + Math.random().toString(36).substr(2, 6).toUpperCase();
+}
+// Guarantee every document record has a unique Document ID + Verification Code
+// so all letters, transcripts, diplomas and certificates can be verified and
+// reprinted against institutional records, including legacy rows that were
+// saved before document IDs were standardised.
+function backfillCertIdentifiers(store, rows) {
+    if (store !== 'certificates') return rows;
+    let changed = false;
+    const out = [];
+    for (const r of rows) {
+        if (!r) { out.push(r); continue; }
+        let rec = r;
+        if (!rec.docId) { rec = Object.assign({}, rec, { docId: certDocId(rec) }); changed = true; }
+        if (!rec.vCode) { rec = Object.assign({}, rec, { vCode: 'V-' + Math.random().toString(36).substr(2,4).toUpperCase() + '-' + Math.random().toString(36).substr(2,4).toUpperCase() }); changed = true; }
+        if (changed && rec !== r) {
+            const idx = db[store].findIndex(x => x === r);
+            if (idx >= 0) { db[store][idx] = rec; }
+        }
+        out.push(rec);
+    }
+    if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('backfillCertIdentifiers save failed:', e); } }
+    return out;
+}
+
 // SSE clients for real-time updates
 const sseClients = [];
 
@@ -1786,6 +1888,59 @@ function handleAPI(req, res) {
         return true;
     }
 
+    // Externalized document content â€” /api/doc-content/:key
+    // GET  -> returns the raw PDF bytes for a stored document
+    // PUT  -> stores base64 JSON body as the doc's file (certificate write path)
+    if (parts[1] === 'doc-content' && req.method === 'GET' && parts.length === 3) {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!canAccessStore(user, 'certificates', 'GET')) return json(res, 403, { error: 'Forbidden' });
+        const key = parts[2];
+        const file = docPath(key);
+        if (!fs.existsSync(file)) return json(res, 404, { error: 'Not found' });
+        try {
+            const buf = fs.readFileSync(file);
+            res.writeHead(200, {
+                'Content-Type': 'application/pdf',
+                'Content-Length': buf.length,
+                'Content-Disposition': 'inline; filename="' + docSafeKey(key) + '.pdf"',
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-store'
+            });
+            res.end(buf);
+        } catch (e) { json(res, 500, { error: e.message || e }); }
+        return true;
+    }
+    if (parts[1] === 'doc-content' && req.method === 'PUT' && parts.length === 3) {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!canAccessStore(user, 'certificates', 'PUT')) return json(res, 403, { error: 'Forbidden' });
+        const key = parts[2];
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body);
+                const b64 = (parsed && parsed.base64) ? String(parsed.base64) : '';
+                if (!b64) return json(res, 400, { error: 'Missing base64' });
+                ensureDocStore();
+                const buf = Buffer.from(b64, 'base64');
+                fs.writeFileSync(docPath(key), buf);
+                json(res, 200, { ok: true, contentPath: '/api/doc-content/' + encodeURIComponent(key) });
+            } catch (e) { json(res, 400, { error: 'Invalid body: ' + e.message }); }
+        });
+        return true;
+    }
+    if (parts[1] === 'doc-content' && req.method === 'DELETE' && parts.length === 3) {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!canAccessStore(user, 'certificates', 'DELETE')) return json(res, 403, { error: 'Forbidden' });
+        const file = docPath(parts[2]);
+        try { if (fs.existsSync(file)) fs.unlinkSync(file); json(res, 200, { ok: true }); }
+        catch (e) { json(res, 500, { error: e.message || e }); }
+        return true;
+    }
+
     // -----------------------------------------------------------
     // Generic DB CRUD endpoints â€” /api/db/:store[/:key]
     // -----------------------------------------------------------
@@ -1882,6 +2037,8 @@ return json(res, 200, result);
             }
             const page = parseInt(urlObj.searchParams.get('page')) || 0;
             const limit = parseInt(urlObj.searchParams.get('limit')) || 0;
+            results = backfillCertIdentifiers(store, results);
+            results = externalizeStoreRecords(store, results);
             if (limit > 0 && page > 0) {
                 const start = (page - 1) * limit;
                 const total = results.length;
@@ -1900,6 +2057,10 @@ return json(res, 200, result);
             }
             if (item && store === 'settings' && key === 'smsSettings' && (!user || user.role !== 'admin')) {
                 item = null;
+            }
+            if (item) {
+                const list = externalizeStoreRecords(store, [item]);
+                item = list[0] || null;
             }
             return json(res, 200, item);
         }
@@ -1921,10 +2082,16 @@ return json(res, 200, result);
                         console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(value));
                         return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     }
+                    // Phase 1: externalize any big base64 PDF in documents before they
+                    // land in the in-memory JSON DB, so the JSON stays small to read/write.
+                    let toStore = value;
+                    if (store === 'certificates' || store === 'idCards' || store === 'idcards') {
+                        toStore = externalizeCertificate(value).record;
+                    }
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
-                    if (idx >= 0) db[store][idx] = value;
-                    else db[store].push(value);
-                    mutate(value);
+                    if (idx >= 0) db[store][idx] = toStore;
+                    else db[store].push(toStore);
+                    mutate(toStore);
                     json(res, 200, { ok: true, key: pk });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
             });
