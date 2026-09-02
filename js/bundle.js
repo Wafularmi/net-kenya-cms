@@ -9433,7 +9433,10 @@ async function generateDiplomaPdf() {
         const displayName = nameOverride || student.name;
         const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         const vCode = generateVerificationCode();
-        const dateStr = new Date(gradDate + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        const gradDt = new Date(gradDate + 'T12:00:00');
+        const gradDay = gradDt.getDate();
+        const gradOrd = (gradDay % 10 === 1 && gradDay !== 11) ? 'st' : (gradDay % 10 === 2 && gradDay !== 12) ? 'nd' : (gradDay % 10 === 3 && gradDay !== 13) ? 'rd' : 'th';
+        const dateStr = gradDay + gradOrd + ' ' + gradDt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
         const pageW = page.getWidth();
         const pageH = page.getHeight();
         const drawField = (text, field) => {
