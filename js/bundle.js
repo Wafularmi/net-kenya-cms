@@ -9045,6 +9045,17 @@ async function detectDiplomaFieldsWithAI() {
             const methodLabel = method === 'pdfjs' ? 'PDF text layer' : (method === 'azure' ? 'Azure OCR' : (method === 'pdfjs+azure' ? 'PDF text + Azure OCR' : method));
             const confidenceLabel = confidence === 'high' ? 'High confidence' : (confidence === 'medium' ? 'Medium confidence' : 'Low confidence');
             showToast(`${confidenceLabel}: ${applied} fields detected via ${methodLabel}. Positions filled.`, { type: 'success' });
+
+            // Auto-save the newly detected positions so the editor matches the saved
+            // template without requiring a manual extra "Save Template" click.
+            try {
+                if (applied > 0) {
+                    if (!window._diplomaPdfTemplate) window._diplomaPdfTemplate = base64;
+                    await saveDiplomaPdfConfig();
+                }
+            } catch (autoSaveErr) {
+                console.warn('Auto-save after AI detection failed:', autoSaveErr);
+            }
         } else {
             showToast('No text found in PDF. Labels may be in raster images. Set positions manually.', { type: 'warning' });
         }
