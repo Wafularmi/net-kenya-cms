@@ -11454,18 +11454,29 @@ async function reprintDocument() {
             previewHtml = `<div id="reprint-preview-area" style="padding:8px;background:#f8fafc;max-height:80vh;overflow-y:auto;">${cert.content}</div>`;
         }
 
+        const isRevoked = cert.docStatus === 'revoked';
+        const revokedNotice = isRevoked ? `
+            <div style="padding:10px 16px;background:#fef2f2;border-bottom:1px solid #fecaca;display:flex;align-items:center;gap:10px;">
+                <div style="font-size:20px;">🚫</div>
+                <div>
+                    <div style="font-weight:800;font-size:13px;color:var(--danger);">Document Revoked</div>
+                    <div style="font-size:11px;color:#b91c1c;">This document was flagged and revoked by the administration. Reprinting it is discouraged and should be reviewed by an admin.${cert.revokedAt ? ' Revoked on ' + new Date(cert.revokedAt).toLocaleString('en-GB') : ''}</div>
+                </div>
+            </div>` : '';
+
         resultDiv.innerHTML = `
-            <div style="border:1px solid var(--success);border-radius:8px;overflow:hidden;">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#f0fdf4;border-bottom:1px solid #bbf7d0;">
+            <div style="${isRevoked ? 'border:1px solid var(--danger);' : 'border:1px solid var(--success);'} border-radius:8px;overflow:hidden;">
+                ${revokedNotice}
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;${isRevoked ? 'background:#fef2f2;border-bottom:1px solid #fecaca;' : 'background:#f0fdf4;border-bottom:1px solid #bbf7d0;'}">
                     <div>
-                        <div style="font-size:14px;font-weight:700;color:#166534;">${escapeHtml(label)}</div>
-                        <div style="font-size:11px;color:#4ade80;">${generatedDate} &middot; ${escapeHtml(cert.docId || cert.id)}</div>
+                        <div style="font-size:14px;font-weight:700;${isRevoked ? 'color:var(--danger);' : 'color:#166534;'}">${escapeHtml(label)}</div>
+                        <div style="font-size:11px;${isRevoked ? 'color:#b91c1c;' : 'color:#4ade80;'}">${generatedDate} &middot; ${escapeHtml(cert.docId || cert.id)}</div>
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn btn-outline" onclick="clearReprintResult()">✕ Close</button>
                         <button class="btn btn-outline" onclick="navigateReprint(${currentIndex - 1}, ${allCertsForNav.length})" ${currentIndex <= 0 ? 'disabled' : ''}>← Prev</button>
                         <button class="btn btn-outline" onclick="navigateReprint(${currentIndex + 1}, ${allCertsForNav.length})" ${currentIndex >= allCertsForNav.length - 1 ? 'disabled' : ''}>Next →</button>
-                        <button class="btn btn-primary" onclick="${printAction}">🖨️ Print</button>
+                        <button class="btn ${isRevoked ? 'btn-warning' : 'btn-primary'}" onclick="${printAction}">🖨️ Print${isRevoked ? ' (Revoked)' : ''}</button>
                     </div>
                 </div>
                 ${previewHtml}
