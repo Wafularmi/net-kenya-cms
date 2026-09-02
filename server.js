@@ -632,50 +632,48 @@ async function extractFieldsFromPdfJs(pdfBase64) {
     }
 }
 
-// Helper: Enhanced extractFieldPositions with fuzzy matching and diploma patterns
+// Helper: Extract field positions from OCR — token/label-aware with confidence scoring.
+// Avoids false positives from words that merely contain a label substring (e.g. the
+// word "name" inside a long header sentence) by requiring label-like structure:
+// a colon, a "No."/number keyword, or a short standalone label at line start.
 function extractFieldPositions(analyzeResult) {
     const fields = {};
     const ptToMm = 25.4 / 72;
 
-    // Enhanced diploma-specific patterns with fuzzy matching support
-    const fieldPatterns = {
+    // Each field has an exact label set and a regex set. We score matches and keep
+    // the highest-confidence one per field to avoid false positives.
+    const fieldRules = {
         name: {
-            exact: ['name', 'student name', 'full name', 'candidate name'],
-            contains: ['name of', 'named as', 'awarded to', 'certify.*?is awarded', 'this certifies that'],
-            fuzzy: ['nm', 'naem', 'nme'] // common typos
+            regex: [/^name[\s:]/i, /\bstudent[\s]name/i, /\bfull[\s]name/i, /\bcandidate[\s]name/i],
+            exactTokens: ['name', 'fullname', 'studentname', 'candidatename']
         },
         adm: {
-            exact: ['admission', 'admission no', 'adm no', 'reg no', 'registration', 'admission number', 'reg number'],
-            contains: ['admission.*?:', 'reg.*?:', 'adm.*?:', 'registration.*?:'],
-            fuzzy: ['admissionno', 'admno', 'regno', 'regnumber']
+            regex: [/\badm(?:ission)?(?:[\s:.-]*)(?:no|#|number|\.)?\s*[:.]?\s*$/i, /\badm(?:ission)?(?:[\s]no|[\s]#|[\s]number|\.)\b/i, /\breg(?:istration)?(?:[\s:.-]*)(?:no|#|number|\.)?\s*[:.]?\s*$/i, /\bregistration\b/i],
+            exactTokens: ['admission', 'admissionno', 'admno', 'adm', 'regno', 'registration', 'regno']
         },
         date: {
-            exact: ['date', 'graduation date', 'award date', 'issue date', 'dated'],
-            contains: ['date.*?:', 'dated.*?:', 'awarded.*?:', 'issued.*?:', 'this.*?day of'],
-            fuzzy: ['dtae', 'dte', 'dare']
+            regex: [/^\s*(dated?|date|issue\s*date|award\s*date|graduation\s*date|date\s*of|awarded)\s*[:.]?\s*$/i, /date\s*of\s*(?:award|issue|graduation|birth)?\s*[:.]?\s*$/i],
+            exactTokens: ['date', 'dated', 'awarddate', 'issuedate', 'graduationdate', 'awarded']
         },
         docid: {
-            exact: ['doc id', 'document id', 'certificate no', 'cert no', 'certificate number', 'cert number', 'cert no.'],
-            contains: ['cert.*?no.*?:', 'doc.*?id.*?:', 'certificate.*?:', 'ref.*?no.*?:'],
-            fuzzy: ['docid', 'certno', 'certificateno', 'certficate']
+            regex: [/\b(cert|document|certificate|ref|reg|diploma)\s*(?:\.?\s*no|\.?\s*#|\.?\s*number)?\s*[:.]?\s*$/i, /\bcert(?:ificate)?\s*(?:no|#|number)\b/i, /\bdoc(?:ument)?(?:\s*id)?\s*[:.]?\s*$/i, /\bcertificate\s*(?:no|#|number)\b/i],
+            exactTokens: ['docid', 'documentid', 'certno', 'certificateno', 'certificatenumber', 'certificate', 'refno']
         },
         vcode: {
-            exact: ['verify', 'verification code', 'v-code', 'vcode', 'verify code', 'verification'],
-            contains: ['verify.*?:', 'verification.*?:', 'v[\- ]code.*?:'],
-            fuzzy: ['verfication', 'verifcation', 'vrify']
+            regex: [/\bverif(?:y|ication)?\s*(?:code|no|#|number)?\s*[:.]?\s*$/i, /\bv[\-\s]?code\b/i, /\bverify\s*(?:code)?\b/i],
+            exactTokens: ['verify', 'verification', 'vcode', 'verificationcode', 'verifycode']
         }
     };
 
-    // Date patterns to detect actual date values
     const dateValuePatterns = [
         /\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b/,
         /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b/i,
-        /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|rd)?,?\s+\d{4}\b/i,
+        /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd)?,?\s+\d{4}\b/i,
         /\b\d{4}[\-\/]\d{1,2}[\-\/]\d{1,2}\b/,
     ];
 
-    // Accept geometry in any shape Azure emits: object-point polygon arrays,
-    // flat numeric boundingBox arrays ([x1,y1,x2,y2,...]), or [x,y] pairs.
+    const cleanTokens = s => (s || '').replace(/[^\w\-]/g, ' ').trim().toLowerCase().split(/\s+/).filter(Boolean);
+
     const bboxOf = pts => {
         if (!Array.isArray(pts) || !pts.length) return null;
         let xs = [], ys = [];
@@ -698,26 +696,24 @@ function extractFieldPositions(analyzeResult) {
         return { minX: Math.min(box.minX, wb.minX), maxX: Math.max(box.maxX, wb.maxX), minY: Math.min(box.minY, wb.minY), maxY: Math.max(box.maxY, wb.maxY) };
     };
 
-    // Fuzzy match helper: Levenshtein distance <= threshold
-    const fuzzyMatch = (str, patterns, threshold = 2) => {
-        const clean = str.replace(/[^a-z0-9]/gi, '').toLowerCase();
-        for (const p of patterns) {
-            const cleanP = p.replace(/[^a-z0-9]/gi, '').toLowerCase();
-            if (clean === cleanP || clean.includes(cleanP)) return true;
-            // Levenshtein for short strings
-            if (clean.length < 15 && cleanP.length < 15) {
-                const dp = Array.from({ length: clean.length + 1 }, () => Array(cleanP.length + 1).fill(0));
-                for (let i = 0; i <= clean.length; i++) dp[i][0] = i;
-                for (let j = 0; j <= cleanP.length; j++) dp[0][j] = j;
-                for (let i = 1; i <= clean.length; i++) {
-                    for (let j = 1; j <= cleanP.length; j++) {
-                        dp[i][j] = clean[i - 1] === cleanP[j - 1] ? dp[i - 1][j - 1] : Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1);
-                    }
-                }
-                if (dp[clean.length][cleanP.length] <= threshold) return true;
-            }
+    // Score how label-like a line is for a given field (higher = better).
+    const scoreLine = (content, rule) => {
+        const c = content.trim();
+        if (!c) return 0;
+        let score = 0;
+        for (const rx of rule.regex) {
+            if (rx.test(c)) { score += 3; break; }
         }
-        return false;
+        const toks = cleanTokens(c);
+        for (const t of toks) {
+            if (rule.exactTokens.includes(t)) { score += 2; break; }
+        }
+        // Penalise long prose lines that merely contain a keyword (headers, body text)
+        if (toks.length > 3) score -= 1;
+        // Penalise if it ends with a common non-label word
+        const last = toks[toks.length - 1] || '';
+        if (['of', 'the', 'and', 'for', 'this', 'is', 'in', 'on', 'with', 'a'].includes(last)) score -= 2;
+        return score;
     };
 
     const processLines = (lines, words, pageW, pageUnits) => {
@@ -738,21 +734,13 @@ function extractFieldPositions(analyzeResult) {
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const content = (line.content || line.text || '').toLowerCase().trim();
+            const content = (line.content || line.text || '').trim();
             if (!content) continue;
 
-            for (const [field, pats] of Object.entries(fieldPatterns)) {
+            for (const [field, rule] of Object.entries(fieldRules)) {
                 if (fields[field]) continue;
-
-                let matched = false;
-                // Try exact match first
-                if (pats.exact.some(l => content.includes(l))) matched = true;
-                // Try contains (regex)
-                if (!matched && pats.contains.some(l => { try { return new RegExp(l, 'i').test(content); } catch { return false; } })) matched = true;
-                // Try fuzzy match
-                if (!matched && fuzzyMatch(content, [...pats.exact, ...pats.fuzzy])) matched = true;
-
-                if (!matched) continue;
+                const sc = scoreLine(content, rule);
+                if (sc <= 0) continue;
 
                 let box = null;
                 const mem = wordsByLine.get(i);
@@ -762,7 +750,6 @@ function extractFieldPositions(analyzeResult) {
                 if (!box) box = bboxOf(line.polygon) || bboxOf(line.boundingBox);
                 if (!box) continue;
 
-                // Position field text AFTER the label (right side), with a small gap
                 const rawX = pageWraw != null ? Math.min(box.maxX + 10, pageWraw) : box.maxX + 10;
                 fields[field] = {
                     x: Math.round(rawX * unitScale * ptToMm),
@@ -771,7 +758,6 @@ function extractFieldPositions(analyzeResult) {
                 };
             }
 
-            // Also check for date values in the line
             if (!fields.date) {
                 for (const dp of dateValuePatterns) {
                     if (dp.test(content)) {
@@ -793,7 +779,6 @@ function extractFieldPositions(analyzeResult) {
     for (const page of analyzeResult.pages || []) {
         processLines(page.lines || [], page.words || [], page.width, page.units);
     }
-    // Legacy v2.1 shape: readResults with text + flat boundingBox
     for (const r of analyzeResult.readResults || []) {
         processLines(r.lines || [], r.words || [], r.width, r.unit);
     }
