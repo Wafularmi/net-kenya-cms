@@ -10031,21 +10031,53 @@ async function renderDocumentHistory() {
     html += '</tbody></table></div>';
     document.getElementById('certificates-list').innerHTML = html;
 }
+function certContentIsPdf(cert) {
+    if (!cert) return false;
+    if (cert.type === 'diploma') return true;
+    return typeof cert.content === 'string' && /^JVBERi0|^%PDF-/.test(cert.content.trim());
+}
+function rawPdfBlobUrl(content) {
+    try {
+        const bin = atob(String(content));
+        const bytes = new Uint8Array(bin.length);
+        for (let b = 0; b < bin.length; b++) bytes[b] = bin.charCodeAt(b);
+        return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    } catch (e) { return ''; }
+}
+function printPdfBlob(blobUrl) {
+    const w = window.open(blobUrl, '_blank');
+    if (w) { setTimeout(() => { try { w.print(); } catch (e) {} }, 500); }
+    else { showToast('Please allow pop-ups to print the document', { type: 'danger' }); }
+}
 async function viewCertificate(certId) {
     const cert = await dbGet('certificates', certId);
     if (!cert) return showToast('Document not found!');
+    if (certContentIsPdf(cert)) {
+        const url = rawPdfBlobUrl(cert.content);
+        if (url) {
+            showModal(cert.docTitle || cert.studentName || 'Document', `<iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe>`, `<button class="btn btn-primary" onclick="printPdfBlob('${url}')">🖨️ Print</button>`);
+            return;
+        }
+    }
     showModal(cert.docTitle || 'Document', cert.content, `<button class="btn btn-primary" onclick="printCertificate('${cert.id}')">Print</button>`);
 }
 async function printCertificate(certId) {
-    let content, certType;
+    let content, certType, certRecord;
     if (certId) {
         const cert = await dbGet('certificates', certId);
         content = cert ? cert.content : '';
         certType = cert ? cert.type : '';
+        certRecord = cert;
     } else {
         content = document.querySelector('.modal-body') ? document.querySelector('.modal-body').innerHTML : '';
     }
     if (!content) return showToast('Nothing to print!');
+    // PDF-based documents (e.g. diplomas) must print the real PDF, not the
+    // raw base64 string injected into an HTML page.
+    if (certRecord && certContentIsPdf(certRecord)) {
+        const url = rawPdfBlobUrl(certRecord.content);
+        if (url) { printPdfBlob(url); return; }
+    }
     const w = window.open('', '', 'width=900,height=700');
     if (certType === 'transcript' || certType === 'final-transcript') {
         w.document.write(`<html><head><title>Official Transcript</title><style>body{margin:0;background:#fff;}@media print{@page{size:A4;margin:0;}}</style></head><body>${content}</body></html>`);
@@ -11272,6 +11304,25 @@ async function reprintDocument() {
         } catch (e) {}
         const currentIndex = allCertsForNav.findIndex(c => (c.id === cert.id || c.docId === cert.docId) && c.vCode === cert.vCode);
         
+        // Diplomas & PDF-based certificates store their content as a base64 PDF,
+        // so we must render them in an iframe (and print the real PDF), not inject
+        // the raw base64 string into the HTML page.
+        const isPdfContent = certContentIsPdf(cert);
+        let previewHtml;
+        let printAction = 'printReprintedDocument()';
+        if (isPdfContent) {
+            let pdfUrl = rawPdfBlobUrl(cert.content);
+            if (!pdfUrl) console.warn('Failed to build PDF blob for reprint:', cert.id);
+            if (pdfUrl) {
+                previewHtml = `<div id="reprint-preview-area" style="padding:0;background:#fff;height:70vh;overflow:hidden;"><iframe src="${pdfUrl}" style="width:100%;height:100%;border:0;" title="Document Preview"></iframe></div>`;
+                printAction = `printPdfBlob('${pdfUrl}')`;
+            } else {
+                previewHtml = `<div id="reprint-preview-area" style="padding:24px;text-align:center;color:var(--danger);">Could not read the PDF content.</div>`;
+            }
+        } else {
+            previewHtml = `<div id="reprint-preview-area" style="padding:8px;background:#f8fafc;max-height:80vh;overflow-y:auto;">${cert.content}</div>`;
+        }
+
         resultDiv.innerHTML = `
             <div style="border:1px solid var(--success);border-radius:8px;overflow:hidden;">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#f0fdf4;border-bottom:1px solid #bbf7d0;">
@@ -11279,14 +11330,14 @@ async function reprintDocument() {
                         <div style="font-size:14px;font-weight:700;color:#166534;">${escapeHtml(label)}</div>
                         <div style="font-size:11px;color:#4ade80;">${generatedDate} &middot; ${escapeHtml(cert.docId || cert.id)}</div>
                     </div>
-                    <div style="display:flex;gap:8px;">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn btn-outline" onclick="clearReprintResult()">✕ Close</button>
                         <button class="btn btn-outline" onclick="navigateReprint(${currentIndex - 1}, ${allCertsForNav.length})" ${currentIndex <= 0 ? 'disabled' : ''}>← Prev</button>
                         <button class="btn btn-outline" onclick="navigateReprint(${currentIndex + 1}, ${allCertsForNav.length})" ${currentIndex >= allCertsForNav.length - 1 ? 'disabled' : ''}>Next →</button>
-                        <button class="btn btn-primary" onclick="printReprintedDocument()">🖨️ Print</button>
+                        <button class="btn btn-primary" onclick="${printAction}">🖨️ Print</button>
                     </div>
                 </div>
-                <div id="reprint-preview-area" style="padding:8px;background:#f8fafc;max-height:80vh;overflow-y:auto;">${cert.content}</div>
+                ${previewHtml}
             </div>`;
     } catch (e) {
         console.error('reprintDocument error:', e);
@@ -11300,6 +11351,7 @@ function printReprintedDocument() {
     w.document.close();
     setTimeout(() => { w.print(); }, 800);
 }
+function printReprintPdf(blobUrl) { printPdfBlob(blobUrl); }
 function clearReprintResult() {
     document.getElementById('reprint-docid').value = '';
     document.getElementById('reprint-vcode').value = '';
