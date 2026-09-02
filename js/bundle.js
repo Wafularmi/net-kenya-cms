@@ -10030,6 +10030,135 @@ async function renderDocumentHistory() {
     });
     html += '</tbody></table></div>';
     document.getElementById('certificates-list').innerHTML = html;
+
+    // Duplicate document detection + admin review UI
+    renderDuplicateAlerts();
+}
+
+// Group documents so we can spot multiple of the same kind issued to the same
+// student with different Document IDs / Verification Codes (potential duplicates).
+async function findDuplicateDocuments() {
+    const certs = await dbGetAll('certificates');
+    const students = await dbGetAll('students');
+    const studentMap = {};
+    students.forEach(s => { studentMap[s.id] = s.name; });
+    const groups = {};
+    for (const c of certs) {
+        const key = (c.studentId || '') + '::' + (c.type || 'document');
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(c);
+    }
+    const dupes = [];
+    for (const [key, list] of Object.entries(groups)) {
+        const [studentId, type] = key.split('::');
+        if (list.length < 2) continue;
+        // Distinct issued documents: group by (docId|id + vCode). A "duplicate" is
+        // when the same student/kind has more than one distinct issued document.
+        const distinct = {};
+        for (const c of list) {
+            const sid = (c.docId || c.id) + '|' + (c.vCode || '');
+            if (!distinct[sid]) distinct[sid] = [];
+            distinct[sid].push(c);
+        }
+        const keys = Object.keys(distinct);
+        if (keys.length < 2) continue; // the multiple records are just reprints of one doc
+        dupes.push({
+            studentId,
+            studentName: list[0].studentName || studentMap[studentId] || 'Unknown',
+            type,
+            keys,
+            docs: list.slice().sort((a, b) => new Date(a.generatedAt || 0) - new Date(b.generatedAt || 0))
+        });
+    }
+    dupes.sort((a, b) => a.studentName.localeCompare(b.studentName));
+    return dupes;
+}
+
+function renderDuplicateAlerts() {
+    const el = document.getElementById('duplicate-doc-alerts');
+    if (!el) return;
+    findDuplicateDocuments().then(groups => {
+        if (!groups.length) { el.innerHTML = ''; return; }
+        const typeLabels = { 'diploma': 'Diploma', 'admission': 'Admission Letter', 'completion': 'Completion Certificate', 'enrollment': 'Enrollment Letter', 'recommendation': 'Recommendation Letter', 'fee-statement': 'Fee Statement', 'transcript': 'Official Transcript' };
+        let html = `
+            <div style="border:1px solid #f59e0b;border-radius:10px;overflow:hidden;background:#fffbeb;">
+                <div style="padding:12px 16px;background:#fef3c7;border-bottom:1px solid #fcd34d;display:flex;align-items:center;gap:10px;">
+                    <div style="font-size:24px;">⚠️</div>
+                    <div>
+                        <div style="font-weight:800;font-size:14px;color:#92400e;">${groups.length} Potential Duplicate Issuance${groups.length !== 1 ? 's' : ''}</div>
+                        <div style="font-size:11px;color:#92400e;">Review, delete, revoke or keep the affected documents below.</div>
+                    </div>
+                </div>`;
+        html += `<div style="padding:12px 16px;">`;
+        groups.forEach((g, gi) => {
+            html += `<div style="border-top:1px solid #fcd34d;padding:10px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+                    <div><b>${escapeHtml(g.studentName)}</b> — ${typeLabels[g.type] || g.type} <span style="font-size:11px;color:#92400e;">(${g.docs.length} record${g.docs.length !== 1 ? 's' : ''})</span></div>
+                </div>`;
+            g.docs.forEach((c, di) => {
+                const status = c.docStatus || 'active';
+                const statusBadge = status === 'revoked' ? `<span class="badge badge-danger">Revoked</span>` : (c._acknowledged ? `<span class="badge badge-success">Acknowledged</span>` : `<span class="badge badge-warning">Flagged</span>`);
+                const gen = new Date(c.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0 4px 14px;flex-wrap:wrap;">
+                    <div style="font-size:12px;">#${di + 1} &middot; <b>${escapeHtml(c.docId || c.id)}</b> &middot; V: ${escapeHtml(c.vCode || '—')} &middot; ${gen} ${statusBadge}</div>
+                    <div style="display:flex;gap:5px;">
+                        <button class="btn btn-xs btn-outline" onclick="viewCertificate('${c.id}')">View</button>
+                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','revoke')" ${status === 'revoked' ? 'disabled' : ''}>Mark Revoked</button>
+                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','delete')">Delete</button>
+                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','leave')" ${c._acknowledged ? 'disabled' : ''}>Leave as is</button>
+                    </div></div>`;
+            });
+            html += `</div>`;
+        });
+        html += `</div></div>`;
+        el.innerHTML = html;
+    }).catch(e => { el.innerHTML = ''; console.error('renderDuplicateAlerts error:', e); });
+}
+
+async function dupAction(certId, action) {
+    const cert = await dbGet('certificates', certId);
+    if (!cert) { showToast('Document not found', { type: 'danger' }); return; }
+    try {
+        if (action === 'delete') {
+            if (!await showConfirm('Delete Document', 'Permanently delete this document? This cannot be undone.')) return;
+            await dbDelete('certificates', certId);
+            showToast('Document deleted');
+        } else if (action === 'revoke') {
+            cert.docStatus = 'revoked';
+            cert._acknowledged = true;
+            cert.revokedAt = new Date().toISOString();
+            await dbPut('certificates', cert);
+            showToast('Document marked as revoked');
+        } else if (action === 'leave') {
+            cert._acknowledged = true;
+            await dbPut('certificates', cert);
+            showToast('Duplicate flag acknowledged');
+        }
+    } catch (e) {
+        showToast('Action failed: ' + e.message, { type: 'danger' });
+    }
+    await renderDocumentHistory();
+    updateNotificationBadge();
+}
+
+// Alert-system rule: surface duplicates in the notification bell too.
+async function checkDuplicateDocuments() {
+    const groups = await findDuplicateDocuments();
+    const alerts = [];
+    // Only alert the "original" vs duplicates: for each group, flag all but the first record.
+    for (const g of groups) {
+        const first = g.docs[0];
+        const dupes = g.docs.slice(1).filter(c => c.docStatus !== 'revoked' && !c._acknowledged);
+        if (!dupes.length) continue;
+        alerts.push({
+            entityId: g.studentId + '-' + g.type + '-dupes',
+            entityName: g.studentName,
+            title: `${g.docs.length} ${g.type}s issued to ${g.studentName}`,
+            details: `${g.studentName} has ${g.docs.length} ${g.type} document(s) with different Document IDs/Verification Codes (${dupes.length} flagged for review). Review, delete, revoke or keep them.`,
+            action: { label: 'Review Documents', screen: 'certificates' }
+        });
+    }
+    return alerts;
 }
 function certContentIsPdf(cert) {
     if (!cert) return false;
@@ -11251,10 +11380,12 @@ async function verifyDocument() {
             }
         }
         const generatedDate = record.generatedAt ? (isNaN(new Date(record.generatedAt)) ? record.generatedAt : new Date(record.generatedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})) : '';
+        const isRevoked = (record.docStatus === 'revoked');
         resultDiv.innerHTML = `
-            <div style="text-align:center;padding:16px 24px;border:2px solid var(--success);border-radius:8px;background:#f0fdf4;">
-                <div style="font-size:48px;margin-bottom:8px;">✅</div>
-                <h3 style="color:var(--success);margin:0 0 12px;">Document Authenticated</h3>
+            <div style="${isRevoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px 24px;border-radius:8px;">
+                ${isRevoked
+                    ? `<div style="font-size:48px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 12px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);margin:0 0 8px;">This document was flagged and revoked by the administration. It is no longer valid for official use.</p>`
+                    : `<div style="font-size:48px;margin-bottom:8px;">✅</div><h3 style="color:var(--success);margin:0 0 12px;">Document Authenticated</h3>`}
                 <div style="text-align:left;max-width:500px;margin:0 auto;font-size:13px;line-height:1.8;">
                     <p><strong>Student Name:</strong> ${escapeHtml(record.studentName || record.name || '—')}</p>
                     <p><strong>Admission No:</strong> ${escapeHtml(record.admission || record.admissionNumber || '—')}</p>
@@ -11266,7 +11397,7 @@ async function verifyDocument() {
                     ${record.totalCredits ? `<p><strong>Total Credits:</strong> ${record.totalCredits}</p>` : ''}
                     ${generatedDate ? `<p><strong>Generated:</strong> ${generatedDate}</p>` : ''}
                 </div>
-                <div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--text-secondary);">${record._integrity || '✅ Document verified against institutional records.'}</div>
+                ${isRevoked ? (record.revokedAt ? `<div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--danger);">Revoked on ${new Date(record.revokedAt).toLocaleString('en-GB')}</div>` : '') : `<div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--text-secondary);">${record._integrity || '✅ Document verified against institutional records.'}</div>`}
             </div>`;
     } catch (e) {
         console.error('verifyDocument error:', e);
@@ -15165,6 +15296,7 @@ async function generateAlerts() {
         { id: 'rule-missing-manuals', type: 'missing-manuals', check: checkMissingManualsAlert, icon: '[M]', severity: 'danger' },
         { id: 'rule-missing-exams', type: 'missing-exams', check: checkMissingExamsAlert, icon: '[E]', severity: 'danger' },
         { id: 'rule-absent-2weeks', type: 'absent-2-weeks', check: checkAbsent2WeeksAlert, icon: '[A]', severity: 'danger' },
+        { id: 'rule-duplicate-documents', type: 'duplicate-documents', check: checkDuplicateDocuments, icon: '[#]', severity: 'warning' },
     ];
     const generatedAlerts = [];
     for (const rule of alertRules) {
