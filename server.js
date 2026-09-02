@@ -517,7 +517,7 @@ const STUDENT_DENY_STORES = new Set([
 // Stores a student is allowed to write to (their own activity records)
 const STUDENT_WRITE_STORES = new Set([
     'submissions', 'quizRegistrations', 'examRegistrations',
-    'retakeRequests', 'seating', 'borrows', 'tickets'
+    'retakeRequests', 'seating', 'borrows', 'tickets', 'enrollments'
 ]);
 
 // Extract the authenticated user from the request (server-verified).

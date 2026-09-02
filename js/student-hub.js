@@ -398,29 +398,47 @@ function _hubCacheRemove(store, id) {
 }
 
 async function hubEnrollCourse(courseId, studentName) {
-    if (!await showConfirm('Enroll in Course', `Enroll ${studentName} in this course?`)) return;
-    const data = studentHubCache || await loadStudentHubData();
-    const me = _hubGetMe();
-    if (!me) return showToast('Student profile not found', { type: 'danger' });
-    if ((data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId)) return showToast('Already enrolled');
-    const record = { id: `ENR-${courseId}-${me.id}`, courseId, studentId: me.id, enrolledAt: new Date().toISOString() };
-    await dbPut('enrollments', record);
-    _hubCachePush('enrollments', record);
-    showToast('✅ Enrolled!');
-    logAudit('created', 'enrollment', { studentId: me.id, courseId });
-    renderStudentHub();
+    try {
+        if (!await showConfirm('Enroll in Course', `Enroll ${studentName} in this course?`)) return;
+        const data = studentHubCache || await loadStudentHubData();
+        const me = _hubGetMe();
+        if (!me) return showToast('Student profile not found', { type: 'danger' });
+        if ((data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId)) return showToast('Already enrolled');
+        const record = { id: `ENR-${courseId}-${me.id}`, courseId, studentId: me.id, enrolledAt: new Date().toISOString() };
+        await dbPut('enrollments', record);
+        _hubCachePush('enrollments', record);
+        showToast('✅ Enrolled!');
+        logAudit('created', 'enrollment', { studentId: me.id, courseId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubEnrollCourse error:', e);
+        showToast('Enroll failed: ' + (e.message || 'Server denied'), { type: 'danger', duration: 6000 });
+    }
 }
 
 async function hubDropCourse(courseId, studentName) {
-    if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
-    const data = studentHubCache || await loadStudentHubData();
-    const me = _hubGetMe();
-    if (!me) return;
-    const enr = (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId);
-    if (enr) { await dbDelete('enrollments', enr.id); _hubCacheRemove('enrollments', enr.id); }
-    showToast('Course dropped');
-    logAudit('deleted', 'enrollment', { studentId: me.id, courseId });
-    renderStudentHub();
+    try {
+        if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
+        const data = studentHubCache || await loadStudentHubData();
+        const me = _hubGetMe();
+        if (!me) return showToast('Student profile not found', { type: 'danger' });
+        const enr = (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId);
+        if (enr) { await dbDelete('enrollments', enr.id); _hubCacheRemove('enrollments', enr.id); }
+        else {
+            // Fallback: try deterministic id even if not in cache (cache may be stale)
+            const fallbackId = `ENR-${courseId}-${me.id}`;
+            try { await dbDelete('enrollments', fallbackId); _hubCacheRemove('enrollments', fallbackId); } catch (err) {
+                // No record on server either — still refresh to sync
+                console.warn('hubDropCourse fallback delete failed:', err);
+            }
+        }
+        showToast('Course dropped');
+        logAudit('deleted', 'enrollment', { studentId: me.id, courseId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubDropCourse error:', e);
+        showToast('Drop failed: ' + (e.message || 'Server denied'), { type: 'danger', duration: 6000 });
+    }
 }
 
 function _hubExamStatus(exam) {
