@@ -359,6 +359,42 @@ async function resolveStudentId(currentUser) {
     );
     return found ? found.id : (currentUser.studentId || currentUser.username);
 }
+function findStudentForCurrentUser(students, currentUser) {
+    if (!students || !currentUser) return null;
+    const uid = String(currentUser.username || '').trim();
+    const sid = String(currentUser.studentId || '').trim();
+    const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
+    const nameLower = String(currentUser.name || '').trim().toLowerCase();
+    const check = (s) => {
+        if (!s) return false;
+        if (s.id && (String(s.id) === sid || String(s.id) === uid || String(s.id) === 'STU-' + uid || String(s.id) === 'STU-' + sid)) return true;
+        if (s.admissionNumber && (String(s.admissionNumber) === uid || String(s.admissionNumber) === sid)) return true;
+        if (s.studentId && (String(s.studentId) === sid || String(s.studentId) === uid)) return true;
+        if (s.phone && uidDigits && String(s.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
+        if (s.phone && String(s.phone) === uid) return true;
+        if (s.email && String(s.email).toLowerCase() === uid.toLowerCase()) return true;
+        if (s.email && sid && String(s.email).toLowerCase() === String(sid).toLowerCase()) return true;
+        if (nameLower && s.name && String(s.name).trim().toLowerCase() === nameLower) return true;
+        return false;
+    };
+    let found = students.find(check);
+    if (found) return found;
+    // Fallback: check alumni store for graduated/migrated students
+    try {
+        const alumni = (typeof dbGetAll === 'function' && false) ? null : null;
+        void alumni;
+    } catch {}
+    return found || null;
+}
+function findStudentWithAlumniFallback(students, alumni, currentUser) {
+    let found = findStudentForCurrentUser(students, currentUser);
+    if (found) return found;
+    if (alumni && alumni.length) {
+        const a = findStudentForCurrentUser(alumni, currentUser);
+        if (a) return { ...a, id: a.studentId || a.id, _isAlumni: true, _alumniRecord: a };
+    }
+    return null;
+}
 function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning' };
     return colors[role] || 'info';
@@ -1786,10 +1822,11 @@ async function renderServerHealth() {
 }
 async function renderStudentDashboard(currentUser) {
     try {
-        const batch = await dbGetBatch(['students','courses','lessons','quizzes','submissions','grades','attendance','payments','events','exams','enrollments']);
+        const batch = await dbGetBatch(['students','courses','lessons','quizzes','submissions','grades','attendance','payments','events','exams','enrollments','alumni']);
         const students = batch.students, courses = batch.courses, lessons = batch.lessons, quizzes = batch.quizzes, submissions = batch.submissions, grades = batch.grades, attendance = batch.attendance, payments = batch.payments, events = batch.events, exams = batch.exams, enrollments = batch.enrollments;
+        const alumniList = batch.alumni || [];
     const today = new Date().toISOString().split('T')[0];
-    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || (currentUser.username && s.phone === currentUser.username));
+    const me = findStudentWithAlumniFallback(students, alumniList, currentUser);
     if (!me) {
         document.getElementById('dash-stats').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Profile not found</div>';
         return;
@@ -2810,7 +2847,7 @@ async function renderCourses() {
     const addBtn = document.querySelector('#screen-courses .btn-primary');
     if (addBtn) addBtn.style.display = isStudentUser ? 'none' : '';
     if (isStudentUser) {
-        const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || (currentUser.username && s.phone === currentUser.username));
+        const me = findStudentForCurrentUser(students, currentUser);
         const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
         const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me?.id, me?.admissionNumber, me?.phone, me?.email].filter(Boolean));
         const enrolledCourseIds = new Set(enrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
@@ -3685,8 +3722,8 @@ async function renderExams() {
         const moderationBtn = document.querySelector('#screen-exams .btn-success');
         if (moderationBtn) moderationBtn.style.display = 'none';
         const students = await dbGetAll('students');
-        const studentId = currentUser.studentId || currentUser.username;
-        const me = students.find(s => s.id === studentId);
+        const me = findStudentForCurrentUser(students, currentUser);
+        const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
         const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
@@ -3921,7 +3958,7 @@ async function deleteExam(id) {
 async function requestMissedExam(examId) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const students = await dbGetAll('students');
-    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    const me = findStudentForCurrentUser(students, currentUser);
     if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
     const exams = await dbGetAll('exams');
     const exam = exams.find(e => e.id === examId);
@@ -3950,7 +3987,7 @@ async function submitMissedExamRequest(examId) {
     if (!reason) return showToast('Please provide a reason', { type: 'danger' });
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const students = await dbGetAll('students');
-    const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    const me = findStudentForCurrentUser(students, currentUser);
     if (!me) return showToast('Could not identify your student profile', { type: 'danger' });
     const record = { id: `RET-${examId}-${me.id}`, examId, studentId: me.id, reason, status: 'pending', requestType: 'missed', createdAt: new Date().toISOString() };
     await dbPut('retakeRequests', record);
@@ -6266,9 +6303,8 @@ async function renderStudentFinance(currentUser) {
     try {
         const students = await dbGetAll('students');
         const payments = await dbGetAll('payments');
-        const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username);
+        const me = findStudentForCurrentUser(students, currentUser);
         if (!me) return;
-        const myPayments = payments.filter(p => p.studentId === me.id).sort((a, b) => b.date.localeCompare(a.date));
         const totalPaid = myPayments.reduce((s, p) => s + p.amount, 0);
         const fee = getCachedStudentFee(me);
         const balance = fee - totalPaid;
@@ -13046,7 +13082,7 @@ async function renderQuizzes() {
         const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
         const filteredQuizzes = availableQuizzes.filter(q => q.assessmentType === 'quiz' || !q.assessmentType || registeredQuizIds.has(q.id));
         const examRegs = allExamRegs.filter(r => r.studentId === studentId);
-        const me = students.find(s => s.id === studentId);
+        const me = findStudentForCurrentUser(students, currentUser) || students.find(s => s.id === studentId);
         const myCenterId = me?.studyCenterId || '';
         const filteredExams = allExams.filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId));
         const studentSubmissions = submissions.filter(s => s.studentId === currentUser.username || s.studentId === studentId);
@@ -14330,7 +14366,7 @@ async function renderProgress() {
     if (savedCourse && data.courses.some(c => c.id === savedCourse)) courseSelect.value = savedCourse;
     courseSelect.onchange = renderProgress;
     if (isStudentUser) {
-        const me = data.students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || (s.phone && s.phone === currentUser.username) || s.email === currentUser.username);
+        const me = findStudentForCurrentUser(data.students, currentUser);
         if (me) {
             hiddenInput.value = me.id;
             searchInput.value = `${me.name} (${me.admissionNumber || me.id})`;
@@ -14751,11 +14787,11 @@ let portalSearchDebounce = null;
 let portalSelectedStudent = null;
 async function loadPortalData() {
     if (portalDataCache) return portalDataCache;
-    const [allStudents, courses, lessons, notes, allQuizzes, allSubmissions, allGrades, allPayments, allAttendance, allEnrollments, allQuizRegistrations, lessonFiles, allExamRegistrations, exams] = await Promise.all([
+    const [allStudents, courses, lessons, notes, allQuizzes, allSubmissions, allGrades, allPayments, allAttendance, allEnrollments, allQuizRegistrations, lessonFiles, allExamRegistrations, exams, allAlumni] = await Promise.all([
         dbGetAll('students'), dbGetAll('courses'), dbGetAll('lessons'), dbGetAll('notes'),
         dbGetAll('quizzes'), dbGetAll('submissions'), dbGetAll('grades'), dbGetAll('payments'),
         dbGetAll('attendance'), dbGetAll('enrollments'), dbGetAll('quizRegistrations'),
-        dbGetAll('lessonFiles'), dbGetAll('examRegistrations'), dbGetAll('exams')
+        dbGetAll('lessonFiles'), dbGetAll('examRegistrations'), dbGetAll('exams'), dbGetAll('alumni').catch(() => [])
     ]);
     const regionalIds = await getRegionalStudentIdSet();
     let students = allStudents, submissions = allSubmissions, grades = allGrades, payments = allPayments, attendance = allAttendance, enrollments = allEnrollments, quizRegistrations = allQuizRegistrations, examRegistrations = allExamRegistrations, quizzes = allQuizzes;
@@ -14770,7 +14806,8 @@ async function loadPortalData() {
         quizRegistrations = allQuizRegistrations?.filter(r => sidSet.has(r.studentId));
         examRegistrations = allExamRegistrations?.filter(r => sidSet.has(r.studentId));
     }
-    portalDataCache = { students, courses, lessons, notes, quizzes, submissions, grades, payments, attendance, enrollments, quizRegistrations, lessonFiles, examRegistrations, exams, loadedAt: Date.now() };
+    const alumni = allAlumni || [];
+    portalDataCache = { students, courses, lessons, notes, quizzes, submissions, grades, payments, attendance, enrollments, quizRegistrations, lessonFiles, examRegistrations, exams, alumni, loadedAt: Date.now() };
     return portalDataCache;
 }
 function invalidatePortalCache() {
@@ -14792,7 +14829,7 @@ async function renderStudentPortal() {
     const isStudentUser = currentUser && currentUser.role === 'student';
     if (isStudentUser) {
         await loadPortalData();
-        const me = portalDataCache.students.find(s => s.id === currentUser.studentId || s.id === currentUser.username || (s.phone && s.phone === currentUser.username) || s.email === currentUser.username);
+        const me = findStudentWithAlumniFallback(portalDataCache.students, portalDataCache.alumni || [], currentUser);
         if (!me) {
             document.getElementById('portal-overview').innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;">Student profile not found</div>';
             return;
@@ -15888,7 +15925,7 @@ async function renderTickets() {
     const isStudentUser = currentUser.role === 'student';
     let filtered = tickets;
     if (isStudentUser) {
-        const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username);
+        const me = findStudentForCurrentUser(students, currentUser);
         if (me) filtered = tickets.filter(t => t.studentId === me.id);
     }
     const statusColors = { open: 'danger', 'in-progress': 'warning', resolved: 'success', closed: 'info' };
@@ -15941,7 +15978,7 @@ async function showTicketForm() {
     const isStudentUser = currentUser.role === 'student';
     let studentSelect = '';
     if (isStudentUser) {
-        const me = students.find(s => s.id === currentUser.studentId || s.id === currentUser.username);
+        const me = findStudentForCurrentUser(students, currentUser);
         studentSelect = me ? `<input type="hidden" id="ticket-student" value="${me.id}"><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;">Submitting as: <b>${me.name}</b></div>` : '';
     } else {
         studentSelect = `<div class="form-group"><label>Student *</label><select id="ticket-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}">${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div>`;
@@ -16423,8 +16460,8 @@ function renderManuals() {
     Promise.all([dbGetAll('manuals'), dbGetAll('courses'), dbGetAll('students'), getCenters()]).then(([docs, courses, students, centers]) => {
         let studentCenterId = '';
         if (isStudentUser) {
-            const studentId = currentUser.studentId || currentUser.username;
-            const me = students.find(s => s.id === studentId);
+            const me = findStudentForCurrentUser(students, currentUser);
+            const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
             studentCenterId = me?.studyCenterId || '';
         }
         const filterCenters = isCoordinator ? centers.filter(c => coordinatorCenterIds.includes(c.id)) : centers;

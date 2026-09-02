@@ -408,6 +408,13 @@ function cleanOnlineUsers() {
 setInterval(cleanOnlineUsers, 30000);
 
 let db = loadDB();
+try { loadSessions(); } catch (e) { console.error('loadSessions at startup failed:', e.message); }
+try {
+    if (fs.existsSync('/data/sessions.json') && !fs.existsSync(SESSION_FILE)) {
+        fs.copyFileSync('/data/sessions.json', SESSION_FILE);
+        loadSessions();
+    }
+} catch {}
 
 let _saveTimer = null;
 function saveDB() {
@@ -506,12 +513,13 @@ const FINANCE_ADMIN_ROLES = new Set(['admin', 'finance', 'registrar']);
 
 // Stores with sensitive records that students must never read.
 // (students/users are handled separately via per-row filtering below)
+// Note: 'alumni' is NOT denied - graduated students need to read their own alumni record
 const STUDENT_DENY_STORES = new Set([
-    'staff', 'alumni', 'payroll', 'audit', 'counters',
+    'staff', 'payroll', 'audit', 'counters',
     'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
     'invoices', 'installments', 'whatsappTemplates', 'whatsappLog',
-    'expenseCategories', 'gradRequirements'
+    'expenseCategories', 'gradRequirements', 'sessions'
 ]);
 
 // Stores a student is allowed to write to (their own activity records)
@@ -539,6 +547,10 @@ function getRequestUser(req) {
 
 // Check if user can access a store
 function canAccessStore(user, store, method) {
+    // Sensitive internal stores - admin only, never via API
+    if (store === 'sessions' || store === 'maintenanceBypassTokens') {
+        return user && user.role === 'admin';
+    }
     // Allow unauthenticated reads for login screen / registration
     if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
@@ -567,19 +579,37 @@ function canAccessStore(user, store, method) {
 function filterStoreForUser(user, store, rows) {
     if (!user || user.role !== 'student') return rows;
     const su = user.user || {};
-    const uid = String(user.username || '');
-    const sid = su.studentId;
+    const uid = String(user.username || '').trim();
+    const sid = String(su.studentId || '').trim();
+    const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
+    const nameLower = String(su.name || user.username || '').trim().toLowerCase();
     if (store === 'students') {
-        return rows.filter(r => r && (
-            String(r.id) === String(sid) ||
-            String(r.phone) === uid ||
-            String(r.admissionNumber) === uid ||
-            String(r.email) === uid ||
-            String(r.id) === uid
-        ));
+        return rows.filter(r => {
+            if (!r) return false;
+            if (String(r.id) === sid || String(r.id) === uid || String(r.id) === 'STU-' + uid || String(r.id) === 'STU-' + sid) return true;
+            if (r.admissionNumber && (String(r.admissionNumber) === uid || String(r.admissionNumber) === sid)) return true;
+            if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
+            if (r.phone && String(r.phone) === uid) return true;
+            if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
+            if (r.email && sid && String(r.email).toLowerCase() === String(sid).toLowerCase()) return true;
+            if (nameLower && r.name && String(r.name).trim().toLowerCase() === nameLower) return true;
+            return false;
+        });
     }
     if (store === 'users') {
         return rows.filter(r => r && String(r.username) === uid);
+    }
+    if (store === 'alumni') {
+        return rows.filter(r => {
+            if (!r) return false;
+            if (r.studentId && (String(r.studentId) === sid || String(r.studentId) === uid)) return true;
+            if (r.id && (String(r.id) === sid || String(r.id) === uid)) return true;
+            if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
+            if (r.phone && String(r.phone) === uid) return true;
+            if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
+            if (nameLower && r.name && String(r.name).trim().toLowerCase() === nameLower) return true;
+            return false;
+        });
     }
     return rows;
 }
@@ -587,14 +617,40 @@ function filterStoreForUser(user, store, rows) {
 // Server-verified session tokens (issued at login, 12h lifetime).
 const sessions = new Map(); // token -> { username, expires, createdAt }
 const SESSION_TTL = 12 * 3600 * 1000;
+const SESSION_FILE = path.join(DATA_ROOT, 'sessions.json');
+function loadSessions() {
+    try {
+        if (!fs.existsSync(SESSION_FILE)) return;
+        const arr = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+        if (!Array.isArray(arr)) return;
+        const now = Date.now();
+        for (const e of arr) {
+            if (e && e.token && e.username && e.expires && e.expires > now) {
+                sessions.set(e.token, { username: e.username, expires: e.expires, createdAt: e.createdAt || now });
+            }
+        }
+    } catch (e) { console.error('loadSessions failed:', e.message); }
+}
+function saveSessions() {
+    try {
+        const arr = [];
+        for (const [token, s] of sessions) arr.push({ token, username: s.username, expires: s.expires, createdAt: s.createdAt });
+        fs.writeFileSync(SESSION_FILE, JSON.stringify(arr, null, 2), 'utf8');
+        try { if (fs.existsSync(SESSION_FILE) && DATA_ROOT !== '/data') fs.copyFileSync(SESSION_FILE, '/data/sessions.json'); } catch {}
+        try { if (fs.existsSync('/data/sessions.json') && !fs.existsSync(SESSION_FILE)) fs.copyFileSync('/data/sessions.json', SESSION_FILE); } catch {}
+    } catch (e) { console.error('saveSessions failed:', e.message); }
+}
 setInterval(() => {
     const now = Date.now();
-    for (const [token, s] of sessions) if (s.expires < now) sessions.delete(token);
+    let changed = false;
+    for (const [token, s] of sessions) if (s.expires < now) { sessions.delete(token); changed = true; }
+    if (changed) saveSessions();
 }, 10 * 60 * 1000);
 
 function issueSession(username) {
     const token = crypto.randomBytes(32).toString('hex');
     sessions.set(token, { username, expires: Date.now() + SESSION_TTL, createdAt: Date.now() });
+    saveSessions();
     return token;
 }
 

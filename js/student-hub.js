@@ -17,7 +17,7 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 300000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -143,11 +143,10 @@ async function renderStudentHub() {
 
     try {
         const data = await loadStudentHubData();
-        const me = (data.students || []).find(s =>
-            s.id === currentUser.studentId || s.id === currentUser.username ||
-            (s.phone && s.phone === currentUser.username) || s.email === currentUser.username
-        );
-        if (!me) { content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Profile not found</h3><p>Please contact the administrator to link your account.</p></div>'; return; }
+        const me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
+        if (!me) {
+            console.warn('Profile not found debug:', { currentUser, studentsCount: (data.students||[]).length, alumniCount: (data.alumni||[]).length, studentIds: (data.students||[]).slice(0,3).map(s=>({id:s.id, adm:s.admissionNumber, phone:s.phone, email:s.email, name:s.name})) });
+            content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Profile not found</h3><p>Please contact the administrator to link your account.</p><button class="btn btn-outline btn-sm" onclick="renderStudentHub()" style="margin-top:12px;">Retry</button></div>'; return; }
 
         _hubStudent = me;
         _hubData = data;
@@ -216,7 +215,7 @@ async function renderStudentHub() {
         console.error('Student Hub error:', err);
         try {
             const fb = await loadStudentHubData();
-            const me = (fb.students || []).find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+            const me = _hubFindStudent(fb.students || [], currentUser, fb.alumni || []);
             const enrolledIds = new Set((fb.enrollments || []).filter(e => e.studentId === (me?.id || '')).map(e => e.courseId));
             const examRegIds = new Set((fb.examRegistrations || []).filter(r => r.studentId === (me?.id || '')).map(r => r.examId));
             const upcomingExams = (fb.exams || []).filter(e => e.published !== false && enrolledIds.has(e.courseId) && (!me?.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
@@ -371,11 +370,42 @@ function renderHubCourses(me, myCourses, availableCourses, data) {
     `;
 }
 
+function _hubFindStudent(students, currentUser, alumniList) {
+    if (!students && !alumniList) return null;
+    if (!currentUser) return null;
+    const uid = String(currentUser.username || '').trim();
+    const sid = String(currentUser.studentId || '').trim();
+    const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
+    const nameLower = String(currentUser.name || '').trim().toLowerCase();
+    const check = (s) => {
+        if (!s) return false;
+        if (s.id && (String(s.id) === sid || String(s.id) === uid || String(s.id) === 'STU-' + uid || String(s.id) === 'STU-' + sid)) return true;
+        if (s.admissionNumber && (String(s.admissionNumber) === uid || String(s.admissionNumber) === sid)) return true;
+        if (s.studentId && (String(s.studentId) === sid || String(s.studentId) === uid)) return true;
+        if (s.phone && uidDigits && String(s.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
+        if (s.phone && String(s.phone) === uid) return true;
+        if (s.email && String(s.email).toLowerCase() === uid.toLowerCase()) return true;
+        if (s.email && sid && String(s.email).toLowerCase() === String(sid).toLowerCase()) return true;
+        if (nameLower && s.name && String(s.name).trim().toLowerCase() === nameLower) return true;
+        return false;
+    };
+    let found = (students || []).find(check);
+    if (found) return found;
+    // Graduated/migrated students live in alumni store - check there as fallback
+    if (alumniList) {
+        found = (alumniList || []).find(check);
+        if (found) {
+            // Normalize alumni record to look like a student for the hub (so existing code works)
+            return { ...found, id: found.studentId || found.id, _isAlumni: true, _alumniRecord: found };
+        }
+    }
+    return null;
+}
 function _hubGetMe() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const data = studentHubCache;
     if (!data) return null;
-    return (data.students || []).find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
+    return _hubFindStudent(data.students || [], currentUser, data.alumni || []);
 }
 
 function _hubCachePush(store, record) {
