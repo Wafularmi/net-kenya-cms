@@ -1183,6 +1183,14 @@ function handleAPI(req, res) {
 
                                 if (result && result.analyzeResult) {
                                     const azureFields = extractFieldPositions(result.analyzeResult);
+                                    const _dbg = [];
+                                    for (const pg of (result.analyzeResult.pages || [])) {
+                                        for (const ln of (pg.lines || [])) {
+                                            _dbg.push({ t: (ln.content || ln.text || ''), un: pg.units || pg.unit, pw: pg.width, ph: pg.height, poly: ln.polygon || null, bb: ln.boundingBox || null });
+                                        }
+                                    }
+                                    console.log('AZURE_FULL:', JSON.stringify(_dbg.slice(0, 40)));
+                                    __lastAzure = _dbg;
                                     for (const [k, v] of Object.entries(azureFields)) {
                                         if (!fields[k]) fields[k] = v;
                                     }
@@ -1200,7 +1208,7 @@ function handleAPI(req, res) {
                 console.log(`Field detection: method=${method}, fields=${Object.keys(fields).length}, confidence=${confidence}`);
                 console.log('Detected fields:', JSON.stringify(fields));
 
-                return json(res, 200, { fields, method, confidence });
+                return json(res, 200, { fields, method, confidence, azureRaw: (typeof __lastAzure !== 'undefined' && __lastAzure) ? __lastAzure.slice(0, 40) : undefined });
 
             } catch (e) {
                 console.error('AI detect-fields error:', e);
