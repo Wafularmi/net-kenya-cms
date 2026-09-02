@@ -1139,12 +1139,23 @@ function handleAPI(req, res) {
 
                                 if (result && result.analyzeResult) {
                                     const azureFields = extractFieldPositions(result.analyzeResult);
+                                    // Debug: dump raw line geometry to understand coordinate units
+                                    const rawDebug = [];
+                                    for (const pg of (result.analyzeResult.pages || [])) {
+                                        const unit = pg.units || '?';
+                                        const w = pg.width, h = pg.height;
+                                        for (const ln of (pg.lines || []).slice(0, 25)) {
+                                            if (ln.content) rawDebug.push({ t: ln.content.slice(0, 30), unit, pageW: w, pageH: h, poly: (ln.polygon || ln.boundingBox || []).slice(0, 2) });
+                                        }
+                                    }
+                                    if (rawDebug.length) console.log('AZURE_RAW:', JSON.stringify(rawDebug));
                                     // Merge: Azure fields fill gaps, don't overwrite PDF.js results
                                     for (const [k, v] of Object.entries(azureFields)) {
                                         if (!fields[k]) fields[k] = v;
                                     }
                                     method = Object.keys(fields).length > Object.keys(azureFields).length ? 'pdfjs+azure' : 'azure';
                                     confidence = Object.keys(fields).length >= 3 ? 'high' : 'medium';
+                                    window_debug = { raw: rawDebug, azureFields, unit: (result.analyzeResult.pages || [])[0] && (result.analyzeResult.pages)[0].units };
                                 }
                             }
                         }
@@ -1157,7 +1168,8 @@ function handleAPI(req, res) {
                 console.log(`Field detection: method=${method}, fields=${Object.keys(fields).length}, confidence=${confidence}`);
                 console.log('Detected fields:', JSON.stringify(fields));
 
-                return json(res, 200, { fields, method, confidence });
+                const dbg = (typeof debugInfo !== 'undefined') ? debugInfo : null;
+                return json(res, 200, { fields, method, confidence, debug: dbg });
 
             } catch (e) {
                 console.error('AI detect-fields error:', e);
