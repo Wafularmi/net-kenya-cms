@@ -10074,39 +10074,73 @@ async function findDuplicateDocuments() {
     return dupes;
 }
 
+const DUPLICATE_TYPE_LABELS = { 'diploma': 'Diploma', 'admission': 'Admission Letter', 'completion': 'Completion Certificate', 'enrollment': 'Enrollment Letter', 'recommendation': 'Recommendation Letter', 'fee-statement': 'Fee Statement', 'transcript': 'Official Transcript', 'final-transcript': 'Final Transcript', 'certificate': 'Certificate' };
+function duplicateTypeLabel(type) { return DUPLICATE_TYPE_LABELS[type] || (type ? type.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Document'); }
+function certDateLabel(c, withTime) {
+    if (!c.generatedAt) return '—';
+    const d = new Date(c.generatedAt);
+    if (isNaN(d)) return '—';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + (withTime ? ' · ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '');
+}
+function certStatusBadge(c) {
+    const status = c.docStatus || 'active';
+    if (status === 'revoked') return '<span class="badge badge-danger">Revoked</span>';
+    if (c._acknowledged) return '<span class="badge badge-success">Acknowledged</span>';
+    return '<span class="badge badge-warning">Flagged</span>';
+}
+
 function renderDuplicateAlerts() {
     const el = document.getElementById('duplicate-doc-alerts');
     if (!el) return;
     findDuplicateDocuments().then(groups => {
         if (!groups.length) { el.innerHTML = ''; return; }
-        const typeLabels = { 'diploma': 'Diploma', 'admission': 'Admission Letter', 'completion': 'Completion Certificate', 'enrollment': 'Enrollment Letter', 'recommendation': 'Recommendation Letter', 'fee-statement': 'Fee Statement', 'transcript': 'Official Transcript' };
         let html = `
             <div style="border:1px solid #f59e0b;border-radius:10px;overflow:hidden;background:#fffbeb;">
                 <div style="padding:12px 16px;background:#fef3c7;border-bottom:1px solid #fcd34d;display:flex;align-items:center;gap:10px;">
                     <div style="font-size:24px;">⚠️</div>
                     <div>
                         <div style="font-weight:800;font-size:14px;color:#92400e;">${groups.length} Potential Duplicate Issuance${groups.length !== 1 ? 's' : ''}</div>
-                        <div style="font-size:11px;color:#92400e;">Review, delete, revoke or keep the affected documents below.</div>
+                        <div style="font-size:11px;color:#92400e;">Multiple ${groups.length !== 1 ? 'documents of the same kind' : 'records'} issued — identify the latest/correct one, then delete, revoke or keep the others.</div>
                     </div>
-                </div>`;
-        html += `<div style="padding:12px 16px;">`;
+                </div>
+                <div style="padding:12px 16px;">`;
         groups.forEach((g, gi) => {
-            html += `<div style="border-top:1px solid #fcd34d;padding:10px 0;">
-                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-                    <div><b>${escapeHtml(g.studentName)}</b> — ${typeLabels[g.type] || g.type} <span style="font-size:11px;color:#92400e;">(${g.docs.length} record${g.docs.length !== 1 ? 's' : ''})</span></div>
+            const latest = g.docs[g.docs.length - 1];
+            const isLatestRevoked = (latest.docStatus === 'revoked');
+            html += `<div style="border-top:1px solid #fcd34d;padding:12px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                    <div>
+                        <div style="font-weight:800;font-size:14px;color:#78350f;">${escapeHtml(g.studentName)}</div>
+                        <div style="font-size:12px;color:#92400e;margin-top:2px;">${duplicateTypeLabel(g.type)} &middot; ${g.docs.length} record${g.docs.length !== 1 ? 's' : ''} issued &middot; <b>${g.docs.length} distinct document(s)</b></div>
+                    </div>
+                    <div style="font-size:11px;color:#b45309;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:3px 8px;">📌 Latest: ${escapeHtml(latest.docId || latest.id)} ${certDateLabel(latest)} ${isLatestRevoked ? '· Revoked' : ''}</div>
                 </div>`;
             g.docs.forEach((c, di) => {
                 const status = c.docStatus || 'active';
-                const statusBadge = status === 'revoked' ? `<span class="badge badge-danger">Revoked</span>` : (c._acknowledged ? `<span class="badge badge-success">Acknowledged</span>` : `<span class="badge badge-warning">Flagged</span>`);
-                const gen = new Date(c.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0 4px 14px;flex-wrap:wrap;">
-                    <div style="font-size:12px;">#${di + 1} &middot; <b>${escapeHtml(c.docId || c.id)}</b> &middot; V: ${escapeHtml(c.vCode || '—')} &middot; ${gen} ${statusBadge}</div>
-                    <div style="display:flex;gap:5px;">
-                        <button class="btn btn-xs btn-outline" onclick="viewCertificate('${c.id}')">View</button>
-                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','revoke')" ${status === 'revoked' ? 'disabled' : ''}>Mark Revoked</button>
-                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','delete')">Delete</button>
-                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','leave')" ${c._acknowledged ? 'disabled' : ''}>Leave as is</button>
-                    </div></div>`;
+                const isOriginal = di === 0;
+                const isLatest = di === g.docs.length - 1;
+                const roleBadge = isLatest
+                    ? `<span style="background:#166534;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;">⬆ LATEST</span>`
+                    : (isOriginal ? `<span style="background:#1d4ed8;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;">ORIGINAL (oldest)</span>` : `<span style="background:#b45309;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;">DUPLICATE</span>`);
+                const revokedInfo = (status === 'revoked') ? `
+                    <div style="font-size:11px;color:#b91c1c;margin-top:4px;line-height:1.5;">
+                        🚫 Revoked by <b>${escapeHtml(c.revokedBy || '—')}</b> on ${escapeHtml(c.revokedAt ? new Date(c.revokedAt).toLocaleString('en-GB') : '—')}
+                        ${c.revokeReason ? `<div style="margin-top:2px;">Reason: ${escapeHtml(c.revokeReason)}</div>` : ''}
+                        ${c.revokeContact ? `<div style="margin-top:2px;">Contact: ${escapeHtml(c.revokeContact)}</div>` : ''}
+                    </div>` : '';
+                html += `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0 8px 12px;flex-wrap:wrap;${isLatest ? 'background:#f0fdf4;border-left:3px solid #22c55e;border-radius:6px;' : ''}">
+                    <div style="font-size:12px;min-width:0;">
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${roleBadge} <b>${escapeHtml(c.docId || c.id)}</b> ${certStatusBadge(c)}</div>
+                        <div style="color:#92400e;margin-top:2px;">V: <span style="font-family:'Courier New',monospace;">${escapeHtml(c.vCode || '—')}</span> &middot; Issued: ${certDateLabel(c, true)}</div>
+                        ${revokedInfo}
+                    </div>
+                    <div style="display:flex;gap:5px;flex-wrap:wrap;flex-shrink:0;">
+                        <button class="btn btn-xs btn-outline" onclick="viewCertificate('${c.id}')">👁️ View</button>
+                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','revoke')" ${status === 'revoked' ? 'disabled' : ''}>🚫 Revoke</button>
+                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','delete')">🗑️ Delete</button>
+                        <button class="btn btn-xs btn-outline" onclick="dupAction('${c.id}','leave')" ${c._acknowledged ? 'disabled' : ''}>Keep as is</button>
+                    </div>
+                </div>`;
             });
             html += `</div>`;
         });
@@ -10120,13 +10154,22 @@ async function dupAction(certId, action) {
     if (!cert) { showToast('Document not found', { type: 'danger' }); return; }
     try {
         if (action === 'delete') {
-            if (!await showConfirm('Delete Document', 'Permanently delete this document? This cannot be undone.')) return;
+            if (!await showConfirm('Delete Document', `Permanently delete <b>${escapeHtml(cert.docId || cert.id)}</b> for <b>${escapeHtml(cert.studentName || 'this student')}</b>?\n\nThis cannot be undone.`)) return;
             await dbDelete('certificates', certId);
             showToast('Document deleted');
         } else if (action === 'revoke') {
+            const reason = await showPrompt('Revoke Document', `Provide the reason for revoking ${escapeHtml(cert.docId || cert.id)} for ${escapeHtml(cert.studentName || 'this student')}.\n\nThis will be recorded and shown to anyone verifying the document.`, '');
+            if (reason === null) return;
+            if (!reason || !reason.trim()) { showToast('A reason is required to revoke', { type: 'danger' }); return; }
+            const contact = await showPrompt('Revoke Document', 'Optional: enter a contact (phone/email) the holder can reach the administration at.\n\nLeave blank if not applicable.', '');
+            if (contact === null) return;
+            const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
             cert.docStatus = 'revoked';
             cert._acknowledged = true;
             cert.revokedAt = new Date().toISOString();
+            cert.revokedBy = currentUser.name || currentUser.username || 'Unknown';
+            cert.revokeReason = reason.trim();
+            cert.revokeContact = (contact || '').trim();
             await dbPut('certificates', cert);
             showToast('Document marked as revoked');
         } else if (action === 'leave') {
@@ -10154,7 +10197,7 @@ async function checkDuplicateDocuments() {
             entityId: g.studentId + '-' + g.type + '-dupes',
             entityName: g.studentName,
             title: `${g.docs.length} ${g.type}s issued to ${g.studentName}`,
-            details: `${g.studentName} has ${g.docs.length} ${g.type} document(s) with different Document IDs/Verification Codes (${dupes.length} flagged for review). Review, delete, revoke or keep them.`,
+            details: `${g.studentName} has ${g.docs.length} ${duplicateTypeLabel(g.type)} document(s) (${g.docs.length} distinct Doc IDs) — ${dupes.length} need review. Latest: ${g.docs[g.docs.length-1].docId || g.docs[g.docs.length-1].id}. Review, delete, revoke or keep them.`,
             action: { label: 'Review Documents', screen: 'certificates' }
         });
     }
@@ -10178,17 +10221,69 @@ function printPdfBlob(blobUrl) {
     if (w) { setTimeout(() => { try { w.print(); } catch (e) {} }, 500); }
     else { showToast('Please allow pop-ups to print the document', { type: 'danger' }); }
 }
+function buildCertDownloadName(cert) {
+    const who = cert.studentName || cert.name || 'document';
+    const kind = cert.type || 'doc';
+    const safeWho = String(who).replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return (safeWho || 'document') + '-' + (cert.docId || cert.id || '') + '.' + ((cert.type === 'diploma' || certContentIsPdf(cert)) ? 'pdf' : 'html');
+}
+function downloadCertificate(certId) {
+    dbGet('certificates', certId).then(cert => {
+        if (!cert) return showToast('Document not found!');
+        const isPdf = certContentIsPdf(cert);
+        const name = buildCertDownloadName(cert);
+        const a = document.createElement('a');
+        if (isPdf) {
+            const url = rawPdfBlobUrl(cert.content);
+            if (!url) return showToast('Could not build the PDF file', { type: 'danger' });
+            a.href = url;
+        } else {
+            a.href = 'data:text/html;charset=utf-8,' + encodeURIComponent(cert.content || '');
+        }
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast('Downloading ' + name);
+    }).catch(() => showToast('Could not download document', { type: 'danger' }));
+}
 async function viewCertificate(certId) {
     const cert = await dbGet('certificates', certId);
     if (!cert) return showToast('Document not found!');
+    const who = escapeHtml(cert.studentName || cert.name || 'Unknown student');
+    const kind = duplicateTypeLabel(cert.type);
+    const docId = escapeHtml(cert.docId || cert.id || '—');
+    const vCode = escapeHtml(cert.vCode || '—');
+    const gen = certDateLabel(cert, true);
+    const isRevoked = cert.docStatus === 'revoked';
+    const statusBadge = certStatusBadge(cert);
+    const revokedBlock = isRevoked ? `
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 14px;margin-bottom:10px;">
+            <div style="font-weight:800;font-size:13px;color:#b91c1c;">🚫 This document has been revoked</div>
+            <div style="font-size:12px;color:#7f1d1d;margin-top:4px;line-height:1.6;">
+                Revoked by <b>${escapeHtml(cert.revokedBy || '—')}</b> on ${escapeHtml(cert.revokedAt ? new Date(cert.revokedAt).toLocaleString('en-GB') : '—')}.
+                ${cert.revokeReason ? `Reason: ${escapeHtml(cert.revokeReason)}.` : ''}
+                ${cert.revokeContact ? ` Contact: ${escapeHtml(cert.revokeContact)}.` : ' It is no longer valid for official use.'}
+            </div>
+        </div>` : '';
+    const metaBar = `<div style="font-size:12px;line-height:1.7;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+        <div><b>${who}</b> ${statusBadge}</div>
+        <div>${kind} &middot; Doc ID: <b>${docId}</b> &middot; V-Code: <span style="font-family:'Courier New',monospace;">${vCode}</span></div>
+        <div>Issued: ${gen}</div>
+    </div>`;
     if (certContentIsPdf(cert)) {
-        const url = rawPdfBlobUrl(cert.content);
+        let url = rawPdfBlobUrl(cert.content);
         if (url) {
-            showModal(cert.docTitle || cert.studentName || 'Document', `<iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe>`, `<button class="btn btn-primary" onclick="printPdfBlob('${url}')">🖨️ Print</button>`);
+            const body = revokedBlock + metaBar + `<iframe src="${url}" style="width:100%;height:68vh;border:1px solid var(--border);border-radius:6px;"></iframe>`;
+            const footer = `<button class="btn btn-outline" onclick="downloadCertificate('${cert.id}')">⬇️ Download</button><button class="btn btn-primary" onclick="printPdfBlob('${url}')">🖨️ Print</button>`;
+            showModal(`${kind} — ${who}`, body, footer);
             return;
         }
+        // fall through to HTML rendering if PDF couldn't be built
+        showModal(`${kind} — ${who}`, revokedBlock + metaBar + '<div style="text-align:center;padding:24px;color:var(--danger);">Could not render this PDF preview.</div>', `<button class="btn btn-outline" onclick="downloadCertificate('${cert.id}')">⬇️ Download</button>`);
+        return;
     }
-    showModal(cert.docTitle || 'Document', cert.content, `<button class="btn btn-primary" onclick="printCertificate('${cert.id}')">Print</button>`);
+    showModal(`${kind} — ${who}`, revokedBlock + metaBar + `<div style="max-height:68vh;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;">${cert.content || 'No content'}</div>`, `<button class="btn btn-outline" onclick="downloadCertificate('${cert.id}')">⬇️ Download</button><button class="btn btn-primary" onclick="printCertificate('${cert.id}')">🖨️ Print</button>`);
 }
 async function printCertificate(certId) {
     let content, certType, certRecord;
@@ -11384,7 +11479,7 @@ async function verifyDocument() {
         resultDiv.innerHTML = `
             <div style="${isRevoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px 24px;border-radius:8px;">
                 ${isRevoked
-                    ? `<div style="font-size:48px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 12px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);margin:0 0 8px;">This document was flagged and revoked by the administration. It is no longer valid for official use.</p>`
+                    ? `<div style="font-size:48px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 12px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);margin:0 0 8px;">This document was flagged and revoked by the administration. It is no longer valid for official use.</p><div style="text-align:left;font-size:12px;color:#7f1d1d;background:#fff;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;margin-top:10px;line-height:1.7;">Revoked by <b>${escapeHtml(record.revokedBy || '—')}</b> on ${escapeHtml(record.revokedAt ? new Date(record.revokedAt).toLocaleString('en-GB') : '—')}.${record.revokeReason ? ` Reason: ${escapeHtml(record.revokeReason)}.` : ''}${record.revokeContact ? ` Contact: ${escapeHtml(record.revokeContact)}.` : ''}</div>`
                     : `<div style="font-size:48px;margin-bottom:8px;">✅</div><h3 style="color:var(--success);margin:0 0 12px;">Document Authenticated</h3>`}
                 <div style="text-align:left;max-width:500px;margin:0 auto;font-size:13px;line-height:1.8;">
                     <p><strong>Student Name:</strong> ${escapeHtml(record.studentName || record.name || '—')}</p>
@@ -11460,7 +11555,7 @@ async function reprintDocument() {
                 <div style="font-size:20px;">🚫</div>
                 <div>
                     <div style="font-weight:800;font-size:13px;color:var(--danger);">Document Revoked</div>
-                    <div style="font-size:11px;color:#b91c1c;">This document was flagged and revoked by the administration. Reprinting it is discouraged and should be reviewed by an admin.${cert.revokedAt ? ' Revoked on ' + new Date(cert.revokedAt).toLocaleString('en-GB') : ''}</div>
+                    <div style="font-size:11px;color:#b91c1c;">This document was flagged and revoked by the administration. Reprinting it is discouraged and should be reviewed by an admin.${cert.revokedAt ? ' Revoked on ' + new Date(cert.revokedAt).toLocaleString('en-GB') : ''}${cert.revokedBy ? ' By ' + escapeHtml(cert.revokedBy) : ''}${cert.revokeReason ? ' Reason: ' + escapeHtml(cert.revokeReason) : ''}${cert.revokeContact ? ' Contact: ' + escapeHtml(cert.revokeContact) : ''}</div>
                 </div>
             </div>` : '';
 
