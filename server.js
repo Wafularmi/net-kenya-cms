@@ -570,18 +570,109 @@ function auditLog(action, entity, details, user) {
 } catch (e) {}
 }
 
-    // Helper: Extract field positions from Azure Form Recognizer layout result
+// Pass 1: Extract text positions directly from the PDF content stream via pdf.js.
+// This is free, instant, and works for any PDF where labels live in the text layer
+// (not just raster images).
+async function extractFieldsFromPdfJs(pdfBase64) {
+    try {
+        let pdfjsLib;
+        try { pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js'); }
+        catch (e) { pdfjsLib = require('pdfjs-dist'); }
+        const pdfData = new Uint8Array(Buffer.from(pdfBase64, 'base64'));
+        const pdf = await pdfjsLib.getDocument({ data: pdfData, useSystemFonts: true, isEvalSupported: false }).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1.0 });
+        const textContent = await page.getTextContent();
+        const pageWidth = viewport.width;   // points
+        const pageHeight = viewport.height;
+        const ptToMm = 25.4 / 72;
+
+        const fieldPatterns = {
+            name: [/\bname\b/i, /\bstudent\s*name\b/i, /\bfull\s*name\b/i, /\bcandidate\s*name\b/i],
+            adm:  [/\badm(?:ission)?\s*(?:no|#|number)?\b/i, /\breg(?:istration)?\s*(?:no|#|number)?\b/i, /\badm(?:ission)?\s*(?:no|#)?\s*:?\s*\S+/i],
+            date: [/\bdate\b/i, /\bgraduation\s*date\b/i, /\bissue\s*date\b/i, /\bawarded?\s*(?:on|in|dated?)\b/i],
+            docid:[/\bdoc(?:ument)?\s*id\b/i, /\bcert(?:ificate)?\s*(?:no|#|number)\b/i, /\bref(?:erence)?\s*(?:no|#|number)\b/i],
+            vcode:[/\bverif(?:y|ication)\s*(?:code|no|#|number)?\b/i, /\bv[\-\s]?code\b/i, /\bverify\b/i],
+        };
+        const datePatterns = [
+            /\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b/,
+            /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b/i,
+            /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b/i,
+        ];
+
+        const fields = {};
+        for (const item of textContent.items) {
+            if (!item.str || !item.str.trim()) continue;
+            const text = item.str.trim();
+            const tx = item.transform[4];
+            const ty = item.transform[5];
+            const xMm = tx * ptToMm;
+            const yMm = (pageHeight - ty) * ptToMm;
+
+            for (const [field, pats] of Object.entries(fieldPatterns)) {
+                if (fields[field]) continue;
+                for (const pat of pats) {
+                    const m = text.match(pat);
+                    if (m) {
+                        fields[field] = { x: Math.round(xMm + (m[0].length * 2.5)), y: Math.round(yMm), size: 12 };
+                        break;
+                    }
+                }
+            }
+            if (!fields.date) {
+                for (const dp of datePatterns) {
+                    if (dp.test(text)) { fields.date = { x: Math.round(xMm), y: Math.round(yMm), size: 12 }; break; }
+                }
+            }
+        }
+        return fields;
+    } catch (e) {
+        console.warn('pdf.js text extraction failed:', e.message);
+        return {};
+    }
+}
+
+// Helper: Enhanced extractFieldPositions with fuzzy matching and diploma patterns
 function extractFieldPositions(analyzeResult) {
     const fields = {};
     const ptToMm = 25.4 / 72;
 
-    const fieldLabels = {
-        name: ['name', 'student name', 'full name', 'candidate name'],
-        adm: ['admission', 'admission no', 'adm no', 'reg no', 'registration'],
-        date: ['date', 'graduation date', 'award date', 'issue date'],
-        docid: ['doc id', 'document id', 'certificate no', 'cert no'],
-        vcode: ['verify', 'verification code', 'v-code', 'vcode'],
+    // Enhanced diploma-specific patterns with fuzzy matching support
+    const fieldPatterns = {
+        name: {
+            exact: ['name', 'student name', 'full name', 'candidate name'],
+            contains: ['name of', 'named as', 'awarded to', 'certify.*?is awarded', 'this certifies that'],
+            fuzzy: ['nm', 'naem', 'nme'] // common typos
+        },
+        adm: {
+            exact: ['admission', 'admission no', 'adm no', 'reg no', 'registration', 'admission number', 'reg number'],
+            contains: ['admission.*?:', 'reg.*?:', 'adm.*?:', 'registration.*?:'],
+            fuzzy: ['admissionno', 'admno', 'regno', 'regnumber']
+        },
+        date: {
+            exact: ['date', 'graduation date', 'award date', 'issue date', 'dated'],
+            contains: ['date.*?:', 'dated.*?:', 'awarded.*?:', 'issued.*?:', 'this.*?day of'],
+            fuzzy: ['dtae', 'dte', 'dare']
+        },
+        docid: {
+            exact: ['doc id', 'document id', 'certificate no', 'cert no', 'certificate number', 'cert number', 'cert no.'],
+            contains: ['cert.*?no.*?:', 'doc.*?id.*?:', 'certificate.*?:', 'ref.*?no.*?:'],
+            fuzzy: ['docid', 'certno', 'certificateno', 'certficate']
+        },
+        vcode: {
+            exact: ['verify', 'verification code', 'v-code', 'vcode', 'verify code', 'verification'],
+            contains: ['verify.*?:', 'verification.*?:', 'v[\- ]code.*?:'],
+            fuzzy: ['verfication', 'verifcation', 'vrify']
+        }
     };
+
+    // Date patterns to detect actual date values
+    const dateValuePatterns = [
+        /\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b/,
+        /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b/i,
+        /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|rd)?,?\s+\d{4}\b/i,
+        /\b\d{4}[\-\/]\d{1,2}[\-\/]\d{1,2}\b/,
+    ];
 
     // Accept geometry in any shape Azure emits: object-point polygon arrays,
     // flat numeric boundingBox arrays ([x1,y1,x2,y2,...]), or [x,y] pairs.
@@ -607,13 +698,31 @@ function extractFieldPositions(analyzeResult) {
         return { minX: Math.min(box.minX, wb.minX), maxX: Math.max(box.maxX, wb.maxX), minY: Math.min(box.minY, wb.minY), maxY: Math.max(box.maxY, wb.maxY) };
     };
 
+    // Fuzzy match helper: Levenshtein distance <= threshold
+    const fuzzyMatch = (str, patterns, threshold = 2) => {
+        const clean = str.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        for (const p of patterns) {
+            const cleanP = p.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            if (clean === cleanP || clean.includes(cleanP)) return true;
+            // Levenshtein for short strings
+            if (clean.length < 15 && cleanP.length < 15) {
+                const dp = Array.from({ length: clean.length + 1 }, () => Array(cleanP.length + 1).fill(0));
+                for (let i = 0; i <= clean.length; i++) dp[i][0] = i;
+                for (let j = 0; j <= cleanP.length; j++) dp[0][j] = j;
+                for (let i = 1; i <= clean.length; i++) {
+                    for (let j = 1; j <= cleanP.length; j++) {
+                        dp[i][j] = clean[i - 1] === cleanP[j - 1] ? dp[i - 1][j - 1] : Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1);
+                    }
+                }
+                if (dp[clean.length][cleanP.length] <= threshold) return true;
+            }
+        }
+        return false;
+    };
+
     const processLines = (lines, words, pageW, pageUnits) => {
-        // Page width in its reported unit, used only to clamp X. Coordinates are
-        // converted to mm after clamping via unitScale.
         const norm = (pageW == null) ? null : Number(pageW);
         const pageWraw = (norm != null && Number.isFinite(norm)) ? norm : null;
-        // Coordinate scale to points: 'pixel' geometry is in px (300 DPI),
-        // 'inch' geometry is in inches, 'point'/absent geometry already in points.
         const unitScale = pageUnits === 'pixel' ? (72 / 300) : (pageUnits === 'inch' ? 72 : 1);
         const wordsByLine = new Map();
         for (let i = 0; i < lines.length; i++) {
@@ -629,9 +738,21 @@ function extractFieldPositions(analyzeResult) {
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const content = (line.content || line.text || '').toLowerCase();
-            for (const [field, labels] of Object.entries(fieldLabels)) {
-                if (fields[field] || !labels.some(l => content.includes(l))) continue;
+            const content = (line.content || line.text || '').toLowerCase().trim();
+            if (!content) continue;
+
+            for (const [field, pats] of Object.entries(fieldPatterns)) {
+                if (fields[field]) continue;
+
+                let matched = false;
+                // Try exact match first
+                if (pats.exact.some(l => content.includes(l))) matched = true;
+                // Try contains (regex)
+                if (!matched && pats.contains.some(l => { try { return new RegExp(l, 'i').test(content); } catch { return false; } })) matched = true;
+                // Try fuzzy match
+                if (!matched && fuzzyMatch(content, [...pats.exact, ...pats.fuzzy])) matched = true;
+
+                if (!matched) continue;
 
                 let box = null;
                 const mem = wordsByLine.get(i);
@@ -641,12 +762,30 @@ function extractFieldPositions(analyzeResult) {
                 if (!box) box = bboxOf(line.polygon) || bboxOf(line.boundingBox);
                 if (!box) continue;
 
-                const rawX = pageWraw != null ? Math.min(box.maxX + 15, pageWraw) : box.maxX + 15;
+                // Position field text AFTER the label (right side), with a small gap
+                const rawX = pageWraw != null ? Math.min(box.maxX + 10, pageWraw) : box.maxX + 10;
                 fields[field] = {
                     x: Math.round(rawX * unitScale * ptToMm),
                     y: Math.round(box.minY * unitScale * ptToMm),
-                    size: 12
+                    size: field === 'name' ? 16 : (field === 'docid' || field === 'vcode' ? 8 : 12)
                 };
+            }
+
+            // Also check for date values in the line
+            if (!fields.date) {
+                for (const dp of dateValuePatterns) {
+                    if (dp.test(content)) {
+                        let box = bboxOf(line.polygon) || bboxOf(line.boundingBox);
+                        if (box) {
+                            fields.date = {
+                                x: Math.round((box.maxX + 10) * unitScale * ptToMm),
+                                y: Math.round(box.minY * unitScale * ptToMm),
+                                size: 12
+                            };
+                        }
+                        break;
+                    }
+                }
             }
         }
     };
@@ -961,7 +1100,7 @@ function handleAPI(req, res) {
         return res.end(backup);
     }
 
-    // POST /api/ai/detect-fields — AI field detection on PDF template
+    // POST /api/ai/detect-fields — Multi-pass field detection: PDF.js → Azure prebuilt-read
     if (parts.length >= 2 && parts[1] === 'ai' && parts[2] === 'detect-fields' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         const user = getRequestUser(req);
@@ -974,57 +1113,66 @@ function handleAPI(req, res) {
                 const { pdfBase64 } = JSON.parse(body);
                 if (!pdfBase64) return json(res, 400, { error: 'pdfBase64 required' });
 
-                // Call Azure Form Recognizer / Azure Document Intelligence.
-                // Field position detection requires the layout model, which always
-                // returns word/line geometry (polygons). Custom/read models can
-                // return text without any coordinates.
+                // Pass 1: PDF.js text extraction (free, instant)
+                let fields = await extractFieldsFromPdfJs(pdfBase64);
+                let method = 'pdfjs';
+                let confidence = Object.keys(fields).length >= 3 ? 'high' : 'low';
+
+                // Pass 2: Azure OCR if PDF.js didn't find enough fields
                 const endpoint = process.env.AZURE_FORM_RECOGNIZER_ENDPOINT;
                 const key = process.env.AZURE_FORM_RECOGNIZER_KEY;
-                const modelId = process.env.AZURE_DIPLOMA_DETECT_MODEL || 'prebuilt-layout';
+                // Use prebuilt-read (better for OCR) instead of prebuilt-layout
+                const modelId = process.env.AZURE_DIPLOMA_DETECT_MODEL || 'prebuilt-read';
 
-                if (!endpoint || !key) {
-                    return json(res, 503, { error: 'Azure Form Recognizer not configured' });
+                if (Object.keys(fields).length < 3 && endpoint && key) {
+                    try {
+                        const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+                        const analyzeUrl = `${endpoint}/formrecognizer/documentModels/${modelId}:analyze?api-version=2023-07-31`;
+                        const analyzeRes = await fetch(analyzeUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/pdf',
+                                'Ocp-Apim-Subscription-Key': key
+                            },
+                            body: pdfBuffer
+                        });
+
+                        if (analyzeRes.ok) {
+                            const operationLocation = analyzeRes.headers.get('operation-location');
+                            if (operationLocation) {
+                                // Poll for results (with timeout)
+                                let result;
+                                for (let i = 0; i < 20; i++) {
+                                    await new Promise(r => setTimeout(r, 800));
+                                    const pollRes = await fetch(operationLocation, {
+                                        headers: { 'Ocp-Apim-Subscription-Key': key }
+                                    });
+                                    const pollData = await pollRes.json();
+                                    if (pollData.status === 'succeeded') { result = pollData; break; }
+                                    if (pollData.status === 'failed') break;
+                                }
+
+                                if (result && result.analyzeResult) {
+                                    const azureFields = extractFieldPositions(result.analyzeResult);
+                                    // Merge: Azure fields fill gaps, don't overwrite PDF.js results
+                                    for (const [k, v] of Object.entries(azureFields)) {
+                                        if (!fields[k]) fields[k] = v;
+                                    }
+                                    method = Object.keys(fields).length > Object.keys(azureFields).length ? 'pdfjs+azure' : 'azure';
+                                    confidence = Object.keys(fields).length >= 3 ? 'high' : 'medium';
+                                }
+                            }
+                        }
+                    } catch (azureErr) {
+                        console.warn('Azure OCR failed, using PDF.js results:', azureErr.message);
+                    }
                 }
 
-                const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+                // Log detection for debugging
+                console.log(`Field detection: method=${method}, fields=${Object.keys(fields).length}, confidence=${confidence}`);
+                console.log('Detected fields:', JSON.stringify(fields));
 
-                // Analyze document with Azure Form Recognizer
-                const analyzeUrl = `${endpoint}/formrecognizer/documentModels/${modelId}:analyze?api-version=2023-07-31`;
-                const analyzeRes = await fetch(analyzeUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/pdf',
-                        'Ocp-Apim-Subscription-Key': key
-                    },
-                    body: pdfBuffer
-                });
-
-                if (!analyzeRes.ok) {
-                    const err = await analyzeRes.text();
-                    console.error('Azure analyze error:', err);
-                    return json(res, 502, { error: 'Azure analysis failed' });
-                }
-
-                const operationLocation = analyzeRes.headers.get('operation-location');
-                if (!operationLocation) return json(res, 502, { error: 'No operation location' });
-
-                // Poll for results
-                let result;
-                for (let i = 0; i < 30; i++) {
-                    await new Promise(r => setTimeout(r, 1000));
-                    const pollRes = await fetch(operationLocation, {
-                        headers: { 'Ocp-Apim-Subscription-Key': key }
-                    });
-                    const pollData = await pollRes.json();
-                    if (pollData.status === 'succeeded') { result = pollData; break; }
-                    if (pollData.status === 'failed') return json(res, 502, { error: 'Analysis failed' });
-                }
-
-                if (!result) return json(res, 504, { error: 'Analysis timeout' });
-
-                // Extract field positions from layout
-                const fields = extractFieldPositions(result.analyzeResult);
-                return json(res, 200, { fields });
+                return json(res, 200, { fields, method, confidence });
 
             } catch (e) {
                 console.error('AI detect-fields error:', e);

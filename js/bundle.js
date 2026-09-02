@@ -9020,7 +9020,7 @@ async function detectDiplomaFieldsWithAI() {
             return showToast('No PDF template available. Please upload and save a PDF first.', { type: 'danger' });
         }
 
-        showToast('Analyzing PDF with AI...', { type: 'info' });
+        showToast('Extracting text from PDF...', { type: 'info' });
         const res = await fetch('/api/ai/detect-fields', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -9030,17 +9030,23 @@ async function detectDiplomaFieldsWithAI() {
         if (!res.ok) throw new Error(data.error || 'AI detection failed');
 
         if (data.fields && Object.keys(data.fields).length) {
+            let applied = 0;
             for (const [field, coords] of Object.entries(data.fields)) {
                 const xEl = document.getElementById('diploma-fx-' + field);
                 const yEl = document.getElementById('diploma-fy-' + field);
                 const sizeEl = document.getElementById('diploma-fs-' + field);
-                if (xEl && Number.isFinite(coords.x)) xEl.value = Math.round(coords.x);
+                if (xEl && Number.isFinite(coords.x)) { xEl.value = Math.round(coords.x); applied++; }
                 if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(coords.y);
                 if (sizeEl && coords.size) sizeEl.value = coords.size;
             }
-            showToast('AI detected and filled field positions!', { type: 'success' });
+            // Show detection method and confidence in toast
+            const method = data.method || 'unknown';
+            const confidence = data.confidence || 'low';
+            const methodLabel = method === 'pdfjs' ? 'PDF text layer' : (method === 'azure' ? 'Azure OCR' : (method === 'pdfjs+azure' ? 'PDF text + Azure OCR' : method));
+            const confidenceLabel = confidence === 'high' ? 'High confidence' : (confidence === 'medium' ? 'Medium confidence' : 'Low confidence');
+            showToast(`${confidenceLabel}: ${applied} fields detected via ${methodLabel}. Positions filled.`, { type: 'success' });
         } else {
-            showToast('No fields detected. Please set manually.', { type: 'warning' });
+            showToast('No text found in PDF. Labels may be in raster images. Set positions manually.', { type: 'warning' });
         }
     } catch (e) {
         showToast('AI detection error: ' + e.message, { type: 'danger' });

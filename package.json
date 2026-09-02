@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "node-forge": "^1.4.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174",
     "puppeteer": "^25.3.0",
     "qrcode": "^1.5.3",
     "ws": "^8.16.0"
