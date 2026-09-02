@@ -1142,10 +1142,15 @@ function handleAPI(req, res) {
                                     // Debug: dump raw line geometry to understand coordinate units
                                     const rawDebug = [];
                                     for (const pg of (result.analyzeResult.pages || [])) {
-                                        const unit = pg.units || '?';
+                                        const unit = pg.units || pg.unit || '?';
                                         const w = pg.width, h = pg.height;
-                                        for (const ln of (pg.lines || []).slice(0, 25)) {
-                                            if (ln.content) rawDebug.push({ t: ln.content.slice(0, 30), unit, pageW: w, pageH: h, poly: (ln.polygon || ln.boundingBox || []).slice(0, 2) });
+                                        for (const ln of (pg.lines || []).slice(0, 15)) {
+                                            rawDebug.push({ t: (ln.content || ln.text || '').slice(0, 30), unit, pageW: w, pageH: h, poly: (ln.polygon || ln.boundingBox || []).slice(0, 2) });
+                                        }
+                                    }
+                                    for (const r of (result.analyzeResult.readResults || []).slice(0, 5)) {
+                                        for (const ln of (r.lines || []).slice(0, 15)) {
+                                            rawDebug.push({ t: (ln.text || '').slice(0, 30), unit: r.unit || r.units || '?', pageW: r.width, pageH: r.height, poly: (ln.boundingBox || []).slice(0, 2) });
                                         }
                                     }
                                     if (rawDebug.length) console.log('AZURE_RAW:', JSON.stringify(rawDebug));
@@ -1155,7 +1160,7 @@ function handleAPI(req, res) {
                                     }
                                     method = Object.keys(fields).length > Object.keys(azureFields).length ? 'pdfjs+azure' : 'azure';
                                     confidence = Object.keys(fields).length >= 3 ? 'high' : 'medium';
-                                    window_debug = { raw: rawDebug, azureFields, unit: (result.analyzeResult.pages || [])[0] && (result.analyzeResult.pages)[0].units };
+                                    debugInfo = { raw: rawDebug, azureFields, unit: ((result.analyzeResult.pages || [])[0] && ((result.analyzeResult.pages)[0].units || (result.analyzeResult.pages)[0].unit)) || ((result.analyzeResult.readResults || [])[0] && (result.analyzeResult.readResults)[0].unit), pageShape: { w: (result.analyzeResult.pages || [])[0] && (result.analyzeResult.pages)[0].width, h: (result.analyzeResult.pages || [])[0] && (result.analyzeResult.pages)[0].height } };
                                 }
                             }
                         }
