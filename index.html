@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=271" as="script">
+    <link rel="preload" href="js/bundle.js?v=272" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -815,14 +815,14 @@
 </div>
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
-                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from top-left)</div>
+                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left — 0,0 at bottom-left, like Diploma)</div>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                              <div class="form-group">
                                  <label>Name Position</label>
                                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
                                      <div><label>X</label><input type="number" id="completion-fx-name" value="105" min="0" max="210" style="width:60px;"></div>
-                                     <div><label>Y</label><input type="number" id="completion-fy-name" value="120" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="completion-fy-name" value="177" min="0" max="297" style="width:60px;"></div>
                                      <div><label>Size</label><input type="number" id="completion-fs-name" value="24" min="8" max="72" style="width:60px;"></div>
                                  </div>
                                  <div style="margin-top:4px;">
@@ -830,8 +830,8 @@
                                      <input type="range" id="completion-fx-name-slider" min="0" max="210" value="105" oninput="document.getElementById('completion-fx-name').value=this.value; document.getElementById('completion-fx-name-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
-                                     <label>Y: <span id="completion-fy-name-slider-val">120</label></label>
-                                     <input type="range" id="completion-fy-name-slider" min="0" max="297" value="120" oninput="document.getElementById('completion-fy-name').value=this.value; document.getElementById('completion-fy-name-slider-val').textContent=this.value;" style="width:100%;">
+                                     <label>Y: <span id="completion-fy-name-slider-val">177</label></label>
+                                     <input type="range" id="completion-fy-name-slider" min="0" max="297" value="177" oninput="document.getElementById('completion-fy-name').value=this.value; document.getElementById('completion-fy-name-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
                                      <label>Size: <span id="completion-fs-name-slider-val">24</label></label>
@@ -842,7 +842,7 @@
                                  <label>Adm No Position</label>
                                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
                                      <div><label>X</label><input type="number" id="completion-fx-adm" value="105" min="0" max="210" style="width:60px;"></div>
-                                     <div><label>Y</label><input type="number" id="completion-fy-adm" value="140" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="completion-fy-adm" value="157" min="0" max="297" style="width:60px;"></div>
                                      <div><label>Size</label><input type="number" id="completion-fs-adm" value="14" min="8" max="72" style="width:60px;"></div>
                                  </div>
                                  <div style="margin-top:4px;">
@@ -850,8 +850,8 @@
                                      <input type="range" id="completion-fx-adm-slider" min="0" max="210" value="105" oninput="document.getElementById('completion-fx-adm').value=this.value; document.getElementById('completion-fx-adm-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
-                                     <label>Y: <span id="completion-fy-adm-slider-val">140</label></label>
-                                     <input type="range" id="completion-fy-adm-slider" min="0" max="297" value="140" oninput="document.getElementById('completion-fy-adm').value=this.value; document.getElementById('completion-fy-adm-slider-val').textContent=this.value;" style="width:100%;">
+                                     <label>Y: <span id="completion-fy-adm-slider-val">157</label></label>
+                                     <input type="range" id="completion-fy-adm-slider" min="0" max="297" value="157" oninput="document.getElementById('completion-fy-adm').value=this.value; document.getElementById('completion-fy-adm-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
                                      <label>Size: <span id="completion-fs-adm-slider-val">14</label></label>
@@ -862,7 +862,7 @@
                                  <label>Date Position</label>
                                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
                                      <div><label>X</label><input type="number" id="completion-fx-date" value="105" min="0" max="210" style="width:60px;"></div>
-                                     <div><label>Y</label><input type="number" id="completion-fy-date" value="200" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="completion-fy-date" value="97" min="0" max="297" style="width:60px;"></div>
                                      <div><label>Size</label><input type="number" id="completion-fs-date" value="14" min="8" max="72" style="width:60px;"></div>
                                  </div>
                                  <div style="margin-top:4px;">
@@ -870,8 +870,8 @@
                                      <input type="range" id="completion-fx-date-slider" min="0" max="210" value="105" oninput="document.getElementById('completion-fx-date').value=this.value; document.getElementById('completion-fx-date-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
-                                     <label>Y: <span id="completion-fy-date-slider-val">200</label></label>
-                                     <input type="range" id="completion-fy-date-slider" min="0" max="297" value="200" oninput="document.getElementById('completion-fy-date').value=this.value; document.getElementById('completion-fy-date-slider-val').textContent=this.value;" style="width:100%;">
+                                     <label>Y: <span id="completion-fy-date-slider-val">97</label></label>
+                                     <input type="range" id="completion-fy-date-slider" min="0" max="297" value="97" oninput="document.getElementById('completion-fy-date').value=this.value; document.getElementById('completion-fy-date-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
                                      <label>Size: <span id="completion-fs-date-slider-val">14</label></label>
@@ -882,7 +882,7 @@
                                  <label>Doc ID Position</label>
                                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
                                      <div><label>X</label><input type="number" id="completion-fx-docid" value="70" min="0" max="210" style="width:60px;"></div>
-                                     <div><label>Y</label><input type="number" id="completion-fy-docid" value="280" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="completion-fy-docid" value="17" min="0" max="297" style="width:60px;"></div>
                                      <div><label>Size</label><input type="number" id="completion-fs-docid" value="10" min="8" max="72" style="width:60px;"></div>
                                  </div>
                                  <div style="margin-top:4px;">
@@ -890,8 +890,8 @@
                                      <input type="range" id="completion-fx-docid-slider" min="0" max="210" value="70" oninput="document.getElementById('completion-fx-docid').value=this.value; document.getElementById('completion-fx-docid-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
-                                     <label>Y: <span id="completion-fy-docid-slider-val">280</label></label>
-                                     <input type="range" id="completion-fy-docid-slider" min="0" max="297" value="280" oninput="document.getElementById('completion-fy-docid').value=this.value; document.getElementById('completion-fy-docid-slider-val').textContent=this.value;" style="width:100%;">
+                                     <label>Y: <span id="completion-fy-docid-slider-val">17</label></label>
+                                     <input type="range" id="completion-fy-docid-slider" min="0" max="297" value="17" oninput="document.getElementById('completion-fy-docid').value=this.value; document.getElementById('completion-fy-docid-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
                                      <label>Size: <span id="completion-fs-docid-slider-val">10</label></label>
@@ -902,7 +902,7 @@
                                  <label>Verify Position</label>
                                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
                                      <div><label>X</label><input type="number" id="completion-fx-vcode" value="140" min="0" max="210" style="width:60px;"></div>
-                                     <div><label>Y</label><input type="number" id="completion-fy-vcode" value="280" min="0" max="297" style="width:60px;"></div>
+                                     <div><label>Y</label><input type="number" id="completion-fy-vcode" value="17" min="0" max="297" style="width:60px;"></div>
                                      <div><label>Size</label><input type="number" id="completion-fs-vcode" value="10" min="8" max="72" style="width:60px;"></div>
                                  </div>
                                  <div style="margin-top:4px;">
@@ -910,8 +910,8 @@
                                      <input type="range" id="completion-fx-vcode-slider" min="0" max="210" value="140" oninput="document.getElementById('completion-fx-vcode').value=this.value; document.getElementById('completion-fx-vcode-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
-                                     <label>Y: <span id="completion-fy-vcode-slider-val">280</label></label>
-                                     <input type="range" id="completion-fy-vcode-slider" min="0" max="297" value="280" oninput="document.getElementById('completion-fy-vcode').value=this.value; document.getElementById('completion-fy-vcode-slider-val').textContent=this.value;" style="width:100%;">
+                                     <label>Y: <span id="completion-fy-vcode-slider-val">17</label></label>
+                                     <input type="range" id="completion-fy-vcode-slider" min="0" max="297" value="17" oninput="document.getElementById('completion-fy-vcode').value=this.value; document.getElementById('completion-fy-vcode-slider-val').textContent=this.value;" style="width:100%;">
                                  </div>
                                  <div style="margin-top:4px;">
                                      <label>Size: <span id="completion-fs-vcode-slider-val">10</label></label>
@@ -926,9 +926,9 @@
                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Completion Certificate Signatures (optional)</div>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload signature images for the completion certificate template. These are separate from the document signatures above.</div>
                         <div style="display:flex;flex-direction:column;gap:14px;">
-                            <div class="form-group" style="margin:0;"><label>Registrar Sig</label><div class="sig-upload"><img id="completion-sig-registrar-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-registrar-upload" accept="image/*" onchange="handleCompletionSigUpload('registrar', event)"><label for="completion-sig-registrar-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-registrar-x" placeholder="X" value="40" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-registrar-y" placeholder="Y" value="240" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-registrar-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
-                            <div class="form-group" style="margin:0;"><label>Dean Sig</label><div class="sig-upload"><img id="completion-sig-dean-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-dean-upload" accept="image/*" onchange="handleCompletionSigUpload('dean', event)"><label for="completion-sig-dean-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-dean-x" placeholder="X" value="105" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-dean-y" placeholder="Y" value="240" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-dean-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
-                            <div class="form-group" style="margin:0;"><label>Director Sig</label><div class="sig-upload"><img id="completion-sig-director-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-director-upload" accept="image/*" onchange="handleCompletionSigUpload('director', event)"><label for="completion-sig-director-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-director-y" placeholder="Y" value="240" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
+                            <div class="form-group" style="margin:0;"><label>Registrar Sig</label><div class="sig-upload"><img id="completion-sig-registrar-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-registrar-upload" accept="image/*" onchange="handleCompletionSigUpload('registrar', event)"><label for="completion-sig-registrar-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-registrar-x" placeholder="X" value="40" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-registrar-y" placeholder="Y" value="57" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-registrar-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
+                            <div class="form-group" style="margin:0;"><label>Dean Sig</label><div class="sig-upload"><img id="completion-sig-dean-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-dean-upload" accept="image/*" onchange="handleCompletionSigUpload('dean', event)"><label for="completion-sig-dean-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-dean-x" placeholder="X" value="105" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-dean-y" placeholder="Y" value="57" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-dean-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
+                            <div class="form-group" style="margin:0;"><label>Director Sig</label><div class="sig-upload"><img id="completion-sig-director-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-director-upload" accept="image/*" onchange="handleCompletionSigUpload('director', event)"><label for="completion-sig-director-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-director-y" placeholder="Y" value="57" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
                         </div>
                          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
                              <button class="btn btn-primary" id="btn-save-completion-config" onclick="saveCompletionPdfConfig()"><span class="btn-text">Save Template</span><span class="btn-loading" style="display:none;">⏳ Saving...</span></button>
@@ -1080,6 +1080,16 @@
                         </div>
                         <button class="btn btn-primary" onclick="saveCoordinatorAccess()">Save Coordinator Access</button>
                     </div>
+                    <div class="card" id="assistant-access-card" style="display:none;"><h3>Assistant Admin Access</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Toggle every admin sidebar tab for the Assistant Admin role. When OFF, the tab is hidden and the screen is blocked. Only admins can change this. Default is ON for all.</div>
+                        <div id="assistant-access-toggles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;max-height:320px;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"></div>
+                        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                            <button class="btn btn-outline btn-sm" onclick="setAssistantAccessAll(true)">Enable All</button>
+                            <button class="btn btn-outline btn-sm" onclick="setAssistantAccessAll(false)">Disable All</button>
+                            <button class="btn btn-primary" onclick="saveAssistantAccess()">Save Assistant Access</button>
+                        </div>
+                        <div id="assistant-access-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+                    </div>
                     <div class="card"><h3>WhatsApp Settings</h3>
                         <div class="form-group"><label>Default Country Code</label><input type="text" id="settings-whatsapp-code" value="254" placeholder="e.g., 254 for Kenya"></div>
                         <div class="form-group"><label>Admin WhatsApp Number</label><input type="text" id="settings-whatsapp-admin" placeholder="e.g., 254712345678"></div>
@@ -1225,8 +1235,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=271"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=12"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=272"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=13"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

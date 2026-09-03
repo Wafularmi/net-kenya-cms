@@ -563,14 +563,60 @@ function canAccessStore(user, store, method) {
         return true;
     }
 
-    if (!FINANCIAL_STORES.has(store)) return true;
-
     // Coordinator: sub-admin scoped to their region
     if (user.role === 'coordinator') {
         if (['settings','regions','users','counters'].includes(store)) return false;
         if (['courses','exams','quizzes','questionBank','lessons'].includes(store) && method !== 'GET') return false;
+        if (!FINANCIAL_STORES.has(store)) return true;
         return true;
     }
+
+    // Assistant admin: granular per-tab toggles stored in settings:assistantAccess
+    if (user.role === 'assistant') {
+        // Only admin can change the assistantAccess config itself
+        if (store === 'settings' && method !== 'GET') {
+            // Defer to later check for assistantAccess key; but block changing it
+            // We need the parsed body to check key, but here we only have store/method.
+            // Allow PUT to settings only if the tab 'settings' is enabled; the
+            // specific 'assistantAccess' key check is done in the PUT handler.
+            const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
+            const access = rec ? (rec.value || rec) : null;
+            if (store === 'settings' && access && access['settings'] === false) return false;
+        }
+        const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
+        const access = rec ? (rec.value || rec) : null;
+        // If no config yet, default to allow all (so new assistant isn't locked out)
+        if (!access) {
+            if (!FINANCIAL_STORES.has(store)) return true;
+            return false;
+        }
+        const storeToTab = {
+            students: 'students', courses: 'courses', lessons: 'lessons', attendance: 'attendance',
+            grades: 'grades', exams: 'exams', manuals: 'manuals', staff: 'staff',
+            payments: 'finance', income: 'finance', expenses: 'finance', fees: 'finance', invoices: 'finance',
+            hostel: 'hostel', hostels: 'hostel', borrows: 'hostel',
+            library: 'library', inventory: 'inventory', alumni: 'alumni',
+            certificates: 'certificates', events: 'events', whatsapp: 'whatsapp', whatsappTemplates: 'whatsapp', whatsappLog: 'whatsapp',
+            audit: 'audit', idcards: 'idcards', idCards: 'idcards', questions: 'questions', quizzes: 'quizzes',
+            submissions: 'submissions', notes: 'notes', portal: 'portal', pending: 'pending',
+            tickets: 'tickets', progress: 'progress', settings: 'settings', verify: 'verify', reprint: 'reprint',
+            discussions: 'discussions', regions: 'regions', communication: 'communication', messages: 'messages',
+            sms: 'sms', smsLog: 'sms', smsSettings: 'sms', chapel: 'chapel', graduation: 'graduation',
+            users: 'users', counters: 'counters', studyCenters: 'regions', studyCenter: 'regions'
+        };
+        const tab = storeToTab[store];
+        if (tab) {
+            if (access[tab] === false) return false;
+            // Also deny financial stores if finance tab disabled
+            if (FINANCIAL_STORES.has(store) && access['finance'] === false) return false;
+            return true;
+        }
+        if (!FINANCIAL_STORES.has(store)) return true;
+        return false;
+    }
+
+    if (!FINANCIAL_STORES.has(store)) return true;
+
     return false;
 }
 
@@ -2133,6 +2179,9 @@ return json(res, 200, result);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
+                    if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
+                        return json(res, 403, { error: 'Only administrators can change assistant access' });
+                    }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) {
                         console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(value));
@@ -2165,6 +2214,9 @@ return json(res, 200, result);
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
+                    }
+                    if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
+                        return json(res, 403, { error: 'Only administrators can change assistant access' });
                     }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });

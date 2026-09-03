@@ -298,8 +298,14 @@ async function getProgramsList() {
 }
 let _academicCache = null;
 let _coordinatorAccessCache = null;
+let _assistantAccessCache = null;
 async function initCoordinatorAccessCache() {
-    _coordinatorAccessCache = await dbGet('settings', 'coordinatorAccess');
+    const rec = await dbGet('settings', 'coordinatorAccess');
+    _coordinatorAccessCache = rec ? (rec.value || rec) : null;
+}
+async function initAssistantAccessCache() {
+    const rec = await dbGet('settings', 'assistantAccess');
+    _assistantAccessCache = rec ? (rec.value || rec) : null;
 }
 async function initAcademicCache() {
     _academicCache = await dbGet('settings', 'academic');
@@ -396,7 +402,7 @@ function findStudentWithAlumniFallback(students, alumni, currentUser) {
     return null;
 }
 function getRoleColor(role) {
-    const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning' };
+    const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
 function getRolePermissions(role) {
@@ -407,9 +413,10 @@ function getRolePermissions(role) {
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         student: ['dashboard','student-hub','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual']
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual'],
+        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions']
     };
-    const base = perms[role] || [];
+    const base = perms[role] ? [...perms[role]] : [];
     if (role === 'coordinator' && _coordinatorAccessCache) {
         if (_coordinatorAccessCache.exams === false) {
             const idx = base.indexOf('exams');
@@ -423,6 +430,11 @@ function getRolePermissions(role) {
             const idx = base.indexOf('grades');
             if (idx !== -1) base.splice(idx, 1);
         }
+    }
+    if (role === 'assistant' && _assistantAccessCache) {
+        // Filter admin tabs by per-tab toggle (false = hidden)
+        const filtered = base.filter(tab => _assistantAccessCache[tab] !== false);
+        return filtered;
     }
     return base;
 }
@@ -816,7 +828,7 @@ async function initAuth() {
     } catch (e) { console.error('initAuth session check failed:', e); }
 }
 function staffRoleToSystemRole(staffRole) {
-    const map = { admin: 'admin', lecturer: 'lecturer', professor: 'lecturer', dean: 'registrar', 'finance officer': 'finance', support: 'lecturer' };
+    const map = { admin: 'admin', lecturer: 'lecturer', professor: 'lecturer', dean: 'registrar', 'finance officer': 'finance', support: 'lecturer', assistant: 'assistant', 'assistant admin': 'assistant' };
     return map[(staffRole || '').toLowerCase()] || 'lecturer';
 }
 async function syncUserAccounts() {
@@ -925,6 +937,11 @@ async function showApp(user) {
     document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
     initCoordinatorAccessCache();
+    initAssistantAccessCache();
+    // For assistant, navigation must wait for cache, so rebuild after load
+    if (user.role === 'assistant') {
+        initAssistantAccessCache().then(() => buildNavigation(user));
+    }
     buildNavigation(user);
     const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
     if (msgBtn) msgBtn.style.display = (user.role === 'admin' || user.role === 'coordinator') ? '' : 'none';
@@ -1363,7 +1380,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
     }
 }
 function initTabs() {
@@ -2698,7 +2715,7 @@ async function showStaffForm(staff = null) {
     const isCoordEdit = isEdit && staff.id && staff.id.startsWith('__coord__');
     if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
     const regionOpts = window._regionsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
-    const content = `<input type="hidden" id="staff-edit-id" value="${isCoordEdit ? staff.id : (staff ? staff.id : '')}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="staff-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${staff && staff.photo ? `<img src="${staff.photo}" style="width:100%;height:100%;object-fit:cover;">` : (staff ? (staff.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="staff-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStaffPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="staff-name" value="${staff ? staff.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="staff-email" value="${staff ? staff.email || '' : ''}"></div><div class="form-group"><label>Phone / Username</label><input type="text" id="staff-phone" value="${staff ? (isCoordEdit ? staff.phone : (staff.phone || '')) : ''}"></div></div><div class="form-row"><div class="form-group"><label>Role</label><select id="staff-role" onchange="toggleStaffRoleFields()"><option value="lecturer">Lecturer</option><option value="professor">Professor</option><option value="dean">Dean</option><option value="admin">Admin</option><option value="support">Support Staff</option><option value="coordinator">Coordinator</option></select></div><div class="form-group" id="staff-dept-group"><label>Department</label><input type="text" id="staff-department" value="${staff && !isCoordEdit ? (staff.department || '') : ''}"></div></div><div id="staff-coord-fields" style="display:${isCoordEdit ? 'block' : 'none'};"><div class="form-group"><label>Region *</label><select id="staff-region"><option value="">— Select region —</option>${regionOpts}</select></div><div class="form-group"><label>Password ${isEdit ? '(leave blank to keep current)' : '*'}</label><input type="password" id="staff-password"></div></div><div id="staff-regular-fields"><div class="form-row"><div class="form-group"><label>Campus</label><select id="staff-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Qualification</label><input type="text" id="staff-qualification" value="${staff && !isCoordEdit ? (staff.qualification || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="staff-status"><option value="active">Active</option><option value="on-leave">On Leave</option><option value="inactive">Inactive</option></select></div><div class="form-group"><label>Specialization</label><input type="text" id="staff-specialization" value="${staff && !isCoordEdit ? (staff.specialization || '') : ''}"></div></div><div class="form-group"><label>WhatsApp</label><input type="text" id="staff-whatsapp" value="${staff && !isCoordEdit ? (staff.whatsapp || '') : ''}"></div></div>`;
+    const content = `<input type="hidden" id="staff-edit-id" value="${isCoordEdit ? staff.id : (staff ? staff.id : '')}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="staff-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${staff && staff.photo ? `<img src="${staff.photo}" style="width:100%;height:100%;object-fit:cover;">` : (staff ? (staff.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="staff-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStaffPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="staff-name" value="${staff ? staff.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="staff-email" value="${staff ? staff.email || '' : ''}"></div><div class="form-group"><label>Phone / Username</label><input type="text" id="staff-phone" value="${staff ? (isCoordEdit ? staff.phone : (staff.phone || '')) : ''}"></div></div><div class="form-row"><div class="form-group"><label>Role</label><select id="staff-role" onchange="toggleStaffRoleFields()"><option value="lecturer">Lecturer</option><option value="professor">Professor</option><option value="dean">Dean</option><option value="admin">Admin</option><option value="assistant">Assistant Admin</option><option value="support">Support Staff</option><option value="coordinator">Coordinator</option></select></div><div class="form-group" id="staff-dept-group"><label>Department</label><input type="text" id="staff-department" value="${staff && !isCoordEdit ? (staff.department || '') : ''}"></div></div><div id="staff-coord-fields" style="display:${isCoordEdit ? 'block' : 'none'};"><div class="form-group"><label>Region *</label><select id="staff-region"><option value="">— Select region —</option>${regionOpts}</select></div><div class="form-group"><label>Password ${isEdit ? '(leave blank to keep current)' : '*'}</label><input type="password" id="staff-password"></div></div><div id="staff-regular-fields"><div class="form-row"><div class="form-group"><label>Campus</label><select id="staff-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Qualification</label><input type="text" id="staff-qualification" value="${staff && !isCoordEdit ? (staff.qualification || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="staff-status"><option value="active">Active</option><option value="on-leave">On Leave</option><option value="inactive">Inactive</option></select></div><div class="form-group"><label>Specialization</label><input type="text" id="staff-specialization" value="${staff && !isCoordEdit ? (staff.specialization || '') : ''}"></div></div><div class="form-group"><label>WhatsApp</label><input type="text" id="staff-whatsapp" value="${staff && !isCoordEdit ? (staff.whatsapp || '') : ''}"></div></div>`;
     showModal(isEdit ? 'Edit Staff' : 'Add New Staff', content, `<button class="btn btn-primary" onclick="saveStaff()">${isEdit ? 'Update' : 'Add'}</button>`);
     loadStaffCampusDropdown();
     if (staff) {
@@ -9291,8 +9308,11 @@ async function renderCompletionPdfOnCanvas(base64Pdf) {
                 const rect = canvas.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const clickY = e.clientY - rect.top;
+                const canvasH = canvas.height / (window.devicePixelRatio || 1);
+                // Use bounding rect height for CSS pixels, convert to mm from bottom
+                const rectH = rect.height;
                 const pdfX = clickX / completionMmToPx();
-                const pdfY = clickY / completionMmToPx();
+                const pdfY = (rectH - clickY) / completionMmToPx();
                 setActiveCompletionFieldCoords(pdfX, pdfY);
             };
         }
@@ -9327,7 +9347,8 @@ function createCompletionFieldOverlayElements() {
         el.style.cssText = `
             position: absolute;
             left: ${data.x * completionMmToPx()}px;
-            top: ${data.y * completionMmToPx()}px;
+            bottom: ${data.y * completionMmToPx()}px;
+            top: auto;
             font-size: ${(data.size || 12) * 0.8}px;
             font-weight: 600;
             color: ${field.color};
@@ -9367,9 +9388,10 @@ function positionCompletionOverlayLabels() {
         const xEl = document.getElementById('completion-fx-' + field);
         const yEl = document.getElementById('completion-fy-' + field);
         const xs = parseFloat(xEl && xEl.value) || 105;
-        const ys = parseFloat(yEl && yEl.value) || 120;
+        const ys = parseFloat(yEl && yEl.value) || 17;
         el.style.left = (xs * mmToPx) + 'px';
-        el.style.top = (ys * mmToPx) + 'px';
+        el.style.bottom = (ys * mmToPx) + 'px';
+        el.style.top = 'auto';
     });
 }
 function wireCompletionOverlay() {
@@ -9399,6 +9421,7 @@ function wireCompletionOverlay() {
         const cy = Math.max(0, Math.min(newY, canvasRect.height - el.offsetHeight));
         el.style.left = cx + 'px';
         el.style.top = cy + 'px';
+        el.style.bottom = 'auto';
     });
     document.addEventListener('mouseup', () => {
         const el = window._completionDragEl;
@@ -9412,7 +9435,7 @@ function wireCompletionOverlay() {
         const elRect = el.getBoundingClientRect();
         const mmToPx = completionMmToPx();
         const pdfX = (elRect.left - canvasRect.left) / mmToPx;
-        const pdfY = (elRect.top - canvasRect.top) / mmToPx;
+        const pdfY = (canvasRect.bottom - elRect.bottom) / mmToPx;
         const fieldId = el.dataset.field;
         window._activeCompletionField = fieldId;
         const xEl = document.getElementById('completion-fx-' + fieldId);
@@ -9476,9 +9499,10 @@ function clearCompletionPdfPreview() {
     if (overlay) overlay.innerHTML = '';
 }
 function applyCompletionPresetCoords(preset) {
+    // Bottom-left origin so X/Y meet at 0,0 (like Diploma visually). Values are flipped from top-left.
     const presets = {
-        portrait: { name: { x: 105, y: 120, size: 24 }, adm: { x: 105, y: 140, size: 14 }, date: { x: 105, y: 200, size: 14 }, docid: { x: 70, y: 280, size: 10 }, vcode: { x: 140, y: 280, size: 10 } },
-        landscape: { name: { x: 148, y: 105, size: 24 }, adm: { x: 148, y: 125, size: 14 }, date: { x: 148, y: 185, size: 14 }, docid: { x: 100, y: 250, size: 10 }, vcode: { x: 196, y: 250, size: 10 } }
+        portrait: { name: { x: 105, y: 177, size: 24 }, adm: { x: 105, y: 157, size: 14 }, date: { x: 105, y: 97, size: 14 }, docid: { x: 70, y: 17, size: 10 }, vcode: { x: 140, y: 17, size: 10 } },
+        landscape: { name: { x: 148, y: 105, size: 24 }, adm: { x: 148, y: 85, size: 14 }, date: { x: 148, y: 25, size: 14 }, docid: { x: 100, y: 17, size: 10 }, vcode: { x: 196, y: 17, size: 10 } }
     };
     const coords = presets[preset];
     if (!coords) return;
@@ -9519,6 +9543,7 @@ async function saveCompletionPdfConfig() {
             docid: { x: +document.getElementById('completion-fx-docid').value, y: +document.getElementById('completion-fy-docid').value, size: +document.getElementById('completion-fs-docid').value },
             vcode: { x: +document.getElementById('completion-fx-vcode').value, y: +document.getElementById('completion-fy-vcode').value, size: +document.getElementById('completion-fs-vcode').value }
         },
+        origin: 'bottom-left',
         font: document.getElementById('completion-font').value,
         color: document.getElementById('completion-text-color').value,
         paper: (() => {
@@ -9550,6 +9575,17 @@ async function loadCompletionPdfConfig() {
     if (!config) return showToast('No saved config found');
     window._completionPdfTemplate = config.template;
     window._completionSigs = config.sigs || {};
+    // Migrate old top-left configs to bottom-left so X/Y meet at 0,0 like Diploma
+    const isOldTopOrigin = !config.origin || config.origin !== 'bottom-left';
+    let pageHmm = 297;
+    try {
+        const paperMm = resolveDiplomaPaperMm(config.paper);
+        if (paperMm && paperMm.hMm) pageHmm = paperMm.hMm;
+        else {
+            const ps = getCompletionPageSize();
+            if (ps && ps.hMm) pageHmm = ps.hMm;
+        }
+    } catch {}
     const f = config.fields || {};
     ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
         const fc = f[field];
@@ -9557,8 +9593,10 @@ async function loadCompletionPdfConfig() {
             const xEl = document.getElementById('completion-fx-' + field);
             const yEl = document.getElementById('completion-fy-' + field);
             const sizeEl = document.getElementById('completion-fs-' + field);
+            let yVal = fc.y;
+            if (isOldTopOrigin && typeof yVal === 'number') yVal = Math.round(Math.max(0, Math.min(pageHmm, pageHmm - yVal)));
             if (xEl) xEl.value = fc.x;
-            if (yEl) yEl.value = fc.y;
+            if (yEl) yEl.value = yVal;
             if (sizeEl) sizeEl.value = fc.size;
         }
     });
@@ -9575,8 +9613,10 @@ async function loadCompletionPdfConfig() {
         ['registrar', 'dean', 'director'].forEach(role => {
             const s = config.sigs[role];
             if (!s) return;
+            let sigY = s.y;
+            if (isOldTopOrigin && typeof sigY === 'number') sigY = Math.round(Math.max(0, Math.min(pageHmm, pageHmm - sigY)));
             document.getElementById('completion-sig-' + role + '-x').value = s.x;
-            document.getElementById('completion-sig-' + role + '-y').value = s.y;
+            document.getElementById('completion-sig-' + role + '-y').value = sigY;
             document.getElementById('completion-sig-' + role + '-w').value = s.w;
             if (s.img) { const p = document.getElementById('completion-sig-' + role + '-preview'); if (p) { p.src = s.img; p.style.display = 'block'; } }
         });
@@ -9783,11 +9823,13 @@ async function generateCompletionPdf() {
         const dateStr = compDay + compOrd + ' ' + compDt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
         const pageW = page.getWidth();
         const pageH = page.getHeight();
+        const isBottomOrigin = config.origin === 'bottom-left';
         const drawField = (text, field) => {
             if (!field) return;
             const size = field.size || 12;
             const topToBaseline = font.heightAtSize(size) * 0.78;
-            page.drawText(text, { x: field.x * mmToPt, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
+            const y = isBottomOrigin ? (field.y * mmToPt) : (pageH - field.y * mmToPt - topToBaseline);
+            page.drawText(text, { x: field.x * mmToPt, y: y, size: size, font: font, color: txtColor });
         };
         drawField(displayName, config.fields.name);
         drawField(student.admissionNumber || student.id, config.fields.adm);
@@ -9806,7 +9848,8 @@ async function generateCompletionPdf() {
                 const sigImg = isPng ? await pdfDoc.embedPng(sigBytes) : await pdfDoc.embedJpg(sigBytes);
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
-                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
+                const sigY = isBottomOrigin ? (sig.y * mmToPt - sigH / 2) : (pageH - sig.y * mmToPt - sigH / 2);
+                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: sigY, width: sigW, height: sigH });
             } catch (e) { console.warn('Signature embed failed for ' + role + ':', e); }
         }
         let outBytes;
@@ -17136,6 +17179,53 @@ function updateCoordAccessLabel(key) {
         status.style.color = on ? 'var(--success)' : 'var(--danger)';
     }
 }
+const ASSISTANT_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'];
+function renderAssistantAccessToggles() {
+    const container = document.getElementById('assistant-access-toggles');
+    if (!container) return;
+    const access = _assistantAccessCache || {};
+    container.innerHTML = ASSISTANT_TABS.map(tab => {
+        const checked = access[tab] !== false;
+        const label = tab.charAt(0).toUpperCase() + tab.slice(1);
+        return `<label style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;">
+            <span>${label}</span>
+            <input type="checkbox" data-tab="${tab}" ${checked ? 'checked' : ''} onchange="updateAssistantAccessLabel('${tab}')" style="width:18px;height:18px;">
+        </label>`;
+    }).join('');
+}
+function updateAssistantAccessLabel(tab) {
+    // No per-tab status text needed; visual checkbox is enough
+}
+function setAssistantAccessAll(on) {
+    document.querySelectorAll('#assistant-access-toggles input[type="checkbox"]').forEach(cb => cb.checked = on);
+}
+async function saveAssistantAccess() {
+    const toggles = document.querySelectorAll('#assistant-access-toggles input[type="checkbox"]');
+    const s = { key: 'assistantAccess' };
+    toggles.forEach(cb => { s[cb.dataset.tab] = cb.checked; });
+    // Ensure all tabs have explicit value
+    ASSISTANT_TABS.forEach(tab => { if (s[tab] === undefined) s[tab] = true; });
+    await dbPut('settings', s);
+    _assistantAccessCache = s;
+    const status = document.getElementById('assistant-access-status');
+    if (status) { status.textContent = '✓ Saved'; status.style.color = 'var(--success)'; setTimeout(() => status.textContent = '', 2000); }
+    showToast('Assistant access saved!'); logAudit('updated', 'assistant-access', s);
+}
+async function loadAssistantAccess() {
+    const rec = await dbGet('settings', 'assistantAccess');
+    const s = rec ? (rec.value || rec) : null;
+    _assistantAccessCache = s || {};
+    const card = document.getElementById('assistant-access-card');
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (card) card.style.display = (currentUser.role === 'admin') ? '' : 'none';
+    renderAssistantAccessToggles();
+    if (s) {
+        ASSISTANT_TABS.forEach(tab => {
+            const cb = document.querySelector(`#assistant-access-toggles input[data-tab="${tab}"]`);
+            if (cb) cb.checked = s[tab] !== false;
+        });
+    }
+}
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };
     await dbPut('settings', s);
@@ -17663,7 +17753,7 @@ async function showUserForm() {
     const studentOpts = students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.admissionNumber || s.id})${s.program ? ' — ' + s.program : ''}</option>`).join('');
     if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
     const regionOpts = window._regionsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
-    const content = `<div class="form-group"><label>Full Name</label><input type="text" id="user-fullname"></div><div class="form-group"><label>Username *</label><input type="text" id="user-username"></div><div class="form-group"><label>Password *</label><input type="password" id="user-password"></div><div class="form-group"><label>Role</label><select id="user-role" onchange="toggleUserStudentSelect()"><option value="lecturer">Lecturer</option><option value="registrar">Registrar</option><option value="finance">Finance Officer</option><option value="admin">Admin</option><option value="coordinator">Coordinator</option><option value="student">Student</option></select></div><div id="user-student-section" style="display:none;" class="form-group"><label>Link to Student</label><select id="user-student-id"><option value="">— Select student record —</option>${studentOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Link this user account to an existing student record for course enrollment access.</div></div><div id="user-region-section" style="display:none;" class="form-group"><label>Region</label><select id="user-region"><option value="">— Select region —</option>${regionOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Assign this coordinator to a region. Required for coordinator role.</div></div>`;
+    const content = `<div class="form-group"><label>Full Name</label><input type="text" id="user-fullname"></div><div class="form-group"><label>Username *</label><input type="text" id="user-username"></div><div class="form-group"><label>Password *</label><input type="password" id="user-password"></div><div class="form-group"><label>Role</label><select id="user-role" onchange="toggleUserStudentSelect()"><option value="lecturer">Lecturer</option><option value="registrar">Registrar</option><option value="finance">Finance Officer</option><option value="admin">Admin</option><option value="assistant">Assistant Admin</option><option value="coordinator">Coordinator</option><option value="student">Student</option></select></div><div id="user-student-section" style="display:none;" class="form-group"><label>Link to Student</label><select id="user-student-id"><option value="">— Select student record —</option>${studentOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Link this user account to an existing student record for course enrollment access.</div></div><div id="user-region-section" style="display:none;" class="form-group"><label>Region</label><select id="user-region"><option value="">— Select region —</option>${regionOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Assign this coordinator to a region. Required for coordinator role.</div></div>`;
     showModal('Add User', content, `<button class="btn btn-primary" onclick="saveUser()">Save</button>`);
     toggleUserStudentSelect();
 }
