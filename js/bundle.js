@@ -9812,13 +9812,17 @@ async function generateCompletionPdf() {
         const dateStr = compDay + compOrd + ' ' + compDt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
         const pageW = page.getWidth();
         const pageH = page.getHeight();
-        const drawField = (text, field) => {
+        const drawField = (text, field, opts = {}) => {
             if (!field) return;
             const size = field.size || 12;
             const topToBaseline = font.heightAtSize(size) * 0.78;
-            page.drawText(text, { x: field.x * mmToPt, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
+            let x = field.x * mmToPt;
+            if (opts.center || field === config.fields.name) {
+                try { const w = font.widthOfTextAtSize(text, size); x = (pageW - w) / 2; } catch {}
+            }
+            page.drawText(text, { x: x, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
         };
-        drawField(displayName, config.fields.name);
+        drawField(displayName, config.fields.name, { center: true });
         drawField(student.admissionNumber || student.id, config.fields.adm);
         drawField(dateStr, config.fields.date);
         drawField('Doc ID: ' + docId, config.fields.docid);
