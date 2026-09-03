@@ -9308,11 +9308,8 @@ async function renderCompletionPdfOnCanvas(base64Pdf) {
                 const rect = canvas.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const clickY = e.clientY - rect.top;
-                const canvasH = canvas.height / (window.devicePixelRatio || 1);
-                // Use bounding rect height for CSS pixels, convert to mm from bottom
-                const rectH = rect.height;
                 const pdfX = clickX / completionMmToPx();
-                const pdfY = (rectH - clickY) / completionMmToPx();
+                const pdfY = clickY / completionMmToPx();
                 setActiveCompletionFieldCoords(pdfX, pdfY);
             };
         }
@@ -9347,8 +9344,7 @@ function createCompletionFieldOverlayElements() {
         el.style.cssText = `
             position: absolute;
             left: ${data.x * completionMmToPx()}px;
-            bottom: ${data.y * completionMmToPx()}px;
-            top: auto;
+            top: ${data.y * completionMmToPx()}px;
             font-size: ${(data.size || 12) * 0.8}px;
             font-weight: 600;
             color: ${field.color};
@@ -9388,10 +9384,9 @@ function positionCompletionOverlayLabels() {
         const xEl = document.getElementById('completion-fx-' + field);
         const yEl = document.getElementById('completion-fy-' + field);
         const xs = parseFloat(xEl && xEl.value) || 105;
-        const ys = parseFloat(yEl && yEl.value) || 17;
+        const ys = parseFloat(yEl && yEl.value) || 120;
         el.style.left = (xs * mmToPx) + 'px';
-        el.style.bottom = (ys * mmToPx) + 'px';
-        el.style.top = 'auto';
+        el.style.top = (ys * mmToPx) + 'px';
     });
 }
 function wireCompletionOverlay() {
@@ -9421,7 +9416,6 @@ function wireCompletionOverlay() {
         const cy = Math.max(0, Math.min(newY, canvasRect.height - el.offsetHeight));
         el.style.left = cx + 'px';
         el.style.top = cy + 'px';
-        el.style.bottom = 'auto';
     });
     document.addEventListener('mouseup', () => {
         const el = window._completionDragEl;
@@ -9435,7 +9429,7 @@ function wireCompletionOverlay() {
         const elRect = el.getBoundingClientRect();
         const mmToPx = completionMmToPx();
         const pdfX = (elRect.left - canvasRect.left) / mmToPx;
-        const pdfY = (canvasRect.bottom - elRect.bottom) / mmToPx;
+        const pdfY = (elRect.top - canvasRect.top) / mmToPx;
         const fieldId = el.dataset.field;
         window._activeCompletionField = fieldId;
         const xEl = document.getElementById('completion-fx-' + fieldId);
@@ -9499,10 +9493,9 @@ function clearCompletionPdfPreview() {
     if (overlay) overlay.innerHTML = '';
 }
 function applyCompletionPresetCoords(preset) {
-    // Bottom-left origin so X/Y meet at 0,0 (like Diploma visually). Values are flipped from top-left.
     const presets = {
-        portrait: { name: { x: 105, y: 177, size: 24 }, adm: { x: 105, y: 157, size: 14 }, date: { x: 105, y: 97, size: 14 }, docid: { x: 70, y: 17, size: 10 }, vcode: { x: 140, y: 17, size: 10 } },
-        landscape: { name: { x: 148, y: 105, size: 24 }, adm: { x: 148, y: 85, size: 14 }, date: { x: 148, y: 25, size: 14 }, docid: { x: 100, y: 17, size: 10 }, vcode: { x: 196, y: 17, size: 10 } }
+        portrait: { name: { x: 105, y: 120, size: 24 }, adm: { x: 105, y: 140, size: 14 }, date: { x: 105, y: 200, size: 14 }, docid: { x: 70, y: 280, size: 10 }, vcode: { x: 140, y: 280, size: 10 } },
+        landscape: { name: { x: 148, y: 105, size: 24 }, adm: { x: 148, y: 125, size: 14 }, date: { x: 148, y: 185, size: 14 }, docid: { x: 100, y: 250, size: 10 }, vcode: { x: 196, y: 250, size: 10 } }
     };
     const coords = presets[preset];
     if (!coords) return;
@@ -9543,7 +9536,6 @@ async function saveCompletionPdfConfig() {
             docid: { x: +document.getElementById('completion-fx-docid').value, y: +document.getElementById('completion-fy-docid').value, size: +document.getElementById('completion-fs-docid').value },
             vcode: { x: +document.getElementById('completion-fx-vcode').value, y: +document.getElementById('completion-fy-vcode').value, size: +document.getElementById('completion-fs-vcode').value }
         },
-        origin: 'bottom-left',
         font: document.getElementById('completion-font').value,
         color: document.getElementById('completion-text-color').value,
         paper: (() => {
@@ -9575,17 +9567,6 @@ async function loadCompletionPdfConfig() {
     if (!config) return showToast('No saved config found');
     window._completionPdfTemplate = config.template;
     window._completionSigs = config.sigs || {};
-    // Migrate old top-left configs to bottom-left so X/Y meet at 0,0 like Diploma
-    const isOldTopOrigin = !config.origin || config.origin !== 'bottom-left';
-    let pageHmm = 297;
-    try {
-        const paperMm = resolveDiplomaPaperMm(config.paper);
-        if (paperMm && paperMm.hMm) pageHmm = paperMm.hMm;
-        else {
-            const ps = getCompletionPageSize();
-            if (ps && ps.hMm) pageHmm = ps.hMm;
-        }
-    } catch {}
     const f = config.fields || {};
     ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
         const fc = f[field];
@@ -9593,10 +9574,8 @@ async function loadCompletionPdfConfig() {
             const xEl = document.getElementById('completion-fx-' + field);
             const yEl = document.getElementById('completion-fy-' + field);
             const sizeEl = document.getElementById('completion-fs-' + field);
-            let yVal = fc.y;
-            if (isOldTopOrigin && typeof yVal === 'number') yVal = Math.round(Math.max(0, Math.min(pageHmm, pageHmm - yVal)));
             if (xEl) xEl.value = fc.x;
-            if (yEl) yEl.value = yVal;
+            if (yEl) yEl.value = fc.y;
             if (sizeEl) sizeEl.value = fc.size;
         }
     });
@@ -9613,10 +9592,8 @@ async function loadCompletionPdfConfig() {
         ['registrar', 'dean', 'director'].forEach(role => {
             const s = config.sigs[role];
             if (!s) return;
-            let sigY = s.y;
-            if (isOldTopOrigin && typeof sigY === 'number') sigY = Math.round(Math.max(0, Math.min(pageHmm, pageHmm - sigY)));
             document.getElementById('completion-sig-' + role + '-x').value = s.x;
-            document.getElementById('completion-sig-' + role + '-y').value = sigY;
+            document.getElementById('completion-sig-' + role + '-y').value = s.y;
             document.getElementById('completion-sig-' + role + '-w').value = s.w;
             if (s.img) { const p = document.getElementById('completion-sig-' + role + '-preview'); if (p) { p.src = s.img; p.style.display = 'block'; } }
         });
@@ -9823,13 +9800,11 @@ async function generateCompletionPdf() {
         const dateStr = compDay + compOrd + ' ' + compDt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
         const pageW = page.getWidth();
         const pageH = page.getHeight();
-        const isBottomOrigin = config.origin === 'bottom-left';
         const drawField = (text, field) => {
             if (!field) return;
             const size = field.size || 12;
             const topToBaseline = font.heightAtSize(size) * 0.78;
-            const y = isBottomOrigin ? (field.y * mmToPt) : (pageH - field.y * mmToPt - topToBaseline);
-            page.drawText(text, { x: field.x * mmToPt, y: y, size: size, font: font, color: txtColor });
+            page.drawText(text, { x: field.x * mmToPt, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
         };
         drawField(displayName, config.fields.name);
         drawField(student.admissionNumber || student.id, config.fields.adm);
@@ -9848,8 +9823,7 @@ async function generateCompletionPdf() {
                 const sigImg = isPng ? await pdfDoc.embedPng(sigBytes) : await pdfDoc.embedJpg(sigBytes);
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
-                const sigY = isBottomOrigin ? (sig.y * mmToPt - sigH / 2) : (pageH - sig.y * mmToPt - sigH / 2);
-                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: sigY, width: sigW, height: sigH });
+                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
             } catch (e) { console.warn('Signature embed failed for ' + role + ':', e); }
         }
         let outBytes;
