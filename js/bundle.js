@@ -119,6 +119,18 @@ function formatDate(dateStr) {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
+function formatOrdinalDate(dateStr) {
+    if (!dateStr) return formatDate(dateStr);
+    const d = new Date(dateStr + (dateStr.includes('T') ? '' : 'T12:00:00'));
+    if (isNaN(d.getTime())) return formatDate(dateStr);
+    const day = d.getDate();
+    const ord = (day % 10 === 1 && day !== 11) ? 'st' : (day % 10 === 2 && day !== 12) ? 'nd' : (day % 10 === 3 && day !== 13) ? 'rd' : 'th';
+    return day + ord + ' ' + d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+function getStudentRegistrationDate(student) {
+    const raw = student.enrollDate || student.registrationRequestedAt || student.createdAt || new Date().toISOString();
+    return String(raw).split('T')[0];
+}
 function formatCurrency(amount) {
     const s = _currencyCache || { code: 'KES', symbol: 'KES', decimals: 2 };
     const val = (amount || 0).toLocaleString(undefined, { minimumFractionDigits: s.decimals, maximumFractionDigits: s.decimals });
@@ -10176,13 +10188,17 @@ async function generateDiplomaPdf() {
         const dateStr = gradDay + gradOrd + ' ' + gradDt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
         const pageW = page.getWidth();
         const pageH = page.getHeight();
-        const drawField = (text, field) => {
+        const drawField = (text, field, opts = {}) => {
             if (!field) return;
             const size = field.size || 12;
             const topToBaseline = font.heightAtSize(size) * 0.78;
-            page.drawText(text, { x: field.x * mmToPt, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
+            let x = field.x * mmToPt;
+            if (opts.center || field === config.fields.name) {
+                try { const w = font.widthOfTextAtSize(text, size); x = (pageW - w) / 2; } catch {}
+            }
+            page.drawText(text, { x: x, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
         };
-        drawField(displayName, config.fields.name);
+        drawField(displayName, config.fields.name, { center: true });
         drawField(student.admissionNumber || student.id, config.fields.adm);
         drawField(dateStr, config.fields.date);
         drawField('Doc ID: ' + docId, config.fields.docid);
@@ -10527,8 +10543,30 @@ async function showCertificateForm() {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const portalId = document.getElementById('portal-student')?.value || '';
-    const content = `<div class="form-group"><label>Student</label><select id="cert-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
+    // Pre-fill date with today; will auto-update to registration date when student selected
+    const todayIso = new Date().toISOString().split('T')[0];
+    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
     showModal('Generate Document', content, `<button class="btn btn-primary" onclick="generateCertificate()">Generate</button>`);
+    setTimeout(() => { onCertStudentChange(); onCertTypeChange(); }, 50);
+}
+function onCertStudentChange() {
+    const sid = document.getElementById('cert-student')?.value;
+    const dateInput = document.getElementById('cert-letter-date');
+    const hint = document.getElementById('cert-date-hint');
+    if (!sid || !dateInput) return;
+    dbGet('students', sid).then(student => {
+        if (!student) return;
+        const regIso = getStudentRegistrationDate(student);
+        dateInput.value = regIso;
+        if (hint) hint.textContent = 'Auto: ' + formatOrdinalDate(regIso) + ' (registration)';
+    }).catch(() => {});
+}
+function onCertTypeChange() {
+    const type = document.getElementById('cert-type-select')?.value;
+    const group = document.getElementById('cert-date-group');
+    if (!group) return;
+    const noDateTypes = ['transcript'];
+    group.style.display = noDateTypes.includes(type) ? 'none' : '';
 }
 async function generateCertificate() {
     try {
@@ -10546,18 +10584,24 @@ async function generateCertificate() {
     const notes = document.getElementById('cert-notes').value.trim();
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
     const vCode = generateVerificationCode();
+    // Custom letter date: auto = registration date, editable, formatted like diploma (12th September 2025)
+    const customDateVal = document.getElementById('cert-letter-date')?.value || '';
+    const regIso = getStudentRegistrationDate(student);
+    const letterDateIso = customDateVal || regIso;
+    const letterDate = formatOrdinalDate(letterDateIso);
+    const letterYear = letterDateIso ? new Date(letterDateIso + 'T12:00:00').getFullYear() : new Date().getFullYear();
     let html = '';
     let docTitle = '';
     const docIdPrefixMap = { admission: 'ADL', completion: 'CMP', enrollment: 'ENL', recommendation: 'REC', 'fee-statement': 'FEE', transcript: 'TRX' };
     let docId = generateDocId(docIdPrefixMap[type] || 'DOC');
     if (type === 'admission') {
         docTitle = 'Admission Letter';
-        const year = new Date().getFullYear();
+        const year = letterYear;
         html = `<div class="doc-container">
             <div class="doc-watermark">OFFICIAL DOCUMENT</div>
             ${docHeader({schoolName, tagline, ...branding}, tagline)}
             <h2 class="doc-title">LETTER OF ADMISSION</h2>
-            <div class="doc-ref">Date: ${today} &nbsp;|&nbsp; Ref: ${initials}/ADM/${year}/${String(Date.now()).slice(-6)}</div>
+            <div class="doc-ref">Date: ${letterDate} &nbsp;|&nbsp; Ref: ${initials}/ADM/${year}/${String(Date.now()).slice(-6)}</div>
             <div class="doc-body-text">
                 <p><b>Dear ${student.name},</b></p>
                 <p>Following your successful application and meeting all the admission requirements, we are pleased to offer you admission to <b>${schoolName}</b> for the <b>${academicSettings ? academicSettings.academicYear || year : year}</b> academic year.</p>
@@ -10646,7 +10690,7 @@ async function generateCertificate() {
             <div class="doc-watermark">OFFICIAL DOCUMENT</div>
             ${docHeader({schoolName, tagline, ...branding}, tagline)}
             <h2 class="doc-title">ENROLLMENT LETTER</h2>
-            <div class="doc-ref">Date: ${today}</div>
+            <div class="doc-ref">Date: ${letterDate}</div>
             <div class="doc-body-text">
                 <p><b>TO WHOM IT MAY CONCERN</b></p>
                 <p>This letter serves to confirm that <b>${student.name}</b> (Admission #: ${student.admissionNumber || student.id}) is currently enrolled as a student at ${schoolName} in the <b>${student.program || 'Program'}</b> program, Year ${student.year || 1}.</p>
@@ -10656,7 +10700,7 @@ async function generateCertificate() {
             </div>
             <div class="doc-signatures">
                 <div class="doc-sig-block">${getRoleSignature('Registrar', branding) ? `<img src="${getRoleSignature('Registrar', branding)}" class="doc-sig-img" alt="Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Registrar</div></div>
-                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${today}</div></div>
+                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${letterDate}</div></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
@@ -10666,7 +10710,7 @@ async function generateCertificate() {
             <div class="doc-watermark">OFFICIAL DOCUMENT</div>
             ${docHeader({schoolName, tagline, ...branding}, tagline)}
             <h2 class="doc-title">LETTER OF RECOMMENDATION</h2>
-            <div class="doc-ref">Date: ${today}</div>
+            <div class="doc-ref">Date: ${letterDate}</div>
             <div class="doc-body-text">
                 <p><b>TO WHOM IT MAY CONCERN</b></p>
                 <p>It is with great pleasure that I recommend <b>${student.name}</b> (Admission #: ${student.admissionNumber || student.id}) for their character, academic performance, and dedication during their time at ${schoolName}.</p>
@@ -10677,7 +10721,7 @@ async function generateCertificate() {
             </div>
             <div class="doc-signatures">
                 <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Dean</div></div>
-                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${today}</div></div>
+                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${letterDate}</div></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
@@ -10718,7 +10762,7 @@ async function generateCertificate() {
             <div class="doc-watermark">OFFICIAL DOCUMENT</div>
             ${docHeader({schoolName, tagline, ...branding}, tagline)}
             <h2 class="doc-title">STUDENT FEE STATEMENT</h2>
-            <div class="doc-ref">Generated: ${today}</div>
+            <div class="doc-ref">Generated: ${letterDate}</div>
             <div class="doc-student-info">
                 <div><b>Student:</b> ${student.name}</div><div><b>Admission #:</b> ${student.admissionNumber || student.id}</div>
                 <div><b>Program:</b> ${student.program || '--'}</div><div><b>Status:</b> ${student.status}</div>
@@ -10733,12 +10777,12 @@ async function generateCertificate() {
             ${notes ? '<p style="margin-top:16px;font-size:12px;"><b>Note:</b> ' + notes + '</p>' : ''}
             <div class="doc-signatures" style="margin-top:24px;">
                 ${getRoleSignature('Finance Officer', branding) ? `<div class="doc-sig-block"><img src="${getRoleSignature('Finance Officer', branding)}" class="doc-sig-img" alt="Finance Signature"><div class="sig-line"></div><div class="doc-finance-sig-label">Finance Officer</div></div>` : ''}
-                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${today}</div></div>
+                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${letterDate}</div></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
     }
-    const cert = { id: 'CERT-' + Date.now(), studentId, studentName: student.name, type, docTitle, content: html, vCode, generatedAt: new Date().toISOString() };
+    const cert = { id: 'CERT-' + Date.now(), studentId, studentName: student.name, type, docTitle, content: html, docId, vCode, letterDate: letterDateIso, letterDateFormatted: letterDate, generatedAt: new Date().toISOString() };
     await dbPut('certificates', cert);
     if (type === 'transcript') {
         const ver = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, generatedAt: new Date().toISOString() };
