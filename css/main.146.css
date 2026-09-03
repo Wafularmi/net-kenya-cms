@@ -51,8 +51,8 @@ body {
 }
 
 .logo-container {
-    width: 48px;
-    height: 48px;
+    width: 96px;
+    height: 96px;
     border-radius: var(--radius);
     overflow: hidden;
     flex-shrink: 0;
@@ -73,7 +73,7 @@ body {
     background: var(--accent);
     color: var(--bg);
     font-weight: 700;
-    font-size: 18px;
+    font-size: 36px;
     border-radius: var(--radius);
 }
 
@@ -1009,8 +1009,8 @@ body {
     }
 
     .logo-container {
-        width: 36px;
-        height: 36px;
+        width: 72px;
+        height: 72px;
     }
 
     .modal-content {
@@ -1155,8 +1155,8 @@ body {
     }
 
     .logo-container {
-        width: 30px;
-        height: 30px;
+        width: 60px;
+        height: 60px;
     }
 
     .header-info h1 {
