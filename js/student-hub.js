@@ -16,7 +16,7 @@ function safeSetLocal(key, value) {
 }
 
 async function loadStudentHubData(force) {
-    if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 300000) return studentHubCache;
+    if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
     const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
@@ -129,7 +129,7 @@ async function renderStudentHub() {
         return;
     }
 
-    const hasCache = studentHubCache && Date.now() - studentHubCache.loadedAt < 300000;
+    const hasCache = studentHubCache && Date.now() - studentHubCache.loadedAt < 60000;
 
     if (!hasCache) content.innerHTML = `
         <div style="position:relative;min-height:400px;display:flex;align-items:center;justify-content:center;">
@@ -1577,8 +1577,11 @@ function startHubLiveSync() {
         if (_hubIsActive()) {
             invalidateStudentHubCache();
             _hubDebouncedRender();
+        } else if (document.visibilityState !== 'hidden') {
+            // Even when hub not active, keep cache fresh so next open is instant
+            invalidateStudentHubCache();
         }
-    }, 120000);
+    }, 30000);
 
     _hubTimestampInterval = setInterval(_updateHubRefreshButton, 1000);
 
@@ -1587,13 +1590,18 @@ function startHubLiveSync() {
         _hubSSE.addEventListener('db-change', (e) => {
             try {
                 const { store } = JSON.parse(e.data || '{}');
-                if (_hubRelevantStores.includes(store) && _hubIsActive()) {
-                    invalidateStudentHubCache();
+                if (!_hubRelevantStores.includes(store)) return;
+                // Always invalidate so next open is fresh, even when hub hidden
+                invalidateStudentHubCache();
+                if (_hubIsActive()) {
                     _hubDebouncedRender();
                     const labels = {
                         grades: '📊 New grade posted',
                         retakeRequests: '📋 Retake request updated',
-                        quizzes: '📋 New quiz available'
+                        quizzes: '📋 New quiz available',
+                        lessons: '📖 New lesson published',
+                        notes: '📄 New note available',
+                        courses: '📚 Course updated'
                     };
                     if (typeof showToast === 'function' && labels[store]) {
                         showToast(labels[store], { duration: 2000 });
