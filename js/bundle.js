@@ -986,7 +986,7 @@ async function verifyDocumentPublic() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Verification failed');
         if (!data.ok) {
-            resultDiv.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${data.reason === 'mismatch' ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${data.reason === 'mismatch' ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p></div>`;
+            resultDiv.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${data.reason === 'mismatch' ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${data.reason === 'mismatch' ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p>${data.reason !== 'mismatch' ? `<p style="font-size:13px;font-weight:700;color:var(--danger);margin-top:10px;">Check that you typed correctly, if you did, then it could be a clear forgery, and Net Foundation Kenya dissociates with the document and the bearer!</p>` : ''}</div>`;
             return;
         }
         const gen = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
