@@ -1230,7 +1230,7 @@ async function mpesaToken(env, key, secret) {
             hostname: u.hostname,
             path: u.pathname + u.search,
             method: 'GET',
-            headers: { 'Authorization': 'Basic ' + auth }
+            headers: { 'Authorization': 'Basic ' + auth, 'User-Agent': 'NET-Kenya-CMS/1.0', 'Accept': 'application/json' }
         };
         const req = https.request(opts, res => {
             let data = '';
@@ -1262,7 +1262,9 @@ async function mpesaRequest(path, payload, env, key, secret) {
             headers: {
                 'Authorization': 'Bearer ' + token,
                 'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(body)
+                'Content-Length': Buffer.byteLength(body),
+                'User-Agent': 'NET-Kenya-CMS/1.0',
+                'Accept': 'application/json'
             }
         };
         const req = https.request(opts, res => {
