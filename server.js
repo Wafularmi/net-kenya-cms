@@ -1773,10 +1773,21 @@ function handleAPI(req, res) {
                 if (!record) { verifyRateFail(req); return json(res, 200, { ok: false, reason: 'not-found', docId: did }); }
                 if (String(record.vCode) !== vc) { verifyRateFail(req); return json(res, 200, { ok: false, reason: 'mismatch', docId: did }); }
                 verifyRateSuccess(req);
+                let studyCenter = '';
+                try {
+                    const sid = record.studentId || '';
+                    const stu = sid ? ((db.students || []).find(s => String(s.id) === String(sid)) || (db.alumni || []).find(a => String(a.studentId) === String(sid))) : null;
+                    const cid = stu ? (stu.studyCenterId || '') : '';
+                    if (cid) {
+                        const center = (db.studyCenters || []).find(c => String(c.id) === String(cid));
+                        studyCenter = center ? (center.name || '') : String(cid);
+                    }
+                } catch {}
                 return json(res, 200, { ok: true, isTranscript,
                     studentName: record.studentName || record.name || '',
                     admission: record.admission || record.admissionNumber || '',
                     program: record.program || '',
+                    studyCenter,
                     docId: record.docId || did,
                     docTitle: record.docTitle || record.type || '',
                     generatedAt: record.generatedAt || record.createdAt || '',

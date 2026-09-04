@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=280" as="script">
+    <link rel="preload" href="js/bundle.js?v=281" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -778,6 +778,7 @@
                          </div>
                          <div class="form-group" style="margin-top:8px;"><label>Font Family</label><select id="diploma-font"><option value="Times Roman">Times Roman</option><option value="Helvetica">Helvetica</option><option value="Courier">Courier</option></select></div>
 <div class="form-group"><label>Text Color (hex)</label><input type="color" id="diploma-text-color" value="#1a1a2e" style="height:36px;width:60px;padding:2px;"></div>
+<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="diploma-show-website" checked style="width:18px;height:18px;"> Show www.netfoundation.ke top-left on diploma</label></div>
                           <div class="form-group"><label>Paper Size</label><select id="diploma-paper-size" onchange="onDiplomaPaperSizeChange()"><option value="auto">Template&#39;s own size (default)</option><option value="a4_landscape">A4 Landscape (297&#215;210mm)</option><option value="a4_portrait">A4 Portrait (210&#215;297mm)</option><option value="letter_landscape">Letter Landscape (11&#215;8.5in)</option><option value="letter_portrait">Letter Portrait (8.5&#215;11in)</option><option value="a5_landscape">A5 Landscape (210&#215;148mm)</option><option value="a5_portrait">A5 Portrait (148&#215;210mm)</option><option value="a3_landscape">A3 Landscape (420&#215;297mm)</option><option value="a3_portrait">A3 Portrait (297&#215;420mm)</option><option value="custom">Custom (mm)</option></select><div id="diploma-custom-paper" style="display:none;gap:8px;margin-top:6px;"><div><label>Width (mm)</label><input type="number" id="diploma-paper-w" value="297" min="50" max="600" step="0.5" style="width:90px;"></div><div><label>Height (mm)</label><input type="number" id="diploma-paper-h" value="210" min="50" max="600" step="0.5" style="width:90px;"></div></div></div>
                           <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Diploma Signatures (optional)</div>
@@ -1237,7 +1238,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=280"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=281"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=16"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

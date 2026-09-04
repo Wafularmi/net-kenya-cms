@@ -998,12 +998,13 @@ async function verifyDocumentPublic() {
                 <div style="text-align:left;max-width:420px;margin:0 auto;font-size:13px;line-height:1.8;">
                     <p><strong>Student Name:</strong> ${escapeHtml(data.studentName || '—')}</p>
                     <p><strong>Admission No:</strong> ${escapeHtml(data.admission || '—')}</p>
+                    ${data.studyCenter ? `<p><strong>Studied at:</strong> ${escapeHtml(data.studyCenter)}</p>` : ''}
                     ${data.program ? `<p><strong>Program:</strong> ${escapeHtml(data.program)}</p>` : ''}
                     ${data.docTitle ? `<p><strong>Document:</strong> ${escapeHtml(data.docTitle)}</p>` : ''}
                     <p><strong>Document ID:</strong> ${escapeHtml(data.docId || '')}</p>
                     ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
                 </div>
-                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. Net Foundation Kenya upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a> or <a href="https://www.netfoundation.ke" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">www.netfoundation.ke</a></p>`}
+                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. Net Foundation Kenya upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>`}
             </div>`;
     } catch (e) {
         resultDiv.innerHTML = `<p style="text-align:center;color:var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
@@ -9268,6 +9269,7 @@ async function saveDiplomaPdfConfig() {
         },
         font: document.getElementById('diploma-font').value,
         color: document.getElementById('diploma-text-color').value,
+        showWebsite: document.getElementById('diploma-show-website') ? document.getElementById('diploma-show-website').checked : true,
         paper: (() => {
             const kind = document.getElementById('diploma-paper-size').value;
             if (kind === 'custom') return { kind: 'custom', wMm: +document.getElementById('diploma-paper-w').value, hMm: +document.getElementById('diploma-paper-h').value };
@@ -10108,6 +10110,8 @@ async function loadDiplomaPdfConfig() {
     if (f.vcode) { document.getElementById('diploma-fx-vcode').value = f.vcode.x; document.getElementById('diploma-fy-vcode').value = f.vcode.y; document.getElementById('diploma-fs-vcode').value = f.vcode.size; }
     if (config.font) document.getElementById('diploma-font').value = config.font;
     if (config.color) document.getElementById('diploma-text-color').value = config.color;
+    const showWebsiteEl = document.getElementById('diploma-show-website');
+    if (showWebsiteEl) showWebsiteEl.checked = config.showWebsite !== false;
     if (config.paper) {
         if (config.paper.kind) document.getElementById('diploma-paper-size').value = config.paper.kind;
         if (config.paper.wMm) document.getElementById('diploma-paper-w').value = config.paper.wMm;
@@ -10283,6 +10287,7 @@ async function generateDiplomaPdf() {
         const displayName = nameOverride || student.name;
         const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         const vCode = generateVerificationCode();
+        const _showWebsite = config.showWebsite !== false;
         const gradDt = new Date(gradDate + 'T12:00:00');
         const gradDay = gradDt.getDate();
         const gradOrd = (gradDay % 10 === 1 && gradDay !== 11) ? 'st' : (gradDay % 10 === 2 && gradDay !== 12) ? 'nd' : (gradDay % 10 === 3 && gradDay !== 13) ? 'rd' : 'th';
@@ -10304,6 +10309,11 @@ async function generateDiplomaPdf() {
         drawField(dateStr, config.fields.date);
         drawField('Doc ID: ' + docId, config.fields.docid);
         drawField('Verify: ' + vCode, config.fields.vcode);
+        if (_showWebsite) {
+            try {
+                page.drawText('www.netfoundation.ke', { x: 10 * mmToPt, y: pageH - 12 * mmToPt, size: 9, font: font, color: txtColor });
+            } catch (e) { console.warn('Website draw failed:', e); }
+        }
         for (const role of ['registrar', 'dean', 'director']) {
             const sig = config.sigs && config.sigs[role];
             let imgData = sig && sig.img;
