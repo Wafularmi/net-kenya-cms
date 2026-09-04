@@ -8871,11 +8871,12 @@ function createFieldOverlayElements() {
         { id: 'adm', label: 'Adm No', color: '#f59e0b' },
         { id: 'date', label: 'Date', color: '#10b981' },
         { id: 'docid', label: 'Doc ID', color: '#8b5cf6' },
-        { id: 'vcode', label: 'Verify Code', color: '#ef4444' }
+        { id: 'vcode', label: 'Verify Code', color: '#ef4444' },
+        { id: 'website', label: 'Website', color: '#0ea5e9' }
     ];
     
     // Get current coordinates from input fields
-    const fieldsData = ['name', 'adm', 'date', 'docid', 'vcode'].reduce((acc, field) => {
+    const fieldsData = ['name', 'adm', 'date', 'docid', 'vcode', 'website'].reduce((acc, field) => {
         const xEl = document.getElementById('diploma-fx-' + field);
         const yEl = document.getElementById('diploma-fy-' + field);
         const sizeEl = document.getElementById('diploma-fs-' + field);
@@ -8899,11 +8900,12 @@ function createFieldOverlayElements() {
         { id: 'adm', label: 'Adm No', color: '#f59e0b' },
         { id: 'date', label: 'Date', color: '#10b981' },
         { id: 'docid', label: 'Doc ID', color: '#8b5cf6' },
-        { id: 'vcode', label: 'Verify Code', color: '#ef4444' }
+        { id: 'vcode', label: 'Verify Code', color: '#ef4444' },
+        { id: 'website', label: 'Website', color: '#0ea5e9' }
     ];
     
     fieldsConfig.forEach(field => {
-        const data = (['name', 'adm', 'date', 'docid', 'vcode'].reduce((acc, field) => {
+        const data = (['name', 'adm', 'date', 'docid', 'vcode', 'website'].reduce((acc, field) => {
             const xEl = document.getElementById('diploma-fx-' + field);
             const yEl = document.getElementById('diploma-fy-' + field);
             const sizeEl = document.getElementById('diploma-fs-' + field);
@@ -9028,7 +9030,7 @@ async function embedTemplateOnPaperPage(pdfDoc, srcPage, tgtW, tgtH, templateB64
 
 function positionOverlayLabels() {
     const mmToPx = diplomaMmToPx();
-    ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
+    ['name', 'adm', 'date', 'docid', 'vcode', 'website'].forEach(field => {
         const el = document.getElementById('diploma-field-overlay-' + field);
         if (!el) return;
         const xEl = document.getElementById('diploma-fx-' + field);
@@ -9044,7 +9046,7 @@ function wireDiplomaOverlay() {
     if (window._diplomaOverlayWired) return;
     window._diplomaOverlayWired = true;
     const reposition = () => positionOverlayLabels();
-    ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
+    ['name', 'adm', 'date', 'docid', 'vcode', 'website'].forEach(field => {
         ['x', 'y'].forEach(ax => {
             const inp = document.getElementById('diploma-f' + ax + '-' + field);
             if (inp) {
@@ -9139,14 +9141,16 @@ function applyPresetCoords(preset) {
             adm: { x: 105, y: 140, size: 14 },
             date: { x: 105, y: 200, size: 14 },
             docid: { x: 70, y: 280, size: 10 },
-            vcode: { x: 140, y: 280, size: 10 }
+            vcode: { x: 140, y: 280, size: 10 },
+            website: { x: 10, y: 12, size: 9 }
         },
         landscape: {
             name: { x: 148, y: 105, size: 24 },
             adm: { x: 148, y: 125, size: 14 },
             date: { x: 148, y: 185, size: 14 },
             docid: { x: 100, y: 250, size: 10 },
-            vcode: { x: 196, y: 250, size: 10 }
+            vcode: { x: 196, y: 250, size: 10 },
+            website: { x: 10, y: 12, size: 9 }
         }
     };
     const coords = presets[preset];
@@ -9265,7 +9269,8 @@ async function saveDiplomaPdfConfig() {
             adm: { x: +document.getElementById('diploma-fx-adm').value, y: +document.getElementById('diploma-fy-adm').value, size: +document.getElementById('diploma-fs-adm').value },
             date: { x: +document.getElementById('diploma-fx-date').value, y: +document.getElementById('diploma-fy-date').value, size: +document.getElementById('diploma-fs-date').value },
             docid: { x: +document.getElementById('diploma-fx-docid').value, y: +document.getElementById('diploma-fy-docid').value, size: +document.getElementById('diploma-fs-docid').value },
-            vcode: { x: +document.getElementById('diploma-fx-vcode').value, y: +document.getElementById('diploma-fy-vcode').value, size: +document.getElementById('diploma-fs-vcode').value }
+            vcode: { x: +document.getElementById('diploma-fx-vcode').value, y: +document.getElementById('diploma-fy-vcode').value, size: +document.getElementById('diploma-fs-vcode').value },
+            website: { x: +(document.getElementById('diploma-fx-website')?.value || 10), y: +(document.getElementById('diploma-fy-website')?.value || 12), size: +(document.getElementById('diploma-fs-website')?.value || 9) }
         },
         font: document.getElementById('diploma-font').value,
         color: document.getElementById('diploma-text-color').value,
@@ -10108,6 +10113,7 @@ async function loadDiplomaPdfConfig() {
     if (f.date) { document.getElementById('diploma-fx-date').value = f.date.x; document.getElementById('diploma-fy-date').value = f.date.y; document.getElementById('diploma-fs-date').value = f.date.size; }
     if (f.docid) { document.getElementById('diploma-fx-docid').value = f.docid.x; document.getElementById('diploma-fy-docid').value = f.docid.y; document.getElementById('diploma-fs-docid').value = f.docid.size; }
     if (f.vcode) { document.getElementById('diploma-fx-vcode').value = f.vcode.x; document.getElementById('diploma-fy-vcode').value = f.vcode.y; document.getElementById('diploma-fs-vcode').value = f.vcode.size; }
+    if (f.website) { const wx = document.getElementById('diploma-fx-website'); const wy = document.getElementById('diploma-fy-website'); const ws = document.getElementById('diploma-fs-website'); if (wx) wx.value = f.website.x; if (wy) wy.value = f.website.y; if (ws) ws.value = f.website.size; }
     if (config.font) document.getElementById('diploma-font').value = config.font;
     if (config.color) document.getElementById('diploma-text-color').value = config.color;
     const showWebsiteEl = document.getElementById('diploma-show-website');
@@ -10310,9 +10316,8 @@ async function generateDiplomaPdf() {
         drawField('Doc ID: ' + docId, config.fields.docid);
         drawField('Verify: ' + vCode, config.fields.vcode);
         if (_showWebsite) {
-            try {
-                page.drawText('www.netfoundation.ke', { x: 10 * mmToPt, y: pageH - 12 * mmToPt, size: 9, font: font, color: txtColor });
-            } catch (e) { console.warn('Website draw failed:', e); }
+            const wf = (config.fields && config.fields.website) || { x: 10, y: 12, size: 9 };
+            drawField('www.netfoundation.ke', wf);
         }
         for (const role of ['registrar', 'dean', 'director']) {
             const sig = config.sigs && config.sigs[role];
