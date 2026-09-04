@@ -1240,7 +1240,11 @@ async function mpesaToken(env, key, secret) {
                     const j = JSON.parse(data);
                     if (!j.access_token) return reject('Token rejected (HTTP ' + res.statusCode + '): ' + String(data).slice(0, 120));
                     resolve(j.access_token);
-                } catch { reject('Token fetch failed (HTTP ' + res.statusCode + '): ' + String(data).slice(0, 120)); }
+                } catch {
+                    const title = (String(data).match(/<title[^>]*>([^<]*)/i) || [])[1] || 'no-title';
+                    try { process.stderr.write('DARAJA_BLOCKED status=' + res.statusCode + ' server=' + (res.headers.server || '?') + ' via=' + (res.headers.via || '?') + ' title=' + title + ' url=' + u.hostname + '\n'); } catch {}
+                    reject('Token fetch failed (HTTP ' + res.statusCode + ' from ' + (res.headers.server || 'unknown') + ' via ' + (res.headers.via || 'unknown') + ' title=' + title + '). Safaricom is blocking the server network — see Railway logs DARAJA_BLOCKED.');
+                }
             });
         });
         req.on('error', reject);
