@@ -964,6 +964,14 @@ async function loadPublicContact() {
         }
     } catch {}
 }
+function showPublicVerifyModal() {
+    showModal('🔍 Verify Document',
+        `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">Guests can verify a certificate without logging in.</p>
+        <div class="form-group"><label>Document ID</label><input type="text" id="login-verify-docid" placeholder="e.g. DIP-ABC123" style="width:100%;"></div>
+        <div class="form-group"><label>Verification Code</label><input type="text" id="login-verify-vcode" placeholder="e.g. V-A7K2-M9B3" style="width:100%;"></div>
+        <div id="login-verify-result" style="margin-top:12px;"></div>`,
+        `<button class="btn btn-primary" onclick="verifyDocumentPublic()">Verify</button>`);
+}
 async function verifyDocumentPublic() {
     const docIdEl = document.getElementById('login-verify-docid');
     const vCodeEl = document.getElementById('login-verify-vcode');
