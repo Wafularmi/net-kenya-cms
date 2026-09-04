@@ -1220,7 +1220,11 @@ function buildUrls(ip) {
     return urls;
 }
 
+const _mpesaTokenCache = new Map(); // key -> { token, expires }
 async function mpesaToken(env, key, secret) {
+    const cacheKey = env + '|' + key;
+    const cached = _mpesaTokenCache.get(cacheKey);
+    if (cached && cached.expires > Date.now() + 60000) return cached.token;
     const isSandbox = env === 'sandbox';
     const baseURL = isSandbox ? 'https://sandbox.safaricom.co.ke' : 'https://api.safaricom.co.ke';
     const auth = Buffer.from(key + ':' + secret).toString('base64');
@@ -1239,6 +1243,8 @@ async function mpesaToken(env, key, secret) {
                 try {
                     const j = JSON.parse(data);
                     if (!j.access_token) return reject('Token rejected (HTTP ' + res.statusCode + '): ' + String(data).slice(0, 120));
+                    const ttl = (parseInt(j.expires_in) || 3600) * 1000;
+                    _mpesaTokenCache.set(cacheKey, { token: j.access_token, expires: Date.now() + ttl });
                     resolve(j.access_token);
                 } catch {
                     const title = (String(data).match(/<title[^>]*>([^<]*)/i) || [])[1] || 'no-title';
