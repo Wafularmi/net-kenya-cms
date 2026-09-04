@@ -9291,7 +9291,8 @@ async function saveDiplomaPdfConfig() {
         showToast('Diploma PDF configuration saved!', { type: 'success' });
         if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
     } catch (e) {
-        showToast('Failed to save: ' + e.message, { type: 'danger' });
+        const hint = /403/.test(e.message || '') ? ' Session expired — log out and log back in, then retry.' : '';
+        showToast('Failed to save: ' + e.message + hint, { type: 'danger' });
         if (statusEl) { statusEl.textContent = '✗ Save failed'; statusEl.style.color = 'var(--danger)'; }
     } finally {
         const btn = document.getElementById('btn-save-diploma-config');
@@ -9670,7 +9671,8 @@ async function saveCompletionPdfConfig() {
         showToast('Completion Certificate PDF configuration saved!', { type: 'success' });
         if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
     } catch (e) {
-        showToast('Failed to save: ' + e.message, { type: 'danger' });
+        const hint = /403/.test(e.message || '') ? ' Session expired — log out and log back in, then retry.' : '';
+        showToast('Failed to save: ' + e.message + hint, { type: 'danger' });
         if (statusEl) { statusEl.textContent = '✗ Save failed'; statusEl.style.color = 'var(--danger)'; }
     } finally {
         const btn = document.getElementById('btn-save-completion-config');

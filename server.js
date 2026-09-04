@@ -408,13 +408,6 @@ function cleanOnlineUsers() {
 setInterval(cleanOnlineUsers, 30000);
 
 let db = loadDB();
-try { loadSessions(); } catch (e) { console.error('loadSessions at startup failed:', e.message); }
-try {
-    if (fs.existsSync('/data/sessions.json') && !fs.existsSync(SESSION_FILE)) {
-        fs.copyFileSync('/data/sessions.json', SESSION_FILE);
-        loadSessions();
-    }
-} catch {}
 
 let _saveTimer = null;
 function saveDB() {
@@ -729,6 +722,15 @@ function getSessionUser(req) {
     if (!token) token = parseCookies(req).session || '';
     return sessionUserForToken(token);
 }
+
+// Restore persisted sessions AFTER all session helpers are defined
+// (calling earlier throws a TDZ error on SESSION_FILE and silently skips).
+try {
+    if (fs.existsSync('/data/sessions.json') && !fs.existsSync(SESSION_FILE)) {
+        fs.copyFileSync('/data/sessions.json', SESSION_FILE);
+    }
+    loadSessions();
+} catch (e) { console.error('loadSessions at startup failed:', e.message); }
 
 // Brute-force protection for /api/login
 const loginAttempts = new Map(); // ip -> { count, windowStart, blockedUntil }
