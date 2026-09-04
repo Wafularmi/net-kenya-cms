@@ -363,14 +363,21 @@ async function showMpesaPayModal(studentId) {
     const balance = hubFeeBalance(stu, totalPaid);
     const content = `
         <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + (typeof formatCurrency === 'function' ? formatCurrency(balance) : balance) + '</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="500000" value="${balance > 0 ? balance : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
+        <input type="hidden" id="mpesa-balance" value="${balance > 0 ? balance : 0}">
         <div class="form-group"><label>M-Pesa Number to Prompt</label><input type="tel" id="mpesa-phone" value="${esc(stu.phone || '')}" placeholder="0712 345 678" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Enter the M-Pesa number to prompt — can differ from your registered number.</div></div>
         <div id="mpesa-status" style="font-size:12px;margin-top:4px;"></div>`;
     showModal('💰 Pay Fees via M-Pesa', content, `<button class="btn btn-success" onclick="submitMpesaStk('${sid}')">Send Prompt</button>`);
+    setTimeout(() => { try { document.getElementById('mpesa-amount')?.focus(); } catch {} }, 100);
 }
 async function submitMpesaStk(studentId) {
-    const amount = parseFloat(document.getElementById('mpesa-amount')?.value);
-    const phoneRaw = document.getElementById('mpesa-phone')?.value || '';
-    const status = document.getElementById('mpesa-status');
+    const modalRoot = document.getElementById('modal-content') || document;
+    const amtEl = modalRoot.querySelector('#mpesa-amount') || document.getElementById('mpesa-amount');
+    const balEl = modalRoot.querySelector('#mpesa-balance') || document.getElementById('mpesa-balance');
+    let amount = parseFloat(String(amtEl?.value ?? '').replace(/[^0-9.]/g, ''));
+    const balanceFallback = parseFloat(balEl?.value || '0');
+    if ((!amount || amount < 1) && balanceFallback > 0) amount = balanceFallback;
+    const phoneRaw = (modalRoot.querySelector('#mpesa-phone') || document.getElementById('mpesa-phone'))?.value || '';
+    const status = modalRoot.querySelector('#mpesa-status') || document.getElementById('mpesa-status');
     const phone = normalizeMpesaPhone(phoneRaw);
     if (!amount || amount < 1) { if (status) { status.textContent = 'Enter an amount of at least KES 1.'; status.style.color = 'var(--danger)'; } return; }
     if (!phone) { if (status) { status.textContent = 'Enter a valid Safaricom number (e.g. 0712 345 678).'; status.style.color = 'var(--danger)'; } return; }
