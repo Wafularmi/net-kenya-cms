@@ -2014,7 +2014,7 @@ function handleAPI(req, res) {
                     const studentId = txn ? txn.studentId : '';
                     if (txn) { txn.status = 'complete'; txn.mpesaReceipt = mpesaReceipt; txn.completedAt = new Date().toISOString(); }
                     if (studentId && amountPaid > 0) {
-                        const exists = (db.payments || []).some(p => p.reference === mpesaReceipt && mpesaReceipt);
+                        const exists = (db.payments || []).some(p => (p.mpesaCheckout && p.mpesaCheckout === checkoutId) || (p.reference === mpesaReceipt && mpesaReceipt));
                         if (!exists) {
                             const d = new Date();
                             const ym = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
@@ -2022,7 +2022,7 @@ function handleAPI(req, res) {
                             const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
                             const receiptNo = prefix + String(seq).padStart(4, '0');
                             if (!Array.isArray(db.payments)) db.payments = [];
-                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, method: 'M-Pesa STK', reference: mpesaReceipt, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, method: 'M-Pesa STK', reference: mpesaReceipt, mpesaCheckout: checkoutId, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
                             broadcastEvent('db-change', { store: 'payments' });
                         }
                     }
@@ -2061,6 +2061,31 @@ function handleAPI(req, res) {
                     CheckoutRequestID: data.checkoutRequestId
                 };
                 const result = await mpesaRequest('/mpesa/stkpushquery/v1/query', payload, s.environment, s.consumerKey, s.consumerSecret);
+                // Reconcile: if Daraja confirms success but the callback never
+                // arrived (blocked/slow), record the payment here so the
+                // student balance reflects it. Idempotent via checkout id.
+                try {
+                    const rc = result && (result.ResultCode === 0 || result.ResultCode === '0');
+                    const cid = String(data.checkoutRequestId || '');
+                    const txn = cid ? (db.mpesaTransactions || []).find(t => t.checkoutRequestId === cid) : null;
+                    if (rc && txn && txn.status !== 'complete' && txn.studentId && txn.amount > 0) {
+                        const dup = (db.payments || []).some(p => (p.mpesaCheckout && p.mpesaCheckout === cid) || (txn.mpesaReceipt && p.reference === txn.mpesaReceipt));
+                        if (!dup) {
+                            const d = new Date();
+                            const ym = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
+                            const prefix = 'RCT-' + ym + '-';
+                            const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
+                            if (!Array.isArray(db.payments)) db.payments = [];
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId: txn.studentId, amount: txn.amount, method: 'M-Pesa STK', reference: txn.mpesaReceipt || cid, mpesaCheckout: cid, notes: 'Paid via ' + (txn.phone || '') + ' (confirmed by query)', receiptNo: prefix + String(seq).padStart(4, '0'), date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            txn.status = 'complete';
+                            txn.completedAt = d.toISOString();
+                            txn.completedVia = 'query';
+                            broadcastEvent('db-change', { store: 'payments' });
+                            saveDB();
+                            auditLog('mpesa-payment', 'payment', { checkoutId: cid, amount: txn.amount, via: 'query' }, 'mpesa-query');
+                        }
+                    }
+                } catch (recErr) { console.error('mpesa query reconcile failed:', recErr); }
                 json(res, 200, result);
             } catch (e) { json(res, 500, { error: e.message || e }); }
         });
