@@ -1743,6 +1743,32 @@ function handleAPI(req, res) {
         return true;
     }
 
+    // POST /api/change-password — self-service password change (any authenticated user, own account only)
+    if (parts.length === 2 && parts[1] === 'change-password' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const authUser = getRequestUser(req);
+                if (!authUser || !authUser.user) return json(res, 401, { error: 'Not authenticated' });
+                const { currentPw, newPw } = JSON.parse(body);
+                if (!currentPw || !newPw) return json(res, 400, { error: 'Enter current and new password' });
+                if (String(newPw).length < 6) return json(res, 400, { error: 'New password must be at least 6 characters' });
+                const user = (db.users || []).find(u => u.username === authUser.username);
+                if (!user) return json(res, 404, { error: 'Account not found' });
+                const hash = pw => crypto.createHash('sha256').update(pw, 'utf8').digest('hex');
+                const okCurrent = user.password === hash(currentPw) || user.password === currentPw;
+                if (!okCurrent) return json(res, 403, { error: 'Current password is incorrect' });
+                if (currentPw === newPw) return json(res, 400, { error: 'New password must differ from current' });
+                user.password = hash(newPw);
+                saveDB();
+                auditLog('change-password', 'user', { username: user.username }, user.username);
+                return json(res, 200, { ok: true });
+            } catch { return json(res, 400, { error: 'Invalid request' }); }
+        });
+        return true;
+    }
+
     // GET /api/public-contact — admin phone for login screen (public, no secrets)
     if (parts.length === 2 && parts[1] === 'public-contact' && req.method === 'GET') {
         try {

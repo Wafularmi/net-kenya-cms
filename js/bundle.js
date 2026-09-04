@@ -972,6 +972,32 @@ function showPublicVerifyModal() {
         <div id="login-verify-result" style="margin-top:12px;"></div>`,
         `<button class="btn btn-primary" onclick="verifyDocumentPublic()">Verify</button>`);
 }
+function showChangePasswordModal() {
+    showModal('🔑 Change Password',
+        `<div class="form-group"><label>Current Password</label><input type="password" id="cp-current" style="width:100%;" autocomplete="current-password"></div>
+        <div class="form-group"><label>New Password (min 6 characters)</label><input type="password" id="cp-new" style="width:100%;" autocomplete="new-password"></div>
+        <div class="form-group"><label>Confirm New Password</label><input type="password" id="cp-confirm" style="width:100%;" autocomplete="new-password"></div>
+        <div id="cp-status" style="font-size:12px;margin-top:4px;"></div>`,
+        `<button class="btn btn-primary" onclick="submitChangePassword()">Update Password</button>`);
+}
+async function submitChangePassword() {
+    const cur = document.getElementById('cp-current')?.value || '';
+    const nw = document.getElementById('cp-new')?.value || '';
+    const cf = document.getElementById('cp-confirm')?.value || '';
+    const status = document.getElementById('cp-status');
+    if (!cur || !nw || !cf) { if (status) { status.textContent = 'Fill all fields'; status.style.color = 'var(--danger)'; } return; }
+    if (nw.length < 6) { if (status) { status.textContent = 'New password must be at least 6 characters'; status.style.color = 'var(--danger)'; } return; }
+    if (nw !== cf) { if (status) { status.textContent = 'New passwords do not match'; status.style.color = 'var(--danger)'; } return; }
+    try {
+        const res = await fetch('/api/change-password', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ currentPw: cur, newPw: nw }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Password change failed');
+        closeModal();
+        showToast('Password updated! Use it next time you log in.', { type: 'success' });
+    } catch (e) {
+        if (status) { status.textContent = e.message; status.style.color = 'var(--danger)'; }
+    }
+}
 async function verifyDocumentPublic() {
     const docIdEl = document.getElementById('login-verify-docid');
     const vCodeEl = document.getElementById('login-verify-vcode');
