@@ -554,6 +554,17 @@ function canAccessStore(user, store, method) {
     // Allow unauthenticated reads for login screen / registration
     if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
+    // Students store: only admin and assistant (if enabled) may create/update/delete
+    if (store === 'students' && method !== 'GET') {
+        if (user.role === 'admin') return true;
+        if (user.role === 'assistant') {
+            const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
+            const access = rec ? (rec.value || rec) : null;
+            if (!access || access['students'] !== false) return true;
+            return false;
+        }
+        return false;
+    }
     if (FINANCE_ADMIN_ROLES.has(user.role)) return true;
 
     if (user.role === 'student') {

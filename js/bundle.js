@@ -454,6 +454,17 @@ function isCoordinator() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     return u.role === 'coordinator';
 }
+function canManageStudents() {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u.role === 'admin') return true;
+        if (u.role === 'assistant') {
+            if (typeof _assistantAccessCache !== 'undefined' && _assistantAccessCache && _assistantAccessCache['students'] === false) return false;
+            return true;
+        }
+    } catch {}
+    return false;
+}
 function getCoordinatorRegionId() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     return u.regionId || '';
@@ -2076,6 +2087,14 @@ document.getElementById('students-body').innerHTML = filtered.map(s => {
         const phone = s.phone || '';
         return `<tr><td><b>${s.admissionNumber || s.id}</b>${s.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || ''}</div></td><td>${center ? center.name : 'Main'}</td><td>${s.program || '--'}</td><td>Year ${s.year || 1}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span></td><td style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:600;">${formatCurrency(balance)}</td><td><button class="btn btn-outline btn-sm" onclick="viewStudent('${s.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">Edit</button> <button class="btn btn-primary btn-sm" onclick="adminEnrollStudentInCourse('${s.id}')" title="Enroll in Course">📚</button> <button class="btn btn-warning btn-sm" onclick="adminRegisterStudentForExam('${s.id}')" title="Register for Exam">📝</button> <button class="btn btn-info btn-sm" onclick="adminEnrollStudentInQuiz('${s.id}')" title="Join Quiz">📋</button> <button class="btn btn-secondary btn-sm" onclick="adminChangeStudentProgram('${s.id}')" title="Change Program">🎓</button> ${phone ? `<div class="wa-dropdown" style="display:inline-block;position:relative;"><button class="btn btn-success btn-sm" onclick="toggleWADropdown(event, '${s.id}')">📱</button><div id="wa-drop-${s.id}" class="wa-drop-menu" style="display:none;position:absolute;right:0;top:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px;min-width:180px;z-index:50;box-shadow:var(--shadow-lg);"><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}')">💬 Custom Message</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-fee')">💰 Fee Reminder</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-attendance')">⚠️ Attendance Alert</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-welcome')">👋 Welcome</div></div></div>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')" title="Delete">🗑</button></td></tr>`;
     }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No students found. Click "+ Add Student" to enroll.</td></tr>';
+    try {
+        if (typeof canManageStudents === 'function' && !canManageStudents()) {
+            document.querySelectorAll('#screen-students [onclick="showStudentForm()"]').forEach(b => b.style.display = 'none');
+            document.querySelectorAll('#students-body [onclick^="editStudent"], #students-body [onclick^="deleteStudent"]').forEach(b => b.style.display = 'none');
+        } else {
+            document.querySelectorAll('#screen-students [onclick="showStudentForm()"]').forEach(b => b.style.display = '');
+        }
+    } catch {}
 }
 async function adminEnrollStudentInCourse(studentId) {
     const student = await dbGet('students', studentId);
@@ -2321,6 +2340,7 @@ async function exportFinanceCSV() {
 }
 
 async function showStudentForm(student = null) {
+    if (!canManageStudents()) return showToast('Only admin / assistant admin can register students.', { type: 'danger' });
     const isEdit = !!student;
     const centers = await getCenters();
     const _brandingRec = await dbGet('settings', 'branding');
@@ -2415,6 +2435,7 @@ async function onStudentProgramChange(sel) {
     if (feeInput && fee > 0) feeInput.value = fee;
 }
 async function saveStudent() {
+    if (!canManageStudents()) return showToast('Only admin / assistant admin can register students.', { type: 'danger' });
     const name = document.getElementById('student-name').value.trim();
     if (!name) return showToast('Name is required!');
     const editId = document.getElementById('student-edit-id').value;
@@ -2554,6 +2575,7 @@ async function saveStudent() {
     logAudit(editId ? 'updated' : 'created', 'student', { id, admissionNumber, name });
 }
 async function editStudent(id) {
+    if (!canManageStudents()) return showToast('Only admin / assistant admin can edit students.', { type: 'danger' });
     try {
         const student = await dbGet('students', id);
         if (!student) { showToast('Student not found.', { type: 'danger' }); return; }
@@ -2654,6 +2676,7 @@ async function assignStudentPrograms() {
     }
 }
 async function deleteStudent(id) {
+    if (!canManageStudents()) return showToast('Only admin / assistant admin can delete students.', { type: 'danger' });
     if (!await showConfirm('Confirm', 'Delete student ' + id + '?')) return;
     const student = await dbGet('students', id);
     if (!student) return;
