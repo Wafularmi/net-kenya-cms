@@ -1959,7 +1959,7 @@ function handleAPI(req, res) {
                 if (!studentId) return json(res, 400, { error: 'Missing student.' });
                 const ts = timestamp();
                 const pw = Buffer.from(s.shortcode + s.passkey + ts).toString('base64');
-                const txnType = s.transactionType === 'till' ? 'BuyGoodsOnline' : 'CustomerPayBillOnline';
+                const txnType = s.transactionType === 'till' ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline';
                 const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
                 const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0] || 'https';
                 const callbackUrl = (host.startsWith('localhost') ? 'http://' + host : proto + '://' + host) + '/api/mpesa/callback';
