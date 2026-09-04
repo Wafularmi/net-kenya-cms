@@ -363,7 +363,7 @@ async function showMpesaPayModal(studentId) {
     const balance = hubFeeBalance(stu, totalPaid);
     const content = `
         <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + (typeof formatCurrency === 'function' ? formatCurrency(balance) : balance) + '</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="500000" value="${balance > 0 ? balance : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
-        <div class="form-group"><label>M-Pesa Number to Prompt</label><input type="tel" id="mpesa-phone" value="${esc(stu.phone || '')}" placeholder="0712 345 678" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Enter the M-Pesa number to prompt — can differ from your registered number (e.g. parent/guardian).</div></div>
+        <div class="form-group"><label>M-Pesa Number to Prompt</label><input type="tel" id="mpesa-phone" value="${esc(stu.phone || '')}" placeholder="0712 345 678" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Enter the M-Pesa number to prompt — can differ from your registered number.</div></div>
         <div id="mpesa-status" style="font-size:12px;margin-top:4px;"></div>`;
     showModal('💰 Pay Fees via M-Pesa', content, `<button class="btn btn-success" onclick="submitMpesaStk('${sid}')">Send Prompt</button>`);
 }
