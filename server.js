@@ -1232,11 +1232,15 @@ async function mpesaToken(env, key, secret) {
             method: 'GET',
             headers: { 'Authorization': 'Basic ' + auth }
         };
-        const req = http.request(opts, res => {
+        const req = https.request(opts, res => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
-                try { const j = JSON.parse(data); resolve(j.access_token); } catch { reject('Token fetch failed'); }
+                try {
+                    const j = JSON.parse(data);
+                    if (!j.access_token) return reject('Token rejected (HTTP ' + res.statusCode + '): ' + String(data).slice(0, 120));
+                    resolve(j.access_token);
+                } catch { reject('Token fetch failed (HTTP ' + res.statusCode + '): ' + String(data).slice(0, 120)); }
             });
         });
         req.on('error', reject);
@@ -1261,7 +1265,7 @@ async function mpesaRequest(path, payload, env, key, secret) {
                 'Content-Length': Buffer.byteLength(body)
             }
         };
-        const req = http.request(opts, res => {
+        const req = https.request(opts, res => {
             let data = '';
             res.on('data', c => data += c);
             res.on('end', () => {
