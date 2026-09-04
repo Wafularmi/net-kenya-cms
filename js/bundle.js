@@ -949,7 +949,14 @@ async function loadPublicContact() {
         const res = await fetch('/api/public-contact');
         if (!res.ok) return;
         const data = await res.json();
-        const phone = (data && data.phone ? String(data.phone).trim() : '');
+        let phone = (data && data.phone ? String(data.phone).trim() : '');
+        if (phone) {
+            const digits = phone.replace(/[^0-9]/g, '');
+            if (phone.trim().startsWith('+')) phone = '+' + digits;
+            else if (digits.startsWith('254')) phone = '+' + digits;
+            else if (digits.startsWith('0')) phone = '+254' + digits.substring(1);
+            else phone = '+' + digits;
+        }
         const el = document.getElementById('login-admin-phone');
         if (el && phone) {
             el.innerHTML = `📞 <a href="tel:${escapeHtml(phone.replace(/\s/g, ''))}" style="color:var(--accent);font-weight:600;text-decoration:none;">${escapeHtml(phone)}</a>`;
