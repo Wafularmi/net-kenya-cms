@@ -1773,10 +1773,19 @@ function handleAPI(req, res) {
                 if (!record) { verifyRateFail(req); return json(res, 200, { ok: false, reason: 'not-found', docId: did }); }
                 if (String(record.vCode) !== vc) { verifyRateFail(req); return json(res, 200, { ok: false, reason: 'mismatch', docId: did }); }
                 verifyRateSuccess(req);
-                let studyCenter = '';
+                // Resolve the live student record first: certificate rows carry
+                // studentName but NO admission number, so the student table is
+                // the source of truth for name/admission/program/center.
+                let stu = null;
                 try {
                     const sid = record.studentId || '';
-                    const stu = sid ? ((db.students || []).find(s => String(s.id) === String(sid)) || (db.alumni || []).find(a => String(a.studentId) === String(sid))) : null;
+                    if (sid) {
+                        stu = (db.students || []).find(s => String(s.id) === String(sid)) || null;
+                        if (!stu) stu = (db.alumni || []).find(a => String(a.studentId) === String(sid)) || null;
+                    }
+                } catch {}
+                let studyCenter = '';
+                try {
                     const cid = stu ? (stu.studyCenterId || '') : '';
                     if (cid) {
                         const center = (db.studyCenters || []).find(c => String(c.id) === String(cid));
@@ -1784,9 +1793,9 @@ function handleAPI(req, res) {
                     }
                 } catch {}
                 return json(res, 200, { ok: true, isTranscript,
-                    studentName: record.studentName || record.name || '',
-                    admission: record.admission || record.admissionNumber || '',
-                    program: record.program || '',
+                    studentName: (stu && stu.name) || record.studentName || record.name || '',
+                    admission: (stu && (stu.admissionNumber || stu.id)) || record.admission || record.admissionNumber || '',
+                    program: (stu && stu.program) || record.program || '',
                     studyCenter,
                     docId: record.docId || did,
                     docTitle: record.docTitle || record.type || '',
