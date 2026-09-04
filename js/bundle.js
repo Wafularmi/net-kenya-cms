@@ -944,6 +944,56 @@ function showLoginError(msg) {
     const el = document.getElementById('login-error');
     if (msg) { el.textContent = msg; el.style.display = 'block'; } else { el.style.display = 'none'; }
 }
+async function loadPublicContact() {
+    try {
+        const res = await fetch('/api/public-contact');
+        if (!res.ok) return;
+        const data = await res.json();
+        const phone = (data && data.phone ? String(data.phone).trim() : '');
+        const el = document.getElementById('login-admin-phone');
+        if (el && phone) {
+            el.innerHTML = `📞 <a href="tel:${escapeHtml(phone.replace(/\s/g, ''))}" style="color:var(--accent);font-weight:600;text-decoration:none;">${escapeHtml(phone)}</a>`;
+            el.style.display = 'block';
+        }
+    } catch {}
+}
+async function verifyDocumentPublic() {
+    const docIdEl = document.getElementById('login-verify-docid');
+    const vCodeEl = document.getElementById('login-verify-vcode');
+    const resultDiv = document.getElementById('login-verify-result');
+    const docId = (docIdEl?.value || '').trim();
+    const vCode = (vCodeEl?.value || '').trim();
+    if (!docId) return showToast('Enter the Document ID!');
+    if (!vCode) return showToast('Enter the Verification Code!');
+    resultDiv.innerHTML = '<p style="text-align:center;color:var(--text-muted);">Verifying...</p>';
+    try {
+        const res = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docId, vCode }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Verification failed');
+        if (!data.ok) {
+            resultDiv.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${data.reason === 'mismatch' ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${data.reason === 'mismatch' ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p></div>`;
+            return;
+        }
+        const gen = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+        resultDiv.innerHTML = `
+            <div style="${data.revoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px;border-radius:8px;">
+                ${data.revoked
+                    ? `<div style="font-size:44px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 8px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);">This document was revoked and is no longer valid.${data.revokeReason ? ' Reason: ' + escapeHtml(data.revokeReason) : ''}</p>`
+                    : `<div style="font-size:44px;margin-bottom:8px;">✅</div><h3 style="color:var(--success);margin:0 0 8px;">Document Authenticated</h3>
+                <div style="text-align:left;max-width:420px;margin:0 auto;font-size:13px;line-height:1.8;">
+                    <p><strong>Student Name:</strong> ${escapeHtml(data.studentName || '—')}</p>
+                    <p><strong>Admission No:</strong> ${escapeHtml(data.admission || '—')}</p>
+                    ${data.program ? `<p><strong>Program:</strong> ${escapeHtml(data.program)}</p>` : ''}
+                    ${data.docTitle ? `<p><strong>Document:</strong> ${escapeHtml(data.docTitle)}</p>` : ''}
+                    <p><strong>Document ID:</strong> ${escapeHtml(data.docId || '')}</p>
+                    ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
+                </div>
+                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. Net Foundation Kenya upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a> or <a href="https://www.netfoundation.ke" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">www.netfoundation.ke</a></p>`}
+            </div>`;
+    } catch (e) {
+        resultDiv.innerHTML = `<p style="text-align:center;color:var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+    }
+}
 function adjustHeaderPadding() {
     const header = document.getElementById('main-header');
     if (header) {
@@ -2350,7 +2400,7 @@ async function showStudentForm(student = null) {
     const defaultMonth = now.getMonth() + 1;
     const defaultYear = String(now.getFullYear()).slice(-2);
     const programs = await getProgramsList();
-    const content = `<input type="hidden" id="student-edit-id" value="${student ? student.id : ''}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="student-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${student && student.photo ? `<img src="${student.photo}" style="width:100%;height:100%;object-fit:cover;">` : (student ? (student.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="student-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStudentPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="student-name" value="${student ? student.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="student-email" value="${student ? student.email || '' : ''}"></div><div class="form-group"><label>Phone</label><input type="text" id="student-phone" value="${student ? student.phone || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Date of Birth</label><input type="date" id="student-dob" value="${student ? student.dob || '' : ''}"></div><div class="form-group"><label>Gender</label><select id="student-gender"><option value="">Select</option><option value="male" ${student && student.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${student && student.gender === 'female' ? 'selected' : ''}>Female</option></select></div></div><div class="form-group"><label>Study Center *</label><select id="student-center" onchange="onStudentCenterChange()"><option value="">Select Study Center...</option>${centers.map(c => `<option value="${c.id}" ${student && student.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div style="padding:12px;background:var(--bg-input);border-radius:var(--radius);margin-bottom:12px;"><div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Admission Number</div><div class="form-row"><div class="form-group"><label>Generation Mode</label><select id="adm-mode" onchange="toggleAdmissionMode()"><option value="auto" ${student && student.admMode === 'manual' ? '' : 'selected'}>Auto-Generate</option><option value="manual" ${student && student.admMode === 'manual' ? 'selected' : ''}>Manual Entry</option></select></div><div class="form-group"><label>Registration Date</label><input type="date" id="adm-date" value="${student ? student.enrollDate || new Date().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}" onchange="updateAdmissionPreview()"></div></div><div id="adm-auto-section"><div style="font-size:13px;margin-top:4px;">Format: <b>${initials}</b> / <span id="adm-preview-center">XXXX</span> / <span id="adm-preview-month">${defaultMonth}</span> - <span id="adm-preview-year">${defaultYear}</span> / <span id="adm-preview-seq">001</span></div><div style="font-size:18px;font-weight:700;color:var(--accent);margin-top:8px;" id="adm-full-preview">${initials}/XXXX/${defaultMonth}-${defaultYear}/001</div></div><div id="adm-manual-section" style="display:none;"><div class="form-group"><label>Manual Admission Number</label><input type="text" id="adm-manual-input" value="${student ? student.admissionNumber || '' : ''}" placeholder="Enter custom admission number"></div></div></div><div class="form-row"><div class="form-group"><label>Program</label><select id="student-program" onchange="onStudentProgramChange(this)"><option value="">Select Program...</option>${programs.map(p => `<option value="${p}" ${student && student.program === p ? 'selected' : ''}>${p}</option>`).join('')}${student && student.program && !programs.includes(student.program) ? `<option value="${student.program}" selected>${student.program}</option>` : ''}</select></div><div class="form-row"><div class="form-group"><label>Year</label><input type="number" id="student-year" value="${student ? student.year || 1 : 1}" min="1" max="3"></div><div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="student-year-auto" ${student && student.yearAuto !== false ? 'checked' : ''}> Auto-calculate from registration date (max Year 3)</label></div></div><div class="form-row"><div class="form-group"><label>Fee Amount</label><input type="number" id="student-fee" value="${student ? getCachedStudentFee(student) : 0}"></div><div class="form-group"><label>Installment Plan</label><select id="student-installment"><option value="">None</option><option value="2" ${student && student.installments == 2 ? 'selected' : ''}>2 Payments</option><option value="3" ${student && student.installments == 3 ? 'selected' : ''}>3 Payments</option><option value="4" ${student && student.installments == 4 ? 'selected' : ''}>4 Payments</option></select></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="student-status"><option value="active" ${student && student.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${student && student.status === 'inactive' ? 'selected' : ''}>Inactive</option><option value="graduated" ${student && student.status === 'graduated' ? 'selected' : ''}>Graduated</option><option value="suspended" ${student && student.status === 'suspended' ? 'selected' : ''}>Suspended</option><option value="dropped" ${student && student.status === 'dropped' ? 'selected' : ''}>Dropped</option></select></div></div><div class="form-group" style="margin-top:4px;"><label class="checkbox-label"><input type="checkbox" id="student-test-account" onchange="onTestAccountToggle()" ${student && student.testAccount ? 'checked' : ''}> 🧪 This is a <b>Test Account</b> (no real admission number, no login created)</label></div><div class="form-group"><label>Address</label><textarea id="student-address">${student ? student.address || '' : ''}</textarea></div><div class="form-group"><label>Emergency Contact</label><input type="text" id="student-emergency" value="${student ? student.emergency || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="student-notes">${student ? student.notes || '' : ''}</textarea></div>`;
+    const content = `<input type="hidden" id="student-edit-id" value="${student ? student.id : ''}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="student-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${student && student.photo ? `<img src="${student.photo}" style="width:100%;height:100%;object-fit:cover;">` : (student ? (student.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="student-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStudentPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="student-name" value="${student ? student.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="student-email" value="${student ? student.email || '' : ''}"></div><div class="form-group"><label>Phone</label><input type="text" id="student-phone" value="${student ? student.phone || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Date of Birth</label><input type="date" id="student-dob" value="${student ? student.dob || '' : ''}"></div><div class="form-group"><label>Gender</label><select id="student-gender"><option value="">Select</option><option value="male" ${student && student.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${student && student.gender === 'female' ? 'selected' : ''}>Female</option></select></div></div><div class="form-group"><label>Study Center *</label><select id="student-center" onchange="onStudentCenterChange()"><option value="">Select Study Center...</option>${centers.map(c => `<option value="${c.id}" ${student && student.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div style="padding:12px;background:var(--bg-input);border-radius:var(--radius);margin-bottom:12px;"><div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Admission Number</div><div class="form-row"><div class="form-group"><label>Generation Mode</label><select id="adm-mode" onchange="toggleAdmissionMode()"><option value="auto" ${student && student.admMode === 'manual' ? '' : 'selected'}>Auto-Generate</option><option value="manual" ${student && student.admMode === 'manual' ? 'selected' : ''}>Manual Entry</option></select></div><div class="form-group"><label>Registration Date</label><input type="date" id="adm-date" value="${student ? student.enrollDate || new Date().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}" onchange="updateAdmissionPreview()"></div></div><div id="adm-auto-section"><div style="font-size:13px;margin-top:4px;">Format: <b>${initials}</b> / <span id="adm-preview-center">XXXX</span> / <span id="adm-preview-month">${defaultMonth}</span> - <span id="adm-preview-year">${defaultYear}</span> / <span id="adm-preview-seq">001</span></div><div style="font-size:18px;font-weight:700;color:var(--accent);margin-top:8px;" id="adm-full-preview">${initials}/XXXX/${defaultMonth}-${defaultYear}/001</div></div><div id="adm-manual-section" style="display:none;"><div class="form-group"><label>Manual Admission Number</label><input type="text" id="adm-manual-input" value="${student ? student.admissionNumber || '' : ''}" placeholder="Enter custom admission number"></div></div></div><div class="form-row"><div class="form-group"><label>Program</label><select id="student-program" onchange="onStudentProgramChange(this)"><option value="">Select Program...</option>${programs.map(p => `<option value="${p}" ${student && student.program === p ? 'selected' : ''}>${p}</option>`).join('')}${student && student.program && !programs.includes(student.program) ? `<option value="${student.program}" selected>${student.program}</option>` : ''}</select></div><div class="form-row"><div class="form-group"><label>Year</label><input type="number" id="student-year" value="${student ? student.year || 1 : 1}" min="1" max="3" oninput="var a=document.getElementById('student-year-auto');if(a)a.checked=false;"></div><div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="student-year-auto" ${student && student.yearAuto !== false ? 'checked' : ''}> Auto-calculate from registration date (max Year 3)</label></div></div><div class="form-row"><div class="form-group"><label>Fee Amount</label><input type="number" id="student-fee" value="${student ? getCachedStudentFee(student) : 0}"></div><div class="form-group"><label>Installment Plan</label><select id="student-installment"><option value="">None</option><option value="2" ${student && student.installments == 2 ? 'selected' : ''}>2 Payments</option><option value="3" ${student && student.installments == 3 ? 'selected' : ''}>3 Payments</option><option value="4" ${student && student.installments == 4 ? 'selected' : ''}>4 Payments</option></select></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="student-status"><option value="active" ${student && student.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${student && student.status === 'inactive' ? 'selected' : ''}>Inactive</option><option value="graduated" ${student && student.status === 'graduated' ? 'selected' : ''}>Graduated</option><option value="suspended" ${student && student.status === 'suspended' ? 'selected' : ''}>Suspended</option><option value="dropped" ${student && student.status === 'dropped' ? 'selected' : ''}>Dropped</option></select></div></div><div class="form-group" style="margin-top:4px;"><label class="checkbox-label"><input type="checkbox" id="student-test-account" onchange="onTestAccountToggle()" ${student && student.testAccount ? 'checked' : ''}> 🧪 This is a <b>Test Account</b> (no real admission number, no login created)</label></div><div class="form-group"><label>Address</label><textarea id="student-address">${student ? student.address || '' : ''}</textarea></div><div class="form-group"><label>Emergency Contact</label><input type="text" id="student-emergency" value="${student ? student.emergency || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="student-notes">${student ? student.notes || '' : ''}</textarea></div>`;
     showModal(isEdit ? 'Edit Student' : 'Add New Student', content, `<button class="btn btn-primary" onclick="saveStudent()">${isEdit ? 'Update' : 'Enroll'}</button>`);
     onStudentCenterChange();
     updateAdmissionPreview();
@@ -2512,13 +2562,18 @@ async function saveStudent() {
         gender: document.getElementById('student-gender').value,
         studyCenterId: document.getElementById('student-center').value,
         program: document.getElementById('student-program').value.trim(),
-        year: calculateYearOfStudy({ 
-            yearAuto: document.getElementById('student-year-auto')?.checked !== false,
-            year: parseInt(document.getElementById('student-year').value) || 1,
-            registrationRequestedAt: existingRecord?.registrationRequestedAt,
-            enrollDate: existingRecord?.enrollDate
-        }),
-        yearAuto: document.getElementById('student-year-auto')?.checked !== false,
+        year: (() => {
+            const manualYear = Math.min(3, Math.max(1, parseInt(document.getElementById('student-year').value) || 1));
+            const autoChecked = document.getElementById('student-year-auto')?.checked === true;
+            if (!autoChecked) return manualYear;
+            return calculateYearOfStudy({
+                yearAuto: true,
+                year: manualYear,
+                registrationRequestedAt: existingRecord?.registrationRequestedAt,
+                enrollDate: existingRecord?.enrollDate
+            });
+        })(),
+        yearAuto: document.getElementById('student-year-auto')?.checked === true,
         feeAmount,
         status: document.getElementById('student-status').value,
         testAccount: isTest,
@@ -2527,10 +2582,14 @@ async function saveStudent() {
         emergency: document.getElementById('student-emergency').value.trim(),
         notes: document.getElementById('student-notes').value.trim(),
         enrollDate,
+        registrationRequestedAt: existingRecord?.registrationRequestedAt || existingRecord?.createdAt || undefined,
+        createdAt: existingRecord?.createdAt || undefined,
         updatedAt: new Date().toISOString()
     };
     if (!editId) student.createdAt = new Date().toISOString();
-    if (!editId) student.yearAuto = true;
+    if (!editId) { student.yearAuto = document.getElementById('student-year-auto')?.checked === true; }
+    if (editId && !student.registrationRequestedAt) delete student.registrationRequestedAt;
+    if (editId && !student.createdAt) delete student.createdAt;
     await dbPut('students', student);
     if (student.status === 'graduated') {
         const existingAlumni = (await dbGetAll('alumni')).find(a => a.studentId === student.id || a.name === student.name);
@@ -19873,4 +19932,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) {
         console.error('Failed to load diploma PDF config:', e);
     }
+    try {
+        if (typeof loadPublicContact === 'function') await loadPublicContact();
+    } catch (e) {}
 });

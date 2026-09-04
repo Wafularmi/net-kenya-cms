@@ -766,6 +766,33 @@ function loginRateSuccess(req) {
     loginAttempts.delete(clientIp(req));
 }
 
+// Rate limiting for public /api/verify (separate from login)
+const verifyAttempts = new Map();
+const VERIFY_MAX_ATTEMPTS = parseInt(process.env.VERIFY_MAX_ATTEMPTS) || 20;
+function verifyRateBlocked(req) {
+    const ip = clientIp(req);
+    const rec = verifyAttempts.get(ip);
+    if (!rec) return false;
+    if (rec.blockedUntil && rec.blockedUntil > Date.now()) return true;
+    if (Date.now() - rec.windowStart > LOGIN_WINDOW_MS) {
+        verifyAttempts.delete(ip);
+        return false;
+    }
+    return false;
+}
+function verifyRateFail(req) {
+    const ip = clientIp(req);
+    const now = Date.now();
+    let rec = verifyAttempts.get(ip);
+    if (!rec || now - rec.windowStart > LOGIN_WINDOW_MS) rec = { count: 0, windowStart: now, blockedUntil: 0 };
+    rec.count++;
+    if (rec.count >= VERIFY_MAX_ATTEMPTS) rec.blockedUntil = now + LOGIN_BLOCK_MS;
+    verifyAttempts.set(ip, rec);
+}
+function verifyRateSuccess(req) {
+    verifyAttempts.delete(clientIp(req));
+}
+
 // Server-side audit trail for security-relevant events
 function auditLog(action, entity, details, user) {
     try {
@@ -1714,7 +1741,58 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/heartbeat â€” client sends username every 30s (session-verified)
+    // GET /api/public-contact — admin phone for login screen (public, no secrets)
+    if (parts.length === 2 && parts[1] === 'public-contact' && req.method === 'GET') {
+        try {
+            const rec = (db.settings || []).find(s => s.key === 'whatsapp');
+            const val = rec ? (rec.value || rec) : null;
+            const phone = (val && (val.adminNumber || val.phone)) || '';
+            return json(res, 200, { phone: String(phone || '') });
+        } catch { return json(res, 200, { phone: '' }); }
+    }
+
+    // POST /api/verify — public guest document verification (rate-limited, minimal fields only)
+    if (parts.length === 2 && parts[1] === 'verify' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                if (verifyRateBlocked(req)) {
+                    return json(res, 429, { error: 'Too many verification attempts. Please try again in 15 minutes.' });
+                }
+                const { docId, vCode } = JSON.parse(body);
+                if (!docId || !vCode) return json(res, 400, { ok: false, error: 'Enter the Document ID and Verification Code.' });
+                const did = String(docId).trim();
+                const vc = String(vCode).trim();
+                let record = (db.transcriptVerifications || []).find(r => String(r.docId) === did) || null;
+                let isTranscript = !!record;
+                if (!record) {
+                    record = (db.certificates || []).find(c => String(c.docId) === did || String(c.id) === did) || null;
+                    isTranscript = false;
+                }
+                if (!record) { verifyRateFail(req); return json(res, 200, { ok: false, reason: 'not-found', docId: did }); }
+                if (String(record.vCode) !== vc) { verifyRateFail(req); return json(res, 200, { ok: false, reason: 'mismatch', docId: did }); }
+                verifyRateSuccess(req);
+                return json(res, 200, { ok: true, isTranscript,
+                    studentName: record.studentName || record.name || '',
+                    admission: record.admission || record.admissionNumber || '',
+                    program: record.program || '',
+                    docId: record.docId || did,
+                    docTitle: record.docTitle || record.type || '',
+                    generatedAt: record.generatedAt || record.createdAt || '',
+                    revoked: record.docStatus === 'revoked',
+                    revokedBy: record.revokedBy || '',
+                    revokedAt: record.revokedAt || '',
+                    revokeReason: record.revokeReason || '',
+                    cgpa: (typeof record.cgpa === 'number' ? record.cgpa : undefined),
+                    classification: record.classification || ''
+                });
+            } catch { return json(res, 400, { ok: false, error: 'Invalid request' }); }
+        });
+        return true;
+    }
+
+    // POST /api/heartbeat — client sends username every 30s (session-verified)
     if (parts.length === 2 && parts[1] === 'heartbeat' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);

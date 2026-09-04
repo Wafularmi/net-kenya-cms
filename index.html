@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=276" as="script">
+    <link rel="preload" href="js/bundle.js?v=278" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -42,7 +42,18 @@
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <button class="btn btn-full" id="login-btn" onclick="login()" style="background:var(--accent);border-color:var(--accent);color:#fff;">Sign In</button>
                 <p id="login-error" class="login-error" style="display:none;"></p>
+                <p id="login-admin-phone" style="display:none;text-align:center;margin-top:10px;font-size:13px;"></p>
                 <p class="login-hint" style="margin-top:12px;font-size:11px;color:var(--text-muted);">Don't have an account? <a href="#" onclick="showSignupForm(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">Request Registration</a></p>
+            </div>
+        </div>
+        <div class="login-card" style="margin-top:16px;">
+            <h2 style="font-size:16px;margin:0 0 4px;">🔍 Verify Document</h2>
+            <p class="login-subtitle" style="margin-bottom:12px;">Guests can verify a certificate without logging in</p>
+            <div class="login-form">
+                <div class="form-group"><label>Document ID</label><input type="text" id="login-verify-docid" placeholder="e.g. DIP-ABC123"></div>
+                <div class="form-group"><label>Verification Code</label><input type="text" id="login-verify-vcode" placeholder="e.g. V-A7K2-M9B3"></div>
+                <button class="btn btn-full btn-outline" onclick="verifyDocumentPublic()">Verify</button>
+                <div id="login-verify-result" style="margin-top:12px;"></div>
             </div>
         </div>
     </div>
@@ -1235,7 +1246,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=276"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=278"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=16"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
