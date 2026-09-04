@@ -331,8 +331,80 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                     </div>
                 </div>
             </div>
+
+            <div class="card" style="border-top:3px solid var(--success);">
+                <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">💰 Fees</h3>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Paid</span><b style="color:var(--success);">${typeof formatCurrency === 'function' ? formatCurrency(totalPaid) : totalPaid}</b></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Balance</span><b style="color:${hubFeeBalance(me, totalPaid) > 0 ? 'var(--danger)' : 'var(--success)'};">${typeof formatCurrency === 'function' ? formatCurrency(hubFeeBalance(me, totalPaid)) : hubFeeBalance(me, totalPaid)}</b></div>
+                <button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>
+            </div>
         </div>
     `;
+}
+function hubFeeBalance(me, totalPaid) {
+    try {
+        const fee = (typeof getCachedStudentFee === 'function') ? getCachedStudentFee(me) : (me.feeAmount || 0);
+        return Math.max(0, (fee || 0) - (totalPaid || 0));
+    } catch { return 0; }
+}
+function normalizeMpesaPhone(input) {
+    let digits = String(input || '').replace(/[^0-9]/g, '');
+    if (/^0/.test(digits)) digits = '254' + digits.substring(1);
+    if (!/^254[17]\d{8}$/.test(digits)) return null;
+    return digits;
+}
+async function showMpesaPayModal(studentId) {
+    const data = studentHubCache || await loadStudentHubData();
+    const me = _hubGetMe();
+    const sid = studentId || (me && me.id) || '';
+    const stu = (data.students || []).find(s => s.id === sid) || me || {};
+    const myPayments = (data.payments || []).filter(p => p.studentId === sid);
+    const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0);
+    const balance = hubFeeBalance(stu, totalPaid);
+    const content = `
+        <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + (typeof formatCurrency === 'function' ? formatCurrency(balance) : balance) + '</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="500000" value="${balance > 0 ? balance : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
+        <div class="form-group"><label>M-Pesa Number to Prompt</label><input type="tel" id="mpesa-phone" value="${esc(stu.phone || '')}" placeholder="0712 345 678" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Enter the M-Pesa number to prompt — can differ from your registered number (e.g. parent/guardian).</div></div>
+        <div id="mpesa-status" style="font-size:12px;margin-top:4px;"></div>`;
+    showModal('💰 Pay Fees via M-Pesa', content, `<button class="btn btn-success" onclick="submitMpesaStk('${sid}')">Send Prompt</button>`);
+}
+async function submitMpesaStk(studentId) {
+    const amount = parseFloat(document.getElementById('mpesa-amount')?.value);
+    const phoneRaw = document.getElementById('mpesa-phone')?.value || '';
+    const status = document.getElementById('mpesa-status');
+    const phone = normalizeMpesaPhone(phoneRaw);
+    if (!amount || amount < 1) { if (status) { status.textContent = 'Enter an amount of at least KES 1.'; status.style.color = 'var(--danger)'; } return; }
+    if (!phone) { if (status) { status.textContent = 'Enter a valid Safaricom number (e.g. 0712 345 678).'; status.style.color = 'var(--danger)'; } return; }
+    if (status) { status.textContent = 'Sending M-Pesa prompt to ' + phone + '...'; status.style.color = 'var(--accent)'; }
+    try {
+        const res = await fetch('/api/mpesa/stkpush', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ studentId, amount: Math.round(amount), phone, reference: studentId, description: 'Fee Payment' }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'STK push failed');
+        if (!data.CheckoutRequestID) throw new Error(data.ResponseDescription || data.errorMessage || 'STK push rejected');
+        if (status) { status.textContent = 'Prompt sent! Enter M-Pesa PIN on ' + phone + ' to complete...'; status.style.color = 'var(--warning)'; }
+        const checkoutId = data.CheckoutRequestID;
+        for (let i = 0; i < 12; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            try {
+                const q = await fetch('/api/mpesa/query', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ checkoutRequestId: checkoutId }) });
+                const qr = await q.json();
+                if (qr && (qr.ResultCode === 0 || qr.ResultCode === '0')) {
+                    if (status) { status.textContent = '✅ Payment confirmed! Receipt on its way.'; status.style.color = 'var(--success)'; }
+                    showToast('✅ M-Pesa payment confirmed!');
+                    invalidateStudentHubCache();
+                    setTimeout(() => { closeModal(); renderStudentHub(); }, 1500);
+                    return;
+                }
+                if (qr && qr.ResultCode !== undefined && String(qr.ResultCode) !== '1032' && String(qr.ResultCode) !== '1037') {
+                    throw new Error(qr.ResultDesc || 'Payment not completed');
+                }
+            } catch (qe) {
+                if (qe && /not completed|cancelled|failed/i.test(qe.message || '')) throw qe;
+            }
+        }
+        if (status) { status.textContent = 'Still processing — your balance will update automatically once confirmed.'; status.style.color = 'var(--text-muted)'; }
+    } catch (e) {
+        if (status) { status.textContent = e.message; status.style.color = 'var(--danger)'; }
+    }
 }
 
 function renderHubCourses(me, myCourses, availableCourses, data) {

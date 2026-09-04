@@ -1916,9 +1916,11 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/mpesa/stkpush
+    // POST /api/mpesa/stkpush (authenticated; students may only pay for themselves)
     if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'stkpush' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const stkUser = getRequestUser(req);
+        if (!stkUser) return json(res, 401, { error: 'Not authenticated' });
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
@@ -1928,26 +1930,95 @@ function handleAPI(req, res) {
                 if (!s.shortcode || !s.consumerKey || !s.consumerSecret || !s.passkey) {
                     return json(res, 400, { error: 'M-Pesa not configured. Save settings first.' });
                 }
+                // Normalize payer number: 07.. / +254.. / 254.. -> 254..
+                // May differ from the registered number (parent/guardian paying).
+                let digits = String(data.phone || '').replace(/[^0-9]/g, '');
+                if (/^0/.test(digits)) digits = '254' + digits.substring(1);
+                if (!/^254[17]\d{8}$/.test(digits)) {
+                    return json(res, 400, { error: 'Enter a valid Safaricom number (e.g. 0712 345 678).' });
+                }
+                const amount = Math.round(Number(data.amount));
+                if (!amount || amount < 1) return json(res, 400, { error: 'Enter an amount of at least KES 1.' });
+                if (amount > 500000) return json(res, 400, { error: 'Amount too large for a single STK push.' });
+                let studentId = String(data.studentId || '');
+                if (stkUser.role === 'student') {
+                    const ownId = String((stkUser.user || {}).studentId || stkUser.username || '');
+                    const stu = (db.students || []).find(x => String(x.id) === ownId || String(x.phone) === String(stkUser.username));
+                    studentId = stu ? stu.id : ownId;
+                }
+                if (!studentId) return json(res, 400, { error: 'Missing student.' });
                 const ts = timestamp();
                 const pw = Buffer.from(s.shortcode + s.passkey + ts).toString('base64');
                 const txnType = s.transactionType === 'till' ? 'BuyGoodsOnline' : 'CustomerPayBillOnline';
-                const partyB = s.shortcode;
+                const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+                const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0] || 'https';
+                const callbackUrl = (host.startsWith('localhost') ? 'http://' + host : proto + '://' + host) + '/api/mpesa/callback';
                 const payload = {
                     BusinessShortCode: s.shortcode,
                     Password: pw,
                     Timestamp: ts,
                     TransactionType: txnType,
-                    Amount: Math.round(data.amount),
-                    PartyA: data.phone,
-                    PartyB: partyB,
-                    PhoneNumber: data.phone,
-                    CallBackURL: 'https://localhost:3000/api/mpesa/callback',
-                    AccountReference: data.reference || 'CollegeFee',
-                    TransactionDesc: data.description || 'Fee Payment'
+                    Amount: amount,
+                    PartyA: digits,
+                    PartyB: s.shortcode,
+                    PhoneNumber: digits,
+                    CallBackURL: callbackUrl,
+                    AccountReference: String(data.reference || studentId).slice(0, 12),
+                    TransactionDesc: String(data.description || 'Fee Payment').slice(0, 20)
                 };
                 const result = await mpesaRequest('/mpesa/stkpush/v1/processrequest', payload, s.environment, s.consumerKey, s.consumerSecret);
+                if (result && result.CheckoutRequestID) {
+                    if (!Array.isArray(db.mpesaTransactions)) db.mpesaTransactions = [];
+                    db.mpesaTransactions.push({ id: 'STK-' + Date.now(), checkoutRequestId: result.CheckoutRequestID, merchantRequestId: result.MerchantRequestID || '', studentId, amount, phone: digits, status: 'pending', initiatedBy: stkUser.username, createdAt: new Date().toISOString() });
+                    saveDB();
+                }
                 json(res, 200, result);
             } catch (e) { json(res, 500, { error: e.message || e }); }
+        });
+        return true;
+    }
+
+    // POST /api/mpesa/callback — Safaricom result callback (public; no auth by design)
+    if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'callback' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(body);
+                const cb = data.Body && data.Body.stkCallback;
+                if (!cb) return json(res, 200, { ResultCode: 1, ResultDesc: 'Ignored' });
+                const checkoutId = cb.CheckoutRequestID || '';
+                const txn = (db.mpesaTransactions || []).find(t => t.checkoutRequestId === checkoutId);
+                if (cb.ResultCode === 0) {
+                    const items = (((cb.CallbackMetadata || {}).Item) || []);
+                    const val = (n) => { const it = items.find(i => i.Name === n); return it ? it.Value : null; };
+                    const mpesaReceipt = val('MpesaReceiptNumber') || '';
+                    const amountPaid = Number(val('Amount')) || (txn ? txn.amount : 0);
+                    const payerPhone = String(val('PhoneNumber') || (txn ? txn.phone : ''));
+                    const studentId = txn ? txn.studentId : '';
+                    if (txn) { txn.status = 'complete'; txn.mpesaReceipt = mpesaReceipt; txn.completedAt = new Date().toISOString(); }
+                    if (studentId && amountPaid > 0) {
+                        const exists = (db.payments || []).some(p => p.reference === mpesaReceipt && mpesaReceipt);
+                        if (!exists) {
+                            const d = new Date();
+                            const ym = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
+                            const prefix = 'RCT-' + ym + '-';
+                            const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
+                            const receiptNo = prefix + String(seq).padStart(4, '0');
+                            if (!Array.isArray(db.payments)) db.payments = [];
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, method: 'M-Pesa STK', reference: mpesaReceipt, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            broadcastEvent('db-change', { store: 'payments' });
+                        }
+                    }
+                    saveDB();
+                    auditLog('mpesa-payment', 'payment', { checkoutId, receipt: mpesaReceipt, amount: amountPaid }, 'mpesa-callback');
+                } else if (txn) {
+                    txn.status = 'failed';
+                    txn.failReason = cb.ResultDesc || 'cancelled';
+                    saveDB();
+                }
+                return json(res, 200, { ResultCode: 0, ResultDesc: 'Accepted' });
+            } catch (e) { return json(res, 200, { ResultCode: 1, ResultDesc: 'Error' }); }
         });
         return true;
     }
@@ -1955,6 +2026,7 @@ function handleAPI(req, res) {
     // POST /api/mpesa/query
     if (parts.length >= 3 && parts[1] === 'mpesa' && parts[2] === 'query' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        if (!getRequestUser(req)) return json(res, 401, { error: 'Not authenticated' });
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
