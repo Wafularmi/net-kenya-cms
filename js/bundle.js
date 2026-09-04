@@ -994,14 +994,14 @@ async function verifyDocumentPublic() {
             <div style="${data.revoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px;border-radius:8px;">
                 ${data.revoked
                     ? `<div style="font-size:44px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 8px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);">This document was revoked and is no longer valid.${data.revokeReason ? ' Reason: ' + escapeHtml(data.revokeReason) : ''}</p>`
-                    : `<div style="font-size:44px;margin-bottom:8px;">✅</div><h3 style="color:var(--success);margin:0 0 8px;">Document Authenticated</h3>
-                <div style="text-align:left;max-width:420px;margin:0 auto;font-size:13px;line-height:1.8;">
-                    <p><strong>Student Name:</strong> ${escapeHtml(data.studentName || '—')}</p>
-                    <p><strong>Admission No:</strong> ${escapeHtml(data.admission || '—')}</p>
-                    ${data.studyCenter ? `<p><strong>Studied at:</strong> ${escapeHtml(data.studyCenter)}</p>` : ''}
-                    ${data.program ? `<p><strong>Program:</strong> ${escapeHtml(data.program)}</p>` : ''}
-                    ${data.docTitle ? `<p><strong>Document:</strong> ${escapeHtml(data.docTitle)}</p>` : ''}
-                    <p><strong>Document ID:</strong> ${escapeHtml(data.docId || '')}</p>
+                    : `<div style="font-size:44px;margin-bottom:8px;">✅</div><h3 style="color:#15803d;margin:0 0 12px;font-size:18px;">Document Authenticated</h3>
+                <div style="text-align:left;max-width:440px;margin:0 auto;background:#ffffff;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;">
+                    <div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Student Name</div><div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.studentName || '—')}</div></div>
+                    <div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Admission No</div><div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.admission || '—')}</div></div>
+                    ${data.studyCenter ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Studied at</div><div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.studyCenter)}</div></div>` : ''}
+                    ${data.program ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Program</div><div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(data.program)}</div></div>` : ''}
+                    ${data.docTitle ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document</div><div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(data.docTitle)}</div></div>` : ''}
+                    <div style="margin:0;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document ID</div><div style="font-size:13px;font-weight:700;color:#0f172a;margin-top:2px;font-family:'Courier New',monospace;">${escapeHtml(data.docId || '')}</div></div>
                     ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
                 </div>
                 <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. Net Foundation Kenya upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>`}
