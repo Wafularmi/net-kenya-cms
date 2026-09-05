@@ -2044,6 +2044,22 @@ function handleAPI(req, res) {
                     studentId = stu ? stu.id : ownId;
                 }
                 if (!studentId) return json(res, 400, { error: 'Missing student.' });
+                // Cap at remaining program fee (same total for all, unless student record sets its own feeAmount)
+                try {
+                    const stuRec = (db.students || []).find(x => String(x.id) === String(studentId)) || null;
+                    let courseFee = Number(stuRec && stuRec.feeAmount) || 0;
+                    if (!(courseFee > 0) && stuRec && stuRec.program) {
+                        const acad = (db.settings || []).find(s => s.key === 'academic');
+                        const av = acad ? (acad.value || acad) : null;
+                        if (av && av.programFees && Number(av.programFees[stuRec.program]) > 0) courseFee = Number(av.programFees[stuRec.program]);
+                    }
+                    if (courseFee > 0) {
+                        const paidSoFar = (db.payments || []).filter(p => String(p.studentId) === String(studentId)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                        const remaining = Math.max(0, courseFee - paidSoFar);
+                        if (remaining <= 0) return json(res, 400, { error: 'Program fee fully paid. Nothing due.' });
+                        if (amount > remaining) return json(res, 400, { error: 'Amount exceeds your remaining program balance of KES ' + Math.round(remaining) + '.' });
+                    }
+                } catch (capErr) { console.error('mpesa cap check failed:', capErr); }
                 const ts = timestamp();
                 const pw = Buffer.from(s.shortcode + s.passkey + ts).toString('base64');
                 const txnType = s.transactionType === 'till' ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline';

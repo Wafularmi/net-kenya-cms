@@ -53,8 +53,8 @@ function hubEffectiveGate(me, gate) {
     }
     return gate;
 }
-function hubWeekStart() {
-    const d = new Date();
+function hubWeekStart(fromDate) {
+    const d = fromDate ? new Date(fromDate) : new Date();
     const dow = (d.getDay() + 6) % 7;
     const s = new Date(d);
     s.setHours(0, 0, 0, 0);
@@ -62,8 +62,13 @@ function hubWeekStart() {
     const iso = s.getFullYear() + '-' + String(s.getMonth() + 1).padStart(2, '0') + '-' + String(s.getDate()).padStart(2, '0');
     return { start: s, iso };
 }
+function hubStudentAnchor(me) {
+    const raw = (me && (me.enrollDate || me.registrationRequestedAt || me.createdAt)) || null;
+    const m = raw ? hubWeekStart(raw) : hubWeekStart();
+    return m.start;
+}
 async function hubFeeLockInfo(me, data) {
-    const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '' };
+    const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '', totalFee: 0, totalPaid: 0, programBalance: 0, weekPaid: 0, weeksElapsed: 1, weeksAhead: 0 };
     if (!me) return none;
     const rawGate = await hubFeeGateConfig();
     const gate = hubEffectiveGate(me, rawGate);
@@ -78,7 +83,18 @@ async function hubFeeLockInfo(me, data) {
     if (!data.payments) {
         try { const extra = await dbGetBatch(['payments']); Object.assign(studentHubCache || {}, extra); data = studentHubCache || data; } catch {}
     }
+    // Week 1 = the student's own enrollment week (mid-term joiners start at join week).
+    const anchor = hubStudentAnchor(me);
+    const weeksElapsed = Math.max(1, Math.floor((Date.now() - anchor.getTime()) / (7 * 86400000)) + 1);
+    const cumulativeTarget = weeksElapsed * target;
+    const mine = (data.payments || []).filter(p => p.studentId === me.id);
+    const totalPaid = mine.reduce((s, p) => s + (Number(p.amount) || 0), 0);
     const { start, iso } = hubWeekStart();
+    const weekPaid = mine.filter(p => String(p.date || '') >= iso).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    let totalFee = 0;
+    try { totalFee = (typeof getCachedStudentFee === 'function') ? (getCachedStudentFee(me) || 0) : (me.feeAmount || 0); } catch { totalFee = me.feeAmount || 0; }
+    const programBalance = Math.max(0, (totalFee || 0) - totalPaid);
+    const weeksAhead = Math.max(0, Math.floor(totalPaid / target) - weeksElapsed);
     const dayOff = ((parseInt(gate.day ?? 1) + 6) % 7);
     const [hh, mm] = String(gate.time || '12:00').split(':').map(Number);
     const deadline = new Date(start);
@@ -86,17 +102,19 @@ async function hubFeeLockInfo(me, data) {
     deadline.setHours(hh || 0, mm || 0, 0, 0);
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dueText = dayNames[deadline.getDay()] + ' ' + String(deadline.getHours()).padStart(2, '0') + ':' + String(deadline.getMinutes()).padStart(2, '0');
-    const paid = (data.payments || []).filter(p => p.studentId === me.id && String(p.date || '') >= iso).reduce((s, p) => s + (Number(p.amount) || 0), 0);
     const gated = Object.entries(gate.tabs || {}).filter(([, on]) => on !== false).map(([t]) => t);
-    if (Date.now() < deadline.getTime()) return { locked: false, target, paid, gated, grace: true, dueText, deadlineMs: deadline.getTime() };
-    return { locked: paid < target, target, paid, gated, grace: false, dueText, deadlineMs: deadline.getTime() };
+    // Overflow: cumulative paid vs cumulative target — advance lump sums cover future weeks.
+    const met = totalPaid >= cumulativeTarget;
+    const base = { target, paid: weekPaid, totalFee, totalPaid, programBalance, weekPaid, weeksElapsed, weeksAhead, cumulativeTarget, gated, dueText, deadlineMs: deadline.getTime() };
+    if (Date.now() < deadline.getTime()) return { ...base, locked: false, grace: true };
+    return { ...base, locked: !met, grace: false };
 }
 function hubLockedPanel(lock, tabLabel) {
-    const due = Math.max(0, (lock.target || 0) - (lock.paid || 0));
+    const due = Math.max(0, (lock.cumulativeTarget || lock.target || 0) - (lock.totalPaid || 0));
     return `<div class="card" style="text-align:center;padding:48px 24px;border-top:3px solid var(--danger);">
         <div style="font-size:44px;margin-bottom:10px;">🔒</div>
         <h3 style="margin:0 0 8px;">${esc(tabLabel)} Locked</h3>
-        <p style="color:var(--text-muted);font-size:13px;max-width:420px;margin:0 auto 6px;">Weekly fee target not met. Pay <b>KES ${due}</b> more (target KES ${lock.target}, paid KES ${lock.paid} this week, due ${esc(lock.dueText || '')}) to unlock.</p>
+        <p style="color:var(--text-muted);font-size:13px;max-width:420px;margin:0 auto 6px;">Weekly fee target not met. Pay <b>KES ${due}</b> more (week ${lock.weeksElapsed || 1}, target KES ${lock.target}/week, paid KES ${lock.totalPaid || 0} so far, due ${esc(lock.dueText || '')}) to unlock. Overpayments overflow to coming weeks.</p>
         <button class="btn btn-success" style="margin-top:12px;" onclick="showMpesaPayModal('${(_hubGetMe() || {}).id || ''}')">💰 Pay Now via M-Pesa</button>
     </div>`;
 }
@@ -431,9 +449,26 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
 
             <div class="card" style="border-top:3px solid var(--success);">
                 <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">💰 Fees</h3>
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Paid</span><b style="color:var(--success);">${typeof formatCurrency === 'function' ? formatCurrency(totalPaid) : totalPaid}</b></div>
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Balance</span><b style="color:${hubFeeBalance(me, totalPaid) > 0 ? 'var(--danger)' : 'var(--success)'};">${typeof formatCurrency === 'function' ? formatCurrency(hubFeeBalance(me, totalPaid)) : hubFeeBalance(me, totalPaid)}</b></div>
-                ${(() => { const L = window._hubFeeLock; if (!L || !L.target) return ''; if (L.locked) return `<div style="font-size:12px;color:var(--danger);font-weight:700;margin-top:6px;">🔒 Tabs locked — pay KES ${Math.max(0, L.target - L.paid)} more (due ${esc(L.dueText || '')})</div>`; if (L.grace) return `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (paid KES ${L.paid})</div>`; return `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (KES ${L.paid}/${L.target})</div>`; })()}
+                ${(() => {
+                    const L = window._hubFeeLock;
+                    const fmt = (n) => (typeof formatCurrency === 'function' ? formatCurrency(n) : n);
+                    const fee = (L && L.totalFee) || hubFeeBalance(me, totalPaid) + totalPaid || 0;
+                    const paid = (L && L.totalPaid != null) ? L.totalPaid : totalPaid;
+                    const progBal = Math.max(0, fee - paid);
+                    const weekDue = L && L.target ? Math.max(0, L.target - (L.weekPaid || 0)) : 0;
+                    let status = '';
+                    if (L && L.target) {
+                        if (L.locked) status = `<div style="font-size:12px;color:var(--danger);font-weight:700;margin-top:6px;">🔒 Tabs locked — pay KES ${Math.max(0, (L.cumulativeTarget || L.target) - (L.totalPaid || 0))} more (due ${esc(L.dueText || '')})</div>`;
+                        else if (L.grace) status = `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (this week KES ${L.weekPaid || 0})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}</div>`;
+                        else status = `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (week ${L.weeksElapsed || 1})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}</div>`;
+                    }
+                    return `
+                    <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Total fee required</span><b>${fmt(fee)}</b></div>
+                    <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Paid so far</span><b style="color:var(--success);">${fmt(paid)}</b></div>
+                    <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Total program balance</span><b style="color:${progBal > 0 ? 'var(--danger)' : 'var(--success)'};">${fmt(progBal)}</b></div>
+                    ${L && L.target ? `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">This week (target KES ${L.target})</span><b>KES ${L.weekPaid || 0} · bal KES ${weekDue}</b></div>` : ''}
+                    ${status}`;
+                })()}
                 <button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>
             </div>
         </div>
@@ -459,8 +494,12 @@ async function showMpesaPayModal(studentId) {
     const myPayments = (data.payments || []).filter(p => p.studentId === sid);
     const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0);
     const balance = hubFeeBalance(stu, totalPaid);
+    let totalFee = 0;
+    try { totalFee = (typeof getCachedStudentFee === 'function') ? (getCachedStudentFee(stu) || 0) : (stu.feeAmount || 0); } catch { totalFee = stu.feeAmount || 0; }
+    const maxPay = totalFee > 0 ? Math.max(0, totalFee - totalPaid) : 500000;
     const content = `
-        <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + (typeof formatCurrency === 'function' ? formatCurrency(balance) : balance) + '</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="500000" value="${balance > 0 ? balance : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
+        <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + (typeof formatCurrency === 'function' ? formatCurrency(balance) : balance) + '</span>' : ''}${totalFee > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">· you can pay up to ' + (typeof formatCurrency === 'function' ? formatCurrency(maxPay) : maxPay) + ' (total fee ' + (typeof formatCurrency === 'function' ? formatCurrency(totalFee) : totalFee) + ')</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="${Math.max(1, Math.round(maxPay))}" value="${balance > 0 ? Math.min(balance, maxPay) : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
+        <input type="hidden" id="mpesa-max" value="${Math.round(maxPay)}">
         <input type="hidden" id="mpesa-balance" value="${balance > 0 ? balance : 0}">
         <div class="form-group"><label>M-Pesa Number to Prompt</label><input type="tel" id="mpesa-phone" value="${esc(stu.phone || '')}" placeholder="0712 345 678" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Enter the M-Pesa number to prompt — can differ from your registered number.</div></div>
         <div id="mpesa-status" style="font-size:12px;margin-top:4px;"></div>`;
@@ -474,6 +513,9 @@ async function submitMpesaStk(studentId) {
     let amount = parseFloat(String(amtEl?.value ?? '').replace(/[^0-9.]/g, ''));
     const balanceFallback = parseFloat(balEl?.value || '0');
     if ((!amount || amount < 1) && balanceFallback > 0) amount = balanceFallback;
+    const maxEl = modalRoot.querySelector('#mpesa-max') || document.getElementById('mpesa-max');
+    const maxPay = parseFloat(maxEl?.value || '0');
+    if (maxPay > 0 && amount > maxPay) { if (status) { status.textContent = 'That exceeds your remaining program balance (' + maxPay + '). Lower the amount.'; status.style.color = 'var(--danger)'; } return; }
     const phoneRaw = (modalRoot.querySelector('#mpesa-phone') || document.getElementById('mpesa-phone'))?.value || '';
     const status = modalRoot.querySelector('#mpesa-status') || document.getElementById('mpesa-status');
     const phone = normalizeMpesaPhone(phoneRaw);
