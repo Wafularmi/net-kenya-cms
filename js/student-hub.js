@@ -169,16 +169,33 @@ async function hubFeeLockInfo(me, data) {
     const gated = Object.entries(gate.tabs || {}).filter(([, on]) => on !== false).map(([t]) => t);
     // Overflow: cumulative paid vs cumulative target — advance lump sums cover future weeks.
     const met = totalPaid >= cumulativeTarget;
-    const base = { target, paid: weekPaid, totalFee, totalPaid, programBalance, weekPaid, weeksElapsed, weeksAhead, cumulativeTarget, gated, dueText, deadlineMs: deadline.getTime() };
+    const base = { target, paid: weekPaid, totalFee, totalPaid, programBalance, weekPaid, weeksElapsed, weeksAhead, cumulativeTarget, gated, dueText, deadlineMs: deadline.getTime(), dayOff, dhh: hh || 0, dmm: mm || 0 };
     if (Date.now() < deadline.getTime()) return { ...base, locked: false, grace: true };
     return { ...base, locked: !met, grace: false };
 }
+function hubTopUpInfo(lock) {
+    if (!lock || !(lock.target > 0)) return null;
+    const target = lock.target;
+    const totalPaid = lock.totalPaid || 0;
+    const anchor = hubStudentAnchor(_hubGetMe() || {});
+    const weeksCovered = Math.floor(totalPaid / target);
+    const coveredUntil = new Date(anchor.getTime() + weeksCovered * 7 * 86400000);
+    const topUpDate = new Date(coveredUntil.getTime());
+    topUpDate.setDate(coveredUntil.getDate() + (lock.dayOff || 0));
+    topUpDate.setHours(lock.dhh || 0, lock.dmm || 0, 0, 0);
+    const fmtD = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const fmtDT = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const topUp = Math.max(0, (lock.cumulativeTarget || target) - totalPaid);
+    return { coveredUntil, fmtD, fmtDT, topUp, topUpDate };
+}
 function hubLockedPanel(lock, tabLabel) {
     const due = Math.max(0, (lock.cumulativeTarget || lock.target || 0) - (lock.totalPaid || 0));
+    const ti = hubTopUpInfo(lock);
+    const coverLine = ti ? `<br>Covered until <b>${ti.fmtD(ti.coveredUntil)}</b> — top up <b>KES ${ti.topUp}</b> before <b>${ti.fmtDT(ti.topUpDate)}</b> to stay unlocked.` : '';
     return `<div class="card" style="text-align:center;padding:48px 24px;border-top:3px solid var(--danger);">
         <div style="font-size:44px;margin-bottom:10px;">🔒</div>
         <h3 style="margin:0 0 8px;">${esc(tabLabel)} Locked</h3>
-        <p style="color:var(--text-muted);font-size:13px;max-width:420px;margin:0 auto 6px;">Weekly fee target not met. Pay <b>KES ${due}</b> more (week ${lock.weeksElapsed || 1}, target KES ${lock.target}/week, paid KES ${lock.totalPaid || 0} so far, due ${esc(lock.dueText || '')}) to unlock. Overpayments overflow to coming weeks.</p>
+        <p style="color:var(--text-muted);font-size:13px;max-width:420px;margin:0 auto 6px;">Weekly fee target not met. Pay <b>KES ${due}</b> more (week ${lock.weeksElapsed || 1}, target KES ${lock.target}/week, paid KES ${lock.totalPaid || 0} so far, due ${esc(lock.dueText || '')}) to unlock. Overpayments overflow to coming weeks.${coverLine}</p>
         <button class="btn btn-success" style="margin-top:12px;" onclick="showMpesaPayModal('${(_hubGetMe() || {}).id || ''}')">💰 Pay Now via M-Pesa</button>
     </div>`;
 }
@@ -542,9 +559,11 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                     const weekDue = L && L.target ? Math.max(0, L.target - (L.weekPaid || 0)) : 0;
                     let status = '';
                     if (L && L.target) {
-                        if (L.locked) status = `<div style="font-size:12px;color:var(--danger);font-weight:700;margin-top:6px;">🔒 Tabs locked — pay KES ${Math.max(0, (L.cumulativeTarget || L.target) - (L.totalPaid || 0))} more (due ${esc(L.dueText || '')})</div>`;
-                        else if (L.grace) status = `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (this week KES ${L.weekPaid || 0})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}</div>`;
-                        else status = `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (week ${L.weeksElapsed || 1})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}</div>`;
+                        const ti = hubTopUpInfo(L);
+                        const coverTxt = ti ? ` · covered until <b>${ti.fmtD(ti.coveredUntil)}</b>` : '';
+                        if (L.locked) status = `<div style="font-size:12px;color:var(--danger);font-weight:700;margin-top:6px;">🔒 Tabs locked — pay KES ${Math.max(0, (L.cumulativeTarget || L.target) - (L.totalPaid || 0))} more (due ${esc(L.dueText || '')})${coverTxt}</div>`;
+                        else if (L.grace) status = `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (this week KES ${L.weekPaid || 0})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}${coverTxt}</div>`;
+                        else status = `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (week ${L.weeksElapsed || 1})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}${coverTxt}</div>`;
                     }
                     return `
                     <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Total fee required</span><b>${fmt(fee)}</b></div>
