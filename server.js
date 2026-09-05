@@ -2607,6 +2607,9 @@ return json(res, 200, result);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);
                     mutate(toStore);
+                    if (store === 'settings' && toStore.key === 'maintenance') {
+                        try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
+                    }
                     json(res, 200, { ok: true, key: pk });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
             });
@@ -2628,15 +2631,15 @@ return json(res, 200, result);
                     if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
                     }
-                    if (store === 'settings' && value.key === 'maintenance') {
-                        try { broadcastMaintenance(!!((value.value || value).active)); } catch {}
-                    }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     const exists = db[store].some(r => r[keyPath] === pk);
                     if (exists) return json(res, 409, { error: `Record with ${keyPath}="${pk}" already exists` });
                     db[store].push(value);
                     mutate(value);
+                    if (store === 'settings' && value.key === 'maintenance') {
+                        try { broadcastMaintenance(!!((value.value || value).active)); } catch {}
+                    }
                     json(res, 200, { ok: true, key: pk });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
             });

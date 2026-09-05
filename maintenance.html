@@ -184,7 +184,7 @@
                 fetch('/api/maintenance-status').then(function(r) { return r.json(); }).then(function(d) {
                     if (d && !d.active) backToApp();
                 }).catch(function() {});
-            }, 30000);
+            }, 5000);
         })();
         function toggleAdminForm() {
             var f = document.getElementById('admin-form');

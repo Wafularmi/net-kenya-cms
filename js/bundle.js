@@ -20752,6 +20752,14 @@ function handleMaintenancePush(active) {
         }
     } catch {}
 }
+let _maintPoll = null;
+async function checkMaintenanceNow() {
+    try {
+        const r = await fetch('/api/maintenance-status', { cache: 'no-store' });
+        if (!r.ok) return;
+        handleMaintenancePush((await r.json()).active);
+    } catch {}
+}
 function startMaintenanceLiveSync() {
     try {
         if (_maintSSE) { try { _maintSSE.close(); } catch {} _maintSSE = null; }
@@ -20762,18 +20770,29 @@ function startMaintenanceLiveSync() {
         _maintSSE.onerror = () => {
             try { if (_maintSSE && _maintSSE.readyState === EventSource.CLOSED) setTimeout(startMaintenanceLiveSync, 8000); } catch {}
         };
-        // Fallback: if SSE drops silently, poll the flag every 30s.
-        setInterval(async () => {
-            try {
-                const r = await fetch('/api/maintenance-status');
-                if (!r.ok) return;
-                handleMaintenancePush((await r.json()).active);
-            } catch {}
-        }, 30000);
+        // Fallback: tiny flag poll every 5s + immediate check on focus/return.
+        if (!_maintPoll) {
+            _maintPoll = setInterval(checkMaintenanceNow, 5000);
+            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkMaintenanceNow(); });
+            window.addEventListener('focus', checkMaintenanceNow);
+            window.addEventListener('pageshow', checkMaintenanceNow);
+        }
+        checkMaintenanceNow();
+    } catch {}
+}
+// Never leave a previous username behind on the login form (demo privacy).
+function clearLoginForm() {
+    try {
+        const u = document.getElementById('login-user');
+        const p = document.getElementById('login-pass');
+        if (u) { u.value = ''; u.setAttribute('readonly', 'readonly'); setTimeout(() => { try { u.removeAttribute('readonly'); } catch {} }, 500); }
+        if (p) p.value = '';
     } catch {}
 }
 // Initialize diploma PDF template on page load
 document.addEventListener('DOMContentLoaded', async () => {
+    try { clearLoginForm(); } catch {}
+    window.addEventListener('pageshow', () => { try { clearLoginForm(); } catch {} });
     try { startMaintenanceLiveSync(); } catch {}
     try {
         await loadDiplomaPdfConfig();

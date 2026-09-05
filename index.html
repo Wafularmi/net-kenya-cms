@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=296" as="script">
+    <link rel="preload" href="js/bundle.js?v=297" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -37,7 +37,7 @@
             <h1 id="login-school-name">{{SCHOOL_NAME}}</h1>
             <p class="login-subtitle">Sign in to continue</p>
             <div class="login-form">
-                <div class="form-group"><label>Username / Phone Number</label><input type="text" id="login-user" placeholder="Phone number (students) or username (staff)"></div>
+                <div class="form-group"><label>Username / Phone Number</label><input type="text" id="login-user" name="net-login-user" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Phone number (students) or username (staff)" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <div class="form-group" style="display:none;"><input type="text" name="fakeuser" autocomplete="off"></div>
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <button class="btn btn-full" id="login-btn" onclick="login()" style="background:var(--accent);border-color:var(--accent);color:#fff;">Sign In</button>
@@ -1322,7 +1322,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=296"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=297"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=28"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
