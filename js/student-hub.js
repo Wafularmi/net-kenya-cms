@@ -139,8 +139,20 @@ function hubStudentAnchor(me) {
     const m = raw ? hubWeekStart(raw) : hubWeekStart();
     return m.start;
 }
+let _hubAgreementsCache = null;
+let _hubAgreementsAt = 0;
+async function hubMyAgreement(me) {
+    if (_hubAgreementsCache && Date.now() - _hubAgreementsAt < 60000) return (_hubAgreementsCache || []).find(a => String(a.studentId) === String(me.id) && a.status === 'approved' && String(a.dueDate || '') >= new Date().toISOString().split('T')[0]) || null;
+    try {
+        const all = await dbGetAll('feeAgreements');
+        _hubAgreementsCache = all || [];
+        _hubAgreementsAt = Date.now();
+    } catch { _hubAgreementsCache = []; }
+    const today = new Date().toISOString().split('T')[0];
+    return (_hubAgreementsCache || []).find(a => String(a.studentId) === String(me.id) && a.status === 'approved' && String(a.dueDate || '') >= today) || null;
+}
 async function hubFeeLockInfo(me, data) {
-    const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '', totalFee: 0, totalPaid: 0, programBalance: 0, weekPaid: 0, weeksElapsed: 1, weeksAhead: 0 };
+    const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '', totalFee: 0, totalPaid: 0, programBalance: 0, weekPaid: 0, weeksElapsed: 1, weeksAhead: 0, agreement: null };
     if (!me) return none;
     const rawGate = await hubFeeGateConfig();
     const gate = hubEffectiveGate(me, rawGate);
@@ -177,7 +189,12 @@ async function hubFeeLockInfo(me, data) {
     const gated = Object.entries(gate.tabs || {}).filter(([, on]) => on !== false).map(([t]) => t);
     // Overflow: cumulative paid vs cumulative target — advance lump sums cover future weeks.
     const met = totalPaid >= cumulativeTarget;
-    const base = { target, paid: weekPaid, totalFee, totalPaid, programBalance, weekPaid, weeksElapsed, weeksAhead, cumulativeTarget, gated, dueText, deadlineMs: deadline.getTime(), dayOff, dhh: hh || 0, dmm: mm || 0 };
+    const base = { target, paid: weekPaid, totalFee, totalPaid, programBalance, weekPaid, weeksElapsed, weeksAhead, cumulativeTarget, gated, dueText, deadlineMs: deadline.getTime(), dayOff, dhh: hh || 0, dmm: mm || 0, agreement: null };
+    // Valid fee agreement overrides the lock (installments / deferral until agreed date).
+    try {
+        const agr = await hubMyAgreement(me);
+        if (agr) return { ...base, locked: false, grace: false, agreement: agr };
+    } catch {}
     if (Date.now() < deadline.getTime()) return { ...base, locked: false, grace: true };
     return { ...base, locked: !met, grace: false };
 }
@@ -567,6 +584,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                     const progBal = Math.max(0, fee - paid);
                     const weekDue = L && L.target ? Math.max(0, L.target - (L.weekPaid || 0)) : 0;
                     let status = '';
+                    if (L && L.agreement) status = `<div style="font-size:12px;color:var(--info);font-weight:700;margin-top:6px;">📝 Access on agreement until <b>${esc(L.agreement.dueDate || '')}</b>${L.agreement.type === 'installment' && L.agreement.weeklyAmount ? ` (${L.agreement.weeklyAmount}/week)` : ''}</div>`;
                     if (L && L.target) {
                         const ti = hubTopUpInfo(L);
                         const coverTxt = ti ? (ti.ranOut ? ` · ran out <b>${ti.fmtD(ti.coveredUntil)}</b> — top up now` : ` · covered until <b>${ti.fmtD(ti.coveredUntil)}</b>`) : '';

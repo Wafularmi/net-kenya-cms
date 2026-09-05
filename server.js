@@ -558,6 +558,18 @@ function canAccessStore(user, store, method) {
         }
         return false;
     }
+    // Fee agreements: reads for staff, writes admin/finance/registrar/assistant(with Finance tab)
+    if (store === 'feeAgreements') {
+        if (method === 'GET') return true;
+        if (user.role === 'admin' || user.role === 'finance' || user.role === 'registrar') return true;
+        if (user.role === 'assistant') {
+            const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
+            const access = rec ? (rec.value || rec) : null;
+            if (!access || access['finance'] !== false) return true;
+            return false;
+        }
+        return false;
+    }
     if (FINANCE_ADMIN_ROLES.has(user.role)) return true;
 
     if (user.role === 'student') {
@@ -650,6 +662,9 @@ function filterStoreForUser(user, store, rows) {
         return rows.filter(r => r && String(r.username) === uid);
     }
     if (store === 'courseCompletions') {
+        return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
+    if (store === 'feeAgreements') {
         return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
     }
     if (store === 'alumni') {

@@ -4660,12 +4660,89 @@ async function renderInstallments() {
 async function renderBalances() {
     const students = await dbGetAll('students');
     const payments = await dbGetAll('payments');
+    const agreements = await dbGetAll('feeAgreements').catch(() => []);
+    const today = new Date().toISOString().split('T')[0];
+    const activeAgr = (sid) => agreements.find(a => String(a.studentId) === String(sid) && a.status === 'approved' && String(a.dueDate || '') >= today);
     const balances = students.map(s => {
         const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
         const fee = getCachedStudentFee(s);
-        return { ...s, paid, fee, balance: fee - paid };
+        return { ...s, paid, fee, balance: fee - paid, agr: activeAgr(s.id) };
     }).filter(s => s.balance > 0).sort((a, b) => b.balance - a.balance);
-    document.getElementById('balances-list').innerHTML = balances.length ? balances.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span><br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)} / ${formatCurrency(s.fee)}</span></div><div style="text-align:right;"><span style="font-weight:700;color:var(--warning);">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button></div></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No outstanding balances</div>';
+    document.getElementById('balances-list').innerHTML = balances.length ? balances.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span><br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">📝 Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:var(--warning);">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button></div></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No outstanding balances</div>';
+}
+function requireAgreementRole() {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (['admin', 'finance', 'registrar', 'assistant'].includes(u.role)) return true;
+    showToast('Access denied: Only admin/finance/registrar/assistant can manage agreements.', { type: 'danger' });
+    return false;
+}
+async function showAgreementForm(studentId) {
+    if (!requireAgreementRole()) return;
+    const students = await dbGetAll('students');
+    const s = students.find(x => x.id === studentId);
+    const all = await dbGetAll('feeAgreements').catch(() => []);
+    const mine = all.filter(a => String(a.studentId) === String(studentId)).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+    const listHtml = mine.length ? mine.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;font-size:12px;">
+        <span><b>${a.type === 'installment' ? 'Installments' : 'Deferral'}</b> · till ${escapeHtml(a.dueDate || '—')} · <span class="badge badge-${a.status === 'approved' ? 'success' : a.status === 'rejected' ? 'danger' : 'warning'}">${escapeHtml(a.status)}</span>${a.evidence ? ' · 📎 evidence' : ''}</span>
+        <span>${a.status !== 'approved' ? `<button class="btn btn-success btn-sm" onclick="setAgreementStatus('${a.id}','approved')">Approve</button> ` : ''}<button class="btn btn-outline btn-sm" onclick="deleteAgreement('${a.id}','${studentId}')">Del</button></span>
+    </div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);">No agreements yet.</div>';
+    const content = `<div style="margin-bottom:8px;font-size:13px;">Student: <b>${escapeHtml(s ? s.name : studentId)}</b></div>
+        ${listHtml}
+        <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
+        <div class="form-group"><label>Agreement Type</label><select id="agr-type" onchange="toggleAgrFields()"><option value="installment">Pay in installments (access continues)</option><option value="deferral">Defer — access until agreed date</option></select></div>
+        <div class="form-row"><div class="form-group" id="agr-weekly-group"><label>Amount per Week (KES)</label><input type="number" id="agr-weekly" min="1" placeholder="e.g. 200"></div><div class="form-group"><label>Valid Until (agreed date) *</label><input type="date" id="agr-due"></div></div>
+        <div class="form-group"><label>Written Commitment *</label><textarea id="agr-note" rows="3" placeholder="e.g. Student commits to pay KES 200 every Friday until clear..."></textarea></div>
+        <div class="form-group"><label>Signed Evidence (optional, photo/PDF ≤2MB)</label><input type="file" id="agr-evidence" accept="image/*,.pdf"></div>
+        <div class="form-group"><label>Status</label><select id="agr-status"><option value="approved">Approved (unlocks immediately)</option><option value="pending">Pending</option><option value="rejected">Rejected</option></select></div>`;
+    showModal('Fee Agreement', content, `<button class="btn btn-primary" onclick="saveAgreement('${studentId}')">Save Agreement</button>`);
+}
+function toggleAgrFields() {
+    const t = document.getElementById('agr-type')?.value;
+    const g = document.getElementById('agr-weekly-group');
+    if (g) g.style.display = t === 'installment' ? '' : 'none';
+}
+async function saveAgreement(studentId) {
+    if (!requireAgreementRole()) return;
+    const type = document.getElementById('agr-type').value;
+    const weekly = parseFloat(document.getElementById('agr-weekly').value) || 0;
+    const due = document.getElementById('agr-due').value;
+    const note = document.getElementById('agr-note').value.trim();
+    const status = document.getElementById('agr-status').value;
+    if (!due) return showToast('Agreed date is required!');
+    if (!note) return showToast('Write the commitment note!');
+    if (type === 'installment' && !(weekly > 0)) return showToast('Enter amount per week!');
+    let evidence = null, evidenceName = '';
+    const f = document.getElementById('agr-evidence').files[0];
+    if (f) {
+        if (f.size > 2 * 1024 * 1024) return showToast('Evidence too large (max 2MB)!', { type: 'danger' });
+        evidenceName = f.name;
+        evidence = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(f);
+        });
+    }
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    await dbPut('feeAgreements', { id: 'AGR-' + Date.now(), studentId, type, weeklyAmount: weekly, dueDate: due, note, evidence, evidenceName, status, by: u.username || '', at: new Date().toISOString() });
+    closeModal(); renderBalances(); showToast('Agreement saved (' + status + ')'); logAudit('created', 'feeAgreement', { studentId, type, status });
+}
+async function setAgreementStatus(id, status) {
+    if (!requireAgreementRole()) return;
+    const all = await dbGetAll('feeAgreements');
+    const a = all.find(x => x.id === id);
+    if (!a) return;
+    a.status = status;
+    await dbPut('feeAgreements', a);
+    renderBalances();
+    showAgreementForm(a.studentId);
+}
+async function deleteAgreement(id, studentId) {
+    if (!requireAgreementRole()) return;
+    if (!await showConfirm('Delete', 'Delete this agreement?')) return;
+    await dbDelete('feeAgreements', id);
+    renderBalances();
+    showAgreementForm(studentId);
 }
 function requireFinanceRole() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -6619,6 +6696,52 @@ async function populateGraduationFilters() {
     if (programSelect) programSelect.innerHTML = '<option value="">All Programs</option>' + programs.map(p => `<option value="${p}">${p}</option>`).join('');
     if (yearSelect) yearSelect.innerHTML = '<option value="all">All Years</option>' + years.map(y => `<option value="${y}">Year ${y}</option>`).join('');
 }
+// Shared graduation rule: coverage % gate + attendance waived when coverage is met.
+function gradIssuesFor(s, m) {
+    const studentGrades = m.grades.filter(g => g.studentId === s.id);
+    const studentCourses = studentGrades.map(g => g.courseId);
+    const enrolledCourses = m.courses.filter(c => studentCourses.includes(c.id));
+    const totalCredits = enrolledCourses.reduce((sum, c) => sum + (c.credits || 0), 0);
+    const totalGPAPoints = studentGrades.reduce((sum, g) => {
+        const c = enrolledCourses.find(c => c.id === g.courseId);
+        return sum + (Number(g.gpa) || 0) * (c ? c.credits : 3);
+    }, 0);
+    const cgpa = totalCredits > 0 ? (totalGPAPoints / totalCredits) : 0;
+    const studentChapel = m.chapel.filter(c => c.studentId === s.id && (c.status === 'present' || c.status === 'late')).length;
+    const studentAttendance = m.attendance.filter(a => a.studentId === s.id);
+    const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
+    const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
+    const totalPaid = m.payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+    const feeBalance = getCachedStudentFee(s) - totalPaid;
+    const seq = sortCoursesBySequence(m.courses);
+    let coveragePct = 100;
+    if (seq.length) {
+        const st = studentCourseStatuses(s.id, seq, m);
+        coveragePct = Math.round((seq.filter(c => st[c.id] === 'covered').length / seq.length) * 100);
+    }
+    const programReqs = m.requirements.filter(r => r.program === s.program);
+    const issues = [];
+    const reqCredit = programReqs.find(r => r.requirement === 'credits');
+    if (reqCredit && totalCredits < reqCredit.minimum) issues.push(true);
+    const reqGPA = programReqs.find(r => r.requirement === 'gpa');
+    if (reqGPA && cgpa < reqGPA.minimum) issues.push(true);
+    const reqCoverage = programReqs.find(r => r.requirement === 'coverage');
+    if (reqCoverage && coveragePct < reqCoverage.minimum) issues.push(true);
+    const waived = !!(reqCoverage && coveragePct >= reqCoverage.minimum);
+    const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
+    if (reqAttendance && attendancePct < reqAttendance.minimum && !waived) issues.push(true);
+    const reqChapel = programReqs.find(r => r.requirement === 'chapel');
+    if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
+    if (programReqs.length && feeBalance > 0) issues.push(true);
+    return { issues, coveragePct, waived, cgpa, totalCredits, attendancePct, studentChapel, feeBalance };
+}
+async function gradExtraData() {
+    const [submissions, quizzes, exams, courseCompletions] = await Promise.all([
+        dbGetAll('submissions').catch(() => []), dbGetAll('quizzes').catch(() => []),
+        dbGetAll('exams').catch(() => []), dbGetAll('courseCompletions').catch(() => [])
+    ]);
+    return { submissions, quizzes, exams, courseCompletions };
+}
 async function checkGraduation() {
     const program = document.getElementById('grad-program').value;
     const year = document.getElementById('grad-year').value;
@@ -6630,6 +6753,18 @@ async function checkGraduation() {
     const attendance = await dbGetAll('attendance');
     const requirements = await dbGetAll('gradRequirements');
     const payments = await dbGetAll('payments');
+    const gSubmissions = await dbGetAll('submissions').catch(() => []);
+    const gQuizzes = await dbGetAll('quizzes').catch(() => []);
+    const gExams = await dbGetAll('exams').catch(() => []);
+    const gCompletions = await dbGetAll('courseCompletions').catch(() => []);
+    const gData = { courses, grades, submissions: gSubmissions, quizzes: gQuizzes, exams: gExams, courseCompletions: gCompletions };
+    const coveragePctOf = (sid) => {
+        const seq = sortCoursesBySequence(courses);
+        if (!seq.length) return 100;
+        const st = studentCourseStatuses(sid, seq, gData);
+        const covered = seq.filter(c => st[c.id] === 'covered').length;
+        return Math.round((covered / seq.length) * 100);
+    };
     let html = `<h4 style="color:var(--accent);margin-bottom:12px;">Graduation Eligibility: ${program || 'All Programs'} ${year || ''}</h4>`;
     if (!requirements.length) {
         html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius);color:var(--text-muted);font-size:13px;">No graduation requirements defined — all students are eligible by default. Add requirements in Settings &gt; Graduation Requirements to enforce conditions.</div>';
@@ -6663,15 +6798,20 @@ async function checkGraduation() {
         if (reqCredit && totalCredits < reqCredit.minimum) issues.push(`Needs ${reqCredit.minimum - totalCredits} more credits`);
         const reqGPA = programReqs.find(r => r.requirement === 'gpa');
         if (reqGPA && parseFloat(cgpa) < reqGPA.minimum) issues.push(`GPA ${cgpa} below ${reqGPA.minimum}`);
+        const coveragePct = coveragePctOf(s.id);
+        const reqCoverage = programReqs.find(r => r.requirement === 'coverage');
+        if (reqCoverage && coveragePct < reqCoverage.minimum) issues.push(`Coverage ${coveragePct}% below ${reqCoverage.minimum}%`);
+        const coverageWaivesAttendance = !!(reqCoverage && coveragePct >= reqCoverage.minimum);
         const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
-        if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(`Attendance ${attendancePct}% below ${reqAttendance.minimum}%`);
+        if (reqAttendance && attendancePct < reqAttendance.minimum && !coverageWaivesAttendance) issues.push(`Attendance ${attendancePct}% below ${reqAttendance.minimum}%`);
         const reqChapel = programReqs.find(r => r.requirement === 'chapel');
         if (reqChapel && studentChapel < reqChapel.minimum) issues.push(`Chapel ${studentChapel} below ${reqChapel.minimum}`);
         if (programReqs.length && !feesClear) issues.push(`Fee balance: ${formatCurrency(feeBalance)}`);
         const eligible = issues.length === 0;
         html += `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;">
             <div style="display:flex;justify-content:space-between;width:100%;"><b>${s.name}</b> <span class="badge badge-${eligible ? 'success' : 'danger'}">${eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}</span></div>
-            <div style="font-size:11px;color:var(--text-secondary);">Credits: ${totalCredits} | GPA: ${cgpa} | Attendance: ${attendancePct}% | Chapel: ${studentChapel} | Fees: ${feesClear ? 'Clear' : formatCurrency(feeBalance)}</div>
+            <div style="font-size:11px;color:var(--text-secondary);">Credits: ${totalCredits} | GPA: ${cgpa} | Attendance: ${attendancePct}%${coverageWaivesAttendance ? ' (waived)' : ''} | Chapel: ${studentChapel} | Coverage: ${coveragePct}% | Fees: ${feesClear ? 'Clear' : formatCurrency(feeBalance)}</div>
+            ${coverageWaivesAttendance && reqAttendance && attendancePct < reqAttendance.minimum ? `<div style="font-size:11px;color:var(--success);">✅ Attendance requirement waived (coverage ${coveragePct}% ≥ ${reqCoverage.minimum}%)</div>` : ''}
             ${issues.length ? `<div style="font-size:11px;color:var(--danger);">⚠️ ${issues.join('; ')}</div>` : ''}
         </div>`;
     }
@@ -6692,6 +6832,8 @@ async function generateGraduationList() {
     const requirements = await dbGetAll('gradRequirements');
     const payments = await dbGetAll('payments');
     const centers = await getCenters();
+    const lExtra = await gradExtraData();
+    const lCtx = { courses, grades, chapel, attendance, payments, requirements, ...lExtra };
     let eligible = [];
     for (const s of students) {
         const studentGrades = grades.filter(g => g.studentId === s.id);
@@ -6707,23 +6849,11 @@ async function generateGraduationList() {
         const studentAttendance = attendance.filter(a => a.studentId === s.id);
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
-        const totalPaid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
-        const feeBalance = getCachedStudentFee(s) - totalPaid;
-        const programReqs = requirements.filter(r => r.program === s.program);
-        let issues = [];
-        const reqCredit = programReqs.find(r => r.requirement === 'credits');
-        if (reqCredit && totalCredits < reqCredit.minimum) issues.push(true);
-        const reqGPA = programReqs.find(r => r.requirement === 'gpa');
-        if (reqGPA && cgpa < reqGPA.minimum) issues.push(true);
-        const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
-        if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(true);
-        const reqChapel = programReqs.find(r => r.requirement === 'chapel');
-        if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
-        if (programReqs.length && feeBalance > 0) issues.push(true);
-        if (issues.length === 0) {
-            const classification = getClassification(cgpa);
+        const g = gradIssuesFor(s, lCtx);
+        if (g.issues.length === 0) {
+            const classification = getClassification(g.cgpa);
             const center = centers.find(c => c.id === s.studyCenterId);
-            eligible.push({ ...s, cgpa, totalCredits, classification: classification.label, centerName: center ? center.name : '' });
+            eligible.push({ ...s, cgpa: g.cgpa, totalCredits: g.totalCredits, classification: classification.label, centerName: center ? center.name : '' });
         }
     }
     eligible.sort((a, b) => a.name.localeCompare(b.name));
@@ -6783,6 +6913,8 @@ async function graduateEligibleStudents() {
     const attendance = await dbGetAll('attendance');
     const requirements = await dbGetAll('gradRequirements');
     const payments = await dbGetAll('payments');
+    const mExtra = await gradExtraData();
+    const mCtx = { courses, grades, chapel, attendance, payments, requirements, ...mExtra };
     let eligible = [];
     for (const s of students) {
         const studentGrades = grades.filter(g => g.studentId === s.id);
@@ -6805,12 +6937,8 @@ async function graduateEligibleStudents() {
         if (reqCredit && totalCredits < reqCredit.minimum) issues.push(true);
         const reqGPA = programReqs.find(r => r.requirement === 'gpa');
         if (reqGPA && cgpa < reqGPA.minimum) issues.push(true);
-        const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
-        if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(true);
-        const reqChapel = programReqs.find(r => r.requirement === 'chapel');
-        if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
-        if (programReqs.length && feeBalance > 0) issues.push(true);
-        if (issues.length === 0) eligible.push(s);
+        const g = gradIssuesFor(s, mCtx);
+        if (g.issues.length === 0) eligible.push(s);
     }
     if (!eligible.length) return showToast('No eligible graduates to process.');
     if (!await showConfirm('Confirm Graduation', `<b>${eligible.length}</b> eligible student(s) will be marked as Graduated and migrated to Alumni. Continue?`)) return;
@@ -6880,31 +7008,11 @@ async function generateGraduationSeating() {
     const attendance = await dbGetAll('attendance');
     const requirements = await dbGetAll('gradRequirements');
     const payments = await dbGetAll('payments');
+    const stExtra = await gradExtraData();
+    const stCtx = { courses, grades, chapel, attendance, payments, requirements, ...stExtra };
     const eligible = [];
     for (const s of students) {
-        const studentGrades = grades.filter(g => g.studentId === s.id);
-        const enrolledCourses = courses.filter(c => studentGrades.map(g => g.courseId).includes(c.id));
-        const totalCredits = enrolledCourses.reduce((sum, c) => sum + c.credits, 0);
-        const totalGPAPoints = studentGrades.reduce((sum, g) => { const c = enrolledCourses.find(c => c.id === g.courseId); return sum + g.gpa * (c ? c.credits : 3); }, 0);
-        const cgpa = totalCredits > 0 ? (totalGPAPoints / totalCredits) : 0;
-        const studentChapel = chapel.filter(c => c.studentId === s.id && (c.status === 'present' || c.status === 'late')).length;
-        const studentAttendance = attendance.filter(a => a.studentId === s.id);
-        const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
-        const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
-        const totalPaid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
-        const feeBalance = getCachedStudentFee(s) - totalPaid;
-        const programReqs = requirements.filter(r => r.program === s.program);
-        let issues = [];
-        const reqCredit = programReqs.find(r => r.requirement === 'credits');
-        if (reqCredit && totalCredits < reqCredit.minimum) issues.push(true);
-        const reqGPA = programReqs.find(r => r.requirement === 'gpa');
-        if (reqGPA && cgpa < reqGPA.minimum) issues.push(true);
-        const reqAttendance = programReqs.find(r => r.requirement === 'attendance');
-        if (reqAttendance && attendancePct < reqAttendance.minimum) issues.push(true);
-        const reqChapel = programReqs.find(r => r.requirement === 'chapel');
-        if (reqChapel && studentChapel < reqChapel.minimum) issues.push(true);
-        if (programReqs.length && feeBalance > 0) issues.push(true);
-        if (issues.length === 0) eligible.push(s);
+        if (gradIssuesFor(s, stCtx).issues.length === 0) eligible.push(s);
     }
     if (!eligible.length) return showToast('No eligible graduates to seat!');
     const gradId = 'GRAD-' + (program || 'ALL') + '-' + (year || 'ALL');
@@ -18397,7 +18505,7 @@ async function renderGradRequirements() {
 async function showGradReqForm() {
     const settings = await dbGet('settings', 'academic');
     const programs = settings && settings.programs ? settings.programs.split(',').map(p => p.trim()).filter(p => p) : ['Theology', 'Biblical Studies', 'Ministry'];
-    const content = `<div class="form-group"><label>Program</label><select id="gradreq-program">${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Requirement Type</label><select id="gradreq-type"><option value="credits">Minimum Credits</option><option value="gpa">Minimum GPA</option><option value="attendance">Minimum Attendance %</option><option value="chapel">Minimum Chapel Credits</option><option value="course">Required Course</option></select></div><div class="form-group"><label>Minimum Value</label><input type="number" id="gradreq-minimum" step="0.01" placeholder="e.g., 120 for credits, 2.0 for GPA"></div>`;
+    const content = `<div class="form-group"><label>Program</label><select id="gradreq-program">${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Requirement Type</label><select id="gradreq-type"><option value="credits">Minimum Credits</option><option value="gpa">Minimum GPA</option><option value="attendance">Minimum Attendance %</option><option value="chapel">Minimum Chapel Credits</option><option value="course">Required Course</option><option value="coverage">Minimum Course Coverage %</option></select></div><div class="form-group"><label>Minimum Value</label><input type="number" id="gradreq-minimum" step="0.01" placeholder="e.g., 120 for credits, 2.0 for GPA, 80 for coverage %"></div>`;
     showModal('Add Graduation Requirement', content, `<button class="btn btn-primary" onclick="saveGradReq()">Save</button>`);
 }
 async function saveGradReq() {
