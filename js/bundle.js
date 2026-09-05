@@ -3539,6 +3539,7 @@ async function saveAttendance(courseId, date) {
     }
     showToast(`✅ Attendance saved for ${saved} of ${filtered.length} students!`, { type: 'success', duration: 4000 });
     logAudit('saved', 'attendance', { courseId, date, count: saved, center: centerId || 'all' });
+    try { await loadAttendance(); } catch {}
 }
 function printAttendance() {
     if (!_attendanceData) return showToast('Load attendance first!');
@@ -3574,17 +3575,32 @@ async function printAttendanceWindow() {
     if (branding && branding.email) addrParts.push('Email: ' + branding.email);
     const addressHTML = addrParts.length ? addrParts.join(' &nbsp;|&nbsp; ') : '';
     let present = 0, absent = 0, late = 0, unmarked = 0;
+    // Prefer the live sheet (what the user just marked) over a re-fetch:
+    // guarantees the print matches the screen even if filters changed or keys differ.
+    const sheetMap = {};
+    try {
+        document.querySelectorAll('#attendance-sheet input[type="radio"]:checked').forEach(r => {
+            const m = (r.name || '').match(/^att-(.+)$/);
+            if (m) {
+                const sid = m[1];
+                const noteEl = document.getElementById('att-note-' + sid);
+                sheetMap[sid] = { status: r.value, notes: noteEl ? noteEl.value.trim() : '' };
+            }
+        });
+    } catch {}
+    const normDate = (d) => String(d || '').split('T')[0];
     const rows = courseStudents.map((s, idx) => {
-        const record = attendance.find(a => a.studentId === s.id && a.courseId === courseId && a.date === date);
-        const status = record ? record.status : '';
+        const record = attendance.find(a => String(a.studentId) === String(s.id) && String(a.courseId) === String(courseId) && normDate(a.date) === normDate(date));
+        const sheet = sheetMap[s.id];
+        const status = (sheet && sheet.status) || (record ? record.status : '');
         if (status === 'present') present++;
         else if (status === 'absent') absent++;
         else if (status === 'late') late++;
         else unmarked++;
-        const studentAttendance = attendance.filter(a => a.studentId === s.id);
+        const studentAttendance = attendance.filter(a => String(a.studentId) === String(s.id));
         const attended = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const pct = studentAttendance.length > 0 ? Math.round((attended / studentAttendance.length) * 100) : 0;
-        const note = record && record.notes ? escapeHtml(record.notes) : '';
+        const note = (sheet && sheet.notes) || (record && record.notes) ? escapeHtml((sheet && sheet.notes) || record.notes) : '';
         return { idx: idx + 1, s, status, pct, note };
     });
     const generated = new Date();
