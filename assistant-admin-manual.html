@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assistant Administrator User Manual — {{SCHOOL_NAME}}</title>
+<style>
+    :root {
+        --primary: #f59e0b;
+        --primary-dark: #d97706;
+        --text: #1e293b;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --bg: #f8fafc;
+        --border: #e2e8f0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        line-height: 1.7;
+        padding: 40px 20px;
+    }
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        padding: 48px 56px;
+    }
+    @media (max-width: 600px) {
+        body { padding: 16px; }
+        .container { padding: 24px 20px; }
+    }
+    .toc { margin-bottom: 40px; }
+    .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
+    .toc ol { padding-left: 24px; }
+    .toc ol li { margin-bottom: 4px; }
+    .toc ol li a { color: var(--primary-dark); text-decoration: none; }
+    .toc ol li a:hover { text-decoration: underline; }
+    section { margin-bottom: 36px; }
+    section h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    section h3 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+    section h4 { font-size: 14px; margin: 12px 0 6px; color: var(--text-secondary); }
+    section p { margin-bottom: 10px; color: var(--text-secondary); }
+    section ul, section ol { padding-left: 24px; margin-bottom: 10px; }
+    section li { margin-bottom: 4px; color: var(--text-secondary); }
+    .note {
+        background: #fffbeb;
+        border-left: 4px solid var(--primary);
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .tip {
+        background: #f0fdf4;
+        border-left: 4px solid #22c55e;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .step { margin: 6px 0 6px 24px; }
+    .step b { color: var(--text); }
+    .ack-box {
+        background: linear-gradient(135deg, #fffbeb, #fef3c7);
+        border: 1px solid #f59e0b;
+        border-radius: 12px;
+        padding: 28px 24px;
+        margin-bottom: 36px;
+    }
+    .ack-box h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    .ack-box p, .ack-box li { color: #78350f; }
+    .signature-area {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid #fde68a;
+        font-size: 13px;
+    }
+    .screenshot {
+        max-width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        margin: 16px 0;
+        display: block;
+    }
+    .screenshot-caption {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: -10px;
+        margin-bottom: 20px;
+        font-style: italic;
+    }
+    .footer {
+        text-align: center;
+        padding: 20px 0 0;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .front-cover {
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1a2744 100%);
+        border-radius: 16px;
+        margin-bottom: 0;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .front-cover::before {
+        content: '';
+        position: absolute;
+        top: -80px;
+        right: -80px;
+        width: 300px;
+        height: 300px;
+        background: rgba(245,158,11,0.08);
+        border-radius: 50%;
+    }
+    .front-cover::after {
+        content: '';
+        position: absolute;
+        bottom: -120px;
+        left: -60px;
+        width: 400px;
+        height: 400px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .front-cover .cover-logo {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .cover-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .front-cover .cover-logo .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 36px;
+        letter-spacing: 2px;
+    }
+    .front-cover h1 {
+        font-size: 34px;
+        font-weight: 800;
+        margin-bottom: 6px;
+        position: relative;
+        z-index: 1;
+        letter-spacing: 0.5px;
+    }
+    .front-cover .subtitle {
+        font-size: 18px;
+        opacity: 0.85;
+        font-weight: 400;
+        margin-bottom: 10px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .divider {
+        width: 80px;
+        height: 4px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .version {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .mission {
+        max-width: 500px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        font-size: 15px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
+        backdrop-filter: blur(4px);
+    }
+    .front-cover .author {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover {
+        page-break-before: always;
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a2744 0%, #2a5298 50%, #1e3c72 100%);
+        border-radius: 16px;
+        margin-top: 36px;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .back-cover::before {
+        content: '';
+        position: absolute;
+        bottom: -60px;
+        right: -60px;
+        width: 250px;
+        height: 250px;
+        background: rgba(245,158,11,0.06);
+        border-radius: 50%;
+    }
+    .back-cover::after {
+        content: '';
+        position: absolute;
+        top: -40px;
+        left: -40px;
+        width: 200px;
+        height: 200px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .back-cover .inner {
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover .divider {
+        width: 60px;
+        height: 3px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+    }
+    .back-cover .logo-small {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .back-cover .logo-small img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .back-cover .logo-small .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 20px;
+        letter-spacing: 1px;
+    }
+    .back-cover h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        opacity: 0.85;
+    }
+    .back-cover p {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 6px;
+        line-height: 1.8;
+    }
+    .back-cover .mission-statement {
+        max-width: 450px;
+        margin: 24px auto;
+        padding: 16px 20px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 14px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.8;
+    }
+    .back-cover .contact {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 20px;
+    }
+    @media print {
+        body { padding: 0; background: #fff; }
+        .container { box-shadow: none; padding: 0; border-radius: 0; max-width: 100%; }
+        .front-cover, .back-cover { border-radius: 0; margin: 0; min-height: 100vh; }
+        .toc { page-break-after: always; }
+        section { page-break-inside: avoid; }
+        .no-print { display: none; }
+    }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="no-print" style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF</button>
+    <button onclick="closeManualTab()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
+</div>
+
+<div class="front-cover">
+    <div class="cover-logo">
+        <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+        <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+    </div>
+    <h1>{{SCHOOL_NAME}}</h1>
+    <div class="subtitle">Assistant Administrator User Manual</div>
+    <div class="divider"></div>
+    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
+    <div class="mission">
+        "This platform exists to ensure that no one has an excuse<br>
+        for ministering without having been trained."
+    </div>
+    <div class="author">
+        Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}}<br>
+        Lead Developer: Pastor David Wafula Wanyonyi
+    </div>
+</div>
+
+<div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#intro">Introduction — Your Role as Assistant Administrator</a></li>
+        <li><a href="#login">Logging In &amp; Out</a></li>
+        <li><a href="#dashboard">Your Dashboard &amp; Navigation</a></li>
+        <li><a href="#students">Students — Register, Edit &amp; Delete</a></li>
+        <li><a href="#courses">Courses, Lessons &amp; Study Notes</a></li>
+        <li><a href="#attendance">Attendance &amp; Chapel Records</a></li>
+        <li><a href="#grades">Grades, Exams &amp; Quizzes</a></li>
+        <li><a href="#finance">Finance You Can Touch</a></li>
+        <li><a href="#gates">Fee-Gated Learning &amp; Content Gates</a></li>
+        <li><a href="#coverage">Coverage Screen &amp; Reports</a></li>
+        <li><a href="#graduation">Graduation List</a></li>
+        <li><a href="#certificates">Certificates &amp; Verification</a></li>
+        <li><a href="#password">Changing Your Own Password</a></li>
+        <li><a href="#troubleshooting">Troubleshooting — Common Problems</a></li>
+        <li><a href="#acknowledgments">Acknowledgments</a></li>
+    </ol>
+</div>
+
+<section id="intro">
+    <h2>1. Introduction — Your Role as Assistant Administrator</h2>
+    <p>Welcome to the <strong>{{SCHOOL_NAME}} Assistant Administrator</strong> role. You have admin-level powers, but only inside the tabs the main administrator toggles <strong>ON</strong> for you in <strong>Settings → Assistant Admin Access</strong>. Anything not toggled ON stays hidden from you.</p>
+
+    <h3>How Your Permissions Work</h3>
+    <div class="step"><b>Step 1:</b> The main administrator opens <strong>Settings → Assistant Admin Access</strong>.</div>
+    <div class="step"><b>Step 2:</b> For each tab (Students, Courses, Finance, Grades, Attendance, Coverage, Graduation, Certificates, Reports, Settings, and others), the admin switches your toggle ON or OFF.</div>
+    <div class="step"><b>Step 3:</b> When you log in, your sidebar shows <strong>only the tabs toggled ON for you</strong>. Everything else is invisible to you.</div>
+    <div class="step"><b>Step 4:</b> If your duties change, the admin adjusts the toggles — you do not need a new account. Log out and back in to see the change.</div>
+
+    <div class="note"><b>Important:</b> Throughout this manual, every feature is described as <strong>"if assigned to you."</strong> Never assume you have a tab. If you cannot find a screen described here, it means that tab was not toggled ON for you — ask the main administrator.</div>
+
+    <h3>What You May Be Asked to Do</h3>
+    <ul>
+        <li>Register and manage students, if the Students tab is assigned to you</li>
+        <li>Upload lessons and study notes, if the Courses tab is assigned to you</li>
+        <li>Mark attendance and chapel records, if the Attendance tab is assigned to you</li>
+        <li>Enter grades and manage exams and quizzes, if the Grades tab is assigned to you</li>
+        <li>Record payments, installments, and fee agreements, if the Finance tab is assigned to you</li>
+        <li>Generate letters and certificates, if the Certificates tab is assigned to you</li>
+        <li>View coverage, reports, and graduation lists, if those tabs are assigned to you</li>
+    </ul>
+    <div class="tip">When in doubt, check your sidebar. Your sidebar is the truth about what you are allowed to do today.</div>
+</section>
+
+<section id="login">
+    <h2>2. Logging In &amp; Out</h2>
+
+    <h3>Your Login Credentials</h3>
+    <p>The main administrator creates your assistant administrator account for you. You will receive your login details from the administration.</p>
+    <ul>
+        <li><strong>Username:</strong> The phone number or username the admin registered for you</li>
+        <li><strong>Password:</strong> The temporary password issued by the admin (change it after first login — see Section 13)</li>
+    </ul>
+
+    <h3>Step-by-Step: How to Log In</h3>
+    <div class="step"><b>Step 1:</b> Open your browser and go to <strong>https://netfoundation.ke</strong></div>
+    <div class="step"><b>Step 2:</b> Wait for the login screen. You will see <strong>Username</strong> and <strong>Password</strong> fields plus a <strong>Sign In</strong> button.</div>
+    <div class="step"><b>Step 3:</b> Type your username (usually your phone number) into the <strong>Username</strong> field.</div>
+    <div class="step"><b>Step 4:</b> Type your password into the <strong>Password</strong> field. Passwords are case-sensitive — watch Caps Lock.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Sign In"</strong> (or press Enter).</div>
+    <div class="step"><b>Step 6:</b> If correct, you enter the portal as an Assistant Administrator and see only your assigned tabs. If you see "Invalid credentials," retype carefully and try again.</div>
+
+    <h3>First-Time Login</h3>
+    <p>The first time you log in you may see the college <strong>Terms and Conditions</strong> pop-up. Read it, check "I agree," and click "Accept." Then immediately change your temporary password (Section 13).</p>
+
+    <h3>Forgot Your Password?</h3>
+    <p>Only the main administrator can reset your password. Contact the admin office — you will receive a temporary password to use once, then set your own.</p>
+
+    <h3>How to Log Out</h3>
+    <div class="step"><b>Step 1:</b> Click your name or profile icon at the top-right corner.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Logout"</strong> or <strong>"Sign Out"</strong> from the dropdown.</div>
+    <div class="note"><b>Important:</b> Always log out on shared computers. Your account carries admin powers inside your assigned tabs — do not leave it open.</div>
+</section>
+
+<section id="dashboard">
+    <h2>3. Your Dashboard &amp; Navigation</h2>
+    <p>Your dashboard is the first screen after login. It summarises what needs your attention — but only for areas assigned to you.</p>
+
+    <h3>What You Will See</h3>
+    <h4>📊 Statistics Cards</h4>
+    <p>Cards at the top show counts for students, courses, fees, attendance, and similar — limited to your assigned tabs. Click a card to jump to that section.</p>
+    <h4>📝 To Do List</h4>
+    <p>Pending items such as unpaid installments, unmarked attendance, ungraded quizzes, or upcoming exams, sorted by urgency.</p>
+    <h4>📅 Upcoming Events</h4>
+    <p>Exam dates, deadlines, and academic calendar items.</p>
+    <h4>📢 Notifications</h4>
+    <p>System alerts and ticket updates. The bell icon at the top-right shows your unread count.</p>
+
+    <h3>Navigation — Only Assigned Tabs Appear</h3>
+    <p>Use the <strong>sidebar menu</strong> on the left to move between sections. You will ONLY see tabs the admin toggled ON for you in <strong>Settings → Assistant Admin Access</strong>, for example:</p>
+    <ul>
+        <li><strong>Dashboard</strong> — This home screen (always visible)</li>
+        <li><strong>Students</strong> — If assigned to you</li>
+        <li><strong>Courses</strong> — If assigned to you</li>
+        <li><strong>Attendance</strong> — If assigned to you</li>
+        <li><strong>Grades / Exams / Quizzes</strong> — If assigned to you</li>
+        <li><strong>Finance</strong> — If assigned to you</li>
+        <li><strong>Coverage / Reports</strong> — If assigned to you</li>
+        <li><strong>Graduation</strong> — If assigned to you</li>
+        <li><strong>Certificates</strong> — If assigned to you</li>
+        <li><strong>Settings</strong> — If assigned to you (most assistants do NOT get this)</li>
+    </ul>
+
+    <h3>What "Access Denied" Means</h3>
+    <p>If you click something — or follow a link or bookmark — for a tab that is NOT assigned to you, you will see an <strong>"Access denied"</strong> message or the page will refuse to load. This is normal. It means:</p>
+    <ol>
+        <li>The admin did not toggle that tab ON for you.</li>
+        <li>You are not doing anything wrong and nothing is broken.</li>
+        <li>Do not try to work around it. Ask the main administrator to grant the tab if your duties require it, then log out and back in.</li>
+    </ol>
+    <div class="tip">If a tab you had yesterday is gone today, the admin changed your toggles. Log out, log back in, and if it is still missing, confirm with the administrator.</div>
+</section>
+
+<section id="students">
+    <h2>4. Students — Register, Edit &amp; Delete</h2>
+    <p>If the <strong>Students</strong> tab is assigned to you, you may register new students, edit their records, and delete records when authorised. If the tab is not assigned to you, you will not see it at all.</p>
+
+    <h3>How to Open the Students Screen</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Students"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> You will see the student list with search, filters (program, year, study center), and each student's admission number, phone, and balance.</div>
+
+    <h3>How to Register a New Student</h3>
+    <div class="step"><b>Step 1:</b> On the Students page, click <strong>"Add Student"</strong> or <strong>"Register"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Fill in the required fields carefully:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>Full name</strong> — Exactly as it should appear on certificates</li>
+        <li><strong>Phone number</strong> — This becomes the student's login username, so type it correctly</li>
+        <li><strong>Program of study</strong> — Select from the dropdown</li>
+        <li><strong>Year field</strong> — Enter the student's current year of study (e.g., Year 1, Year 2). This controls which courses, exams, and graduation rules apply to the student, so set it correctly at registration and update it on promotion.</li>
+        <li><strong>Study center</strong> — Select the correct center</li>
+        <li><strong>Date of birth, gender, email</strong> — Fill in where available</li>
+    </ul>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong> or <strong>"Register"</strong>. The system generates the admission number automatically (used as the student's initial password).</div>
+    <div class="step"><b>Step 4:</b> Give the student their username (phone number) and password (admission number) and the portal address <strong>https://netfoundation.ke</strong>.</div>
+    <div class="note"><b>Important:</b> Double-check the phone number and the <strong>Year field</strong> before saving. A wrong phone number locks the student out; a wrong Year puts them in the wrong classes and reports.</div>
+
+    <h3>How to Edit a Student Record</h3>
+    <div class="step"><b>Step 1:</b> Find the student with search or filters.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Edit"</strong> or the student's name.</div>
+    <div class="step"><b>Step 3:</b> Update the fields — including promoting the <strong>Year field</strong> when a student advances — then click <strong>"Save"</strong> or <strong>"Update"</strong>.</div>
+
+    <h3>How to Delete a Student Record</h3>
+    <div class="step"><b>Step 1:</b> Find the student in the list.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Delete"</strong> (you may need admin authorisation for this).</div>
+    <div class="step"><b>Step 3:</b> Confirm the deletion when prompted. This is permanent — grades, fees, and attendance tied to the student may also be removed.</div>
+    <div class="note"><b>Important:</b> Never delete a student to "fix" a mistake you can edit instead. When in doubt, ask the main administrator before deleting.</div>
+</section>
+
+<section id="courses">
+    <h2>5. Courses, Lessons &amp; Study Notes</h2>
+    <p>If the <strong>Courses</strong> tab is assigned to you, you manage learning content: view courses, organise lessons, and upload study notes and materials. If the tab is not assigned to you, these screens stay hidden.</p>
+
+    <h3>Viewing Courses</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Courses"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Browse the course list. Each card shows course code, title, instructor, and credit hours.</div>
+    <div class="step"><b>Step 3:</b> Click a course to open its lessons, materials, quizzes, and schedule.</div>
+
+    <h3>Working with Lessons</h3>
+    <div class="step"><b>Step 1:</b> Inside a course, open the lessons list (in order).</div>
+    <div class="step"><b>Step 2:</b> Click a lesson to view its study notes, videos, and downloads.</div>
+    <div class="step"><b>Step 3:</b> If assigned to you, use <strong>"Add Lesson"</strong> or <strong>"Edit"</strong> to create or update a lesson: enter the title, arrange it in the correct order, and save.</div>
+
+    <h3>Uploading Study Notes and Materials</h3>
+    <div class="step"><b>Step 1:</b> Open the lesson the material belongs to.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Upload"</strong>, <strong>"Add Material"</strong>, or <strong>"Add Note"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Enter a clear title, paste or type the study-note text (or attach a PDF / slide file), and click <strong>"Save"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Reopen the lesson as a check to confirm students will see the note correctly.</div>
+    <div class="tip">Use short, descriptive titles (e.g., "BTH101 Lesson 3 — The Doctrine of Scripture") so students and reports stay organised.</div>
+    <div class="note"><b>Important:</b> Upload only authorised, lawful materials. Do not upload content you do not have permission to share.</div>
+</section>
+
+<section id="attendance">
+    <h2>6. Attendance &amp; Chapel Records</h2>
+    <p>If the <strong>Attendance</strong> tab is assigned to you, you mark class attendance and chapel records that feed reports and graduation checks. If the tab is not assigned to you, you will not see it.</p>
+
+    <h3>How to Mark Class Attendance</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Attendance"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Select the course, date, and session.</div>
+    <div class="step"><b>Step 3:</b> Tick <strong>Present</strong> / <strong>Absent</strong> (and Late / Excused where offered) for each student on the roster.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> or <strong>"Submit"</strong>. The percentages and colour badges recalculate automatically.</div>
+
+    <h3>Chapel Records</h3>
+    <div class="step"><b>Step 1:</b> In the Attendance area, open the <strong>Chapel</strong> session or register where offered.</div>
+    <div class="step"><b>Step 2:</b> Mark each student present or absent for the chapel session, then save.</div>
+    <div class="step"><b>Step 3:</b> Re-check totals after saving — chapel attendance may count toward conduct or graduation requirements.</div>
+
+    <h3>Correcting a Mistake</h3>
+    <div class="step"><b>Step 1:</b> Reopen the same course, date, and session.</div>
+    <div class="step"><b>Step 2:</b> Fix the ticks and save again. The record updates.</div>
+    <div class="tip">Mark attendance on the same day the class meets. Late marking causes forgotten names and disputes.</div>
+</section>
+
+<section id="grades">
+    <h2>7. Grades, Exams &amp; Quizzes</h2>
+    <p>If the <strong>Grades / Exams / Quizzes</strong> tabs are assigned to you, you enter scores, organise exams, and manage quizzes. Any tab not assigned to you stays hidden and shows "Access denied" if you try to open it directly.</p>
+
+    <h3>Entering and Managing Grades</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Grades"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Select the course and assessment (assignment, quiz, or exam).</div>
+    <div class="step"><b>Step 3:</b> Enter each student's numerical score (out of 100), then save. Letter grades and GPA compute automatically:</div>
+    <ul style="margin-left: 40px;">
+        <li><strong>A</strong> (80–100%) — Excellent — GPA 4.0</li>
+        <li><strong>B</strong> (70–79%) — Good — GPA 3.0</li>
+        <li><strong>C</strong> (60–69%) — Satisfactory — GPA 2.0</li>
+        <li><strong>D</strong> (50–59%) — Pass — GPA 1.0</li>
+        <li><strong>F</strong> (Below 50%) — Fail — GPA 0.0</li>
+    </ul>
+    <div class="step"><b>Step 4:</b> Publish or confirm the grades where the system requires it so students can see them.</div>
+
+    <h3>Managing Exams</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Exams"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> View Upcoming and Past lists. Each entry shows title, course, date, time, and venue.</div>
+    <div class="step"><b>Step 3:</b> If assigned to you, use <strong>"Create Exam"</strong> to schedule a new exam: enter title, course, date, time, and venue, then save.</div>
+    <div class="step"><b>Step 4:</b> Review student registrations (green "Registered" badges) and handle retake requests as directed by the administrator.</div>
+
+    <h3>Managing Quizzes</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Quizzes"</strong> in the sidebar or open the Quizzes tab inside a course (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Create or edit a quiz: set the title, questions, marks, and time limit, then save and attach it to the correct lesson or course.</div>
+    <div class="step"><b>Step 3:</b> Monitor attempts and scores; reset an attempt only when authorised.</div>
+    <div class="note"><b>Important:</b> Grades are official records. Enter them carefully, double-check before publishing, and never alter a score without authorisation.</div>
+</section>
+
+<section id="finance">
+    <h2>8. Finance You Can Touch</h2>
+    <p>If the <strong>Finance</strong> tab is assigned to you, you handle day-to-day money records: payments, installments, fee agreements, and reading M-Pesa status. If the Finance tab is not assigned to you, you cannot see any of this.</p>
+
+    <h3>How to Record a Payment</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Finance"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Find the student by name, admission number, or phone.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Record Payment"</strong> or <strong>"Add Payment"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Enter the amount, date, payment method (M-Pesa, bank, cash), and receipt or transaction reference exactly as on the proof of payment.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>. The student's Total Paid, Balance, and payment history update immediately.</div>
+    <div class="note"><b>Important:</b> Never record a payment without proof (M-Pesa message, bank slip, or signed cash receipt). Type the receipt number exactly — it is the audit trail.</div>
+
+    <h3>Installments and Fee Agreements</h3>
+    <div class="step"><b>Step 1:</b> Open the student's finance record.</div>
+    <div class="step"><b>Step 2:</b> To set up a plan, click <strong>"Installments"</strong> or <strong>"Fee Agreement"</strong> and enter each installment's amount and due date, then save.</div>
+    <div class="step"><b>Step 3:</b> As the student pays, record each payment against the plan. The system marks installments paid, pending, or overdue.</div>
+    <div class="step"><b>Step 4:</b> If an agreement changes, update the amounts and dates (only when authorised) and keep a written record of who approved the change.</div>
+
+    <h3>Reading M-Pesa Status</h3>
+    <p>Where M-Pesa integration is shown, each transaction displays a status such as <strong>Completed</strong>, <strong>Pending</strong>, or <strong>Failed</strong>. A Completed status with a matching transaction code confirms the money arrived. Pending means wait and re-check — do not record it as paid until it shows Completed. Failed means no money moved — ask for a fresh payment.</p>
+    <div class="tip">For any fee dispute, show the payment history table (date, receipt number, amount, method) to the student before escalating to the finance office.</div>
+</section>
+
+<section id="gates">
+    <h2>9. Fee-Gated Learning &amp; Content Gates</h2>
+    <p>Fee-gated learning means students with unpaid balances can be automatically locked out of lessons, quizzes, or exams until they pay. Your job is to understand what locked students see — you do <strong>NOT</strong> configure these gates unless the <strong>Settings</strong> tab is assigned to you.</p>
+
+    <h3>What Locked Students See</h3>
+    <ul>
+        <li>A lock notice or banner on the course, lesson, quiz, or exam explaining that access requires fee payment</li>
+        <li>Their balance and what to pay shown on the Finance / My Fees screen</li>
+        <li>Normal access restored automatically once the qualifying payment is recorded</li>
+    </ul>
+
+    <h3>What You Should Do (Without Settings Access)</h3>
+    <div class="step"><b>Step 1:</b> When a student reports being locked, open their finance record (if the Finance tab is assigned to you) and check Total Fee, Total Paid, and Balance.</div>
+    <div class="step"><b>Step 2:</b> If a qualifying payment is missing, record it properly (Section 8) and ask the student to refresh and retry.</div>
+    <div class="step"><b>Step 3:</b> If the balance is fully paid but the lock remains, confirm the payment status (including M-Pesa Completed) and escalate to the main administrator — do not attempt to change gate rules yourself.</div>
+    <div class="note"><b>Important:</b> Gate thresholds and rules are configured in <strong>Settings</strong>. Unless the Settings tab is assigned to you, you must never change them. Send gate-change requests to the main administrator.</div>
+</section>
+
+<section id="coverage">
+    <h2>10. Coverage Screen &amp; Reports</h2>
+    <p>If the <strong>Coverage</strong> and <strong>Reports</strong> tabs are assigned to you, you can monitor teaching progress and pull official reports. If either tab is not assigned to you, it stays hidden.</p>
+
+    <h3>Using the Coverage Screen</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Coverage"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Select the program, year, or study center to review.</div>
+    <div class="step"><b>Step 3:</b> Read the coverage table: which lessons and topics are taught, in progress, or not started per course and center.</div>
+    <div class="step"><b>Step 4:</b> Flag gaps (unstarted topics, stalled courses) to the administrator or the responsible trainer.</div>
+
+    <h3>Pulling Reports</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Reports"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Choose the report type: enrollment, attendance, grades, finance, or coverage.</div>
+    <div class="step"><b>Step 3:</b> Set filters (date range, course, center, year) and click <strong>"Generate"</strong> or <strong>"View"</strong>.</div>
+    <div class="step"><b>Step 4:</b> To save a copy, press <strong>Ctrl+P</strong> (Windows) or <strong>Cmd+P</strong> (Mac) and choose <strong>"Save as PDF"</strong>.</div>
+    <div class="tip">Always set the Year and center filters before exporting — unfiltered reports mix cohorts and confuse readers.</div>
+</section>
+
+<section id="graduation">
+    <h2>11. Graduation List</h2>
+    <p>If the <strong>Graduation</strong> tab is assigned to you, you can review who qualifies to graduate. If the tab is not assigned to you, you will not see it.</p>
+
+    <h3>How to Open the Graduation List</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Graduation"</strong> in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Select the program and year cohort to review.</div>
+    <div class="step"><b>Step 3:</b> Each student row shows the checks that decide eligibility: required courses passed, minimum grades and GPA, attendance threshold, fee balance cleared, and chapel requirements where applied.</div>
+
+    <h3>What the Statuses Mean</h3>
+    <ul>
+        <li><strong>Eligible / Cleared</strong> — All checks pass; the student can graduate</li>
+        <li><strong>Pending</strong> — One or more checks fail (failed course, low attendance, unpaid balance). Fix the underlying record (grade correction, fee payment, attendance fix) and re-check.</li>
+    </ul>
+    <div class="step"><b>Step 4:</b> Confirm or forward the final list exactly as the administrator instructs — do not add or remove names on your own.</div>
+    <div class="note"><b>Important:</b> The graduation list drives certificates. Never mark a student eligible unless every check genuinely passes.</div>
+</section>
+
+<section id="certificates">
+    <h2>12. Certificates &amp; Verification</h2>
+    <p>If the <strong>Certificates</strong> tab is assigned to you, you generate letters and certificates and verify or reprint them. If the tab is not assigned to you, these tools stay hidden.</p>
+
+    <h3>Generating Letters</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Certificates"</strong> (or "Letters") in the sidebar (only visible if assigned to you).</div>
+    <div class="step"><b>Step 2:</b> Choose the letter type (admission, recommendation, completion, or as directed).</div>
+    <div class="step"><b>Step 3:</b> Find the student, confirm the name spelling and admission number, then click <strong>"Generate"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Preview the letter, print or save it as PDF, and file a copy as instructed.</div>
+
+    <h3>Generating Diplomas and Completion Certificates</h3>
+    <div class="step"><b>Step 1:</b> Confirm the student appears as eligible on the graduation list (if the Graduation tab is assigned to you) or as directed by the administrator.</div>
+    <div class="step"><b>Step 2:</b> In the Certificates area, select <strong>Diploma</strong> or <strong>Completion Certificate</strong>.</div>
+    <div class="step"><b>Step 3:</b> Verify the full name, program, year, and date, then click <strong>"Generate"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Preview carefully — names and dates on certificates are permanent once printed and issued.</div>
+
+    <h3>Verifying and Reprinting</h3>
+    <div class="step"><b>Step 1:</b> To verify a presented certificate, open the verification search, enter the certificate number or admission number, and confirm the holder's name, program, and issue date match.</div>
+    <div class="step"><b>Step 2:</b> To reprint, find the original record and click <strong>"Reprint"</strong>. Confirm the details are unchanged before issuing the new copy.</div>
+    <div class="note"><b>Important:</b> Certificates are legal documents. Never generate one for an ineligible student and never alter names, dates, or grades without written authorisation.</div>
+</section>
+
+<section id="password">
+    <h2>13. Changing Your Own Password</h2>
+    <div class="step"><b>Step 1:</b> Click your name or profile icon at the top-right corner and open <strong>"Profile"</strong> or <strong>"My Account"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Find the <strong>Change Password</strong> section.</div>
+    <div class="step"><b>Step 3:</b> Enter your current password.</div>
+    <div class="step"><b>Step 4:</b> Enter a new password and type it again to confirm.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong> or <strong>"Update"</strong>, then log out and log back in with the new password to confirm it works.</div>
+    <div class="tip">Use a mix of letters, numbers, and symbols. Never share your assistant administrator password with anyone — it carries admin powers inside your assigned tabs.</div>
+</section>
+
+<section id="troubleshooting">
+    <h2>14. Troubleshooting — Common Problems</h2>
+
+    <h3>I Cannot Log In</h3>
+    <ol>
+        <li>Check that Caps Lock is off. Passwords are case-sensitive.</li>
+        <li>Confirm you are using the exact username the admin gave you (often your phone number).</li>
+        <li>If the admin recently reset your password, use the new temporary password exactly, then change it.</li>
+        <li>Clear browser cache and cookies, then try again — or try an incognito/private window.</li>
+        <li>If still stuck, ask the main administrator for a password reset.</li>
+    </ol>
+
+    <h3>A Tab Described in This Manual Is Missing</h3>
+    <ol>
+        <li>This is almost always permissions: the admin did not toggle that tab ON for you in Settings → Assistant Admin Access.</li>
+        <li>Log out and back in to pick up any recent permission change.</li>
+        <li>If it is still missing, ask the main administrator to check your toggles.</li>
+    </ol>
+
+    <h3>"Access Denied" When I Open a Page</h3>
+    <ol>
+        <li>It means that tab is not assigned to you. Stop and do not try to work around it.</li>
+        <li>Record what you were trying to do and ask the main administrator for access or for someone assigned to handle it.</li>
+    </ol>
+
+    <h3>A Student Cannot Log In</h3>
+    <ol>
+        <li>If the Students tab is assigned to you, confirm the phone number (username) and admission number (password) in the student record.</li>
+        <li>Check the Year field and enrollment — a wrong year or missing enrollment can confuse access.</li>
+        <li>If the record looks right, ask the student to clear cache or try another browser, then escalate to the administrator if needed.</li>
+    </ol>
+
+    <h3>A Paid Student Is Still Locked Out of Content</h3>
+    <ol>
+        <li>If the Finance tab is assigned to you, confirm the payment was recorded with the correct amount, date, and receipt, and that M-Pesa status shows Completed.</li>
+        <li>Ask the student to refresh or log out and back in.</li>
+        <li>If the lock persists, escalate to the main administrator — gate rules live in Settings, which most assistants cannot touch.</li>
+    </ol>
+
+    <h3>The Page Shows Blank or Won't Load</h3>
+    <ol>
+        <li>Press <strong>F5</strong> or <strong>Ctrl+R</strong> (Windows) / <strong>Cmd+R</strong> (Mac) to refresh.</li>
+        <li>Check your internet connection by opening another website.</li>
+        <li>Clear your browser cache (Chrome: Settings → Privacy → Clear browsing data).</li>
+        <li>Try a different device or network. If it still fails, the server may be in maintenance — try again later.</li>
+    </ol>
+
+    <h3>Need More Help?</h3>
+    <p>Contact the main administrator with the exact screen name, the student or record involved, what you clicked, and what message appeared (quote "Access denied" exactly where seen). A screenshot helps.</p>
+</section>
+
+<section id="acknowledgments">
+    <h2>15. Acknowledgments</h2>
+
+    <div class="ack-box">
+        <p>This Student Portal and its accompanying User Manual were made possible through the shared vision between Eternal Ministries Africa and NET Foundation Netherlands. We express our deepest gratitude to:</p>
+
+        <p><strong>NET Foundation Netherlands</strong> — <a href="https://english.netfoundation.nl" target="_blank" style="color:#d97706;">english.netfoundation.nl</a><br>
+        For generously availing their curriculum for use in training Pastors and Church leaders in Kenya and around the world. We appreciate all who have contributed to the development of the NET curriculum in the Netherlands — your labour in preparing sound, accessible theological materials is the bedrock upon which this entire work stands. This platform exists because of the foundational work and unwavering commitment of everyone involved in crafting this curriculum.</p>
+
+        <p><strong>NET Foundation Kenya (North Rift Trainers)</strong><br>
+        For their invaluable contribution to the development of this system — working tirelessly to fuse face-to-face training with online training, making quality theological education accessible to more students across Kenya and beyond. Their dedication aligns with NET Foundation Netherlands' long-term vision of reaching the world with this training.</p>
+
+        <p><strong>Raymond Warnar — Founding Director of NET Foundation</strong><br>
+        For being an anchor to this vision, providing steadfast support, guidance, and oversight that has kept this project grounded and moving forward from its very foundation.</p>
+
+        <p><strong>Lazarus Gatimu</strong><br>
+        For serving as the English-Speaking Countries Coordinator, with Kenya being among the nations under this coordination. His leadership has been instrumental in bringing this system to the English-speaking African context.</p>
+
+        <p><strong>The Staff of NET Foundation</strong><br>
+        For your dedicated service in ensuring the smooth operation of this vision — from administration to coordination, your work behind the scenes makes it all possible.</p>
+
+        <p><strong>All Trainers of NET Foundation</strong><br>
+        For heeding the call to run with the Great Commission, to go and make disciples of all nations. Your willingness to teach, mentor, and equip the next generation of ministers ensures that the Word of God is faithfully passed on. You are on the front lines of this mission, and we honour your commitment.</p>
+
+        <p><strong>Lead Developer: Pastor David Wafula Wanyonyi</strong><br>
+        For leading the technical development of this platform, bringing together the vision, the curriculum, and the technology to create a system that serves students across Kenya and beyond.</p>
+
+        <p>This work is dedicated to the mission of ensuring that every person called to ministry has access to sound theological training — so that no one has an excuse for ministering without having been trained.</p>
+
+        <div class="signature-area">
+            <p><strong>Developed by:</strong> Eternal Ministries Africa Tech Team &amp; NET Foundation Kenya</p>
+            <p><strong>Lead Developer:</strong> Pastor David Wafula Wanyonyi</p>
+            <p><strong>Year:</strong> 2026</p>
+        </div>
+    </div>
+</section>
+
+<div class="footer">
+    <p>{{SCHOOL_NAME}} &middot; https://netfoundation.ke</p>
+    <p>Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}} &middot; Lead Developer: Pastor David Wafula Wanyonyi</p>
+    <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
+</div>
+
+<div class="back-cover">
+    <div class="inner">
+        <div class="logo-small">
+            <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+            <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+        </div>
+        <h3>{{SCHOOL_NAME}}</h3>
+        <p>Assistant Administrator User Manual</p>
+        <div class="divider"></div>
+        <div class="mission-statement">
+            "Equipping ministers with sound theological training —<br>
+            so that no one has an excuse for ministering<br>
+            without having been trained."
+        </div>
+        <p>https://netfoundation.ke</p>
+        <div class="contact">
+            <p>Developed by Eternal Ministries Africa Tech Team</p>
+            <p>Lead Developer: Pastor David Wafula Wanyonyi</p>
+            <p>&copy; 2026 &middot; {{SCHOOL_NAME}} &middot; All Rights Reserved &middot; Version 1.0</p>
+        </div>
+    </div>
+</div>
+
+</div>
+<script>
+function closeManualTab() {
+    window.close();
+    setTimeout(function() { window.location.href = '/'; }, 200);
+}
+</script>
+</body>
+</html>

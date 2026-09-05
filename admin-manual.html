@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Administrator User Manual — {{SCHOOL_NAME}}</title>
+<style>
+    :root {
+        --primary: #f59e0b;
+        --primary-dark: #d97706;
+        --text: #1e293b;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --bg: #f8fafc;
+        --border: #e2e8f0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        line-height: 1.7;
+        padding: 40px 20px;
+    }
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        padding: 48px 56px;
+    }
+    @media (max-width: 600px) {
+        body { padding: 16px; }
+        .container { padding: 24px 20px; }
+    }
+    .toc { margin-bottom: 40px; }
+    .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
+    .toc ol { padding-left: 24px; }
+    .toc ol li { margin-bottom: 4px; }
+    .toc ol li a { color: var(--primary-dark); text-decoration: none; }
+    .toc ol li a:hover { text-decoration: underline; }
+    section { margin-bottom: 36px; }
+    section h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    section h3 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+    section h4 { font-size: 14px; margin: 12px 0 6px; color: var(--text-secondary); }
+    section p { margin-bottom: 10px; color: var(--text-secondary); }
+    section ul, section ol { padding-left: 24px; margin-bottom: 10px; }
+    section li { margin-bottom: 4px; color: var(--text-secondary); }
+    .note {
+        background: #fffbeb;
+        border-left: 4px solid var(--primary);
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .tip {
+        background: #f0fdf4;
+        border-left: 4px solid #22c55e;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .step { margin: 6px 0 6px 24px; }
+    .step b { color: var(--text); }
+    .ack-box {
+        background: linear-gradient(135deg, #fffbeb, #fef3c7);
+        border: 1px solid #f59e0b;
+        border-radius: 12px;
+        padding: 28px 24px;
+        margin-bottom: 36px;
+    }
+    .ack-box h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    .ack-box p, .ack-box li { color: #78350f; }
+    .signature-area {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid #fde68a;
+        font-size: 13px;
+    }
+    .screenshot {
+        max-width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        margin: 16px 0;
+        display: block;
+    }
+    .screenshot-caption {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: -10px;
+        margin-bottom: 20px;
+        font-style: italic;
+    }
+    .footer {
+        text-align: center;
+        padding: 20px 0 0;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .front-cover {
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1a2744 100%);
+        border-radius: 16px;
+        margin-bottom: 0;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .front-cover::before {
+        content: '';
+        position: absolute;
+        top: -80px;
+        right: -80px;
+        width: 300px;
+        height: 300px;
+        background: rgba(245,158,11,0.08);
+        border-radius: 50%;
+    }
+    .front-cover::after {
+        content: '';
+        position: absolute;
+        bottom: -120px;
+        left: -60px;
+        width: 400px;
+        height: 400px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .front-cover .cover-logo {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .cover-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .front-cover .cover-logo .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 36px;
+        letter-spacing: 2px;
+    }
+    .front-cover h1 {
+        font-size: 34px;
+        font-weight: 800;
+        margin-bottom: 6px;
+        position: relative;
+        z-index: 1;
+        letter-spacing: 0.5px;
+    }
+    .front-cover .subtitle {
+        font-size: 18px;
+        opacity: 0.85;
+        font-weight: 400;
+        margin-bottom: 10px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .divider {
+        width: 80px;
+        height: 4px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .version {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .mission {
+        max-width: 500px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        font-size: 15px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
+        backdrop-filter: blur(4px);
+    }
+    .front-cover .author {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover {
+        page-break-before: always;
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a2744 0%, #2a5298 50%, #1e3c72 100%);
+        border-radius: 16px;
+        margin-top: 36px;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .back-cover::before {
+        content: '';
+        position: absolute;
+        bottom: -60px;
+        right: -60px;
+        width: 250px;
+        height: 250px;
+        background: rgba(245,158,11,0.06);
+        border-radius: 50%;
+    }
+    .back-cover::after {
+        content: '';
+        position: absolute;
+        top: -40px;
+        left: -40px;
+        width: 200px;
+        height: 200px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .back-cover .inner {
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover .divider {
+        width: 60px;
+        height: 3px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+    }
+    .back-cover .logo-small {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .back-cover .logo-small img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .back-cover .logo-small .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 20px;
+        letter-spacing: 1px;
+    }
+    .back-cover h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        opacity: 0.85;
+    }
+    .back-cover p {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 6px;
+        line-height: 1.8;
+    }
+    .back-cover .mission-statement {
+        max-width: 450px;
+        margin: 24px auto;
+        padding: 16px 20px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 14px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.8;
+    }
+    .back-cover .contact {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 20px;
+    }
+    @media print {
+        body { padding: 0; background: #fff; }
+        .container { box-shadow: none; padding: 0; border-radius: 0; max-width: 100%; }
+        .front-cover, .back-cover { border-radius: 0; margin: 0; min-height: 100vh; }
+        .toc { page-break-after: always; }
+        section { page-break-inside: avoid; }
+        .no-print { display: none; }
+    }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="no-print" style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF</button>
+    <button onclick="closeManualTab()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
+</div>
+
+<div class="front-cover">
+    <div class="cover-logo">
+        <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+        <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+    </div>
+    <h1>{{SCHOOL_NAME}}</h1>
+    <div class="subtitle">Administrator User Manual</div>
+    <div class="divider"></div>
+    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
+    <div class="mission">
+        "This platform exists to ensure that no one has an excuse<br>
+        for ministering without having been trained."
+    </div>
+    <div class="author">
+        Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}}<br>
+        Lead Developer: Pastor David Wafula Wanyonyi
+    </div>
+</div>
+
+<div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#intro">Introduction — The Administrator Role</a></li>
+        <li><a href="#login">Logging In, Logging Out &amp; Session Expiry</a></li>
+        <li><a href="#dashboard">Dashboard — Command Center</a></li>
+        <li><a href="#students">Students — Register, Edit &amp; Delete</a></li>
+        <li><a href="#courses">Courses, Sequence Order &amp; Lessons / Notes Upload</a></li>
+        <li><a href="#attendance">Attendance &amp; Chapel</a></li>
+        <li><a href="#grades">Grades, Exams, Quizzes &amp; Question Bank</a></li>
+        <li><a href="#finance">Finance — Payments, Installments, Balances &amp; M-Pesa STK</a></li>
+        <li><a href="#feegate">Fee-Gated Learning — Master Toggle, Targets &amp; Scopes</a></li>
+        <li><a href="#accessgate">Content Access Gate — Global, Region, Center &amp; Student</a></li>
+        <li><a href="#coverage">Coverage Screen &amp; Reports</a></li>
+        <li><a href="#graduation">Graduation &amp; Alumni Migration</a></li>
+        <li><a href="#certificates">Certificates &amp; Documents</a></li>
+        <li><a href="#users">Users &amp; Roles — Assistants and Coordinators</a></li>
+        <li><a href="#settings">Settings — Full Configuration Reference</a></li>
+        <li><a href="#backup">Backup / Restore &amp; Audit Log</a></li>
+        <li><a href="#troubleshooting">Troubleshooting — Common Problems</a></li>
+        <li><a href="#acknowledgments">Acknowledgments</a></li>
+    </ol>
+</div>
+
+<section id="intro">
+    <h2>1. Introduction — The Administrator Role</h2>
+    <p>Welcome, Administrator. You hold full control over the <strong>{{SCHOOL_NAME}} college management system</strong> — the same product described in the Student Manual, but seen here from the management side. Everything a student, coordinator, or assistant admin can do flows from what you configure in this panel.</p>
+    <h3>What the Admin Can Do</h3>
+    <ul>
+        <li>Register, edit, and (when permitted) delete students; manage admission numbers and years</li>
+        <li>Create and order courses, upload lessons and study notes</li>
+        <li>Record attendance and chapel attendance; apply waivers</li>
+        <li>Enter grades, build exams and quizzes, manage the question bank</li>
+        <li>Record payments, set installments, manage balances and fee agreements with evidence</li>
+        <li>Control fee-gated learning and the content access gate at global, regional, center, and per-student levels</li>
+        <li>Run coverage, contacts, and finance reports and export PDFs</li>
+        <li>Graduate students and migrate them to alumni; generate letters, diplomas, and completion certificates with verification codes</li>
+        <li>Create assistant admins (per-tab toggles) and coordinators; control coordinator access</li>
+        <li>Configure all Settings (branding, academic, signatures, admission numbers, terms, protection, maintenance, WhatsApp/SMS/M-Pesa), run backups/restores, and review the audit log</li>
+    </ul>
+    <h3>Admin vs Assistant Admin vs Coordinator</h3>
+    <ul>
+        <li><strong>Administrator (you):</strong> unrestricted access to every tab and setting, including delete, restore, and security settings.</li>
+        <li><strong>Assistant Admin:</strong> sees only the tabs you toggle on for them. Can delete students only if you allow it; never sees password/security or restore functions unless granted.</li>
+        <li><strong>Coordinator:</strong> limited to their own center(s)/region — attendance, coverage follow-up, contacts, and the fee-gate screen you enable for them.</li>
+    </ul>
+    <div class="note"><b>Rule of thumb:</b> if a destructive or money-related action is involved (delete student, revoke certificate, restore backup, change M-Pesa production keys), do it yourself as admin or supervise it directly.</div>
+    <h3>How to Use This Manual</h3>
+    <p>Each section below is a task recipe with numbered steps. Work top-to-bottom the first time (Settings → Students → Courses → Finance → Gates → Graduation), then use the Table of Contents for day-to-day reference.</p>
+</section>
+
+<section id="login">
+    <h2>2. Logging In, Logging Out &amp; Session Expiry</h2>
+    <h3>Your Admin Credentials</h3>
+    <p>Your admin account is created during setup. Your username is your phone number or the admin ID issued by the developer, and your password is set privately. Students log in with phone + admission number; you log in with your admin credentials — never share them.</p>
+    <h3>Step-by-Step: How to Log In</h3>
+    <div class="step"><b>Step 1:</b> Open your browser and go to <strong>https://netfoundation.ke</strong>.</div>
+    <div class="step"><b>Step 2:</b> On the login screen, type your admin <strong>Username</strong> (phone number / admin ID).</div>
+    <div class="step"><b>Step 3:</b> Type your <strong>Password</strong> exactly — passwords are case-sensitive.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Sign In"</strong> (or press Enter).</div>
+    <div class="step"><b>Step 5:</b> On first-ever login, read the <strong>Terms and Conditions</strong> pop-up, tick "I agree", and click <strong>"Accept"</strong>.</div>
+    <div class="step"><b>Step 6:</b> Confirm you land on the Admin <strong>Dashboard</strong> with the full sidebar (Students, Courses, Finance, Settings, etc.). If you see a limited sidebar, you logged in as assistant/coordinator — log out and retry with admin credentials.</div>
+    <h3>How to Log Out</h3>
+    <div class="step"><b>Step 1:</b> Click your name / profile icon at the top-right corner.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Logout"</strong> / <strong>"Sign Out"</strong>.</div>
+    <div class="step"><b>Step 3:</b> On shared computers, close the browser tab after logout.</div>
+    <h3>Session Expiry &amp; Re-login After Deploys</h3>
+    <p>Sessions expire for security. After every server deploy / update, all sessions are invalidated and you must log in again — this is normal, not an error.</p>
+    <div class="step"><b>Step 1:</b> If you see "Session expired — please log in again" or are returned to the login screen, simply log in afresh.</div>
+    <div class="step"><b>Step 2:</b> After a deploy announcement, tell assistants and coordinators to log out and log back in before reporting "system errors".</div>
+    <div class="step"><b>Step 3:</b> If login loops persist, clear browser cache and cookies, then retry; if still stuck, check <strong>Settings → Maintenance</strong> to confirm maintenance mode is OFF.</div>
+    <div class="tip">Bookmark <strong>https://netfoundation.ke</strong>. Use Chrome or Edge (latest version) for admin work; avoid old browsers for PDF and certificate printing.</div>
+</section>
+
+<section id="dashboard">
+    <h2>3. Dashboard — Command Center</h2>
+    <p>The Dashboard is your first screen after login. It summarizes the whole college at a glance.</p>
+    <h3>What You Will See</h3>
+    <h4>📊 Statistics Cards</h4>
+    <p>Totals for students, courses, exams/quizzes, fees collected vs outstanding, and attendance alerts. Click any card to jump to that module.</p>
+    <h4>📝 To-Do &amp; Alerts</h4>
+    <p>Pending items: overdue installments, low-attendance students, unresolved tickets, upcoming exams, and ungraded submissions.</p>
+    <h4>📅 Upcoming Events</h4>
+    <p>Exam dates, term deadlines, graduation dates, and maintenance windows you set in Settings.</p>
+    <h4>📢 Notifications (Bell Icon)</h4>
+    <p>System alerts, ticket updates, payment confirmations (including M-Pesa STK callbacks), and backup reminders. The red badge shows unread count.</p>
+    <h3>Daily Admin Routine (Recommended)</h3>
+    <div class="step"><b>Step 1:</b> Log in and scan the stat cards — note new students, balances, and attendance reds.</div>
+    <div class="step"><b>Step 2:</b> Open the bell icon and clear/action all unread notifications.</div>
+    <div class="step"><b>Step 3:</b> Check <strong>To-Do</strong>: overdue fees → Finance; low coverage → Coverage screen; open tickets → Support.</div>
+    <div class="step"><b>Step 4:</b> Use the left <strong>sidebar</strong> to jump to the module needing action (Students, Finance, Coverage, etc.).</div>
+    <div class="tip">Start every morning on the Dashboard. A 5-minute scan prevents most end-of-term surprises.</div>
+</section>
+
+<section id="students">
+    <h2>4. Students — Register, Edit &amp; Delete</h2>
+    <h3>How to Register a New Student</h3>
+    <div class="step"><b>Step 1:</b> In the sidebar click <strong>"Students"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add Student"</strong> / <strong>"Register"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Fill personal details: full name, phone (becomes Username), email, date of birth, gender, photo (optional, used for ID card).</div>
+    <div class="step"><b>Step 4:</b> Fill academic details: program of study, study center, region, intake/year — see Year field below.</div>
+    <div class="step"><b>Step 5:</b> Confirm the <strong>Admission Number</strong> auto-generated from Settings → Admission Numbers format (e.g., NET/001/07-26/001). Edit only if you have a reason.</div>
+    <div class="step"><b>Step 6:</b> Click <strong>"Save"</strong>. The student account is created immediately; login password = admission number until changed.</div>
+    <div class="step"><b>Step 7:</b> Give the student their username (phone) + password (admission number) and the portal URL.</div>
+    <h3>How to Edit a Student (incl. Year Field + Auto-Calculate Checkbox)</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Students</strong>, search by name / admission number / phone.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Edit"</strong> / the student row.</div>
+    <div class="step"><b>Step 3:</b> Update any field (contacts, center, program, photo, password reset).</div>
+    <div class="step"><b>Step 4:</b> For study year: locate the <strong>Year</strong> field. Either type the year manually (1, 2, 3…) OR tick <strong>"Auto-calculate"</strong> so the system derives Year from intake date and academic settings. If Auto-calculate is ON, the manual Year box is locked/ignored.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong> / <strong>"Update"</strong> and verify the profile shows the correct Year.</div>
+    <div class="note"><b>Important:</b> Year drives graduation eligibility, fee targets, and coverage expectations. Leave Auto-calculate ON unless you have a repeater, transfer, or special case — then untick it and set Year manually with a note in the record.</div>
+    <h3>Delete Rules — Only Admin / Assistant</h3>
+    <ul>
+        <li>Only <strong>Administrator</strong> and <strong>Assistant Admin</strong> (if granted Students-tab delete permission) can delete students. Coordinators can never delete.</li>
+        <li>Deleting removes login access; linked payments, grades, and audit entries are retained/archived per protection settings — never delete to "fix" a fee balance; instead correct the payment record in Finance.</li>
+    </ul>
+    <div class="step"><b>Step 1:</b> Go to <strong>Students</strong> → search the student → click <strong>"Delete"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Read the confirmation warning and type/confirm as prompted.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Confirm Delete"</strong>. Check the audit log entry afterwards (section 16).</div>
+    <div class="tip">Prefer to <strong>deactivate/transfer</strong> rather than delete (e.g., move to alumni on graduation, or change center). Delete only duplicates or erroneous registrations.</div>
+</section>
+
+<section id="courses">
+    <h2>5. Courses, Sequence Order &amp; Lessons / Notes Upload</h2>
+    <h3>How to Create a Course</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Courses"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add Course"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Enter course code (e.g., BTH101), title, instructor, credit hours, description/objectives, and program/year assignment.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong>. The course appears in the course list and (if published) to enrolled students.</div>
+    <h3>Sequence Order — Controlling the Learning Path</h3>
+    <p>Courses and lessons inside a course follow a <strong>sequence order</strong> number. Students see them sorted ascending — set this deliberately.</p>
+    <div class="step"><b>Step 1:</b> In <strong>Courses</strong>, open the course (or the course list order view).</div>
+    <div class="step"><b>Step 2:</b> Find the <strong>Order / Sequence</strong> field on each course/lesson row.</div>
+    <div class="step"><b>Step 3:</b> Number them 1, 2, 3… in teaching order (e.g., Foundation → Doctrine → Ministry Practice).</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save Order"</strong> / save each row. Reopen the student view to confirm the order is correct.</div>
+    <div class="note"><b>Important:</b> Gaps or duplicate order numbers confuse students and break coverage % calculations. Always keep sequence contiguous (1,2,3…) after adding or removing lessons.</div>
+    <h3>How to Add Lessons and Upload Notes</h3>
+    <div class="step"><b>Step 1:</b> Open the course → go to <strong>"Lessons"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add Lesson"</strong>, enter lesson title, order number, and study text/notes content.</div>
+    <div class="step"><b>Step 3:</b> To attach files: click <strong>"Upload"</strong> / <strong>"Choose File"</strong> — select PDF, slides, or documents (study notes). Optionally add a video link/URL.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save Lesson"</strong>. Repeat for each topic in order.</div>
+    <div class="step"><b>Step 5:</b> Preview as student (or check student view) to confirm notes open/download and videos play.</div>
+    <h3>Class Schedule Tab</h3>
+    <div class="step"><b>Step 1:</b> Inside the course, open the <strong>"Schedule"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Add date, time, venue or online meeting link per session.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>. Schedules appear on student Dashboards and in My Hub Exams/Schedule views.</div>
+</section>
+
+<section id="attendance">
+    <h2>6. Attendance &amp; Chapel</h2>
+    <h3>How to Record Class Attendance</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Attendance"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select center, course, and date/session.</div>
+    <div class="step"><b>Step 3:</b> Tick <strong>Present/Absent</strong> per student (use "Mark all present" then untick absentees to save time).</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save Attendance"</strong>.</div>
+    <div class="step"><b>Step 5:</b> Verify percentages update: Green ≥70%, Orange 50–69%, Red &lt;50%.</div>
+    <h3>Chapel Attendance</h3>
+    <div class="step"><b>Step 1:</b> In <strong>Attendance</strong>, switch to the <strong>"Chapel"</strong> tab/type.</div>
+    <div class="step"><b>Step 2:</b> Select date and center, mark present/absent as above, and click <strong>"Save"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Chapel counts are tracked separately but may feed graduation and coverage reports — confirm with your academic settings.</div>
+    <div class="note"><b>Important:</b> Minimum 70% attendance per course is required unless an attendance waiver is applied at graduation (see section 12). Correct errors promptly — instructors/coordinators should report mistakes to you rather than editing locked past sessions.</div>
+    <h3>Correcting an Error</h3>
+    <div class="step"><b>Step 1:</b> Reopen the same center/course/date session.</div>
+    <div class="step"><b>Step 2:</b> Fix the ticks and click <strong>"Update"</strong>.</div>
+    <div class="step"><b>Step 3:</b> If the session is locked, use the manual override / unlock per your protection settings, then re-save.</div>
+</section>
+
+<section id="grades">
+    <h2>7. Grades, Exams, Quizzes &amp; Question Bank</h2>
+    <h3>Grading Scale (System Default)</h3>
+    <ul>
+        <li><strong>A</strong> (80–100%) — Excellent — 4.0</li>
+        <li><strong>B</strong> (70–79%) — Good — 3.0</li>
+        <li><strong>C</strong> (60–69%) — Satisfactory — 2.0</li>
+        <li><strong>D</strong> (50–59%) — Pass — 1.0</li>
+        <li><strong>F</strong> (Below 50%) — Fail — 0.0</li>
+    </ul>
+    <h3>How to Enter / Publish Grades</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>"Grades"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Select course (and exam/quiz source). Enter scores out of 100 per student.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>, then <strong>"Publish"</strong> so students see them under Grades/Transcript.</div>
+    <div class="step"><b>Step 4:</b> Spot-check one student transcript for correct letter grade and GPA.</div>
+    <h3>How to Create an Exam</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Exams"</strong> → <strong>"Add Exam"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Enter title, course, date, time, venue/mode (physical/online), duration, and total marks.</div>
+    <div class="step"><b>Step 3:</b> Attach questions manually or pull from the <strong>Question Bank</strong> (below).</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Publish"</strong>. Students register via Exams/My Hub; registered lists feed your attendance and To-Do.</div>
+    <div class="step"><b>Step 5:</b> To allow a retake: open the exam → student row → <strong>"Allow Retake"</strong> / approve their retake request.</div>
+    <h3>How to Create a Quiz</h3>
+    <div class="step"><b>Step 1:</b> Open the course → <strong>"Quizzes"</strong> tab → <strong>"Add Quiz"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Set title, time limit, attempts allowed, pass mark, and whether correct answers show after submit.</div>
+    <div class="step"><b>Step 3:</b> Add questions (or import from Question Bank), set marks, and click <strong>"Save &amp; Publish"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Scores auto-grade (objective types) and flow to Grades; highest attempt is kept where retakes are allowed.</div>
+    <h3>Question Bank</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>"Question Bank"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add Question"</strong>: choose type (multiple choice / true-false / short answer), course/topic, question text, options, correct answer, and marks.</div>
+    <div class="step"><b>Step 3:</b> Tag by course/topic for reuse. Click <strong>"Save"</strong>.</div>
+    <div class="step"><b>Step 4:</b> When building an exam/quiz, click <strong>"Import from Bank"</strong>, filter by course, tick questions, and confirm.</div>
+    <div class="tip">Build the bank first, then assemble exams/quizzes from it — far faster and more consistent than typing fresh questions each term.</div>
+</section>
+
+<section id="finance">
+    <h2>8. Finance — Payments, Installments, Balances &amp; M-Pesa STK</h2>
+    <h3>How to Record a Payment</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Finance"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Search the student (name / admission / phone) and open their statement.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Record Payment"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Enter date, amount, method (M-Pesa / bank / cash), receipt/reference number, and received-by note.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>. Totals update: Total Fee, Total Paid, Balance = Total − Paid.</div>
+    <div class="step"><b>Step 6:</b> Issue/share the receipt number with the student for their payment history.</div>
+    <h3>Installments &amp; Balances</h3>
+    <div class="step"><b>Step 1:</b> On the student finance record, open <strong>"Installments"</strong> / payment plan.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add Installment"</strong>: enter amount + due date per installment until they sum to the total fee.</div>
+    <div class="step"><b>Step 3:</b> Save. Each installment shows Paid / Pending / Overdue automatically as payments arrive or dates pass.</div>
+    <div class="step"><b>Step 4:</b> Monitor <strong>Balances</strong> on the Dashboard and Finance list: green = fully paid, orange = outstanding.</div>
+    <div class="note"><b>Important:</b> Never take payments to personal numbers. Receipt numbers must be unique and traceable — bank/M-Pesa references go in the reference field.</div>
+    <h3>Fee Agreements with Evidence</h3>
+    <div class="step"><b>Step 1:</b> On the student finance record, open <strong>"Fee Agreement"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Enter agreed total, installment promises, and deadline; upload <strong>evidence</strong> (signed letter photo/PDF, screenshot, guarantor note) via Choose File.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save Agreement"</strong>. The agreement + evidence attach to the student file for audit and graduation checks.</div>
+    <h3>M-Pesa STK Settings — Sandbox vs Production + Callback URL</h3>
+    <p>STK push lets you send a payment prompt to a student's phone. Configure carefully — wrong mode loses real money or fails silently.</p>
+    <div class="step"><b>Step 1:</b> Go to <strong>Settings → WhatsApp/SMS/M-Pesa</strong> (M-Pesa section).</div>
+    <div class="step"><b>Step 2:</b> Choose <strong>Environment</strong>: <strong>Sandbox</strong> for testing (fake money, test keys) or <strong>Production</strong> for live payments (real Daraja credentials: Consumer Key/Secret, Shortcode, Passkey).</div>
+    <div class="step"><b>Step 3:</b> Paste the <strong>Callback URL</strong> — the public HTTPS URL the system listens on for M-Pesa results (e.g., your Railway/production domain + callback path). It must be reachable from the internet or payments will stay "pending".</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong>, then send a <strong>test STK</strong> (sandbox first, then a small live amount) and confirm the Finance record auto-updates on callback.</div>
+    <div class="step"><b>Step 5:</b> Only switch to Production after sandbox callbacks succeed. Keep production keys secret — never screenshot them into tickets.</div>
+    <div class="tip">If STK stays "Sent" forever: check callback URL, confirm production vs sandbox keys match the mode, and verify server logs/audit for callback errors.</div>
+</section>
+
+<section id="feegate">
+    <h2>9. Fee-Gated Learning — Master Toggle, Targets &amp; Scopes</h2>
+    <p>Fee-gated learning locks lessons/quizzes when a student falls behind on fees, nudging payment without manual chasing.</p>
+    <h3>Master Toggle, Weekly Target &amp; Deadline</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Fee Gate</strong> / <strong>Fee-Gated Learning</strong> screen.</div>
+    <div class="step"><b>Step 2:</b> Flip the <strong>Master Toggle</strong> ON to enforce gating (OFF = everyone learns regardless of fees).</div>
+    <div class="step"><b>Step 3:</b> Set the <strong>Weekly Target</strong> amount (minimum paid-per-week to stay unlocked).</div>
+    <div class="step"><b>Step 4:</b> Set the <strong>Deadline</strong> date — after this, rules tighten (or full balance required, per your policy text).</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>.</div>
+    <h3>Tabs &amp; Scope (All / Selected / Except)</h3>
+    <div class="step"><b>Step 1:</b> On the same screen, use the <strong>Tabs</strong> (e.g., Overview / Rules / Students / Regions) to navigate.</div>
+    <div class="step"><b>Step 2:</b> Set <strong>Scope</strong>: <strong>All students</strong> (blanket rule), <strong>Selected</strong> (only listed centers/regions/students), or <strong>Except</strong> (everyone except listed).</div>
+    <div class="step"><b>Step 3:</b> Pick the centers/regions for Selected/Except and click <strong>"Save"</strong>.</div>
+    <h3>Per-Student Target / Exempt</h3>
+    <div class="step"><b>Step 1:</b> Search the student in the fee-gate student list.</div>
+    <div class="step"><b>Step 2:</b> To customize: set a <strong>per-student target</strong> (different weekly amount) OR mark <strong>Exempt</strong> (never gated — e.g., scholarship, staff).</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>. Exempt shows a badge; custom target overrides the global weekly target for that student only.</div>
+    <h3>Regional Mode</h3>
+    <div class="step"><b>Step 1:</b> Enable <strong>Regional Mode</strong> if different regions need different targets/deadlines.</div>
+    <div class="step"><b>Step 2:</b> Per region, set its own weekly target + deadline, then save.</div>
+    <div class="note"><b>Important:</b> Test gating with one center (Scope = Selected) before going All. Always pair gating with clear student communication (WhatsApp fee reminders) to avoid surprise lockouts.</div>
+</section>
+
+<section id="accessgate">
+    <h2>10. Content Access Gate — Global, Region, Center &amp; Student</h2>
+    <p>The Content Access Gate controls whether learning content opens at all — independent of fees. Use it to stage releases (e.g., open Term 1 everywhere, lock Term 2 until launch).</p>
+    <h3>Levels: Global / Per-Region / Per-Center / Per-Student</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Content Access</strong> / <strong>Access Gate</strong> screen.</div>
+    <div class="step"><b>Step 2:</b> Set the <strong>Global</strong> default first (applies to everyone unless overridden).</div>
+    <div class="step"><b>Step 3:</b> Drill down: override by <strong>Region</strong>, then by <strong>Center</strong> within a region, then by <strong>Student</strong> for special cases. Lower levels beat upper levels.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> at each level and verify the effective status badge.</div>
+    <h3>Modes: Auto / Locked / Unlocked + Reset</h3>
+    <ul>
+        <li><strong>Auto</strong> — follows fee-gate + schedule rules automatically.</li>
+        <li><strong>Locked</strong> — forces closed regardless of fees (e.g., pre-launch content).</li>
+        <li><strong>Unlocked</strong> — forces open regardless of fees (e.g., grace period, exam revision week).</li>
+    </ul>
+    <div class="step"><b>Step 1:</b> Choose <strong>Auto / Locked / Unlocked</strong> at the level you are editing.</div>
+    <div class="step"><b>Step 2:</b> To undo custom rules and fall back to the parent level: click <strong>"Reset"</strong> / "Reset to inherit".</div>
+    <div class="step"><b>Step 3:</b> Confirm the effective badge returns to inherited/Auto.</div>
+    <div class="tip">Typical setup: Global = Auto, one pilot Center = Unlocked for trials, pre-release courses = Locked until launch day.</div>
+</section>
+
+<section id="coverage">
+    <h2>11. Coverage Screen &amp; Reports</h2>
+    <h3>Using the Coverage Screen</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Coverage"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Filter by region / center / course. Each row shows student, lessons completed vs total, and <strong>coverage %</strong>.</div>
+    <div class="step"><b>Step 3:</b> Click a student row to see lesson-by-lesson ticks and missing items.</div>
+    <div class="step"><b>Step 4:</b> Follow up low-coverage students via coordinator/WhatsApp; re-check after a week.</div>
+    <h3>Manual Override Pills</h3>
+    <div class="step"><b>Step 1:</b> On the coverage row, find the <strong>pill</strong> (status badge, e.g., Behind / On-track / Complete / Overridden).</div>
+    <div class="step"><b>Step 2:</b> Click the pill to cycle or open the <strong>"Manual Override"</strong> dialog.</div>
+    <div class="step"><b>Step 3:</b> Choose override value + reason (e.g., "transfer credit — verified by admin"), then <strong>"Save"</strong>. The pill shows overridden state and logs to audit.</div>
+    <div class="note"><b>Important:</b> Overrides affect graduation eligibility. Use only with evidence; never override to hide non-attendance.</div>
+    <h3>Reports: Coverage / Contacts / Center Finance / Region Finance PDFs</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Reports</strong> (or the Export button inside Coverage/Finance screens).</div>
+    <div class="step"><b>Step 2:</b> Choose report type: <strong>Coverage</strong> (completion %), <strong>Contacts</strong> (student phone/email lists per center/region), <strong>Center Finance</strong> (collected vs outstanding per center), or <strong>Region Finance</strong> (aggregated per region).</div>
+    <div class="step"><b>Step 3:</b> Set filters (region/center/date range) and click <strong>"Generate"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Download PDF"</strong> / print via the browser print dialog. File and share with coordinators as needed.</div>
+</section>
+
+<section id="graduation">
+    <h2>12. Graduation &amp; Alumni Migration</h2>
+    <h3>Graduation Requirements</h3>
+    <ul>
+        <li>Pass all required courses (grades ≥ pass mark per academic settings).</li>
+        <li>Meet minimum <strong>coverage %</strong> (lessons completed vs total, per program settings).</li>
+        <li>Meet attendance threshold (default 70%) OR hold an approved <strong>attendance waiver</strong>.</li>
+        <li>Clear fee balance OR hold an approved fee agreement (with evidence).</li>
+    </ul>
+    <h3>How to Apply an Attendance Waiver</h3>
+    <div class="step"><b>Step 1:</b> Open the student record → <strong>Graduation</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Find <strong>"Attendance Waiver"</strong>, tick it, enter reason + approver name.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>. The eligibility check re-runs with attendance bypassed for that student.</div>
+    <h3>Graduation List &amp; Migrate to Alumni</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Graduation"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Review the <strong>eligible list</strong> (auto-checked against requirements incl. coverage % and waiver).</div>
+    <div class="step"><b>Step 3:</b> Tick graduates → click <strong>"Approve"</strong> if approval step is enabled.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Migrate to Alumni"</strong>. Students move from active to alumni status: logins are retired/archived, records kept for transcripts and certificates.</div>
+    <div class="step"><b>Step 5:</b> Verify under <strong>Alumni</strong> list; issue certificates next (section 13).</div>
+    <div class="tip">Run graduation in batches per center to keep ceremonies and certificate printing orderly.</div>
+</section>
+
+<section id="certificates">
+    <h2>13. Certificates &amp; Documents</h2>
+    <h3>How to Generate Letters (with Letter Date)</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>"Certificates"</strong> / <strong>"Documents"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Generate Letter"</strong> (e.g., admission, recommendation, completion letter).</div>
+    <div class="step"><b>Step 3:</b> Select student, letter template, and set the <strong>Letter Date</strong> (printed on the letter — backdate only with authorization).</div>
+    <div class="step"><b>Step 4:</b> Preview, then <strong>"Generate PDF"</strong> and print/file.</div>
+    <h3>Diploma / Completion PDF Templates with Field Positioning</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Settings → Certificates</strong> (or Documents → Templates).</div>
+    <div class="step"><b>Step 2:</b> Choose template: <strong>Diploma</strong> or <strong>Completion Certificate</strong>.</div>
+    <div class="step"><b>Step 3:</b> Upload background artwork (seal/logo border) and drag/set <strong>field positions</strong>: name (X/Y), course, date, signatures, Doc ID box. Save positions.</div>
+    <div class="step"><b>Step 4:</b> Print a <strong>test copy</strong> on plain paper, measure alignment, adjust X/Y, and re-test before using official blanks.</div>
+    <div class="step"><b>Step 5:</b> Return to Documents → select graduate → <strong>"Generate Diploma / Completion PDF"</strong>.</div>
+    <h3>Doc ID / Verify Codes, Verify &amp; Reprint</h3>
+    <div class="step"><b>Step 1:</b> Every generated document gets a unique <strong>Doc ID</strong> + <strong>Verify Code</strong> printed on it.</div>
+    <div class="step"><b>Step 2:</b> To verify: open <strong>Verify</strong> screen, enter Doc ID + code, and confirm student/course/date match.</div>
+    <div class="step"><b>Step 3:</b> To reprint: find the document record → <strong>"Reprint"</strong> (same Doc ID, logged as reprint — do not mint a new ID for the same award).</div>
+    <h3>Duplicates &amp; Revoked</h3>
+    <div class="step"><b>Step 1:</b> For a lost certificate: use <strong>"Issue Duplicate"</strong> — it links to the original, marks "DUPLICATE", and gets its own audit entry.</div>
+    <div class="step"><b>Step 2:</b> To invalidate (fraud/error): open the document → <strong>"Revoke"</strong> + reason. Revoked codes fail verification with a "REVOKED" message.</div>
+    <div class="note"><b>Important:</b> Only the admin issues or revokes diplomas. Never edit a generated PDF by hand — re-generate from the system so Doc ID and audit stay consistent.</div>
+</section>
+
+<section id="users">
+    <h2>14. Users &amp; Roles — Assistants and Coordinators</h2>
+    <h3>How to Create an Assistant Admin (Per-Tab Toggles)</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>"Users"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add User"</strong> → Role = <strong>"Assistant Admin"</strong>. Enter name, phone (username), and temporary password.</div>
+    <div class="step"><b>Step 3:</b> Set <strong>per-tab toggles</strong>: switch ON only the tabs they need (e.g., Students, Attendance, Finance-view). Leave Settings/Security, Backup/Restore, and Delete OFF unless required.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong>. Ask them to log in and change their password.</div>
+    <div class="step"><b>Step 5:</b> To adjust later: Users → open assistant → flip toggles → Save. Changes apply on their next login/refresh.</div>
+    <h3>How to Create a Coordinator (+ Fee-Gate Screen)</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>"Users"</strong> → <strong>"Add User"</strong> → Role = <strong>"Coordinator"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Assign their <strong>center(s)</strong> and <strong>region</strong>. They only see data for those assignments.</div>
+    <div class="step"><b>Step 3:</b> If they need fee follow-up: enable their <strong>fee-gate screen</strong> access (per coordinator-access settings) so they see targets/balances for their centers without full Finance control.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> and share login + scope ("you cover Center X, Region Y").</div>
+    <div class="note"><b>Important:</b> Review Users quarterly. Disable accounts of departed staff immediately (Users → Deactivate) rather than deleting, so audit history stays intact.</div>
+</section>
+
+<section id="settings">
+    <h2>15. Settings — Full Configuration Reference</h2>
+    <p>Open <strong>Settings</strong> in the sidebar. Work through each block once during setup, then revisit only when policy changes.</p>
+    <h3>Branding</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Branding</strong>.</div>
+    <div class="step"><b>Step 2:</b> Set school name (fills {{SCHOOL_NAME}} placeholders incl. manuals/footers), upload logo (fills {{LOGO_DATA}}), set initials fallback ({{INITIALS}}), and theme color.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong> and reload the portal + this manual to confirm logo/initials display.</div>
+    <h3>Academic</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Academic</strong>.</div>
+    <div class="step"><b>Step 2:</b> Set pass mark, grading bands, GPA scale, minimum coverage % for graduation, attendance threshold (default 70%), and term/year structure.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>.</div>
+    <h3>Signatures</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Signatures</strong>.</div>
+    <div class="step"><b>Step 2:</b> Upload signatory images + names/titles (Principal, Registrar). These print on transcripts, letters, diplomas.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong> and test-print one document.</div>
+    <h3>Admission Numbers</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Admission Numbers</strong>.</div>
+    <div class="step"><b>Step 2:</b> Define format/prefix, center codes, year tokens, and next sequence number.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>. All future registrations follow this pattern.</div>
+    <h3>Terms (T&amp;C)</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Terms</strong>.</div>
+    <div class="step"><b>Step 2:</b> Edit the Terms and Conditions text shown on first login; set version number so re-acceptance is forced on change.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save &amp; Publish"</strong>.</div>
+    <h3>Protection</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Protection</strong>.</div>
+    <div class="step"><b>Step 2:</b> Set locks: who can edit past attendance/grades, delete guards, revoke guards, and confirmation requirements.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>.</div>
+    <h3>Maintenance</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Maintenance</strong>.</div>
+    <div class="step"><b>Step 2:</b> Toggle <strong>Maintenance Mode</strong> ON before updates (students see maintenance.html), OFF after. Set the public message.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save"</strong>.</div>
+    <h3>Coordinator Access</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Coordinator Access</strong>.</div>
+    <div class="step"><b>Step 2:</b> Toggle which screens coordinators see (attendance, coverage, contacts, fee-gate view). Save.</div>
+    <h3>WhatsApp / SMS / M-Pesa</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → WhatsApp/SMS/M-Pesa</strong>.</div>
+    <div class="step"><b>Step 2:</b> Configure WhatsApp provider + templates (welcome, fee reminder, attendance alert, announcements), SMS fallback, and M-Pesa STK keys + callback URL (see section 8).</div>
+    <div class="step"><b>Step 3:</b> Send test messages to your own number before enabling bulk sends. Click <strong>"Save"</strong>.</div>
+    <h3>Password (Change Your Own)</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Password</strong> (or Profile → Change Password).</div>
+    <div class="step"><b>Step 2:</b> Enter current password, new password, confirm, and click <strong>"Update"</strong>.</div>
+    <div class="tip">Change default passwords immediately after setup. Use a mix of letters, numbers, and symbols; never reuse the student-pattern password for admin accounts.</div>
+</section>
+
+<section id="backup">
+    <h2>16. Backup / Restore &amp; Audit Log</h2>
+    <h3>How to Take a Backup</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Backup</strong> / <strong>Settings → Backup</strong>.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Create Backup Now"</strong>. Wait for the success message + file entry (stored under server-data-backups / System backups).</div>
+    <div class="step"><b>Step 3:</b> Download a copy to your computer / external drive for off-server safekeeping.</div>
+    <div class="tip">Back up before every: term rollover, graduation migration, bulk import, settings overhaul, and deploy.</div>
+    <h3>How to Restore</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Backup → Restore</strong>.</div>
+    <div class="step"><b>Step 2:</b> Select the backup file (date-stamped) to restore from.</div>
+    <div class="step"><b>Step 3:</b> Read the warning (restore overwrites current data), confirm, and click <strong>"Restore"</strong>.</div>
+    <div class="step"><b>Step 4:</b> Log out/in, verify students, finance, and certificates, then take a fresh post-restore backup.</div>
+    <div class="note"><b>Important:</b> Restore is admin-only and destructive. Never restore over live data without a current backup taken first.</div>
+    <h3>Audit Log</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Audit Log</strong>.</div>
+    <div class="step"><b>Step 2:</b> Filter by user, date, or action (login, payment, grade change, override, delete, restore, revoke).</div>
+    <div class="step"><b>Step 3:</b> Click an entry for before/after details. Export/print for board or dispute evidence as needed.</div>
+</section>
+
+<section id="troubleshooting">
+    <h2>17. Troubleshooting — Common Problems</h2>
+    <h3>Admin Cannot Log In / Session Expired Loop</h3>
+    <ol>
+        <li>Confirm Caps Lock is off and credentials are the admin ones (not a student admission number).</li>
+        <li>If just deployed/updated: wait 1–2 minutes, then log in afresh — sessions are invalidated on deploy.</li>
+        <li>Clear cache/cookies or try incognito; try a different browser.</li>
+        <li>Check Settings → Maintenance is OFF (via another admin session if needed).</li>
+        <li>If locked out fully, contact the developer with server access for a password reset.</li>
+    </ol>
+    <h3>Student Cannot Log In</h3>
+    <ol>
+        <li>Verify username = phone number on file; password = admission number exactly (case-sensitive, slashes included).</li>
+        <li>Check Students record for typos; reset password if needed.</li>
+        <li>Confirm Terms acceptance screen is not blocking them on first login.</li>
+        <li>Confirm Content Access Gate / fee gate is not being mistaken for a login failure (they log in fine but see locked content).</li>
+    </ol>
+    <h3>Page Blank / Won't Load / PDFs Fail</h3>
+    <ol>
+        <li>Refresh (F5 / Ctrl+R); check internet; try another device/network.</li>
+        <li>Update browser; disable aggressive ad-blockers for the portal domain.</li>
+        <li>For PDF/certificate print issues: use Chrome/Edge, enable background graphics, set margins to None/Default as tested.</li>
+        <li>If after a deploy: hard refresh (Ctrl+F5) to drop cached JS.</li>
+    </ol>
+    <h3>M-Pesa STK Never Confirms</h3>
+    <ol>
+        <li>Confirm Sandbox vs Production mode matches the keys in use.</li>
+        <li>Verify callback URL is public HTTPS and reachable; check server logs for callback hits.</li>
+        <li>Confirm shortcode/passkey correct; re-save settings and retest with a small amount.</li>
+        <li>Record cash/bank manually meanwhile so student balances stay correct.</li>
+    </ol>
+    <h3>Coverage % Looks Wrong / Graduation Blocked</h3>
+    <ol>
+        <li>Check course/lesson sequence order for gaps/duplicates.</li>
+        <li>Check per-student overrides and waivers (attendance waiver applied?).</li>
+        <li>Check Content Access / Fee Gate locks that prevent lesson completion.</li>
+        <li>Reopen Coverage row detail to find the exact missing lessons, then fix source data.</li>
+    </ol>
+    <h3>Need More Help?</h3>
+    <p>Check the Audit Log for what changed, take a backup before fixing, then file a support ticket with screenshots, admission numbers, and timestamps — or contact the developer.</p>
+</section>
+
+<section id="acknowledgments">
+    <h2>18. Acknowledgments</h2>
+
+    <div class="ack-box">
+        <p>This Student Portal and its accompanying User Manual were made possible through the shared vision between Eternal Ministries Africa and NET Foundation Netherlands. We express our deepest gratitude to:</p>
+
+        <p><strong>NET Foundation Netherlands</strong> — <a href="https://english.netfoundation.nl" target="_blank" style="color:#d97706;">english.netfoundation.nl</a><br>
+        For generously availing their curriculum for use in training Pastors and Church leaders in Kenya and around the world. We appreciate all who have contributed to the development of the NET curriculum in the Netherlands — your labour in preparing sound, accessible theological materials is the bedrock upon which this entire work stands. This platform exists because of the foundational work and unwavering commitment of everyone involved in crafting this curriculum.</p>
+
+        <p><strong>NET Foundation Kenya (North Rift Trainers)</strong><br>
+        For their invaluable contribution to the development of this system — working tirelessly to fuse face-to-face training with online training, making quality theological education accessible to more students across Kenya and beyond. Their dedication aligns with NET Foundation Netherlands' long-term vision of reaching the world with this training.</p>
+
+        <p><strong>Raymond Warnar — Founding Director of NET Foundation</strong><br>
+        For being an anchor to this vision, providing steadfast support, guidance, and oversight that has kept this project grounded and moving forward from its very foundation.</p>
+
+        <p><strong>Lazarus Gatimu</strong><br>
+        For serving as the English-Speaking Countries Coordinator, with Kenya being among the nations under this coordination. His leadership has been instrumental in bringing this system to the English-speaking African context.</p>
+
+        <p><strong>The Staff of NET Foundation</strong><br>
+        For your dedicated service in ensuring the smooth operation of this vision — from administration to coordination, your work behind the scenes makes it all possible.</p>
+
+        <p><strong>All Trainers of NET Foundation</strong><br>
+        For heeding the call to run with the Great Commission, to go and make disciples of all nations. Your willingness to teach, mentor, and equip the next generation of ministers ensures that the Word of God is faithfully passed on. You are on the front lines of this mission, and we honour your commitment.</p>
+
+        <p><strong>Lead Developer: Pastor David Wafula Wanyonyi</strong><br>
+        For leading the technical development of this platform, bringing together the vision, the curriculum, and the technology to create a system that serves students across Kenya and beyond.</p>
+
+        <p>This work is dedicated to the mission of ensuring that every person called to ministry has access to sound theological training — so that no one has an excuse for ministering without having been trained.</p>
+
+        <div class="signature-area">
+            <p><strong>Developed by:</strong> Eternal Ministries Africa Tech Team &amp; NET Foundation Kenya</p>
+            <p><strong>Lead Developer:</strong> Pastor David Wafula Wanyonyi</p>
+            <p><strong>Year:</strong> 2026</p>
+        </div>
+    </div>
+</section>
+
+<div class="footer">
+    <p>{{SCHOOL_NAME}} &middot; https://netfoundation.ke</p>
+    <p>Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}} &middot; Lead Developer: Pastor David Wafula Wanyonyi</p>
+    <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
+</div>
+
+<div class="back-cover">
+    <div class="inner">
+        <div class="logo-small">
+            <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+            <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+        </div>
+        <h3>{{SCHOOL_NAME}}</h3>
+        <p>Administrator User Manual</p>
+        <div class="divider"></div>
+        <div class="mission-statement">
+            "Equipping ministers with sound theological training —<br>
+            so that no one has an excuse for ministering<br>
+            without having been trained."
+        </div>
+        <p>https://netfoundation.ke</p>
+        <div class="contact">
+            <p>Developed by Eternal Ministries Africa Tech Team</p>
+            <p>Lead Developer: Pastor David Wafula Wanyonyi</p>
+            <p>&copy; 2026 &middot; {{SCHOOL_NAME}} &middot; All Rights Reserved &middot; Version 1.0</p>
+        </div>
+    </div>
+</div>
+
+</div>
+<script>
+function closeManualTab() {
+    window.close();
+    setTimeout(function() { window.location.href = '/'; }, 200);
+}
+</script>
+</body>
+</html>

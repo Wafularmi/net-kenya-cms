@@ -2776,7 +2776,7 @@ const server = http.createServer((req, res) => {
     if (url === '/') url = '/index.html';
 
     // Maintenance mode: show the maintenance page to everyone except admins (bypass cookie)
-    if (isMaintenanceActive() && !hasMaintenanceBypass(req) && (url === '/index.html' || url === '/student-manual.html' || url === '/coordinator-manual.html')) {
+    if (isMaintenanceActive() && !hasMaintenanceBypass(req) && (url === '/index.html' || url === '/student-manual.html' || url === '/coordinator-manual.html' || url === '/admin-manual.html' || url === '/assistant-admin-manual.html' || url === '/staff-manual.html')) {
         url = '/maintenance.html';
     }
 
@@ -2799,7 +2799,7 @@ const server = http.createServer((req, res) => {
     }
 
     // Inject branding into index.html and manual pages at serve-time
-    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html') || filePath.endsWith('coordinator-manual.html') || filePath.endsWith('maintenance.html')) {
+    if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html') || filePath.endsWith('coordinator-manual.html') || filePath.endsWith('admin-manual.html') || filePath.endsWith('assistant-admin-manual.html') || filePath.endsWith('staff-manual.html') || filePath.endsWith('maintenance.html')) {
         fs.readFile(filePath, 'utf8', (err, html) => {
             if (err) {
                 res.writeHead(500);

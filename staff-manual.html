@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staff User Manual — {{SCHOOL_NAME}}</title>
+<style>
+    :root {
+        --primary: #f59e0b;
+        --primary-dark: #d97706;
+        --text: #1e293b;
+        --text-secondary: #475569;
+        --text-muted: #94a3b8;
+        --bg: #f8fafc;
+        --border: #e2e8f0;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        line-height: 1.7;
+        padding: 40px 20px;
+    }
+    .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        padding: 48px 56px;
+    }
+    @media (max-width: 600px) {
+        body { padding: 16px; }
+        .container { padding: 24px 20px; }
+    }
+    .toc { margin-bottom: 40px; }
+    .toc h2 { font-size: 18px; margin-bottom: 12px; color: var(--primary-dark); }
+    .toc ol { padding-left: 24px; }
+    .toc ol li { margin-bottom: 4px; }
+    .toc ol li a { color: var(--primary-dark); text-decoration: none; }
+    .toc ol li a:hover { text-decoration: underline; }
+    section { margin-bottom: 36px; }
+    section h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    section h3 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+    section h4 { font-size: 14px; margin: 12px 0 6px; color: var(--text-secondary); }
+    section p { margin-bottom: 10px; color: var(--text-secondary); }
+    section ul, section ol { padding-left: 24px; margin-bottom: 10px; }
+    section li { margin-bottom: 4px; color: var(--text-secondary); }
+    .note {
+        background: #fffbeb;
+        border-left: 4px solid var(--primary);
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .tip {
+        background: #f0fdf4;
+        border-left: 4px solid #22c55e;
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+    .step { margin: 6px 0 6px 24px; }
+    .step b { color: var(--text); }
+    .ack-box {
+        background: linear-gradient(135deg, #fffbeb, #fef3c7);
+        border: 1px solid #f59e0b;
+        border-radius: 12px;
+        padding: 28px 24px;
+        margin-bottom: 36px;
+    }
+    .ack-box h2 {
+        font-size: 20px;
+        color: var(--primary-dark);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+    }
+    .ack-box p, .ack-box li { color: #78350f; }
+    .signature-area {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid #fde68a;
+        font-size: 13px;
+    }
+    .screenshot {
+        max-width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        margin: 16px 0;
+        display: block;
+    }
+    .screenshot-caption {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: -10px;
+        margin-bottom: 20px;
+        font-style: italic;
+    }
+    .footer {
+        text-align: center;
+        padding: 20px 0 0;
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .front-cover {
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1a2744 100%);
+        border-radius: 16px;
+        margin-bottom: 0;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .front-cover::before {
+        content: '';
+        position: absolute;
+        top: -80px;
+        right: -80px;
+        width: 300px;
+        height: 300px;
+        background: rgba(245,158,11,0.08);
+        border-radius: 50%;
+    }
+    .front-cover::after {
+        content: '';
+        position: absolute;
+        bottom: -120px;
+        left: -60px;
+        width: 400px;
+        height: 400px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .front-cover .cover-logo {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .cover-logo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .front-cover .cover-logo .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 36px;
+        letter-spacing: 2px;
+    }
+    .front-cover h1 {
+        font-size: 34px;
+        font-weight: 800;
+        margin-bottom: 6px;
+        position: relative;
+        z-index: 1;
+        letter-spacing: 0.5px;
+    }
+    .front-cover .subtitle {
+        font-size: 18px;
+        opacity: 0.85;
+        font-weight: 400;
+        margin-bottom: 10px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .divider {
+        width: 80px;
+        height: 4px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .version {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .front-cover .mission {
+        max-width: 500px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        font-size: 15px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
+        backdrop-filter: blur(4px);
+    }
+    .front-cover .author {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 30px;
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover {
+        page-break-before: always;
+        page-break-after: always;
+        text-align: center;
+        padding: 60px 40px 40px;
+        min-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a2744 0%, #2a5298 50%, #1e3c72 100%);
+        border-radius: 16px;
+        margin-top: 36px;
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+    .back-cover::before {
+        content: '';
+        position: absolute;
+        bottom: -60px;
+        right: -60px;
+        width: 250px;
+        height: 250px;
+        background: rgba(245,158,11,0.06);
+        border-radius: 50%;
+    }
+    .back-cover::after {
+        content: '';
+        position: absolute;
+        top: -40px;
+        left: -40px;
+        width: 200px;
+        height: 200px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .back-cover .inner {
+        position: relative;
+        z-index: 1;
+    }
+    .back-cover .divider {
+        width: 60px;
+        height: 3px;
+        background: var(--primary);
+        margin: 20px auto;
+        border-radius: 2px;
+    }
+    .back-cover .logo-small {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .back-cover .logo-small img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .back-cover .logo-small .initials {
+        color: #1e3c72;
+        font-weight: 900;
+        font-size: 20px;
+        letter-spacing: 1px;
+    }
+    .back-cover h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        opacity: 0.85;
+    }
+    .back-cover p {
+        font-size: 13px;
+        opacity: 0.6;
+        margin-bottom: 6px;
+        line-height: 1.8;
+    }
+    .back-cover .mission-statement {
+        max-width: 450px;
+        margin: 24px auto;
+        padding: 16px 20px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 14px;
+        font-style: italic;
+        line-height: 1.7;
+        opacity: 0.8;
+    }
+    .back-cover .contact {
+        font-size: 12px;
+        opacity: 0.5;
+        margin-top: 20px;
+    }
+    @media print {
+        body { padding: 0; background: #fff; }
+        .container { box-shadow: none; padding: 0; border-radius: 0; max-width: 100%; }
+        .front-cover, .back-cover { border-radius: 0; margin: 0; min-height: 100vh; }
+        .toc { page-break-after: always; }
+        section { page-break-inside: avoid; }
+        .no-print { display: none; }
+    }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="no-print" style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()" style="background:var(--primary);color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📥 Download PDF</button>
+    <button onclick="closeManualTab()" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border);padding:8px 20px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;margin-left:8px;">← Back to Portal</button>
+</div>
+
+<div class="front-cover">
+    <div class="cover-logo">
+        <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+        <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+    </div>
+    <h1>{{SCHOOL_NAME}}</h1>
+    <div class="subtitle">Staff User Manual</div>
+    <div class="divider"></div>
+    <div class="version">&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</div>
+    <div class="mission">
+        "This platform exists to ensure that no one has an excuse<br>
+        for ministering without having been trained."
+    </div>
+    <div class="author">
+        Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}}<br>
+        Lead Developer: Pastor David Wafula Wanyonyi
+    </div>
+</div>
+
+<div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#intro">Introduction — The Lecturer / Trainer Role</a></li>
+        <li><a href="#login">Logging In &amp; Out</a></li>
+        <li><a href="#dashboard">Dashboard &amp; Navigation</a></li>
+        <li><a href="#students">Viewing Students &amp; Class Lists</a></li>
+        <li><a href="#lessons">Lessons &amp; Study Notes</a></li>
+        <li><a href="#attendance">Attendance &amp; Chapel</a></li>
+        <li><a href="#quizzes">Question Bank, Quizzes &amp; CATs</a></li>
+        <li><a href="#exams">Exams — Scheduling, Registration &amp; Seating</a></li>
+        <li><a href="#grading">Grading &amp; Submissions</a></li>
+        <li><a href="#progress">Progress &amp; Coverage</a></li>
+        <li><a href="#graduation">Graduation List</a></li>
+        <li><a href="#discussions">Discussions &amp; Live Classes</a></li>
+        <li><a href="#library">Library, Tickets &amp; Messages</a></li>
+        <li><a href="#password">Changing Your Own Password</a></li>
+        <li><a href="#troubleshooting">Troubleshooting — Common Problems</a></li>
+        <li><a href="#acknowledgments">Acknowledgments</a></li>
+    </ol>
+</div>
+
+<section id="intro">
+    <h2>1. Introduction — The Lecturer / Trainer Role</h2>
+    <p>Welcome to the <strong>{{SCHOOL_NAME}} Staff Portal</strong>. As a Lecturer or Trainer, you are on the front lines of the mission — teaching, mentoring, and equipping students for ministry. This manual guides you step-by-step through every task you will perform in the NET Foundation Kenya college management system.</p>
+    <h3>What a Lecturer / Trainer Does</h3>
+    <ul>
+        <li>Prepare and publish lessons, study notes, and video lessons for your assigned courses</li>
+        <li>Mark class and chapel attendance registers</li>
+        <li>Build the question bank, create quizzes and CATs, and publish them to students</li>
+        <li>Schedule exams, register students, and organise seating</li>
+        <li>Mark submissions, enter scores, and monitor pass marks</li>
+        <li>Track syllabus coverage and student progress</li>
+        <li>Lead discussions and live classes, and support students via library, tickets, and messages</li>
+    </ul>
+    <h3>What You Cannot Do (Important Boundaries)</h3>
+    <p>To protect student records and college finances, some areas are restricted:</p>
+    <ul>
+        <li><strong>Students:</strong> You can <strong>view</strong> students and class lists, but you <strong>cannot register, edit, or delete students</strong>. Only Admin and Assistant roles can add, edit, or delete student records. If a student record is wrong or missing, contact the administration.</li>
+        <li><strong>Finance:</strong> You cannot view or touch the Finance section (fees, payments, receipts, payroll). Contact the finance office for any fee-related query.</li>
+        <li><strong>Settings:</strong> You cannot change system Settings (programs, grading scales, terms, user roles). Contact the administrator for system changes.</li>
+    </ul>
+    <div class="note"><b>Important:</b> If you need a student added, corrected, or removed, or you need a finance or settings change, submit a support ticket or contact the administration — do not attempt workarounds.</div>
+    <h3>Device &amp; Browser Requirements</h3>
+    <p>The portal works on phone, tablet, laptop, or desktop in any modern browser (Chrome, Firefox, Safari, Edge) with an internet connection.</p>
+    <div class="tip">Bookmark this URL: <strong>https://netfoundation.ke</strong> for quick access.</div>
+</section>
+
+<section id="login">
+    <h2>2. Logging In &amp; Out</h2>
+    <h3>Your Login Credentials</h3>
+    <p>Your staff account is created for you by the administration. You will receive your login details from the college administration or your coordinator.</p>
+    <ul>
+        <li><strong>Username:</strong> Your phone number or staff email, as registered by the administration</li>
+        <li><strong>Password:</strong> The temporary password issued to you (change it after first login — see Section 14)</li>
+    </ul>
+    <h3>Step-by-Step: How to Log In</h3>
+    <div class="step"><b>Step 1:</b> Open your browser and go to <strong>https://netfoundation.ke</strong></div>
+    <div class="step"><b>Step 2:</b> Wait for the login screen. You will see <strong>Username</strong> and <strong>Password</strong> fields plus a <strong>Sign In</strong> button.</div>
+    <div class="step"><b>Step 3:</b> Type your username (phone number or staff email) into the <strong>Username</strong> field.</div>
+    <div class="step"><b>Step 4:</b> Type your password into the <strong>Password</strong> field. Passwords are case-sensitive.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Sign In"</strong> (or press Enter).</div>
+    <div class="step"><b>Step 6:</b> If correct, you enter the Staff Dashboard. If you see "Invalid credentials," re-check spelling and Caps Lock, then try again.</div>
+    <div class="note"><b>Important:</b> Passwords are case-sensitive. Make sure Caps Lock is off. After several failed attempts your account may lock — contact the administration to unlock it.</div>
+    <h3>First-Time Login — Accepting Terms</h3>
+    <p>The first time you log in, a pop-up shows the college's <strong>Terms and Conditions</strong>. Read them, check "I agree," and click "Accept" to continue. You only see this once.</p>
+    <h3>Forgot Your Password?</h3>
+    <p>Contact the college administration to reset your password. You will receive a temporary password, which you should change immediately from your profile (Section 14).</p>
+    <h3>How to Log Out</h3>
+    <div class="step"><b>Step 1:</b> Click your name or profile icon at the top-right corner.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Logout"</strong> or <strong>"Sign Out"</strong> from the dropdown.</div>
+    <div class="tip">Always log out on shared devices to protect student data.</div>
+</section>
+
+<section id="dashboard">
+    <h2>3. Dashboard &amp; Navigation</h2>
+    <p>The Dashboard is the first screen after login. It summarises your teaching work at a glance.</p>
+    <h3>What You Will See on the Dashboard</h3>
+    <h4>📊 Statistics Cards</h4>
+    <p>Cards at the top show counts for your assigned courses, students, pending marking, quizzes/exams, and attendance. Click any card to jump to that section.</p>
+    <h4>📝 To Do List</h4>
+    <p>Pending marking, upcoming quizzes/CATs/exams, and unmarked attendance registers, sorted by date. The most urgent items appear first.</p>
+    <h4>📅 Upcoming Events</h4>
+    <p>Scheduled exams, live classes, CAT dates, and academic deadlines for your courses.</p>
+    <h4>📢 Notifications</h4>
+    <p>Alerts from administration, ticket updates, and student submissions. The bell icon at the top-right shows your unread count.</p>
+    <h4>📚 My Courses</h4>
+    <p>Quick links to the courses assigned to you so you can jump straight into content, attendance, or grading.</p>
+    <h3>How to Navigate</h3>
+    <p>Use the <strong>sidebar menu</strong> on the left to move between sections:</p>
+    <ul>
+        <li><strong>Dashboard</strong> — This home screen</li>
+        <li><strong>📚 Courses / Lessons</strong> — Your assigned courses and lesson content</li>
+        <li><strong>👥 Students</strong> — View students and class lists (view-only)</li>
+        <li><strong>📋 Attendance</strong> — Mark class and chapel registers</li>
+        <li><strong>❓ Question Bank</strong> — Create and manage questions</li>
+        <li><strong>📝 Quizzes / CATs</strong> — Create, publish, and monitor quizzes</li>
+        <li><strong>📄 Exams</strong> — Schedule exams, register students, seating</li>
+        <li><strong>✅ Grading</strong> — Mark submissions and enter scores</li>
+        <li><strong>📈 Progress / Coverage</strong> — Syllabus coverage and student progress</li>
+        <li><strong>🎓 Graduation</strong> — View graduation list (view-only)</li>
+        <li><strong>💬 Discussions / Live Classes</strong> — Forums and live sessions</li>
+        <li><strong>📖 Library</strong> — Digital books</li>
+        <li><strong>🎫 Support / 💌 Messages</strong> — Tickets and messaging</li>
+    </ul>
+    <div class="note"><b>Note:</b> You will not see Finance or Settings in your sidebar. Those areas are restricted to Admin and finance staff. If you need anything from those areas, contact the administration.</div>
+</section>
+
+<section id="students">
+    <h2>4. Viewing Students &amp; Class Lists</h2>
+    <p>You can view the students enrolled in your courses and print class lists, but you cannot add, edit, or delete student records. Student registration and edits are done by Admin / Assistant staff only.</p>
+    <h3>How to View Your Students</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"👥 Students"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> The list shows students linked to your assigned courses / study centre. Each row shows name, admission number, program, year, and study centre.</div>
+    <div class="step"><b>Step 3:</b> Use the search bar to find a student by name or admission number.</div>
+    <div class="step"><b>Step 4:</b> Use filters (program, year, study centre, course) to narrow the list to one class.</div>
+    <div class="step"><b>Step 5:</b> Click a student name to open their academic profile: enrolled courses, attendance summary, quiz/exam registrations, and grades for your courses.</div>
+    <h3>How to Open a Class List</h3>
+    <div class="step"><b>Step 1:</b> From <strong>Students</strong>, apply the filter for the course / class you teach.</div>
+    <div class="step"><b>Step 2:</b> Confirm the total count matches your expected enrolment.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Print"</strong> or press <strong>Ctrl+P</strong> and choose <strong>"Save as PDF"</strong> to save the class list for marking or seating.</div>
+    <div class="note"><b>Important:</b> The Add, Edit, and Delete buttons are not available to staff. If a student is missing from your list, has a wrong name, or left the course, contact the administration or submit a support ticket — do not create a duplicate record.</div>
+    <div class="tip">Download the class list at the start of term and keep a printed copy for physical registers and exam seating.</div>
+</section>
+
+<section id="lessons">
+    <h2>5. Lessons &amp; Study Notes</h2>
+    <p>Lessons are the teaching content students read and watch inside each course. As the lecturer, you create lessons, upload notes, order them logically, and attach video lessons.</p>
+    <h3>How to Open Your Course Content</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📚 Courses"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"View Course"</strong> on the course assigned to you.</div>
+    <div class="step"><b>Step 3:</b> Open the <strong>"Lessons"</strong> or <strong>"Content"</strong> tab to see existing lessons in order.</div>
+    <h3>How to Create a New Lesson</h3>
+    <div class="step"><b>Step 1:</b> Inside the course, click <strong>"Add Lesson"</strong> or <strong>"New Lesson"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Enter the <strong>lesson title</strong> (e.g., "Lesson 3: The Person of Christ").</div>
+    <div class="step"><b>Step 3:</b> Type or paste the lesson content / study notes into the editor. Use headings, bold, lists, and scripture references for readability.</div>
+    <div class="step"><b>Step 4:</b> Set the <strong>lesson order number</strong> (1, 2, 3…) so lessons appear in teaching sequence.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>. The lesson appears in the course outline.</div>
+    <h3>How to Upload Notes (PDF / Slides / Documents)</h3>
+    <div class="step"><b>Step 1:</b> Open the lesson for editing (click <strong>"Edit"</strong> next to the lesson).</div>
+    <div class="step"><b>Step 2:</b> Find the <strong>Attachments</strong> or <strong>Upload Notes</strong> section.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Choose File"</strong> and select the PDF, Word, or PowerPoint file from your device.</div>
+    <div class="step"><b>Step 4:</b> Wait for the upload to finish, then click <strong>"Save"</strong>. Students will see a download link inside the lesson.</div>
+    <div class="tip">Keep file names clear, e.g., "BTH101-Lesson3-Notes.pdf". Keep files under the recommended size limit so students on phones can download them.</div>
+    <h3>How to Add a Video Lesson</h3>
+    <div class="step"><b>Step 1:</b> Open the lesson for editing.</div>
+    <div class="step"><b>Step 2:</b> Paste the video link (e.g., YouTube) into the <strong>Video URL</strong> field, or upload a video file if the system allows.</div>
+    <div class="step"><b>Step 3:</b> Save the lesson. Students will see an embedded player inside the lesson.</div>
+    <h3>How to Order / Reorder Lessons</h3>
+    <div class="step"><b>Step 1:</b> In the Lessons tab, find the order numbers or drag handles.</div>
+    <div class="step"><b>Step 2:</b> Change the order numbers or drag lessons into teaching sequence (Lesson 1 first).</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save Order"</strong> if required. Open the student preview to confirm the sequence is correct.</div>
+    <h3>Editing and Publishing</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"Edit"</strong> to update lesson text, replace attachments, or fix errors, then <strong>"Save"</strong>.</div>
+    <div class="step"><b>Step 2:</b> If lessons have Draft / Published status, click <strong>"Publish"</strong> when the lesson is ready for students.</div>
+    <div class="note"><b>Note:</b> Only publish lessons you have fully checked. Students are notified of new lessons, so avoid publishing incomplete drafts.</div>
+</section>
+
+<section id="attendance">
+    <h2>6. Attendance &amp; Chapel</h2>
+    <p>You are responsible for marking attendance registers for your classes, including chapel sessions where assigned. Mark registers promptly so records stay accurate.</p>
+    <h3>How to Mark a Class Register</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📋 Attendance"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select the <strong>course / class</strong>, the <strong>date</strong>, and the <strong>session</strong> (e.g., Lecture 1, Morning).</div>
+    <div class="step"><b>Step 3:</b> The class list loads. For each student, mark <strong>Present</strong>, <strong>Absent</strong>, or <strong>Late / Excused</strong> as provided.</div>
+    <div class="step"><b>Step 4:</b> Double-check the totals (present + absent = total enrolled).</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Submit"</strong> or <strong>"Save Attendance"</strong>. A confirmation message appears.</div>
+    <h3>How to Mark Chapel Attendance</h3>
+    <div class="step"><b>Step 1:</b> In <strong>Attendance</strong>, select <strong>Chapel</strong> as the session type and choose the date.</div>
+    <div class="step"><b>Step 2:</b> Mark each student Present / Absent as above.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Submit"</strong>.</div>
+    <h3>Correcting a Mistake</h3>
+    <div class="step"><b>Step 1:</b> Reopen the same course, date, and session.</div>
+    <div class="step"><b>Step 2:</b> Correct the student's status and click <strong>"Update"</strong> or <strong>"Save"</strong>.</div>
+    <div class="step"><b>Step 3:</b> If the register is locked, contact the administration to unlock or correct it.</div>
+    <div class="tip">Mark attendance on the same day. Late marking causes false low-attendance alerts (below 70%) for students.</div>
+</section>
+
+<section id="quizzes">
+    <h2>7. Question Bank, Quizzes &amp; CATs</h2>
+    <p>Quizzes and CATs (Continuous Assessment Tests) come from your question bank. Build questions once, then assemble them into quizzes and publish to students.</p>
+    <h3>How to Add Questions to the Question Bank</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"❓ Question Bank"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Add Question"</strong> and select the <strong>course</strong>.</div>
+    <div class="step"><b>Step 3:</b> Choose the <strong>question type</strong>: multiple choice, true/false, short answer, or essay.</div>
+    <div class="step"><b>Step 4:</b> Type the question, enter the answer options, and mark the <strong>correct answer(s)</strong> and <strong>marks</strong>.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>. Repeat until the bank covers the topic adequately.</div>
+    <h3>How to Create a Quiz or CAT</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📝 Quizzes"</strong> or <strong>"CATs"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Create Quiz"</strong> / <strong>"New CAT"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Enter the <strong>title</strong>, select the <strong>course</strong>, set <strong>total marks</strong>, <strong>time limit</strong>, <strong>open / due dates</strong>, and <strong>attempts allowed</strong>.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Add Questions"</strong> and select questions from the bank (or add new ones). Confirm the marks add up correctly.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>. The quiz is saved as a draft.</div>
+    <h3>How to Publish a Quiz</h3>
+    <div class="step"><b>Step 1:</b> Open the draft quiz and review questions, marks, time limit, and dates.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Publish"</strong>. The quiz becomes visible to enrolled students from the open date.</div>
+    <div class="step"><b>Step 3:</b> Confirm students can see it by checking the student preview or the registrations list.</div>
+    <div class="note"><b>Note:</b> Once published and attempted, avoid editing questions or marks — it can distort scores. If a fix is essential, unpublish first or contact the administration.</div>
+    <h3>Viewing Quiz Registrations / Attempts</h3>
+    <div class="step"><b>Step 1:</b> Open the quiz and click the <strong>"Registrations"</strong> or <strong>"Attempts"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> See who started, submitted, or has not attempted. Follow up with students who have not attempted before the due date.</div>
+    <div class="tip">Set a clear due date and one attempt for CATs. Allow retakes only for practice quizzes, not formal CATs, unless the administration approves.</div>
+</section>
+
+<section id="exams">
+    <h2>8. Exams — Scheduling, Registration &amp; Seating</h2>
+    <p>Exams are formal assessments on fixed dates. As a lecturer you schedule exams for your courses, register eligible students, and organise seating.</p>
+    <h3>How to Schedule an Exam</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📄 Exams"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"Schedule Exam"</strong> or <strong>"New Exam"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Enter the <strong>exam title</strong>, select the <strong>course</strong>, and set <strong>date, start time, duration, venue</strong>, and <strong>total marks</strong>.</div>
+    <div class="step"><b>Step 4:</b> Add instructions (what to bring, admission-number requirement, arrival time).</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong>, then <strong>"Publish"</strong> so students can see and register for it.</div>
+    <div class="note"><b>Note:</b> Confirm dates and venues with the administration before publishing to avoid clashes with other exams or chapel.</div>
+    <h3>How to Register Students for an Exam</h3>
+    <div class="step"><b>Step 1:</b> Open the scheduled exam and click the <strong>"Registrations"</strong> or <strong>"Candidates"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Review the list of enrolled students eligible for this course.</div>
+    <div class="step"><b>Step 3:</b> Tick the students to register (or click <strong>"Register All Eligible"</strong> if provided).</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> or <strong>"Confirm Registration"</strong>. Registered students show a "Registered" badge.</div>
+    <h3>How to Organise Seating</h3>
+    <div class="step"><b>Step 1:</b> In the exam, open the <strong>"Seating"</strong> tab if available.</div>
+    <div class="step"><b>Step 2:</b> Assign seat / desk numbers to each registered student (e.g., by admission-number order).</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save Seating"</strong>, then print the seating plan and post it at the venue entrance on exam day.</div>
+    <div class="tip">Print the final registration list the day before the exam and carry a spare copy to the venue for verification.</div>
+</section>
+
+<section id="grading">
+    <h2>9. Grading &amp; Submissions</h2>
+    <p>After quizzes, CATs, and exams, you mark submissions, enter scores, and confirm pass marks. Objective questions may auto-mark; essays and written work need manual marking.</p>
+    <h3>How to Mark Submissions</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"✅ Grading"</strong> or open the quiz/exam and click the <strong>"Submissions"</strong> tab.</div>
+    <div class="step"><b>Step 2:</b> Click a student submission to open their answers.</div>
+    <div class="step"><b>Step 3:</b> For each manual question, award marks and optionally add feedback comments.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>"Save"</strong> or <strong>"Submit Marks"</strong>. The total updates automatically.</div>
+    <h3>How to Enter / Edit Scores</h3>
+    <div class="step"><b>Step 1:</b> In <strong>Grading</strong>, select the course and assessment.</div>
+    <div class="step"><b>Step 2:</b> Type each student's score out of the total (e.g., 72/100).</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Save Scores"</strong>. Double-check totals before publishing results to students.</div>
+    <h3>Pass Marks &amp; Grading Scale</h3>
+    <ul>
+        <li><strong>A</strong> (80–100%) — Excellent — GPA 4.0</li>
+        <li><strong>B</strong> (70–79%) — Good — GPA 3.0</li>
+        <li><strong>C</strong> (60–69%) — Satisfactory — GPA 2.0</li>
+        <li><strong>D</strong> (50–59%) — Pass — GPA 1.0</li>
+        <li><strong>F</strong> (Below 50%) — Fail — GPA 0.0</li>
+    </ul>
+    <div class="note"><b>Important:</b> The pass mark is 50%. Do not alter the grading scale — it is set in Settings by the administrator. If a score looks wrong after publishing, correct it promptly and inform the administration.</div>
+    <div class="tip">Mark promptly after the due date so students get feedback while the material is fresh, and the Dashboard To Do list clears.</div>
+</section>
+
+<section id="progress">
+    <h2>10. Progress &amp; Coverage</h2>
+    <p>The Progress / Coverage screen shows how much of the syllabus you have taught and how students are performing. Check it weekly to stay on schedule.</p>
+    <h3>How to Read the Coverage Screen</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📈 Progress"</strong> or <strong>"Coverage"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select your <strong>course</strong>. You will see lessons/topics with status: <strong>Covered</strong>, <strong>In Progress</strong>, or <strong>Not Started</strong>.</div>
+    <div class="step"><b>Step 3:</b> Check the <strong>coverage percentage bar</strong> (e.g., 60% covered) and compare it with the term timetable.</div>
+    <div class="step"><b>Step 4:</b> Review per-student progress: lessons completed, quizzes submitted, attendance rate, and average score.</div>
+    <div class="note"><b>Note:</b> Students below 70% attendance or with missing CATs are flagged. Follow up with them early — before exams.</div>
+    <h3>Manual Completion Overrides (If Permitted)</h3>
+    <p>In some courses, a lesson taught physically (in class or at a study centre) may still show as incomplete online. If the administration permits, you may mark a manual completion override.</p>
+    <div class="step"><b>Step 1:</b> On the Coverage screen, find the lesson/topic and click <strong>"Mark Complete"</strong> or <strong>"Override"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Select whether it applies to the <strong>whole class</strong> or <strong>specific students</strong>, and add a brief reason (e.g., "Taught physically on 12/03/2026").</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Confirm"</strong>. The coverage percentage updates.</div>
+    <div class="note"><b>Important:</b> Only use overrides for genuinely taught content. If you do not see the override button, your role does not have permission — contact the administration instead.</div>
+</section>
+
+<section id="graduation">
+    <h2>11. Graduation List</h2>
+    <p>The Graduation List shows students who have met all requirements to graduate. It is view-only for lecturers — final approval is done by the administration.</p>
+    <h3>How to View the Graduation List</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"🎓 Graduation"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select the <strong>program</strong> and <strong>graduating year / cohort</strong>.</div>
+    <div class="step"><b>Step 3:</b> The list shows eligible students with their program, GPA, and completion status.</div>
+    <div class="step"><b>Step 4:</b> Search by name or admission number to confirm a specific student.</div>
+    <div class="note"><b>Note:</b> You cannot add or remove names. If a student should (or should not) be on the list — e.g., missing grades or attendance — inform the administration with the details.</div>
+</section>
+
+<section id="discussions">
+    <h2>12. Discussions &amp; Live Classes</h2>
+    <p>Discussions and live classes keep students engaged between physical sessions. Moderate forums respectfully and run scheduled live sessions on time.</p>
+    <h3>How to Participate in Discussions</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"💬 Discussions"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Select your <strong>course</strong> to open its forum thread.</div>
+    <div class="step"><b>Step 3:</b> Read student posts. Click <strong>"Reply"</strong> to answer a question or guide the conversation.</div>
+    <div class="step"><b>Step 4:</b> To start a new topic, click <strong>"New Post"</strong> or <strong>"Post a Question"</strong>, enter a title and message, then <strong>"Submit"</strong>.</div>
+    <div class="tip">Answer course questions within 48 hours where possible. Pin key announcements (exam dates, notes) to the top of the thread.</div>
+    <h3>How to Run a Live Class</h3>
+    <div class="step"><b>Step 1:</b> Confirm the live class schedule (date, time, link) with the administration in advance.</div>
+    <div class="step"><b>Step 2:</b> Open <strong>"Live Classes"</strong> or the <strong>Schedule</strong> tab in your course at the scheduled time.</div>
+    <div class="step"><b>Step 3:</b> Click <strong>"Start"</strong> or the meeting link to open the live session (e.g., Zoom / Google Meet).</div>
+    <div class="step"><b>Step 4:</b> Take attendance during or after the session (see Section 6).</div>
+    <div class="step"><b>Step 5:</b> After the session, post a summary and any recording link in the course Discussions so absent students can catch up.</div>
+</section>
+
+<section id="library">
+    <h2>13. Library, Tickets &amp; Messages</h2>
+    <p>Use the Library to recommend reading, Tickets to request help, and Messages / Notifications to communicate.</p>
+    <h3>How to Use the Library</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"📖 Library"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Browse or search by title or author.</div>
+    <div class="step"><b>Step 3:</b> Click a book to read it in the browser or download it if allowed.</div>
+    <div class="step"><b>Step 4:</b> Recommend specific books inside your lessons or discussion posts (e.g., "Read Chapter 4 of…").</div>
+    <div class="note"><b>Note:</b> You cannot upload or delete library books — that is done by the administration. To suggest a new book, submit a support ticket with title and author.</div>
+    <h3>How to Submit a Support Ticket</h3>
+    <div class="step"><b>Step 1:</b> Click <strong>"🎫 Support"</strong> or <strong>"Tickets"</strong> in the sidebar.</div>
+    <div class="step"><b>Step 2:</b> Click <strong>"New Ticket"</strong>.</div>
+    <div class="step"><b>Step 3:</b> Choose a <strong>Category</strong>: Academic, Technical, Student Records, or General.</div>
+    <div class="step"><b>Step 4:</b> Enter a subject and describe the issue in detail (course, student admission number, date, screenshots if any).</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Submit"</strong> and track status (Open, In Progress, Resolved) from the Support page.</div>
+    <h3>Messages &amp; Notifications</h3>
+    <p>Use <strong>💌 Messages</strong> to communicate with students and administration. Click the <strong>🔔 bell icon</strong> at the top-right to see unread notifications — ticket updates, submissions, and announcements. Click any notification to view details.</p>
+    <div class="tip">For urgent issues (e.g., exam-day problems), contact the administration directly by phone in addition to submitting a ticket.</div>
+</section>
+
+<section id="password">
+    <h2>14. Changing Your Own Password</h2>
+    <p>Change your password regularly to keep staff and student data secure. You can only change your own password — not those of students or other staff.</p>
+    <h3>Step-by-Step: How to Change Your Password</h3>
+    <div class="step"><b>Step 1:</b> Click your name or profile icon at the top-right, then click <strong>"Profile"</strong> or <strong>"My Account"</strong>.</div>
+    <div class="step"><b>Step 2:</b> Find the <strong>Change Password</strong> section.</div>
+    <div class="step"><b>Step 3:</b> Enter your <strong>current password</strong>.</div>
+    <div class="step"><b>Step 4:</b> Enter a <strong>new password</strong> and type it again to confirm.</div>
+    <div class="step"><b>Step 5:</b> Click <strong>"Save"</strong> or <strong>"Update"</strong>. A confirmation message appears.</div>
+    <div class="step"><b>Step 6:</b> Log out and log back in with the new password to confirm it works.</div>
+    <div class="tip">Use a mix of letters, numbers, and symbols (at least 8 characters). Never share your staff password with students or colleagues.</div>
+    <div class="note"><b>Note:</b> If you forget your password, you cannot reset it yourself — contact the administration for a reset and temporary password.</div>
+</section>
+
+<section id="troubleshooting">
+    <h2>15. Troubleshooting — Common Problems</h2>
+    <h3>I Cannot Log In</h3>
+    <ol>
+        <li>Check that Caps Lock is off. Passwords are case-sensitive.</li>
+        <li>Confirm you are using the correct username (phone number or staff email as registered).</li>
+        <li>Clear browser cache and cookies, then try again.</li>
+        <li>Try a different browser or an incognito/private window.</li>
+        <li>If locked out after failed attempts, contact the administration to unlock your account.</li>
+    </ol>
+    <h3>Students Are Missing From My Class List</h3>
+    <ol>
+        <li>Check your course assignment and filters (program, year, study centre).</li>
+        <li>Confirm with the administration that the students are enrolled in your course.</li>
+        <li>Remember: you cannot add students yourself — only Admin / Assistant staff can register students.</li>
+        <li>Submit a support ticket with the missing students' names and admission numbers.</li>
+    </ol>
+    <h3>Lesson Upload / Video Will Not Save</h3>
+    <ol>
+        <li>Check your internet connection and file size (large files may fail on slow networks).</li>
+        <li>Use supported formats (PDF for notes; standard video links for videos).</li>
+        <li>Try a shorter file name without special characters.</li>
+        <li>Save the lesson text first, then attach the file in a second edit.</li>
+    </ol>
+    <h3>Attendance Register Will Not Submit</h3>
+    <ol>
+        <li>Ensure every student has a status (no blank rows).</li>
+        <li>Check that the date and session are selected correctly.</li>
+        <li>Refresh and re-submit; if the register is locked, contact the administration.</li>
+    </ol>
+    <h3>Quiz / Exam Scores Look Wrong</h3>
+    <ol>
+        <li>Re-check the marks per question and total marks on the quiz/exam setup.</li>
+        <li>Check for unmarked essay questions still pending manual marking.</li>
+        <li>Correct the scores in Grading and re-save before students complain.</li>
+        <li>If the grading scale looks wrong, do not change Settings — contact the administrator.</li>
+    </ol>
+    <h3>Page Shows Blank or Won't Load</h3>
+    <ol>
+        <li>Press <strong>F5</strong> or <strong>Ctrl+R</strong> (Windows) / <strong>Cmd+R</strong> (Mac) to refresh.</li>
+        <li>Check your internet connection.</li>
+        <li>Clear browser cache (Chrome: Settings → Privacy → Clear browsing data).</li>
+        <li>Try a different device or network. If still down, it may be server maintenance — try again later.</li>
+    </ol>
+    <h3>Need More Help?</h3>
+    <p>Submit a support ticket (Support → New Ticket) with details and screenshots, or contact the college administration / coordinator directly.</p>
+</section>
+
+<section id="acknowledgments">
+    <h2>16. Acknowledgments</h2>
+
+    <div class="ack-box">
+        <p>This Student Portal and its accompanying User Manual were made possible through the shared vision between Eternal Ministries Africa and NET Foundation Netherlands. We express our deepest gratitude to:</p>
+
+        <p><strong>NET Foundation Netherlands</strong> — <a href="https://english.netfoundation.nl" target="_blank" style="color:#d97706;">english.netfoundation.nl</a><br>
+        For generously availing their curriculum for use in training Pastors and Church leaders in Kenya and around the world. We appreciate all who have contributed to the development of the NET curriculum in the Netherlands — your labour in preparing sound, accessible theological materials is the bedrock upon which this entire work stands. This platform exists because of the foundational work and unwavering commitment of everyone involved in crafting this curriculum.</p>
+
+        <p><strong>NET Foundation Kenya (North Rift Trainers)</strong><br>
+        For their invaluable contribution to the development of this system — working tirelessly to fuse face-to-face training with online training, making quality theological education accessible to more students across Kenya and beyond. Their dedication aligns with NET Foundation Netherlands' long-term vision of reaching the world with this training.</p>
+
+        <p><strong>Raymond Warnar — Founding Director of NET Foundation</strong><br>
+        For being an anchor to this vision, providing steadfast support, guidance, and oversight that has kept this project grounded and moving forward from its very foundation.</p>
+
+        <p><strong>Lazarus Gatimu</strong><br>
+        For serving as the English-Speaking Countries Coordinator, with Kenya being among the nations under this coordination. His leadership has been instrumental in bringing this system to the English-speaking African context.</p>
+
+        <p><strong>The Staff of NET Foundation</strong><br>
+        For your dedicated service in ensuring the smooth operation of this vision — from administration to coordination, your work behind the scenes makes it all possible.</p>
+
+        <p><strong>All Trainers of NET Foundation</strong><br>
+        For heeding the call to run with the Great Commission, to go and make disciples of all nations. Your willingness to teach, mentor, and equip the next generation of ministers ensures that the Word of God is faithfully passed on. You are on the front lines of this mission, and we honour your commitment.</p>
+
+        <p><strong>Lead Developer: Pastor David Wafula Wanyonyi</strong><br>
+        For leading the technical development of this platform, bringing together the vision, the curriculum, and the technology to create a system that serves students across Kenya and beyond.</p>
+
+        <p>This work is dedicated to the mission of ensuring that every person called to ministry has access to sound theological training — so that no one has an excuse for ministering without having been trained.</p>
+
+        <div class="signature-area">
+            <p><strong>Developed by:</strong> Eternal Ministries Africa Tech Team &amp; NET Foundation Kenya</p>
+            <p><strong>Lead Developer:</strong> Pastor David Wafula Wanyonyi</p>
+            <p><strong>Year:</strong> 2026</p>
+        </div>
+    </div>
+</section>
+
+<div class="footer">
+    <p>{{SCHOOL_NAME}} &middot; https://netfoundation.ke</p>
+    <p>Developed by Eternal Ministries Africa Tech Team &amp; {{SCHOOL_NAME}} &middot; Lead Developer: Pastor David Wafula Wanyonyi</p>
+    <p>&copy; 2026 &middot; All Rights Reserved &middot; Version 1.0</p>
+</div>
+
+<div class="back-cover">
+    <div class="inner">
+        <div class="logo-small">
+            <img src="{{LOGO_DATA}}" alt="{{SCHOOL_NAME}}" style="display:{{LOGO_VISIBLE}};">
+            <span class="initials" style="display:{{INITIALS_VISIBLE}};">{{INITIALS}}</span>
+        </div>
+        <h3>{{SCHOOL_NAME}}</h3>
+        <p>Staff User Manual</p>
+        <div class="divider"></div>
+        <div class="mission-statement">
+            "Equipping ministers with sound theological training —<br>
+            so that no one has an excuse for ministering<br>
+            without having been trained."
+        </div>
+        <p>https://netfoundation.ke</p>
+        <div class="contact">
+            <p>Developed by Eternal Ministries Africa Tech Team</p>
+            <p>Lead Developer: Pastor David Wafula Wanyonyi</p>
+            <p>&copy; 2026 &middot; {{SCHOOL_NAME}} &middot; All Rights Reserved &middot; Version 1.0</p>
+        </div>
+    </div>
+</div>
+
+</div>
+<script>
+function closeManualTab() {
+    window.close();
+    setTimeout(function() { window.location.href = '/'; }, 200);
+}
+</script>
+</body>
+</html>
