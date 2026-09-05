@@ -48,41 +48,48 @@ async function hubCourseAccess(me, data) {
         }
     } catch {}
     // Precedence: per-student override > study center > region > global.
+    // Locks map values: 'locked' | 'unlocked' (absent = auto-follow sequence).
+    // Legacy unlocked[] arrays are migrated on the fly.
+    const migrateLocks = (o) => {
+        const m = { ...((o && o.locks) || {}) };
+        ((o && o.unlocked) || []).forEach(id => { if (!m[id]) m[id] = 'unlocked'; });
+        return m;
+    };
     const sOv = (gate.students && gate.students[me.id]) || null;
     if (sOv && sOv.exempt) return openAll();
-    const studentExtra = new Set((sOv && sOv.unlocked) || []);
-    let eff = { enabled: !!gate.enabled, unlocked: gate.unlocked || [] };
+    const studentLocks = migrateLocks(sOv);
+    let eff = { enabled: !!gate.enabled, locks: migrateLocks(gate) };
     if (me.studyCenterId) {
         if (gate.mode === 'per-center' && gate.centers && gate.centers[me.studyCenterId]) {
             const rc = gate.centers[me.studyCenterId];
-            if (!rc.enabled) { eff = { enabled: false, unlocked: [] }; }
-            else eff = { enabled: true, unlocked: rc.unlocked || [] };
+            if (!rc.enabled) { eff = { enabled: false, locks: {} }; }
+            else eff = { enabled: true, locks: migrateLocks(rc) };
         } else if (gate.mode === 'per-region' && _hubCenterRegionCache) {
             const rid = _hubCenterRegionCache[me.studyCenterId] || '';
             const rr = rid && gate.regions ? gate.regions[rid] : null;
             if (rr) {
-                if (!rr.enabled) eff = { enabled: false, unlocked: [] };
-                else eff = { enabled: true, unlocked: rr.unlocked || [] };
+                if (!rr.enabled) eff = { enabled: false, locks: {} };
+                else eff = { enabled: true, locks: migrateLocks(rr) };
             }
         }
     }
-    if (!eff.enabled) {
-        if (!studentExtra.size) return openAll();
-        eff = { enabled: true, unlocked: [] };
-    }
-    const mergedUnlocked = new Set([...(eff.unlocked || []), ...studentExtra]);
-    eff = { enabled: true, unlocked: [...mergedUnlocked] };
+    if (!eff.enabled && !Object.keys(studentLocks).length) return openAll();
+    eff = { enabled: true, locks: { ...eff.locks } };
+    Object.entries(studentLocks).forEach(([cid, st]) => { eff.locks[cid] = st; });
     if (!data.grades || !data.submissions) {
         try { await _hubLoadTabData('overview'); } catch {}
     }
     const statuses = (typeof studentCourseStatuses === 'function') ? studentCourseStatuses(me.id, data.courses || [], data) : {};
-    const unlocked = new Set(eff.unlocked || []);
+    const locks = eff.locks || {};
     const allowed = new Set();
     const locked = new Set();
     const enrolledIds = new Set((data.enrollments || []).filter(e => e.studentId === me.id).map(e => e.courseId));
     (data.courses || []).forEach(c => {
         const st = statuses[c.id] || 'current';
-        if (st === 'covered' || st === 'current' || unlocked.has(c.id)) { allowed.add(c.id); return; }
+        const lockState = locks[c.id] || 'auto';
+        if (st === 'covered') { allowed.add(c.id); return; }
+        if (lockState === 'locked') { if (enrolledIds.has(c.id)) locked.add(c.id); return; }
+        if (st === 'current' || lockState === 'unlocked') { allowed.add(c.id); return; }
         if (enrolledIds.has(c.id)) locked.add(c.id);
     });
     const res = { gated: true, allowed, locked, statuses };
@@ -186,12 +193,13 @@ function hubTopUpInfo(lock) {
     const fmtD = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
     const fmtDT = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     const topUp = Math.max(0, (lock.cumulativeTarget || target) - totalPaid);
-    return { coveredUntil, fmtD, fmtDT, topUp, topUpDate };
+    const ranOut = coveredUntil.getTime() < Date.now();
+    return { coveredUntil, fmtD, fmtDT, topUp, topUpDate, ranOut };
 }
 function hubLockedPanel(lock, tabLabel) {
     const due = Math.max(0, (lock.cumulativeTarget || lock.target || 0) - (lock.totalPaid || 0));
     const ti = hubTopUpInfo(lock);
-    const coverLine = ti ? `<br>Covered until <b>${ti.fmtD(ti.coveredUntil)}</b> — top up <b>KES ${ti.topUp}</b> before <b>${ti.fmtDT(ti.topUpDate)}</b> to stay unlocked.` : '';
+    const coverLine = ti ? (ti.ranOut ? `<br>Your payments ran out on <b>${ti.fmtD(ti.coveredUntil)}</b> — top up <b>KES ${ti.topUp} now</b> to unlock instantly.` : `<br>Covered until <b>${ti.fmtD(ti.coveredUntil)}</b> — top up <b>KES ${ti.topUp}</b> before <b>${ti.fmtDT(ti.topUpDate)}</b> to stay unlocked.`) : '';
     return `<div class="card" style="text-align:center;padding:48px 24px;border-top:3px solid var(--danger);">
         <div style="font-size:44px;margin-bottom:10px;">🔒</div>
         <h3 style="margin:0 0 8px;">${esc(tabLabel)} Locked</h3>
@@ -560,7 +568,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                     let status = '';
                     if (L && L.target) {
                         const ti = hubTopUpInfo(L);
-                        const coverTxt = ti ? ` · covered until <b>${ti.fmtD(ti.coveredUntil)}</b>` : '';
+                        const coverTxt = ti ? (ti.ranOut ? ` · ran out <b>${ti.fmtD(ti.coveredUntil)}</b> — top up now` : ` · covered until <b>${ti.fmtD(ti.coveredUntil)}</b>`) : '';
                         if (L.locked) status = `<div style="font-size:12px;color:var(--danger);font-weight:700;margin-top:6px;">🔒 Tabs locked — pay KES ${Math.max(0, (L.cumulativeTarget || L.target) - (L.totalPaid || 0))} more (due ${esc(L.dueText || '')})${coverTxt}</div>`;
                         else if (L.grace) status = `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (this week KES ${L.weekPaid || 0})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}${coverTxt}</div>`;
                         else status = `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (week ${L.weeksElapsed || 1})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}${coverTxt}</div>`;

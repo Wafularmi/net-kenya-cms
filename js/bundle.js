@@ -17641,18 +17641,27 @@ async function loadContentGateCenters() {
     }
     if (cur) sel.value = cur;
 }
+function contentGateLocks(data) {
+    // Migrate legacy unlocked[] arrays into the locks map.
+    const locks = { ...(data.locks || {}) };
+    (data.unlocked || []).forEach(id => { if (!locks[id]) locks[id] = 'unlocked'; });
+    return locks;
+}
 async function renderContentGateCourses() {
     const box = document.getElementById('contentgate-courses');
     if (!box) return;
     let courses = [];
     try { courses = await dbGetAll('courses'); } catch { courses = []; }
     const scope = contentGateScopeData();
-    const unlocked = new Set(scope.data.unlocked || []);
-    box.innerHTML = sortCoursesBySequence(courses).map(c => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;">
-        <input type="checkbox" data-unlock="${c.id}" ${unlocked.has(c.id) ? 'checked' : ''} style="width:16px;height:16px;">
+    const locks = contentGateLocks(scope.data);
+    const opt = (val, cur, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${label}</option>`;
+    box.innerHTML = sortCoursesBySequence(courses).map(c => {
+        const cur = locks[c.id] || 'auto';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);font-size:12px;">
         <span style="flex:1;"><b>#${courseSeq(c)}</b> ${escapeHtml(c.code || '')} — ${escapeHtml(c.name || '')}</span>
-        <span style="color:var(--text-muted);font-size:11px;">${unlocked.has(c.id) ? 'Unlocked' : 'Sequenced'}</span>
-    </label>`).join('') || '<div style="color:var(--text-muted);padding:8px;">No courses.</div>';
+        <select data-lock="${c.id}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);">${opt('auto', cur, 'Auto (sequence)')}${opt('locked', cur, '🔒 Locked')}${opt('unlocked', cur, '✅ Unlocked')}</select>
+    </div>`;
+    }).join('') || '<div style="color:var(--text-muted);padding:8px;">No courses.</div>';
 }
 function contentGateScopeData() {
     if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {}, regions: {}, students: {} };
@@ -17684,7 +17693,11 @@ function selectContentGateCenter() {
 }
 async function saveContentGate() {
     if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {}, regions: {}, students: {} };
-    const unlocked = Array.from(document.querySelectorAll('#contentgate-courses input[data-unlock]:checked')).map(cb => cb.getAttribute('data-unlock'));
+    const locks = {};
+    document.querySelectorAll('#contentgate-courses select[data-lock]').forEach(sel => {
+        const v = sel.value;
+        if (v === 'locked' || v === 'unlocked') locks[sel.getAttribute('data-lock')] = v;
+    });
     const modeSel = document.getElementById('contentgate-mode')?.value || 'global';
     _contentGateFull.mode = ['global', 'per-region', 'per-center', 'per-student'].includes(modeSel) ? modeSel : 'global';
     _contentGateFull.centers = _contentGateFull.centers || {};
@@ -17694,9 +17707,9 @@ async function saveContentGate() {
     const label = scope.kind === 'global' ? 'global' : (scope.rid || scope.cid || scope.sid);
     if (scope.kind === 'student') {
         if (!scope.sid) return showToast('Select a student first!', { type: 'warning' });
-        _contentGateFull.students[scope.sid] = { unlocked, exempt: !!document.getElementById('contentgate-student-exempt')?.checked };
+        _contentGateFull.students[scope.sid] = { locks, exempt: !!document.getElementById('contentgate-student-exempt')?.checked };
     } else {
-        const part = { enabled: !!document.getElementById('contentgate-enabled')?.checked, unlocked };
+        const part = { enabled: !!document.getElementById('contentgate-enabled')?.checked, locks };
         if (scope.kind === 'region') _contentGateFull.regions[scope.rid] = part;
         else if (scope.kind === 'center') _contentGateFull.centers[scope.cid] = part;
         else {
