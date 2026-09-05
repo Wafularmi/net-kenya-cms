@@ -17611,6 +17611,7 @@ function onContentGateModeChange() {
     if (sg) sg.style.display = (mode === 'per-student') ? '' : 'none';
     if (mode === 'per-student') renderContentGateStudentOptions();
     else loadContentGateCenters().then(() => selectContentGateCenter()).catch(() => {});
+    updateContentGateScopeWarn();
 }
 let _contentGateStudentsCache = [];
 async function renderContentGateStudentOptions() {
@@ -17647,7 +17648,47 @@ function contentGateLocks(data) {
     (data.unlocked || []).forEach(id => { if (!locks[id]) locks[id] = 'unlocked'; });
     return locks;
 }
+function contentGateScopeLabel() {
+    const mode = document.getElementById('contentgate-mode')?.value || 'global';
+    if (mode === 'per-student') {
+        const sel = document.getElementById('contentgate-student');
+        const name = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : '';
+        return 'Student: ' + (name || '(none selected)');
+    }
+    const scopeId = document.getElementById('contentgate-center')?.value || '';
+    if (!scopeId) return 'Global default';
+    const sel = document.getElementById('contentgate-center');
+    const name = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : scopeId;
+    return name;
+}
+// Stage on-screen selects into memory BEFORE any re-render, so switching
+// scope/student/search never wipes unsaved ticks.
+function stageContentGateCourses() {
+    const existing = document.querySelectorAll('#contentgate-courses select[data-lock]');
+    if (!existing.length || !_contentGateFull) return;
+    const locks = {};
+    existing.forEach(sel => {
+        const v = sel.value;
+        if (v === 'locked' || v === 'unlocked') locks[sel.getAttribute('data-lock')] = v;
+    });
+    const scope = contentGateScopeData();
+    if (scope.kind === 'student') {
+        if (!scope.sid) return;
+        _contentGateFull.students = _contentGateFull.students || {};
+        _contentGateFull.students[scope.sid] = { ...(_contentGateFull.students[scope.sid] || {}), locks };
+    } else if (scope.kind === 'region') {
+        _contentGateFull.regions = _contentGateFull.regions || {};
+        _contentGateFull.regions[scope.rid] = { ...(_contentGateFull.regions[scope.rid] || {}), locks, enabled: !!document.getElementById('contentgate-enabled')?.checked };
+    } else if (scope.kind === 'center') {
+        _contentGateFull.centers = _contentGateFull.centers || {};
+        _contentGateFull.centers[scope.cid] = { ...(_contentGateFull.centers[scope.cid] || {}), locks, enabled: !!document.getElementById('contentgate-enabled')?.checked };
+    } else {
+        _contentGateFull.locks = locks;
+        _contentGateFull.enabled = !!document.getElementById('contentgate-enabled')?.checked;
+    }
+}
 async function renderContentGateCourses() {
+    stageContentGateCourses();
     const box = document.getElementById('contentgate-courses');
     if (!box) return;
     let courses = [];
@@ -17655,7 +17696,10 @@ async function renderContentGateCourses() {
     const scope = contentGateScopeData();
     const locks = contentGateLocks(scope.data);
     const opt = (val, cur, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${label}</option>`;
-    box.innerHTML = sortCoursesBySequence(courses).map(c => {
+    const label = contentGateScopeLabel();
+    const counts = (() => { const ls = contentGateLocks(contentGateScopeData().data); let l = 0, u = 0; Object.values(ls).forEach(v => { if (v === 'locked') l++; else if (v === 'unlocked') u++; }); return { l, u }; })();
+    const header = `<div style="padding:6px 8px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--accent);border-radius:6px;font-size:12px;">Editing locks for: <b>${escapeHtml(label)}</b> &nbsp;·&nbsp; 🔒 ${counts.l} locked, ✅ ${counts.u} unlocked, rest Auto</div>`;
+    box.innerHTML = header + sortCoursesBySequence(courses).map(c => {
         const cur = locks[c.id] || 'auto';
         return `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);font-size:12px;">
         <span style="flex:1;"><b>#${courseSeq(c)}</b> ${escapeHtml(c.code || '')} — ${escapeHtml(c.name || '')}</span>
@@ -17683,7 +17727,22 @@ function contentGateScopeData() {
     const centers = _contentGateFull.centers || {};
     return { kind: 'center', cid: id, data: centers[id] || {} };
 }
+function updateContentGateScopeWarn() {
+    const warn = document.getElementById('contentgate-scope-warn');
+    if (!warn) return;
+    const mode = document.getElementById('contentgate-mode')?.value || 'global';
+    const scopeId = document.getElementById('contentgate-center')?.value || '';
+    const sid = document.getElementById('contentgate-student')?.value || '';
+    let msg = '';
+    if (mode === 'global' && (scopeId || sid)) msg = '⚠️ Edit Scope is not Global, but Mode is Global — these locks will be IGNORED until you switch Mode to Per-region / Per-center / Per-student.';
+    else if (mode === 'per-region' && !scopeId) msg = 'Editing the Global default. Pick a region in Edit Scope to set that region.';
+    else if (mode === 'per-center' && !scopeId) msg = 'Editing the Global default. Pick a study center in Edit Scope to set that center.';
+    else if (mode === 'per-student' && !sid) msg = 'Pick a student above — otherwise your ticks save nowhere.';
+    if (msg) { warn.textContent = msg; warn.style.display = 'block'; }
+    else { warn.textContent = ''; warn.style.display = 'none'; }
+}
 function selectContentGateCenter() {
+    updateContentGateScopeWarn();
     const { data, kind } = contentGateScopeData();
     if (document.getElementById('contentgate-enabled')) document.getElementById('contentgate-enabled').checked = !!data.enabled;
     const exEl = document.getElementById('contentgate-student-exempt');
@@ -17718,9 +17777,12 @@ async function saveContentGate() {
         }
     }
     await dbPut('settings', { key: 'contentGate', ..._contentGateFull });
+    const savedLocks = scope.kind === 'student' ? ((_contentGateFull.students[scope.sid] || {}).locks || {}) : (contentGateLocks(scope.kind === 'global' ? _contentGateFull : ((_contentGateFull[scope.kind + 's'] || {})[scope.rid || scope.cid] || {})));
+    let nl = 0, nu = 0;
+    Object.values(savedLocks).forEach(v => { if (v === 'locked') nl++; else if (v === 'unlocked') nu++; });
     const st = document.getElementById('contentgate-status');
-    if (st) { st.textContent = '✓ Saved'; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 2000); }
-    showToast('Content gate saved!'); logAudit('updated', 'content-gate', { mode: _contentGateFull.mode, scope: label });
+    if (st) { st.textContent = `✓ Saved (${nl} locked, ${nu} unlocked)`; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 3000); }
+    showToast(`Content gate saved for ${label}! (${nl} locked, ${nu} unlocked)`); logAudit('updated', 'content-gate', { mode: _contentGateFull.mode, scope: label, locked: nl, unlocked: nu });
 }
 async function loadContentGate() {
     let s = null;

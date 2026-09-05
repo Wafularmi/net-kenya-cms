@@ -83,16 +83,17 @@ async function hubCourseAccess(me, data) {
     const locks = eff.locks || {};
     const allowed = new Set();
     const locked = new Set();
+    const reasons = {};
     const enrolledIds = new Set((data.enrollments || []).filter(e => e.studentId === me.id).map(e => e.courseId));
     (data.courses || []).forEach(c => {
         const st = statuses[c.id] || 'current';
         const lockState = locks[c.id] || 'auto';
         if (st === 'covered') { allowed.add(c.id); return; }
-        if (lockState === 'locked') { if (enrolledIds.has(c.id)) locked.add(c.id); return; }
+        if (lockState === 'locked') { if (enrolledIds.has(c.id)) { locked.add(c.id); reasons[c.id] = 'manual'; } return; }
         if (st === 'current' || lockState === 'unlocked') { allowed.add(c.id); return; }
-        if (enrolledIds.has(c.id)) locked.add(c.id);
+        if (enrolledIds.has(c.id)) { locked.add(c.id); reasons[c.id] = 'sequence'; }
     });
-    const res = { gated: true, allowed, locked, statuses };
+    const res = { gated: true, allowed, locked, reasons, statuses };
     window._hubCourseAccess = res;
     return res;
 }
@@ -674,11 +675,13 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
             </div>
             ${myCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${myCourses.map(c => {
                 const isLocked = locked.has(c.id);
+                const reason = (window._hubCourseAccess && window._hubCourseAccess.reasons && window._hubCourseAccess.reasons[c.id]) || 'sequence';
+                const reasonTxt = reason === 'manual' ? 'Locked by administrator' : 'Locked — complete earlier courses first';
                 return `
-                <div class="card" style="border-left:4px solid ${isLocked ? 'var(--text-muted)' : 'var(--success)'};transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
+                <div class="card" title="${isLocked ? esc(reasonTxt) : ''}" style="border-left:4px solid ${isLocked ? 'var(--text-muted)' : 'var(--success)'};transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
                     <div style="font-weight:700;font-size:15px;color:var(--text);">${isLocked ? '🔒 ' : ''}${esc(c.code)}</div>
                     <div style="color:var(--text);font-size:13px;margin-top:4px;font-weight:500;">${esc(c.name)}</div>
-                    ${isLocked ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">Locked — complete earlier courses or wait for unlock.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
+                    ${isLocked ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">${esc(reasonTxt)}.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
                     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;">
                         ${isLocked ? '' : `<button class="btn btn-outline btn-sm" onclick="switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
                         <button class="btn btn-outline btn-sm" onclick="hubDropCourse('${c.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);">Drop</button>
