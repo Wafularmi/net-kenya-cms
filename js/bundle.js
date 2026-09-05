@@ -17606,15 +17606,39 @@ function toggleContentGateOptions() {
 function onContentGateModeChange() {
     const mode = document.getElementById('contentgate-mode')?.value || 'global';
     const cs = document.getElementById('contentgate-center');
-    if (cs) cs.disabled = mode !== 'per-center';
+    if (cs) cs.disabled = (mode === 'global' || mode === 'per-student');
+    const sg = document.getElementById('contentgate-student-group');
+    if (sg) sg.style.display = (mode === 'per-student') ? '' : 'none';
+    if (mode === 'per-student') renderContentGateStudentOptions();
+    else loadContentGateCenters().then(() => selectContentGateCenter()).catch(() => {});
+}
+let _contentGateStudentsCache = [];
+async function renderContentGateStudentOptions() {
+    const sel = document.getElementById('contentgate-student');
+    if (!sel) return;
+    if (!_contentGateStudentsCache.length) {
+        try { _contentGateStudentsCache = await dbGetAll('students'); } catch { _contentGateStudentsCache = []; }
+    }
+    const q = (document.getElementById('contentgate-student-search')?.value || '').toLowerCase();
+    const keep = sel.value;
+    const list = _contentGateStudentsCache.filter(s => !q || (s.name || '').toLowerCase().includes(q) || (s.admissionNumber || '').toLowerCase().includes(q)).slice(0, 200);
+    sel.innerHTML = '<option value="">— Select student —</option>' + list.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(s.admissionNumber || s.id)})</option>`).join('');
+    if (keep) sel.value = keep;
 }
 async function loadContentGateCenters() {
     const sel = document.getElementById('contentgate-center');
     if (!sel) return;
-    let centers = [];
-    try { centers = await dbGetAll('studyCenters'); } catch { centers = []; }
+    const mode = document.getElementById('contentgate-mode')?.value || 'global';
     const cur = sel.value;
-    sel.innerHTML = '<option value="">Global default</option>' + centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+    if (mode === 'per-region') {
+        let regions = [];
+        try { regions = await dbGetAll('regions'); } catch { regions = []; }
+        sel.innerHTML = '<option value="">Global default</option>' + regions.map(r => `<option value="${r.id}">Region: ${escapeHtml(r.name)}</option>`).join('');
+    } else {
+        let centers = [];
+        try { centers = await dbGetAll('studyCenters'); } catch { centers = []; }
+        sel.innerHTML = '<option value="">Global default</option>' + centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+    }
     if (cur) sel.value = cur;
 }
 async function renderContentGateCourses() {
@@ -17631,45 +17655,66 @@ async function renderContentGateCourses() {
     </label>`).join('') || '<div style="color:var(--text-muted);padding:8px;">No courses.</div>';
 }
 function contentGateScopeData() {
-    const cid = document.getElementById('contentgate-center')?.value || '';
-    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {} };
-    if (!cid) {
-        const { centers, mode, ...global } = _contentGateFull;
-        return { isCenter: false, data: global };
+    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {}, regions: {}, students: {} };
+    const mode = document.getElementById('contentgate-mode')?.value || _contentGateFull.mode || 'global';
+    if (mode === 'per-student') {
+        const sid = document.getElementById('contentgate-student')?.value || '';
+        const students = _contentGateFull.students || {};
+        return { kind: 'student', sid, data: (sid && students[sid]) || {} };
+    }
+    const id = document.getElementById('contentgate-center')?.value || '';
+    if (!id) {
+        const { centers, regions, students, mode: m, ...global } = _contentGateFull;
+        return { kind: 'global', data: global };
+    }
+    if (mode === 'per-region') {
+        const regions = _contentGateFull.regions || {};
+        return { kind: 'region', rid: id, data: regions[id] || {} };
     }
     const centers = _contentGateFull.centers || {};
-    return { isCenter: true, cid, data: centers[cid] || {} };
+    return { kind: 'center', cid: id, data: centers[id] || {} };
 }
 function selectContentGateCenter() {
-    const { data } = contentGateScopeData();
+    const { data, kind } = contentGateScopeData();
     if (document.getElementById('contentgate-enabled')) document.getElementById('contentgate-enabled').checked = !!data.enabled;
+    const exEl = document.getElementById('contentgate-student-exempt');
+    if (exEl) exEl.checked = !!(kind === 'student' && data.exempt);
     toggleContentGateOptions();
     renderContentGateCourses();
 }
 async function saveContentGate() {
-    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {} };
+    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {}, regions: {}, students: {} };
     const unlocked = Array.from(document.querySelectorAll('#contentgate-courses input[data-unlock]:checked')).map(cb => cb.getAttribute('data-unlock'));
-    const part = { enabled: !!document.getElementById('contentgate-enabled')?.checked, unlocked };
-    _contentGateFull.mode = document.getElementById('contentgate-mode')?.value === 'per-center' ? 'per-center' : 'global';
-    const cid = document.getElementById('contentgate-center')?.value || '';
-    if (cid) {
-        _contentGateFull.centers = _contentGateFull.centers || {};
-        _contentGateFull.centers[cid] = part;
+    const modeSel = document.getElementById('contentgate-mode')?.value || 'global';
+    _contentGateFull.mode = ['global', 'per-region', 'per-center', 'per-student'].includes(modeSel) ? modeSel : 'global';
+    _contentGateFull.centers = _contentGateFull.centers || {};
+    _contentGateFull.regions = _contentGateFull.regions || {};
+    _contentGateFull.students = _contentGateFull.students || {};
+    const scope = contentGateScopeData();
+    const label = scope.kind === 'global' ? 'global' : (scope.rid || scope.cid || scope.sid);
+    if (scope.kind === 'student') {
+        if (!scope.sid) return showToast('Select a student first!', { type: 'warning' });
+        _contentGateFull.students[scope.sid] = { unlocked, exempt: !!document.getElementById('contentgate-student-exempt')?.checked };
     } else {
-        const { centers, mode } = _contentGateFull;
-        _contentGateFull = { ...part, mode: _contentGateFull.mode, centers: centers || {} };
+        const part = { enabled: !!document.getElementById('contentgate-enabled')?.checked, unlocked };
+        if (scope.kind === 'region') _contentGateFull.regions[scope.rid] = part;
+        else if (scope.kind === 'center') _contentGateFull.centers[scope.cid] = part;
+        else {
+            const { centers, regions, students, mode } = _contentGateFull;
+            _contentGateFull = { ...part, mode: _contentGateFull.mode, centers: centers || {}, regions: regions || {}, students: students || {} };
+        }
     }
     await dbPut('settings', { key: 'contentGate', ..._contentGateFull });
     const st = document.getElementById('contentgate-status');
     if (st) { st.textContent = '✓ Saved'; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 2000); }
-    showToast('Content gate saved!'); logAudit('updated', 'content-gate', { mode: _contentGateFull.mode, center: cid || 'global' });
+    showToast('Content gate saved!'); logAudit('updated', 'content-gate', { mode: _contentGateFull.mode, scope: label });
 }
 async function loadContentGate() {
-    await loadContentGateCenters();
     let s = null;
     try { const rec = await dbGet('settings', 'contentGate'); s = rec ? (rec.value || rec) : null; } catch {}
-    _contentGateFull = s && typeof s === 'object' ? { mode: s.mode || 'global', centers: s.centers || {}, ...s } : { mode: 'global', centers: {} };
-    if (document.getElementById('contentgate-mode')) document.getElementById('contentgate-mode').value = _contentGateFull.mode === 'per-center' ? 'per-center' : 'global';
+    _contentGateFull = s && typeof s === 'object' ? { mode: s.mode || 'global', centers: s.centers || {}, regions: s.regions || {}, students: s.students || {}, ...s } : { mode: 'global', centers: {}, regions: {}, students: {} };
+    if (document.getElementById('contentgate-mode')) document.getElementById('contentgate-mode').value = ['global', 'per-region', 'per-center', 'per-student'].includes(_contentGateFull.mode) ? _contentGateFull.mode : 'global';
+    await loadContentGateCenters();
     onContentGateModeChange();
     selectContentGateCenter();
 }

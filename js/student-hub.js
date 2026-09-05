@@ -40,13 +40,38 @@ async function hubCourseAccess(me, data) {
     if (!me || !data) return openAll();
     const gate = await hubContentGate();
     if (!gate) return openAll();
+    try {
+        if (!_hubCenterRegionCache) {
+            const centers = await dbGetAll('studyCenters');
+            _hubCenterRegionCache = {};
+            (centers || []).forEach(c => { if (c && c.id) _hubCenterRegionCache[c.id] = c.regionId || ''; });
+        }
+    } catch {}
+    // Precedence: per-student override > study center > region > global.
+    const sOv = (gate.students && gate.students[me.id]) || null;
+    if (sOv && sOv.exempt) return openAll();
+    const studentExtra = new Set((sOv && sOv.unlocked) || []);
     let eff = { enabled: !!gate.enabled, unlocked: gate.unlocked || [] };
-    if (gate.mode === 'per-center' && me.studyCenterId && gate.centers && gate.centers[me.studyCenterId]) {
-        const rc = gate.centers[me.studyCenterId];
-        if (!rc.enabled) return openAll();
-        eff = { enabled: true, unlocked: rc.unlocked || [] };
+    if (me.studyCenterId) {
+        if (gate.mode === 'per-center' && gate.centers && gate.centers[me.studyCenterId]) {
+            const rc = gate.centers[me.studyCenterId];
+            if (!rc.enabled) { eff = { enabled: false, unlocked: [] }; }
+            else eff = { enabled: true, unlocked: rc.unlocked || [] };
+        } else if (gate.mode === 'per-region' && _hubCenterRegionCache) {
+            const rid = _hubCenterRegionCache[me.studyCenterId] || '';
+            const rr = rid && gate.regions ? gate.regions[rid] : null;
+            if (rr) {
+                if (!rr.enabled) eff = { enabled: false, unlocked: [] };
+                else eff = { enabled: true, unlocked: rr.unlocked || [] };
+            }
+        }
     }
-    if (!eff.enabled) return openAll();
+    if (!eff.enabled) {
+        if (!studentExtra.size) return openAll();
+        eff = { enabled: true, unlocked: [] };
+    }
+    const mergedUnlocked = new Set([...(eff.unlocked || []), ...studentExtra]);
+    eff = { enabled: true, unlocked: [...mergedUnlocked] };
     if (!data.grades || !data.submissions) {
         try { await _hubLoadTabData('overview'); } catch {}
     }
