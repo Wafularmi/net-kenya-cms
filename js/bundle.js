@@ -419,14 +419,14 @@ function getRoleColor(role) {
 }
 function getRolePermissions(role) {
     const perms = {
-        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'],
+        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage'],
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         student: ['dashboard','student-hub','library','tickets','discussions'],
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate'],
-        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions']
+        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage']
     };
     const base = perms[role] ? [...perms[role]] : [];
     if (role === 'coordinator' && _coordinatorAccessCache) {
@@ -641,6 +641,50 @@ function sortCoursesByTranscriptOrder(courses) {
         const ib = order.indexOf((b.name || '').toUpperCase());
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
     });
+}
+// Sequence position of a course: explicit order field wins, else transcript order, else last.
+function courseSeq(course) {
+    if (course && Number(course.order) > 0) return Number(course.order);
+    const idx = getTranscriptCourseOrder().indexOf(((course && course.name) || '').toUpperCase());
+    return idx === -1 ? 99 : idx + 1;
+}
+function sortCoursesBySequence(courses) {
+    return (courses || []).slice().sort((a, b) => courseSeq(a) - courseSeq(b));
+}
+function coursePassMark(course) {
+    return (course && Number(course.passMark) > 0) ? Number(course.passMark) : 50;
+}
+// Covered = (a) auto: passing grade or passed submission in the course, or (b) manual override tick.
+function isCourseCovered(studentId, courseId, data) {
+    if (!studentId || !courseId || !data) return false;
+    const manual = (data.courseCompletions || []).some(c => String(c.studentId) === String(studentId) && String(c.courseId) === String(courseId) && c.covered !== false);
+    if (manual) return true;
+    const course = (data.courses || []).find(c => String(c.id) === String(courseId));
+    const pm = coursePassMark(course);
+    const passedGrade = (data.grades || []).some(g => String(g.studentId) === String(studentId) && String(g.courseId) === String(courseId) && Number(g.score) >= pm);
+    if (passedGrade) return true;
+    const quizzes = (data.quizzes || []);
+    const exams = (data.exams || []);
+    const passedSub = (data.submissions || []).some(s => {
+        if (String(s.studentId) !== String(studentId) || s.status !== 'pass') return false;
+        const q = s.quizId ? quizzes.find(x => String(x.id) === String(s.quizId)) : null;
+        const e = s.examId ? exams.find(x => String(x.id) === String(s.examId)) : (s.quizId ? exams.find(x => String(x.linkedQuizId) === String(s.quizId)) : null);
+        const cid = (q && q.courseId) || (e && e.courseId) || '';
+        return String(cid) === String(courseId);
+    });
+    return !!passedSub;
+}
+// Status per course for a student: covered | current (first uncovered in sequence) | future
+function studentCourseStatuses(studentId, courses, data) {
+    const seq = sortCoursesBySequence(courses || []);
+    const out = {};
+    let currentFound = false;
+    seq.forEach(c => {
+        if (isCourseCovered(studentId, c.id, data)) { out[c.id] = 'covered'; return; }
+        if (!currentFound) { out[c.id] = 'current'; currentFound = true; return; }
+        out[c.id] = 'future';
+    });
+    return out;
 }
 function hexToRgb(hex) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -1119,7 +1163,7 @@ function buildNavigation(user) {
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
         { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
-        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'settings', icon: '', text: 'Settings' }] }
+        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
     sections.forEach(section => {
@@ -1495,8 +1539,9 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
+        case 'coverage': renderCoverage(); break;
     }
 }
 function initTabs() {
@@ -3065,7 +3110,7 @@ function showCourseForm(course = null) {
         { label: 'Attendance', value: 10, type: 'attendance' }
     ];
     const wtItemsHtml = wtSrc.map(w => buildWeightageRow(w.label, w.value, w.type)).join('');
-    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
+    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
     showModal(isEdit ? 'Edit Course' : 'Add New Course', content, `<button class="btn btn-primary" onclick="saveCourse()">${isEdit ? 'Update' : 'Create'}</button>`);
     loadStaffDropdown();
     loadCampusDropdownForCourse();
@@ -3097,7 +3142,7 @@ async function saveCourse() {
     const quizW = weightage.find(w => w.type === 'quiz');
     const catW = weightage.find(w => w.type === 'cat');
     const attW = weightage.find(w => w.type === 'attendance');
-    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW ? examW.value : 30, quizWeight: quizW ? quizW.value : 20, catWeight: catW ? catW.value : 25, attWeight: attW ? attW.value : 10, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
+    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW ? examW.value : 30, quizWeight: quizW ? quizW.value : 20, catWeight: catW ? catW.value : 25, attWeight: attW ? attW.value : 10, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
     await dbPut('courses', course); closeModal(); renderCourses(); updateCourseDropdowns(); showToast(editId ? 'Course updated!' : 'Course created!'); logAudit(editId ? 'updated' : 'created', 'course', course);
 }
 function buildWeightageRow(label, value, type) {
@@ -17342,7 +17387,7 @@ function updateCoordAccessLabel(key) {
         status.style.color = on ? 'var(--success)' : 'var(--danger)';
     }
 }
-const ASSISTANT_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions'];
+const ASSISTANT_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage'];
 function renderAssistantAccessToggles() {
     const container = document.getElementById('assistant-access-toggles');
     if (!container) return;
@@ -17551,6 +17596,82 @@ async function saveFeeGateCoordinator() {
     if (!res.ok) { const d = await res.json().catch(() => ({})); if (st) { st.textContent = '✗ ' + (d.error || 'Save failed'); st.style.color = 'var(--danger)'; } return; }
     if (st) { st.textContent = '✓ Saved for your region'; st.style.color = 'var(--success)'; }
     showToast('Regional fee gate saved!');
+}
+let _contentGateFull = null;
+function toggleContentGateOptions() {
+    const on = document.getElementById('contentgate-enabled')?.checked;
+    const box = document.getElementById('contentgate-options');
+    if (box) box.style.display = on ? '' : 'none';
+}
+function onContentGateModeChange() {
+    const mode = document.getElementById('contentgate-mode')?.value || 'global';
+    const cs = document.getElementById('contentgate-center');
+    if (cs) cs.disabled = mode !== 'per-center';
+}
+async function loadContentGateCenters() {
+    const sel = document.getElementById('contentgate-center');
+    if (!sel) return;
+    let centers = [];
+    try { centers = await dbGetAll('studyCenters'); } catch { centers = []; }
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Global default</option>' + centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+    if (cur) sel.value = cur;
+}
+async function renderContentGateCourses() {
+    const box = document.getElementById('contentgate-courses');
+    if (!box) return;
+    let courses = [];
+    try { courses = await dbGetAll('courses'); } catch { courses = []; }
+    const scope = contentGateScopeData();
+    const unlocked = new Set(scope.data.unlocked || []);
+    box.innerHTML = sortCoursesBySequence(courses).map(c => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;">
+        <input type="checkbox" data-unlock="${c.id}" ${unlocked.has(c.id) ? 'checked' : ''} style="width:16px;height:16px;">
+        <span style="flex:1;"><b>#${courseSeq(c)}</b> ${escapeHtml(c.code || '')} — ${escapeHtml(c.name || '')}</span>
+        <span style="color:var(--text-muted);font-size:11px;">${unlocked.has(c.id) ? 'Unlocked' : 'Sequenced'}</span>
+    </label>`).join('') || '<div style="color:var(--text-muted);padding:8px;">No courses.</div>';
+}
+function contentGateScopeData() {
+    const cid = document.getElementById('contentgate-center')?.value || '';
+    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {} };
+    if (!cid) {
+        const { centers, mode, ...global } = _contentGateFull;
+        return { isCenter: false, data: global };
+    }
+    const centers = _contentGateFull.centers || {};
+    return { isCenter: true, cid, data: centers[cid] || {} };
+}
+function selectContentGateCenter() {
+    const { data } = contentGateScopeData();
+    if (document.getElementById('contentgate-enabled')) document.getElementById('contentgate-enabled').checked = !!data.enabled;
+    toggleContentGateOptions();
+    renderContentGateCourses();
+}
+async function saveContentGate() {
+    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {} };
+    const unlocked = Array.from(document.querySelectorAll('#contentgate-courses input[data-unlock]:checked')).map(cb => cb.getAttribute('data-unlock'));
+    const part = { enabled: !!document.getElementById('contentgate-enabled')?.checked, unlocked };
+    _contentGateFull.mode = document.getElementById('contentgate-mode')?.value === 'per-center' ? 'per-center' : 'global';
+    const cid = document.getElementById('contentgate-center')?.value || '';
+    if (cid) {
+        _contentGateFull.centers = _contentGateFull.centers || {};
+        _contentGateFull.centers[cid] = part;
+    } else {
+        const { centers, mode } = _contentGateFull;
+        _contentGateFull = { ...part, mode: _contentGateFull.mode, centers: centers || {} };
+    }
+    await dbPut('settings', { key: 'contentGate', ..._contentGateFull });
+    const st = document.getElementById('contentgate-status');
+    if (st) { st.textContent = '✓ Saved'; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 2000); }
+    showToast('Content gate saved!'); logAudit('updated', 'content-gate', { mode: _contentGateFull.mode, center: cid || 'global' });
+}
+async function loadContentGate() {
+    await loadContentGateCenters();
+    let s = null;
+    try { const rec = await dbGet('settings', 'contentGate'); s = rec ? (rec.value || rec) : null; } catch {}
+    _contentGateFull = s && typeof s === 'object' ? { mode: s.mode || 'global', centers: s.centers || {}, ...s } : { mode: 'global', centers: {} };
+    if (document.getElementById('contentgate-mode')) document.getElementById('contentgate-mode').value = _contentGateFull.mode === 'per-center' ? 'per-center' : 'global';
+    onContentGateModeChange();
+    selectContentGateCenter();
 }
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };
@@ -18254,6 +18375,202 @@ async function exportStudentsCSV() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'students_' + new Date().toISOString().split('T')[0] + '.csv'; a.click();
     showToast('Students exported!'); logAudit('exported', 'students-csv', {});
+}
+let _coverageCache = null;
+async function loadCoverageData() {
+    const [students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions] = await Promise.all([
+        dbGetAll('students'), dbGetAll('courses'), dbGetAll('enrollments'), dbGetAll('grades'), dbGetAll('submissions'), dbGetAll('attendance'), dbGetAll('payments'), dbGetAll('studyCenters'), dbGetAll('regions').catch(() => []), dbGetAll('quizzes'), dbGetAll('exams'), dbGetAll('courseCompletions').catch(() => [])
+    ]);
+    let academic = null;
+    try { const rec = await dbGet('settings', 'academic'); academic = rec ? (rec.value || rec) : null; } catch {}
+    _coverageCache = { students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, academic, loadedAt: Date.now() };
+    return _coverageCache;
+}
+function coverageStudentIds() { return null; }
+function coverageMetrics(studentId, courseId, d) {
+    const grades = (d.grades || []).filter(g => String(g.studentId) === String(studentId) && String(g.courseId) === String(courseId));
+    const avg = grades.length ? Math.round(grades.reduce((s, g) => s + (Number(g.score) || 0), 0) / grades.length) : null;
+    const att = (d.attendance || []).filter(a => String(a.studentId) === String(studentId) && (!a.courseId || String(a.courseId) === String(courseId)));
+    const present = att.filter(a => a.status === 'present' || a.status === 'late').length;
+    const attPct = att.length ? Math.round((present / att.length) * 100) : null;
+    return { avg, attPct };
+}
+async function toggleCourseCompletion(studentId, courseId, el) {
+    const id = `CCMP-${studentId}-${courseId}`;
+    const existing = (await dbGetAll('courseCompletions').catch(() => [])).find(c => c.id === id);
+    if (existing) {
+        await dbDelete('courseCompletions', id);
+        showToast('Manual override removed — back to automatic.');
+    } else {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        await dbPut('courseCompletions', { id, studentId, courseId, covered: true, manual: true, by: u.username || '', at: new Date().toISOString() });
+        showToast('Marked as covered (manual override).');
+    }
+    _coverageCache = null;
+    renderCoverage();
+}
+async function renderCoverage() {
+    const d = (_coverageCache && Date.now() - _coverageCache.loadedAt < 60000) ? _coverageCache : await loadCoverageData();
+    const sel = document.getElementById('coverage-center');
+    const centers = d.studyCenters || [];
+    if (sel && !sel.dataset.filled) {
+        sel.innerHTML = '<option value="">All Centers</option>' + centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        sel.dataset.filled = '1';
+    }
+    const fCenter = sel ? sel.value : '';
+    const box = document.getElementById('coverage-content');
+    const seqCourses = sortCoursesBySequence(d.courses || []);
+    const list = centers.filter(c => !fCenter || c.id === fCenter);
+    const centerName = (id) => { const c = centers.find(x => x.id === id); return c ? c.name : (id || 'Main'); };
+    let html = '';
+    (fCenter ? list : list).forEach(center => {
+        const students = d.students.filter(s => (s.studyCenterId || '') === center.id);
+        const manualCount = (d.courseCompletions || []).filter(c => students.some(s => s.id === c.studentId)).length;
+        html += `<div style="margin-bottom:24px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+            <div style="background:linear-gradient(135deg,var(--accent),#1a3a6b);color:#fff;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                <div><b>${escapeHtml(center.name)}</b> <span style="font-size:11px;opacity:0.85;">${students.length} student(s) · ${manualCount} manual override(s)</span></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-outline" style="background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.4);" onclick="printContactsPDF('${center.id}')">👥 Contacts</button>
+                    <button class="btn btn-sm btn-outline" style="background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.4);" onclick="printFinanceCenterPDF('${center.id}')">💰 Finance</button>
+                </div>
+            </div>
+            <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead><tr><th>Student (Adm#)</th>${seqCourses.map(c => `<th style="text-align:center;">${escapeHtml(c.code || c.name)}<br><span style="font-weight:400;font-size:10px;">#${courseSeq(c)}</span></th>`).join('')}<th>Attend%</th><th>Avg%</th></tr></thead><tbody>`;
+        students.forEach(s => {
+            const statuses = studentCourseStatuses(s.id, seqCourses, d);
+            let attSum = 0, attN = 0, scoreSum = 0, scoreN = 0;
+            const cells = seqCourses.map(c => {
+                const st = statuses[c.id];
+                const m = coverageMetrics(s.id, c.id, d);
+                if (m.attPct != null) { attSum += m.attPct; attN++; }
+                if (m.avg != null) { scoreSum += m.avg; scoreN++; }
+                const manual = (d.courseCompletions || []).some(x => String(x.studentId) === String(s.id) && String(x.courseId) === String(c.id));
+                const pill = st === 'covered' ? `<span class="badge badge-success">✅${manual ? '*' : ''}</span>` : st === 'current' ? `<span class="badge badge-warning">📖</span>` : `<span class="badge badge-secondary">🔒</span>`;
+                return `<td style="text-align:center;" title="Click to toggle manual override"><span style="cursor:pointer;" onclick="toggleCourseCompletion('${s.id}','${c.id}',this)">${pill}</span></td>`;
+            }).join('');
+            html += `<tr><td><b>${escapeHtml(s.name)}</b><br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml(s.admissionNumber || s.id)}</span></td>${cells}<td style="text-align:center;">${attN ? Math.round(attSum / attN) + '%' : '—'}</td><td style="text-align:center;">${scoreN ? Math.round(scoreSum / scoreN) + '%' : '—'}</td></tr>`;
+        });
+        if (!students.length) html += `<tr><td colspan="${seqCourses.length + 3}" style="text-align:center;color:var(--text-muted);padding:20px;">No students in this center.</td></tr>`;
+        // Per-course aggregates
+        html += `<tr style="background:var(--bg-input);"><td><b>Covered</b></td>${seqCourses.map(c => {
+            const n = students.filter(s => { const st = studentCourseStatuses(s.id, seqCourses, d); return st[c.id] === 'covered'; }).length;
+            return `<td style="text-align:center;"><b>${n}/${students.length}</b></td>`;
+        }).join('')}<td></td><td></td></tr>`;
+        html += `</tbody></table></div><div style="font-size:11px;color:var(--text-muted);padding:6px 12px;">✅ covered (* = manual override) · 📖 current · 🔒 future — click a pill to toggle manual override</div></div>`;
+    });
+    if (!list.length) html = '<div style="color:var(--text-muted);padding:40px;text-align:center;">No study centers found.</div>';
+    box.innerHTML = html;
+}
+function coveragePrintDoc(title, subtitle, bodyHtml) {
+    const branding = null;
+    const w = window.open('', '', 'width=900,height=700');
+    w.document.write(`<html><head><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;}h1{font-size:20px;margin:0 0 4px;}p.sub{color:#64748b;font-size:12px;margin:0 0 16px;}table{width:100%;border-collapse:collapse;font-size:11px;margin:12px 0;}th,td{border:1px solid #999;padding:5px 7px;text-align:left;}th{background:#eee;}h2{font-size:14px;margin:20px 0 6px;}@media print{body{padding:0;}}</style></head><body><h1>${escapeHtml(title)}</h1><p class="sub">${subtitle} · Generated ${new Date().toLocaleDateString('en-GB')}</p>${bodyHtml}</body></html>`);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 500);
+}
+async function coverageScope() {
+    const d = _coverageCache || await loadCoverageData();
+    const sel = document.getElementById('coverage-center');
+    const fCenter = sel ? sel.value : '';
+    const centers = (d.studyCenters || []).filter(c => !fCenter || c.id === fCenter);
+    return { d, centers };
+}
+async function printCoveragePDF() {
+    const { d, centers } = await coverageScope();
+    const seqCourses = sortCoursesBySequence(d.courses || []);
+    let body = '';
+    centers.forEach(center => {
+        const students = d.students.filter(s => (s.studyCenterId || '') === center.id);
+        body += `<h2>${escapeHtml(center.name)} (${students.length} students)</h2><table><thead><tr><th>#</th><th>Name</th><th>Adm#</th>${seqCourses.map(c => `<th>${escapeHtml(c.code || c.name)}</th>`).join('')}<th>Attend%</th><th>Avg%</th></tr></thead><tbody>`;
+        students.forEach((s, i) => {
+            const statuses = studentCourseStatuses(s.id, seqCourses, d);
+            let attSum = 0, attN = 0, scoreSum = 0, scoreN = 0;
+            const cells = seqCourses.map(c => {
+                const m = coverageMetrics(s.id, c.id, d);
+                if (m.attPct != null) { attSum += m.attPct; attN++; }
+                if (m.avg != null) { scoreSum += m.avg; scoreN++; }
+                const st = statuses[c.id];
+                return `<td>${st === 'covered' ? 'Done' : st === 'current' ? 'Current' : 'Locked'}</td>`;
+            }).join('');
+            body += `<tr><td>${i + 1}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.admissionNumber || s.id)}</td>${cells}<td>${attN ? Math.round(attSum / attN) + '%' : '—'}</td><td>${scoreN ? Math.round(scoreSum / scoreN) + '%' : '—'}</td></tr>`;
+        });
+        body += `</tbody></table>`;
+    });
+    coveragePrintDoc('Course Coverage Report', centers.length === 1 ? centers[0].name : 'All Centers', body);
+    logAudit('printed', 'coverage-report', {});
+}
+async function printContactsPDF(centerId) {
+    const { d, centers } = await coverageScope();
+    const list = centerId ? centers.filter(c => c.id === centerId) : centers;
+    let body = '';
+    list.forEach(center => {
+        const students = d.students.filter(s => (s.studyCenterId || '') === center.id);
+        body += `<h2>${escapeHtml(center.name)} (${students.length})</h2><table><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Admission No</th></tr></thead><tbody>`;
+        students.forEach((s, i) => { body += `<tr><td>${i + 1}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.phone || '—')}</td><td>${escapeHtml(s.admissionNumber || s.id)}</td></tr>`; });
+        body += `</tbody></table>`;
+    });
+    coveragePrintDoc('Student Contacts', list.length === 1 ? list[0].name : 'All Centers', body);
+    logAudit('printed', 'contacts-report', {});
+}
+function coverageFeeOf(student, d) {
+    if (student && Number(student.feeAmount) > 0) return Number(student.feeAmount);
+    try {
+        const pf = d && d.academic && d.academic.programFees;
+        if (pf && student && student.program && Number(pf[student.program]) > 0) return Number(pf[student.program]);
+    } catch {}
+    return 0;
+}
+async function financeRowsFor(centerIds, d) {
+    const students = d.students.filter(s => centerIds.includes(s.studyCenterId || ''));
+    return students.map(s => {
+        const paid = (d.payments || []).filter(p => String(p.studentId) === String(s.id)).reduce((x, p) => x + (Number(p.amount) || 0), 0);
+        const fee = coverageFeeOf(s, d);
+        return { name: s.name, adm: s.admissionNumber || s.id, phone: s.phone || '', fee, paid, bal: Math.max(0, fee - paid) };
+    });
+}
+async function printFinanceCenterPDF(centerId) {
+    const { d, centers } = await coverageScope();
+    const list = centerId ? centers.filter(c => c.id === centerId) : centers;
+    let body = '';
+    for (const center of list) {
+        const rows = await financeRowsFor([center.id], d);
+        const tFee = rows.reduce((s, r) => s + r.fee, 0), tPaid = rows.reduce((s, r) => s + r.paid, 0);
+        body += `<h2>${escapeHtml(center.name)} — Expected: ${tFee.toLocaleString()}, Paid: ${tPaid.toLocaleString()}, Balance: ${(tFee - tPaid).toLocaleString()}</h2>`;
+        body += `<table><thead><tr><th>#</th><th>Name</th><th>Adm#</th><th>Fee</th><th>Paid</th><th>Balance</th></tr></thead><tbody>`;
+        rows.forEach((r, i) => { body += `<tr><td>${i + 1}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.adm)}</td><td>${r.fee.toLocaleString()}</td><td>${r.paid.toLocaleString()}</td><td>${r.bal.toLocaleString()}</td></tr>`; });
+        body += `</tbody></table>`;
+    }
+    coveragePrintDoc('Center Financial Report', list.length === 1 ? list[0].name : 'All Centers', body);
+    logAudit('printed', 'finance-center-report', {});
+}
+async function printFinanceRegionPDF() {
+    const { d } = await coverageScope();
+    const regions = d.regions || [];
+    const centerRegion = {};
+    (d.studyCenters || []).forEach(c => { centerRegion[c.id] = c.regionId || ''; });
+    const regionName = (id) => { const r = regions.find(x => x.id === id); return r ? r.name : (id || 'Unassigned'); };
+    const byRegion = {};
+    (d.studyCenters || []).forEach(c => {
+        const rid = centerRegion[c.id] || '';
+        if (!byRegion[rid]) byRegion[rid] = [];
+        byRegion[rid].push(c);
+    });
+    let body = '';
+    for (const rid of Object.keys(byRegion)) {
+        const centers = byRegion[rid];
+        const rows = await financeRowsFor(centers.map(c => c.id), d);
+        const tFee = rows.reduce((s, r) => s + r.fee, 0), tPaid = rows.reduce((s, r) => s + r.paid, 0);
+        body += `<h2>Region: ${escapeHtml(regionName(rid))} — Expected: ${tFee.toLocaleString()}, Paid: ${tPaid.toLocaleString()}, Balance: ${(tFee - tPaid).toLocaleString()}</h2>`;
+        body += `<table><thead><tr><th>Center</th><th>Students</th><th>Expected</th><th>Paid</th><th>Balance</th></tr></thead><tbody>`;
+        for (const c of centers) {
+            const cr = await financeRowsFor([c.id], d);
+            const f = cr.reduce((s, r) => s + r.fee, 0), p = cr.reduce((s, r) => s + r.paid, 0);
+            body += `<tr><td>${escapeHtml(c.name)}</td><td>${cr.length}</td><td>${f.toLocaleString()}</td><td>${p.toLocaleString()}</td><td>${(f - p).toLocaleString()}</td></tr>`;
+        }
+        body += `</tbody></table>`;
+    }
+    if (!Object.keys(byRegion).length) body = '<p>No centers found.</p>';
+    coveragePrintDoc('Regional Financial Report', 'All Regions', body);
+    logAudit('printed', 'finance-region-report', {});
 }
 async function exportGradesPDF() {
     const grades = await dbGetAll('grades');

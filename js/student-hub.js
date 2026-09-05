@@ -17,7 +17,7 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -25,6 +25,45 @@ async function loadStudentHubData(force) {
 }
 
 function invalidateStudentHubCache() { studentHubCache = null; _hubComputedCache = null; }
+let _hubContentGateCache = null;
+let _hubContentGateAt = 0;
+async function hubContentGate() {
+    if (_hubContentGateCache && Date.now() - _hubContentGateAt < 60000) return _hubContentGateCache;
+    try { const r = await dbGet('settings', 'contentGate'); _hubContentGateCache = (r && (r.value || r)) || null; }
+    catch { _hubContentGateCache = null; }
+    _hubContentGateAt = Date.now();
+    return _hubContentGateCache;
+}
+// Returns { gated, allowed:Set(courseIds), locked:Set(enrolled locked ids), statuses }
+async function hubCourseAccess(me, data) {
+    const openAll = () => ({ gated: false, allowed: new Set((data.courses || []).map(c => c.id)), locked: new Set(), statuses: {} });
+    if (!me || !data) return openAll();
+    const gate = await hubContentGate();
+    if (!gate) return openAll();
+    let eff = { enabled: !!gate.enabled, unlocked: gate.unlocked || [] };
+    if (gate.mode === 'per-center' && me.studyCenterId && gate.centers && gate.centers[me.studyCenterId]) {
+        const rc = gate.centers[me.studyCenterId];
+        if (!rc.enabled) return openAll();
+        eff = { enabled: true, unlocked: rc.unlocked || [] };
+    }
+    if (!eff.enabled) return openAll();
+    if (!data.grades || !data.submissions) {
+        try { await _hubLoadTabData('overview'); } catch {}
+    }
+    const statuses = (typeof studentCourseStatuses === 'function') ? studentCourseStatuses(me.id, data.courses || [], data) : {};
+    const unlocked = new Set(eff.unlocked || []);
+    const allowed = new Set();
+    const locked = new Set();
+    const enrolledIds = new Set((data.enrollments || []).filter(e => e.studentId === me.id).map(e => e.courseId));
+    (data.courses || []).forEach(c => {
+        const st = statuses[c.id] || 'current';
+        if (st === 'covered' || st === 'current' || unlocked.has(c.id)) { allowed.add(c.id); return; }
+        if (enrolledIds.has(c.id)) locked.add(c.id);
+    });
+    const res = { gated: true, allowed, locked, statuses };
+    window._hubCourseAccess = res;
+    return res;
+}
 let _hubFeeGateCache = null;
 let _hubFeeGateAt = 0;
 let _hubCenterRegionCache = null;
@@ -371,13 +410,33 @@ async function switchHubTab(tab, btn) {
             const me = _hubGetMe();
             if (me) { c = _hubBuildComputed(studentHubCache, me); _hubComputed = c; _hubComputedCache = { computed: c, dataVersion: studentHubCache.loadedAt, meId: me.id }; }
         }
+        // Content gate: filter to allowed courses (covered + current + unlocked)
+        let rc = c;
+        let lockedIds = (window._hubCourseAccess && window._hubCourseAccess.locked) || new Set();
         try {
-            if (tab === 'courses') container.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data);
-            else if (tab === 'exams') container.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
-            else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
-            else if (tab === 'notes') container.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
-            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(c.me, c.myCourses, c.myLessons);
-            else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(c.me, c.data); return; }
+            const access = await hubCourseAccess(_hubGetMe(), studentHubCache || {});
+            lockedIds = access.locked || new Set();
+            if (access.gated) {
+                const ok = access.allowed || new Set();
+                rc = { ...c,
+                    myLessons: (c.myLessons || []).filter(l => ok.has(l.courseId)),
+                    myNotes: (c.myNotes || []).filter(n => ok.has(n.courseId)),
+                    pendingQuizzes: (c.pendingQuizzes || []).filter(q => ok.has(q.courseId)),
+                    completedQuizzes: (c.completedQuizzes || []).filter(q => ok.has(q.courseId)),
+                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId)),
+                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId)),
+                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId)),
+                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId))
+                };
+            }
+        } catch {}
+        try {
+            if (tab === 'courses') container.innerHTML = renderHubCourses(rc.me, rc.myCourses, rc.availableCourses, rc.data, lockedIds);
+            else if (tab === 'exams') container.innerHTML = renderHubExams(rc.me, rc.upcomingRegisteredExams, rc.pastRegisteredExams, rc.upcomingAvailableExams, rc.pastAvailableExams, rc.data);
+            else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(rc.me, rc.pendingQuizzes, rc.completedQuizzes, rc.data, rc.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
+            else if (tab === 'notes') container.innerHTML = renderHubNotes(rc.me, rc.myCourses, rc.myLessons, rc.myNotes, rc.data);
+            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(rc.me, rc.myCourses, rc.myLessons);
+            else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(rc.me, rc.data); return; }
         } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
         _hubRenderedTabs[tab] = true;
     }
@@ -554,23 +613,26 @@ async function submitMpesaStk(studentId) {
     }
 }
 
-function renderHubCourses(me, myCourses, availableCourses, data) {
+function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
+    const locked = lockedIds instanceof Set ? lockedIds : new Set(lockedIds || []);
     return `
         <div style="margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h3 style="color:var(--accent);margin:0;">📚 My Enrolled Courses <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${myCourses.length})</span></h3>
             </div>
-            ${myCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${myCourses.map(c => `
-                <div class="card" style="border-left:4px solid var(--success);transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
-                    <div style="font-weight:700;font-size:15px;color:var(--text);">${esc(c.code)}</div>
+            ${myCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${myCourses.map(c => {
+                const isLocked = locked.has(c.id);
+                return `
+                <div class="card" style="border-left:4px solid ${isLocked ? 'var(--text-muted)' : 'var(--success)'};transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
+                    <div style="font-weight:700;font-size:15px;color:var(--text);">${isLocked ? '🔒 ' : ''}${esc(c.code)}</div>
                     <div style="color:var(--text);font-size:13px;margin-top:4px;font-weight:500;">${esc(c.name)}</div>
-                    ${c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : ''}
+                    ${isLocked ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">Locked — complete earlier courses or wait for unlock.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
                     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;">
-                        <button class="btn btn-outline btn-sm" onclick="switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>
+                        ${isLocked ? '' : `<button class="btn btn-outline btn-sm" onclick="switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
                         <button class="btn btn-outline btn-sm" onclick="hubDropCourse('${c.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);">Drop</button>
                     </div>
-                </div>
-            `).join('')}</div>` : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">📚</div><div>You haven\'t enrolled in any courses yet.</div><div style="font-size:12px;margin-top:8px;">Browse available courses below to get started.</div></div>'}
+                </div>`;
+            }).join('')}</div>` : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">📚</div><div>You haven\'t enrolled in any courses yet.</div><div style="font-size:12px;margin-top:8px;">Browse available courses below to get started.</div></div>'}
         </div>
 
         <div>
@@ -1262,7 +1324,7 @@ function _hubRenderTab(tab) {
     if (!el) return;
     if (tab === 'quizzes') { el.innerHTML = renderHubQuizzes(c.me, c.pendingQuizzes, c.completedQuizzes, c.data, c.allScores); if (!el.dataset.hubQuizBound) { el.dataset.hubQuizBound = '1'; el.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
     else if (tab === 'exams') el.innerHTML = renderHubExams(c.me, c.upcomingRegisteredExams, c.pastRegisteredExams, c.upcomingAvailableExams, c.pastAvailableExams, c.data);
-    else if (tab === 'courses') el.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data);
+    else if (tab === 'courses') el.innerHTML = renderHubCourses(c.me, c.myCourses, c.availableCourses, c.data, (window._hubCourseAccess && window._hubCourseAccess.locked) || new Set());
     else if (tab === 'notes') el.innerHTML = renderHubNotes(c.me, c.myCourses, c.myLessons, c.myNotes, c.data);
     else if (tab === 'discussions') renderHubDiscussions(c.me, c.data);
 }
@@ -1275,7 +1337,8 @@ async function renderHubDiscussions(me, data) {
     }
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const userId = currentUser.studentId || currentUser.username;
-    const myCourses = (data.courses || []).filter(c => (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === c.id));
+    const gateAccess = window._hubCourseAccess;
+    const myCourses = (data.courses || []).filter(c => (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === c.id) && (!gateAccess || !gateAccess.gated || gateAccess.allowed.has(c.id)));
 
     let html = '<div style="margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><select id="hub-disc-course" class="filter-select" style="flex:1;min-width:200px;max-width:400px;" onchange="renderHubDiscussions(_hubGetMe(),_hubData)"><option value="">All My Courses</option>' + myCourses.map(c => '<option value="' + esc(c.id) + '">' + esc(c.code) + ' — ' + esc(c.name) + '</option>').join('') + '</select>';
     html += '<button class="btn btn-primary btn-sm" onclick="' + (myCourses.length ? 'var e=document.getElementById(\'hub-disc-course\');showNewDiscussionModal(e?e.value:\'\')' : 'showToast(\'You are not enrolled in any courses yet\',{type:\'warning\'})') + '">+ New Discussion</button></div>';

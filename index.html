@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=289" as="script">
+    <link rel="preload" href="js/bundle.js?v=290" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -459,6 +459,17 @@
                     <button class="btn btn-danger" onclick="clearAllAudit()" style="margin-left:4px;">Clear All</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Date/Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody id="audit-body"></tbody></table></div></div>
+            </section>
+
+            <section id="screen-coverage" class="screen">
+                <div class="screen-header"><h2>📊 Course Coverage per Center</h2><div class="screen-actions">
+                    <select id="coverage-center" class="filter-select" onchange="renderCoverage()"><option value="">All Centers</option></select>
+                    <button class="btn btn-outline" onclick="printCoveragePDF()">🖨 Coverage PDF</button>
+                    <button class="btn btn-outline" onclick="printContactsPDF()">👥 Contacts PDF</button>
+                    <button class="btn btn-outline" onclick="printFinanceCenterPDF()">💰 Center Finance PDF</button>
+                    <button class="btn btn-outline" onclick="printFinanceRegionPDF()">🗺 Region Finance PDF</button>
+                </div></div>
+                <div class="card"><div id="coverage-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading coverage...</p></div></div>
             </section>
 
             <section id="screen-verify" class="screen">
@@ -1140,6 +1151,16 @@
                         <button class="btn btn-primary" onclick="saveFeeGate()">Save Fee Gate</button>
                         <div id="feegate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
+                    <div class="card"><h3>📖 Content Access Gate</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now — tick Unlock per course to release it early. Works globally or per study center.</div>
+                        <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="contentgate-enabled" onchange="toggleContentGateOptions()" style="width:18px;height:18px;"> Enable content gating</label></div>
+                        <div id="contentgate-options" style="display:none;">
+                            <div class="form-row"><div class="form-group"><label>Mode</label><select id="contentgate-mode" onchange="onContentGateModeChange()"><option value="global">Global (one rule for all)</option><option value="per-center">Per study center</option></select></div><div class="form-group"><label>Edit Scope</label><select id="contentgate-center" onchange="selectContentGateCenter()"><option value="">Global default</option></select></div></div>
+                            <div class="form-group"><label>Courses (tick Unlock to release a future course early)</label><div id="contentgate-courses" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-input);"></div></div>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveContentGate()">Save Content Gate</button>
+                        <div id="contentgate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+                    </div>
                     <div class="card"><h3>WhatsApp Settings</h3>
                         <div class="form-group"><label>Default Country Code</label><input type="text" id="settings-whatsapp-code" value="254" placeholder="e.g., 254 for Kenya"></div>
                         <div class="form-group"><label>Admin WhatsApp Number</label><input type="text" id="settings-whatsapp-admin" placeholder="e.g., 254712345678"></div>
@@ -1285,8 +1306,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=289"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=22"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=290"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=23"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

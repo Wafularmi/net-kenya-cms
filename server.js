@@ -649,6 +649,9 @@ function filterStoreForUser(user, store, rows) {
     if (store === 'users') {
         return rows.filter(r => r && String(r.username) === uid);
     }
+    if (store === 'courseCompletions') {
+        return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
     if (store === 'alumni') {
         return rows.filter(r => {
             if (!r) return false;
