@@ -230,7 +230,7 @@ function syncToVolume() {
 
 // Atomic write: write to temp file, then rename (atomic on same filesystem)
 function safeWriteJSON(data) {
-    const json = JSON.stringify(data, null, 2);
+    const json = JSON.stringify(data);
     try {
         // Write to temp file first
         fs.writeFileSync(DB_TEMP, json, 'utf8');
@@ -676,10 +676,7 @@ function canAccessStore(user, store, method) {
         const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
         const access = rec ? (rec.value || rec) : null;
         // If no config yet, default to allow all (so new assistant isn't locked out)
-        if (!access) {
-            if (!FINANCIAL_STORES.has(store)) return true;
-            return false;
-        }
+        if (!access) return true;
         const storeToTab = {
             students: 'students', courses: 'courses', lessons: 'lessons', attendance: 'attendance',
             grades: 'grades', exams: 'exams', manuals: 'manuals', staff: 'staff',
@@ -1878,7 +1875,7 @@ function handleAPI(req, res) {
                 }
 
                 user.lastLogin = new Date().toISOString();
-                safeWriteJSON(db);
+                saveDB(); // debounced, non-blocking — never hold up the login response with a 9MB rewrite
 
                 // Ensure studentId is present for student users
                 if (user.role === 'student' && !user.studentId) {

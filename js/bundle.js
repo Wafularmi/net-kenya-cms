@@ -1910,7 +1910,9 @@ async function renderDashboard() {
             actions.querySelector('#dash-record-payment')?.remove();
             actions.querySelector('#dash-record-expense')?.remove();
         }
-        const batch = await dbGetBatch(['students','courses','events','staff','attendance','inventory','alumni','payments','income','expenses']);
+        const _dashKeys = ['students','courses','events','staff','attendance','inventory','alumni','payments','income','expenses'];
+        const _dashVals = await Promise.all(_dashKeys.map(k => dbGetAll(k).catch(() => [])));
+        const batch = _dashKeys.reduce((acc, k, i) => { acc[k] = _dashVals[i]; return acc; }, {});
         const students = await filterByRegion(batch.students, s => s.studyCenterId);
         const isAdmin = currentUser.role === 'admin';
         const regionalStudentIds = new Set(students.map(s => s.id));
