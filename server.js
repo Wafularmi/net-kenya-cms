@@ -94,6 +94,65 @@ function externalizeStoreRecords(store, rows) {
     if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
     return out;
 }
+// Heavy settings blobs (PDF templates) live on disk, NOT in server-data.json.
+// Transparent to clients: PUT strips template->disk, GET re-injects it.
+const SETTINGS_BLOBS = { diplomaPdfConfig: 'template', completionPdfConfig: 'template' };
+function settingsBlobPath(key) { return path.join(DOC_STORE_DIR, 'settings-' + docSafeKey(key) + '-template.pdf'); }
+function externalizeSettingsRecord(rec) {
+    if (!rec || !SETTINGS_BLOBS[rec.key]) return rec;
+    const field = SETTINGS_BLOBS[rec.key];
+    const holder = rec.value && typeof rec.value === 'object' ? rec.value : rec;
+    const tpl = holder ? holder[field] : null;
+    if (typeof tpl === 'string' && tpl.length > 1000) {
+        try {
+            ensureDocStore();
+            fs.writeFileSync(settingsBlobPath(rec.key), Buffer.from(tpl, 'base64'));
+            const verify = fs.statSync(settingsBlobPath(rec.key));
+            if (verify.size > 0) {
+                if (rec.value && typeof rec.value === 'object') rec.value[field] = null;
+                else rec[field] = null;
+            }
+        } catch (e) { console.error('externalizeSettingsRecord failed:', rec.key, e); }
+    } else if (!tpl) {
+        try { if (fs.existsSync(settingsBlobPath(rec.key))) fs.unlinkSync(settingsBlobPath(rec.key)); } catch {}
+    }
+    return rec;
+}
+function injectSettingsBlobs(rec) {
+    if (!rec || !SETTINGS_BLOBS[rec.key]) return rec;
+    const field = SETTINGS_BLOBS[rec.key];
+    const holder = rec.value && typeof rec.value === 'object' ? rec.value : rec;
+    if (holder && !holder[field]) {
+        try {
+            const file = settingsBlobPath(rec.key);
+            if (fs.existsSync(file)) {
+                const out = Object.assign({}, rec);
+                const hv = Object.assign({}, holder);
+                hv[field] = fs.readFileSync(file).toString('base64');
+                if (out.value && typeof out.value === 'object') out.value = hv;
+                else Object.assign(out, hv);
+                return out;
+            }
+        } catch (e) { console.error('injectSettingsBlobs failed:', rec.key, e); }
+    }
+    return rec;
+}
+function backfillSettingsBlobs() {
+    try {
+        if (!Array.isArray(db.settings)) return;
+        let changed = false;
+        db.settings.forEach((r, i) => {
+            if (r && SETTINGS_BLOBS[r.key]) {
+                const holder = r.value && typeof r.value === 'object' ? r.value : r;
+                if (holder && typeof holder[SETTINGS_BLOBS[r.key]] === 'string' && holder[SETTINGS_BLOBS[r.key]].length > 1000) {
+                    externalizeSettingsRecord(r);
+                    changed = true;
+                }
+            }
+        });
+        if (changed) saveDB();
+    } catch (e) { console.error('backfillSettingsBlobs failed:', e); }
+}
 const CERT_ID_PREFIX = { diploma: 'DIP', admission: 'ADL', completion: 'CMP', enrollment: 'ENL', recommendation: 'REC', 'fee-statement': 'FEE', transcript: 'TRX', 'final-transcript': 'FTR', certificate: 'CERT' };
 function certDocId(cert) {
     const p = (CERT_ID_PREFIX[(cert || {}).type] || 'DOC').toUpperCase();
@@ -764,6 +823,7 @@ try {
     }
     loadSessions();
 } catch (e) { console.error('loadSessions at startup failed:', e.message); }
+try { backfillSettingsBlobs(); } catch (e) { console.error('backfillSettingsBlobs failed:', e.message); }
 
 // Brute-force protection for /api/login
 const loginAttempts = new Map(); // ip -> { count, windowStart, blockedUntil }
@@ -2469,6 +2529,7 @@ function handleAPI(req, res) {
             if (name === 'settings' && (!user || user.role !== 'admin')) {
                 rows = rows.filter(r => r && r.key !== 'smsSettings');
             }
+            if (name === 'settings') rows = rows.map(injectSettingsBlobs);
             result[name] = rows;
         }
 return json(res, 200, result);
@@ -2551,6 +2612,7 @@ return json(res, 200, result);
             const limit = parseInt(urlObj.searchParams.get('limit')) || 0;
             results = backfillCertIdentifiers(store, results);
             results = externalizeStoreRecords(store, results);
+            if (store === 'settings') results = results.map(injectSettingsBlobs);
             if (limit > 0 && page > 0) {
                 const start = (page - 1) * limit;
                 const total = results.length;
@@ -2573,6 +2635,7 @@ return json(res, 200, result);
             if (item) {
                 const list = externalizeStoreRecords(store, [item]);
                 item = list[0] || null;
+                if (store === 'settings') item = injectSettingsBlobs(item);
             }
             return json(res, 200, item);
         }
@@ -2603,6 +2666,8 @@ return json(res, 200, result);
                     if (store === 'certificates' || store === 'idCards' || store === 'idcards') {
                         toStore = externalizeCertificate(value).record;
                     }
+                    // Heavy PDF templates in settings go straight to disk, never the JSON.
+                    if (store === 'settings') externalizeSettingsRecord(value);
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);

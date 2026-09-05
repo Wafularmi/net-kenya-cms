@@ -1885,11 +1885,34 @@ function _hubIsActive() {
     return el && el.classList.contains('active') && !document.hidden;
 }
 
+function hubVideoPlaying() {
+    try {
+        const vids = document.querySelectorAll('video, audio');
+        for (const v of vids) {
+            if (!v.paused && !v.ended && v.currentTime > 0) return true;
+        }
+    } catch {}
+    return false;
+}
 function _hubDebouncedRender() {
     if (_hubRenderDebounce) clearTimeout(_hubRenderDebounce);
     _hubRenderDebounce = setTimeout(() => {
         if (_hubModalOpen || document.querySelector('.modal, .modal-overlay, [class*="modal"]:not(.hidden)')) {
             invalidateStudentHubCache();
+            return;
+        }
+        // Never tear down a playing video: refresh data silently, render on next tick.
+        if (hubVideoPlaying()) {
+            invalidateStudentHubCache();
+            try {
+                document.querySelectorAll('video, audio').forEach(v => {
+                    if (!v.paused && !v.dataset.hubResume) {
+                        v.dataset.hubResume = '1';
+                        v.addEventListener('pause', () => { delete v.dataset.hubResume; _hubDebouncedRender(); }, { once: true });
+                        v.addEventListener('ended', () => { delete v.dataset.hubResume; _hubDebouncedRender(); }, { once: true });
+                    }
+                });
+            } catch {}
             return;
         }
         if (typeof renderStudentHub === 'function') renderStudentHub();
