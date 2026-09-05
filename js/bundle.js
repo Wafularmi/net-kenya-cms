@@ -952,7 +952,9 @@ async function login() {
         if (!res.ok) {
             if (res.status === 401) return showLoginError('Invalid username or password');
             if (res.status === 403) return showLoginError(data.error || 'Access denied');
-            return showLoginError('Login failed. Please try again.');
+            if (res.status === 503) return showLoginError(data.error || 'System under maintenance — only admins can log in right now.');
+            if (res.status === 429) return showLoginError(data.error || 'Too many attempts — wait 15 minutes and retry.');
+            return showLoginError((data && data.error ? data.error + ' ' : '') + 'Login failed (server error ' + res.status + '). Please try again.');
         }
         const user = data.user;
         if (!user) return showLoginError('Login failed');
