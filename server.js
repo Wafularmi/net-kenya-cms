@@ -1759,6 +1759,87 @@ function handleAPI(req, res) {
         return true;
     }
 
+    // GET /api/fee-gate — read effective fee-gate config (admin: full; coordinator: own region only)
+    if (parts.length === 2 && parts[1] === 'fee-gate' && req.method === 'GET') {
+        const fgUser = getRequestUser(req);
+        if (!fgUser) return json(res, 401, { error: 'Not authenticated' });
+        const rec = (db.settings || []).find(s => s.key === 'feeGate');
+        const cfg = rec ? (rec.value || rec) : { enabled: false };
+        if (fgUser.role === 'admin') return json(res, 200, { ok: true, config: cfg });
+        if (fgUser.role === 'coordinator') {
+            const rid = fgUser.user.regionId || '';
+            const regions = (cfg && cfg.regions) || {};
+            return json(res, 200, { ok: true, mode: cfg.mode || 'global', regionId: rid, region: regions[rid] || null, global: { enabled: !!(cfg && cfg.enabled), amount: (cfg && cfg.amount) || 0, day: (cfg && cfg.day) ?? 1, time: (cfg && cfg.time) || '12:00', tabs: (cfg && cfg.tabs) || {} } });
+        }
+        return json(res, 403, { error: 'Forbidden' });
+    }
+
+    // PUT /api/fee-gate — save fee-gate config (admin: full; coordinator: own region only)
+    if (parts.length === 2 && parts[1] === 'fee-gate' && req.method === 'PUT') {
+        const fgUser = getRequestUser(req);
+        if (!fgUser) return json(res, 401, { error: 'Not authenticated' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(body);
+                let rec = (db.settings || []).find(s => s.key === 'feeGate');
+                if (!rec) { rec = { key: 'feeGate' }; db.settings.push(rec); }
+                const cur = rec.value || rec;
+                const cleanTabs = (t) => {
+                    const known = ['courses', 'exams', 'quizzes', 'discussions', 'live', 'notes'];
+                    const out = {};
+                    known.forEach(k => { out[k] = !(t && t[k] === false); });
+                    return out;
+                };
+                const cleanRegion = (r) => ({
+                    enabled: !!r.enabled,
+                    amount: Math.max(0, Number(r.amount) || 0),
+                    day: [0, 1, 2, 3, 4, 5, 6].includes(Number(r.day)) ? Number(r.day) : 1,
+                    time: /^\d{2}:\d{2}$/.test(String(r.time || '')) ? String(r.time) : '12:00',
+                    tabs: cleanTabs(r.tabs),
+                    scope: ['all', 'selected', 'except'].includes(r.scope) ? r.scope : 'all',
+                    overrides: (r.overrides && typeof r.overrides === 'object') ? r.overrides : {}
+                });
+                if (fgUser.role === 'admin') {
+                    const next = { key: 'feeGate' };
+                    if (data && typeof data === 'object' && ('enabled' in data || 'amount' in data || 'tabs' in data) && !data.regions && data.mode === undefined) {
+                        Object.assign(next, cur, cleanRegion({ ...cur, ...data }), { key: 'feeGate' });
+                        delete next.regions;
+                    } else {
+                        next.enabled = !!data.enabled;
+                        next.amount = Math.max(0, Number(data.amount) || 0);
+                        next.day = [0, 1, 2, 3, 4, 5, 6].includes(Number(data.day)) ? Number(data.day) : 1;
+                        next.time = /^\d{2}:\d{2}$/.test(String(data.time || '')) ? String(data.time) : '12:00';
+                        next.tabs = cleanTabs(data.tabs);
+                        next.scope = ['all', 'selected', 'except'].includes(data.scope) ? data.scope : 'all';
+                        next.overrides = (data.overrides && typeof data.overrides === 'object') ? data.overrides : {};
+                        next.mode = data.mode === 'per-region' ? 'per-region' : 'global';
+                        next.regions = {};
+                        Object.entries((data.regions && typeof data.regions === 'object') ? data.regions : {}).forEach(([rid, r]) => { next.regions[String(rid)] = cleanRegion(r || {}); });
+                    }
+                    rec.value = next;
+                    saveDB();
+                    auditLog('fee-gate', 'settings', { by: fgUser.username }, fgUser.username);
+                    return json(res, 200, { ok: true });
+                }
+                if (fgUser.role === 'coordinator') {
+                    const rid = fgUser.user.regionId || '';
+                    if (!rid) return json(res, 403, { error: 'No region assigned' });
+                    const regions = (cur.regions && typeof cur.regions === 'object') ? { ...cur.regions } : {};
+                    regions[rid] = cleanRegion(data || {});
+                    const next = { ...cur, regions, mode: 'per-region', key: 'feeGate' };
+                    rec.value = next;
+                    saveDB();
+                    auditLog('fee-gate-region', 'settings', { region: rid, by: fgUser.username }, fgUser.username);
+                    return json(res, 200, { ok: true, regionId: rid });
+                }
+                return json(res, 403, { error: 'Forbidden' });
+            } catch (e) { return json(res, 400, { error: 'Invalid request' }); }
+        });
+        return true;
+    }
+
     // POST /api/change-password — self-service password change (any authenticated user, own account only)
     if (parts.length === 2 && parts[1] === 'change-password' && req.method === 'POST') {
         let body = '';

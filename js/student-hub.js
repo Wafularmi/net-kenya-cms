@@ -27,12 +27,31 @@ async function loadStudentHubData(force) {
 function invalidateStudentHubCache() { studentHubCache = null; _hubComputedCache = null; }
 let _hubFeeGateCache = null;
 let _hubFeeGateAt = 0;
+let _hubCenterRegionCache = null;
 async function hubFeeGateConfig() {
     if (_hubFeeGateCache && Date.now() - _hubFeeGateAt < 60000) return _hubFeeGateCache;
     try { const r = await dbGet('settings', 'feeGate'); _hubFeeGateCache = (r && (r.value || r)) || null; }
     catch { _hubFeeGateCache = null; }
+    try {
+        if (!_hubCenterRegionCache) {
+            const centers = await dbGetAll('studyCenters');
+            _hubCenterRegionCache = {};
+            (centers || []).forEach(c => { if (c && c.id) _hubCenterRegionCache[c.id] = c.regionId || ''; });
+        }
+    } catch {}
     _hubFeeGateAt = Date.now();
     return _hubFeeGateCache;
+}
+function hubEffectiveGate(me, gate) {
+    if (!gate) return null;
+    if (gate.mode === 'per-region' && me && me.studyCenterId && _hubCenterRegionCache) {
+        const rid = _hubCenterRegionCache[me.studyCenterId] || '';
+        const rc = rid && gate.regions ? gate.regions[rid] : null;
+        if (rc && rc.enabled) {
+            return { enabled: true, amount: rc.amount || gate.amount || 0, day: (rc.day ?? gate.day ?? 1), time: rc.time || gate.time || '12:00', tabs: { ...(gate.tabs || {}), ...(rc.tabs || {}) }, scope: rc.scope || 'all', overrides: rc.overrides || {} };
+        }
+    }
+    return gate;
 }
 function hubWeekStart() {
     const d = new Date();
@@ -46,7 +65,8 @@ function hubWeekStart() {
 async function hubFeeLockInfo(me, data) {
     const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '' };
     if (!me) return none;
-    const gate = await hubFeeGateConfig();
+    const rawGate = await hubFeeGateConfig();
+    const gate = hubEffectiveGate(me, rawGate);
     if (!gate || !gate.enabled || !(gate.amount > 0)) return none;
     const ov = (gate.overrides && gate.overrides[me.id]) || {};
     if (ov.exempt) return none;

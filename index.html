@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=288" as="script">
+    <link rel="preload" href="js/bundle.js?v=289" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -586,6 +586,19 @@
                 <div id="student-hub-content"></div>
             </section>
 
+            <section id="screen-fee-gate" class="screen">
+                <div class="screen-header"><h2>🔒 Fee Gate (My Region)</h2></div>
+                <div class="card" style="max-width:720px;margin:0 auto;">
+                    <div id="feegate-coord-region" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+                    <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="fgc-enabled" style="width:18px;height:18px;"> Enable fee gating for my region</label></div>
+                    <div class="form-row"><div class="form-group"><label>Weekly Target (KES)</label><input type="number" id="fgc-amount" min="1" value="200"></div><div class="form-group"><label>Deadline Day</label><select id="fgc-day"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div><div class="form-group"><label>Deadline Time</label><input type="time" id="fgc-time" value="12:00"></div></div>
+                    <div class="form-group"><label>Lock these hub tabs when target missed</label><div id="fgc-tabs" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"></div></div>
+                    <div class="form-group"><label>Apply To</label><select id="fgc-scope"><option value="all">All students in my region</option><option value="selected">Only selected students</option><option value="except">All except selected</option></select></div>
+                    <button class="btn btn-primary" onclick="saveFeeGateCoordinator()">Save My Region</button>
+                    <div id="fgc-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+                </div>
+            </section>
+
             <section id="screen-pending" class="screen">
                 <div class="screen-header"><h2>Pending Registrations</h2><div class="screen-actions"></div></div>
                 <div class="card" style="max-width:900px;margin:0 auto;">
@@ -1115,7 +1128,8 @@
                         <div id="assistant-access-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
                     <div class="card"><h3>🔒 Fee-Gated Learning</h3>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, students below the weekly target lose access to the tabs you tick, once the deadline passes. When OFF, all students learn free.</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, students below the weekly target lose access to the tabs you tick, once the deadline passes. When OFF, all students learn free. Use Global for all-at-once, or Per-region to let each regional coordinator set their own.</div>
+                        <div class="form-row"><div class="form-group"><label>Mode</label><select id="feegate-mode" onchange="onFeeGateModeChange()"><option value="global">Global (one rule for all)</option><option value="per-region">Per-region (coordinators set theirs)</option></select></div><div class="form-group"><label>Edit Scope</label><select id="feegate-region" onchange="selectFeeGateRegion()"><option value="">Global default</option></select></div></div>
                         <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="feegate-enabled" onchange="toggleFeeGateOptions()" style="width:18px;height:18px;"> Enable fee gating</label></div>
                         <div id="feegate-options" style="display:none;">
                             <div class="form-row"><div class="form-group"><label>Weekly Target (KES)</label><input type="number" id="feegate-amount" min="1" value="200"></div><div class="form-group"><label>Deadline Day</label><select id="feegate-day"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div><div class="form-group"><label>Deadline Time</label><input type="time" id="feegate-time" value="12:00"></div></div>
@@ -1271,8 +1285,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=288"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=19"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=289"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=20"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

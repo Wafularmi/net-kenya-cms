@@ -425,7 +425,7 @@ function getRolePermissions(role) {
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
         student: ['dashboard','student-hub','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual'],
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate'],
         assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions']
     };
     const base = perms[role] ? [...perms[role]] : [];
@@ -1118,7 +1118,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1496,6 +1496,7 @@ function showScreen(id) {
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
         case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'fee-gate': renderFeeGateCoordinator(); break;
     }
 }
 function initTabs() {
@@ -17438,10 +17439,54 @@ function collectFeeGateOverrides() {
     });
     return { ..._feeGateOverrides, ...ov };
 }
+let _feeGateFull = null;
+async function loadFeeGateRegions() {
+    const sel = document.getElementById('feegate-region');
+    if (!sel) return;
+    let regions = window._regionsCache || [];
+    if (!regions.length) {
+        try { regions = await dbGetAll('regions'); } catch { regions = []; }
+    }
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Global default</option>' + regions.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
+    if (cur) sel.value = cur;
+}
+function onFeeGateModeChange() {
+    const mode = document.getElementById('feegate-mode')?.value || 'global';
+    const rs = document.getElementById('feegate-region');
+    if (rs) rs.disabled = mode !== 'per-region';
+}
+function feeGateScopeData() {
+    const rid = document.getElementById('feegate-region')?.value || '';
+    if (!_feeGateFull) _feeGateFull = { mode: 'global', regions: {} };
+    if (!rid) {
+        const { regions, mode, ...global } = _feeGateFull;
+        return { isRegion: false, data: global };
+    }
+    const regs = _feeGateFull.regions || {};
+    return { isRegion: true, rid, data: regs[rid] || {} };
+}
+function selectFeeGateRegion() {
+    const { data } = feeGateScopeData();
+    if (document.getElementById('feegate-enabled')) document.getElementById('feegate-enabled').checked = !!data.enabled;
+    if (document.getElementById('feegate-amount')) document.getElementById('feegate-amount').value = data.amount || 200;
+    if (document.getElementById('feegate-day')) document.getElementById('feegate-day').value = String(data.day ?? 1);
+    if (document.getElementById('feegate-time')) document.getElementById('feegate-time').value = data.time || '12:00';
+    if (document.getElementById('feegate-scope')) document.getElementById('feegate-scope').value = data.scope || 'all';
+    Object.entries(data.tabs || {}).forEach(([tab, on]) => {
+        const cb = document.querySelector(`#feegate-tabs input[data-tab="${tab}"]`);
+        if (cb) cb.checked = on !== false;
+    });
+    _feeGateOverrides = data.overrides || {};
+    toggleFeeGateOptions();
+    toggleFeeGateStudents();
+    renderFeeGateStudents();
+}
 async function saveFeeGate() {
+    if (!_feeGateFull) _feeGateFull = { mode: 'global', regions: {} };
     const tabs = {};
     document.querySelectorAll('#feegate-tabs input[type="checkbox"]').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
-    const s = { key: 'feeGate',
+    const part = {
         enabled: !!document.getElementById('feegate-enabled')?.checked,
         amount: parseFloat(document.getElementById('feegate-amount')?.value) || 0,
         day: parseInt(document.getElementById('feegate-day')?.value ?? '1'),
@@ -17449,29 +17494,63 @@ async function saveFeeGate() {
         tabs, scope: document.getElementById('feegate-scope')?.value || 'all',
         overrides: collectFeeGateOverrides()
     };
-    await dbPut('settings', s);
-    _feeGateOverrides = s.overrides;
+    _feeGateFull.mode = document.getElementById('feegate-mode')?.value === 'per-region' ? 'per-region' : 'global';
+    const rid = document.getElementById('feegate-region')?.value || '';
+    if (rid) {
+        _feeGateFull.regions = _feeGateFull.regions || {};
+        _feeGateFull.regions[rid] = part;
+    } else {
+        const { regions, mode } = _feeGateFull;
+        _feeGateFull = { ...part, mode: _feeGateFull.mode, regions: regions || {} };
+    }
+    const res = await fetch('/api/fee-gate', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(_feeGateFull) });
+    if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+    _feeGateOverrides = part.overrides;
     const st = document.getElementById('feegate-status');
     if (st) { st.textContent = '✓ Saved'; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 2000); }
-    showToast('Fee gate saved!'); logAudit('updated', 'fee-gate', { enabled: s.enabled });
+    showToast('Fee gate saved!'); logAudit('updated', 'fee-gate', { mode: _feeGateFull.mode, region: rid || 'global' });
 }
 async function loadFeeGate() {
     renderFeeGateTabs();
+    await loadFeeGateRegions();
     let s = null;
     try { const rec = await dbGet('settings', 'feeGate'); s = rec ? (rec.value || rec) : null; } catch {}
-    if (!s) { toggleFeeGateOptions(); return; }
-    if (document.getElementById('feegate-enabled')) document.getElementById('feegate-enabled').checked = !!s.enabled;
-    if (document.getElementById('feegate-amount')) document.getElementById('feegate-amount').value = s.amount || 200;
-    if (document.getElementById('feegate-day')) document.getElementById('feegate-day').value = String(s.day ?? 1);
-    if (document.getElementById('feegate-time')) document.getElementById('feegate-time').value = s.time || '12:00';
-    if (document.getElementById('feegate-scope')) document.getElementById('feegate-scope').value = s.scope || 'all';
-    Object.entries(s.tabs || {}).forEach(([tab, on]) => {
-        const cb = document.querySelector(`#feegate-tabs input[data-tab="${tab}"]`);
-        if (cb) cb.checked = on !== false;
-    });
-    _feeGateOverrides = s.overrides || {};
-    toggleFeeGateOptions();
-    toggleFeeGateStudents();
+    _feeGateFull = s && typeof s === 'object' ? { mode: s.mode || 'global', regions: s.regions || {}, ...s } : { mode: 'global', regions: {} };
+    if (document.getElementById('feegate-mode')) document.getElementById('feegate-mode').value = _feeGateFull.mode === 'per-region' ? 'per-region' : 'global';
+    onFeeGateModeChange();
+    selectFeeGateRegion();
+}
+async function renderFeeGateCoordinator() {
+    const box = document.getElementById('fgc-tabs');
+    if (box && !box.children.length) {
+        box.innerHTML = FEEGATE_TABS.map(([tab, label]) => `<label style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;"><span>${label}</span><input type="checkbox" data-tab="${tab}" checked style="width:18px;height:18px;"></label>`).join('');
+    }
+    try {
+        const res = await fetch('/api/fee-gate', { headers: getAuthHeaders() });
+        const data = await res.json();
+        const cur = (data && (data.region || data.global)) || {};
+        const regEl = document.getElementById('feegate-coord-region');
+        if (regEl) regEl.textContent = data && data.regionId ? 'Region: ' + data.regionId + (data.region ? '' : ' (using global defaults — save to set your own)') : '';
+        if (document.getElementById('fgc-enabled')) document.getElementById('fgc-enabled').checked = !!cur.enabled;
+        if (document.getElementById('fgc-amount')) document.getElementById('fgc-amount').value = cur.amount || 200;
+        if (document.getElementById('fgc-day')) document.getElementById('fgc-day').value = String(cur.day ?? 1);
+        if (document.getElementById('fgc-time')) document.getElementById('fgc-time').value = cur.time || '12:00';
+        if (document.getElementById('fgc-scope')) document.getElementById('fgc-scope').value = cur.scope || 'all';
+        Object.entries(cur.tabs || {}).forEach(([tab, on]) => {
+            const cb = document.querySelector(`#fgc-tabs input[data-tab="${tab}"]`);
+            if (cb) cb.checked = on !== false;
+        });
+    } catch (e) { showToast('Could not load fee gate: ' + e.message, { type: 'danger' }); }
+}
+async function saveFeeGateCoordinator() {
+    const tabs = {};
+    document.querySelectorAll('#fgc-tabs input[type="checkbox"]').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
+    const body = { enabled: !!document.getElementById('fgc-enabled')?.checked, amount: parseFloat(document.getElementById('fgc-amount')?.value) || 0, day: parseInt(document.getElementById('fgc-day')?.value ?? '1'), time: document.getElementById('fgc-time')?.value || '12:00', tabs, scope: document.getElementById('fgc-scope')?.value || 'all', overrides: {} };
+    const res = await fetch('/api/fee-gate', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(body) });
+    const st = document.getElementById('fgc-status');
+    if (!res.ok) { const d = await res.json().catch(() => ({})); if (st) { st.textContent = '✗ ' + (d.error || 'Save failed'); st.style.color = 'var(--danger)'; } return; }
+    if (st) { st.textContent = '✓ Saved for your region'; st.style.color = 'var(--success)'; }
+    showToast('Regional fee gate saved!');
 }
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };
