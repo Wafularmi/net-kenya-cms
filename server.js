@@ -1827,7 +1827,9 @@ function handleAPI(req, res) {
                 const students = db.students || [];
 
                 // Lookup user by username, studentId, phone, email, or admission number
-                let user = users.find(u => u.username === input);
+                // (usernames match case-insensitively — "John" and "john" are the same account)
+                const inputLower = String(input).toLowerCase();
+                let user = users.find(u => u.username === input) || users.find(u => String(u.username || '').toLowerCase() === inputLower);
                 if (!user) user = users.find(u => u.studentId === input);
                 if (!user) {
                     const student = students.find(s => s.phone === input && s.status !== 'pending');

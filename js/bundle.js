@@ -913,7 +913,7 @@ async function syncUserAccounts() {
         const created = [];
         for (const s of students) {
             if (s.status !== 'active' || !s.phone) continue;
-            const hasUser = allUsers.some(u => u.studentId === s.id || u.username === s.phone);
+            const hasUser = allUsers.some(u => u.studentId === s.id || String(u.username || '').toLowerCase() === String(s.phone).toLowerCase());
             if (hasUser) continue;
             const pw = s.admissionNumber || s.id;
             const pwHash = await hashPassword(pw);
@@ -924,7 +924,7 @@ async function syncUserAccounts() {
         for (const st of staffList) {
             if (st.status !== 'active') continue;
             const username = st.email || st.phone || ('staff-' + st.id);
-            const hasUser = allUsers.some(u => u.username === username || u.name === st.name);
+            const hasUser = allUsers.some(u => String(u.username || '').toLowerCase() === String(username).toLowerCase() || u.name === st.name);
             if (hasUser) continue;
             const pw = 'staff123';
             const pwHash = await hashPassword(pw);
@@ -3528,7 +3528,9 @@ async function saveAttendance(courseId, date) {
     const students = await dbGetAll('students');
     const studentIds = enrollments.map(e => e.studentId);
     const courseStudents = students.filter(s => studentIds.includes(s.id) && s.status === 'active');
-    const centerId = document.getElementById('attendance-center').value;
+    const centerId = document.getElementById('attendance-center')?.value || '';
+    // Preserve filters: the sheet may have been rebuilt since load; restore so refresh works.
+    const savedFilters = { courseId, date, centerId };
     const filtered = centerId ? courseStudents.filter(s => s.studyCenterId === centerId) : courseStudents;
     let saved = 0;
     for (const s of filtered) {
@@ -3541,7 +3543,22 @@ async function saveAttendance(courseId, date) {
     }
     showToast(`✅ Attendance saved for ${saved} of ${filtered.length} students!`, { type: 'success', duration: 4000 });
     logAudit('saved', 'attendance', { courseId, date, count: saved, center: centerId || 'all' });
-    try { await loadAttendance(); } catch {}
+    try {
+        const cs = document.getElementById('attendance-course');
+        const dt = document.getElementById('attendance-date');
+        const ct = document.getElementById('attendance-center');
+        if (cs && !cs.value && savedFilters.courseId) {
+            // Options were rebuilt after load — re-add current course then restore filters.
+            await populateAttendanceCourses();
+            const opt = document.createElement('option');
+            opt.value = savedFilters.courseId; opt.textContent = savedFilters.courseId;
+            cs.appendChild(opt);
+        }
+        if (cs && savedFilters.courseId) cs.value = savedFilters.courseId;
+        if (dt && savedFilters.date) dt.value = savedFilters.date;
+        if (ct && savedFilters.centerId !== undefined) ct.value = savedFilters.centerId;
+        await loadAttendance();
+    } catch {}
 }
 function printAttendance() {
     if (!_attendanceData) return showToast('Load attendance first!');
@@ -18566,6 +18583,9 @@ async function saveUser() {
     if (role === 'student' && !studentId) return showToast('Select a student record to link this user account!');
     const existing = await dbGet('users', username).catch(() => null);
     if (existing) return showToast(`Username "${username}" is already taken by ${existing.name || existing.role}! Pick another.`, { type: 'danger' });
+    const allUsers = await dbGetAll('users').catch(() => []);
+    const clash = (allUsers || []).find(u => String(u.username || '').toLowerCase() === username.toLowerCase());
+    if (clash) return showToast(`Username "${username}" too closely matches existing account "${clash.username}"! Pick another.`, { type: 'danger' });
     const pwHash = await hashPassword(password);
     if (role === 'coordinator' && !document.getElementById('user-region').value) return showToast('Please select a region for this coordinator!');
     const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim() || username, role, status: 'active', studentId: studentId || undefined, regionId: role === 'coordinator' ? document.getElementById('user-region').value : undefined, createdAt: new Date().toISOString() };
