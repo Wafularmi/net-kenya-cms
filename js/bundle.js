@@ -1495,7 +1495,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
     }
 }
 function initTabs() {
@@ -17387,6 +17387,91 @@ async function loadAssistantAccess() {
             if (cb) cb.checked = s[tab] !== false;
         });
     }
+}
+const FEEGATE_TABS = [['courses','📚 Courses'],['exams','📝 Exams'],['quizzes','📋 Quizzes'],['discussions','💬 Discussions'],['live','🎥 Live Classes'],['notes','📄 Notes']];
+let _feeGateStudentsCache = [];
+let _feeGateOverrides = {};
+function toggleFeeGateOptions() {
+    const on = document.getElementById('feegate-enabled')?.checked;
+    const box = document.getElementById('feegate-options');
+    if (box) box.style.display = on ? '' : 'none';
+}
+function toggleFeeGateStudents() {
+    const scope = document.getElementById('feegate-scope')?.value || 'all';
+    const g = document.getElementById('feegate-students-group');
+    if (g) g.style.display = scope === 'all' ? 'none' : '';
+    if (scope !== 'all') renderFeeGateStudents();
+}
+function renderFeeGateTabs() {
+    const c = document.getElementById('feegate-tabs');
+    if (!c) return;
+    c.innerHTML = FEEGATE_TABS.map(([tab, label]) => `<label style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;"><span>${label}</span><input type="checkbox" data-tab="${tab}" checked style="width:18px;height:18px;"></label>`).join('');
+}
+async function renderFeeGateStudents() {
+    const box = document.getElementById('feegate-students');
+    if (!box) return;
+    if (!_feeGateStudentsCache.length) {
+        try { _feeGateStudentsCache = await dbGetAll('students'); } catch { _feeGateStudentsCache = []; }
+    }
+    const q = (document.getElementById('feegate-student-search')?.value || '').toLowerCase();
+    const list = _feeGateStudentsCache.filter(s => !q || (s.name || '').toLowerCase().includes(q) || (s.admissionNumber || '').toLowerCase().includes(q)).slice(0, 200);
+    box.innerHTML = list.map(s => {
+        const ov = _feeGateOverrides[s.id] || {};
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);font-size:12px;">
+            <input type="checkbox" data-pick="${s.id}" ${ov.picked ? 'checked' : ''} style="width:16px;height:16px;" title="Include in scope">
+            <span style="flex:1;min-width:0;"><b>${escapeHtml(s.name)}</b> <span style="color:var(--text-muted);">${escapeHtml(s.admissionNumber || s.id)}</span></span>
+            <input type="number" data-amt="${s.id}" min="0" placeholder="Target" value="${ov.amount || ''}" style="width:80px;" title="Custom weekly target (blank = global)">
+            <label style="display:flex;align-items:center;gap:4px;color:var(--text-muted);">Exempt<input type="checkbox" data-exempt="${s.id}" ${ov.exempt ? 'checked' : ''} style="width:16px;height:16px;"></label>
+        </div>`;
+    }).join('') || '<div style="color:var(--text-muted);padding:8px;">No students found.</div>';
+}
+function collectFeeGateOverrides() {
+    const ov = {};
+    document.querySelectorAll('#feegate-students [data-pick]').forEach(cb => {
+        const id = cb.getAttribute('data-pick');
+        const amtEl = document.querySelector(`#feegate-students [data-amt="${id}"]`);
+        const exEl = document.querySelector(`#feegate-students [data-exempt="${id}"]`);
+        const amt = amtEl && parseFloat(amtEl.value) > 0 ? parseFloat(amtEl.value) : null;
+        const exempt = !!(exEl && exEl.checked);
+        const picked = cb.checked;
+        if (picked || amt || exempt) ov[id] = { picked, amount: amt, exempt };
+    });
+    return { ..._feeGateOverrides, ...ov };
+}
+async function saveFeeGate() {
+    const tabs = {};
+    document.querySelectorAll('#feegate-tabs input[type="checkbox"]').forEach(cb => { tabs[cb.dataset.tab] = cb.checked; });
+    const s = { key: 'feeGate',
+        enabled: !!document.getElementById('feegate-enabled')?.checked,
+        amount: parseFloat(document.getElementById('feegate-amount')?.value) || 0,
+        day: parseInt(document.getElementById('feegate-day')?.value ?? '1'),
+        time: document.getElementById('feegate-time')?.value || '12:00',
+        tabs, scope: document.getElementById('feegate-scope')?.value || 'all',
+        overrides: collectFeeGateOverrides()
+    };
+    await dbPut('settings', s);
+    _feeGateOverrides = s.overrides;
+    const st = document.getElementById('feegate-status');
+    if (st) { st.textContent = '✓ Saved'; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 2000); }
+    showToast('Fee gate saved!'); logAudit('updated', 'fee-gate', { enabled: s.enabled });
+}
+async function loadFeeGate() {
+    renderFeeGateTabs();
+    let s = null;
+    try { const rec = await dbGet('settings', 'feeGate'); s = rec ? (rec.value || rec) : null; } catch {}
+    if (!s) { toggleFeeGateOptions(); return; }
+    if (document.getElementById('feegate-enabled')) document.getElementById('feegate-enabled').checked = !!s.enabled;
+    if (document.getElementById('feegate-amount')) document.getElementById('feegate-amount').value = s.amount || 200;
+    if (document.getElementById('feegate-day')) document.getElementById('feegate-day').value = String(s.day ?? 1);
+    if (document.getElementById('feegate-time')) document.getElementById('feegate-time').value = s.time || '12:00';
+    if (document.getElementById('feegate-scope')) document.getElementById('feegate-scope').value = s.scope || 'all';
+    Object.entries(s.tabs || {}).forEach(([tab, on]) => {
+        const cb = document.querySelector(`#feegate-tabs input[data-tab="${tab}"]`);
+        if (cb) cb.checked = on !== false;
+    });
+    _feeGateOverrides = s.overrides || {};
+    toggleFeeGateOptions();
+    toggleFeeGateStudents();
 }
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };

@@ -25,6 +25,61 @@ async function loadStudentHubData(force) {
 }
 
 function invalidateStudentHubCache() { studentHubCache = null; _hubComputedCache = null; }
+let _hubFeeGateCache = null;
+let _hubFeeGateAt = 0;
+async function hubFeeGateConfig() {
+    if (_hubFeeGateCache && Date.now() - _hubFeeGateAt < 60000) return _hubFeeGateCache;
+    try { const r = await dbGet('settings', 'feeGate'); _hubFeeGateCache = (r && (r.value || r)) || null; }
+    catch { _hubFeeGateCache = null; }
+    _hubFeeGateAt = Date.now();
+    return _hubFeeGateCache;
+}
+function hubWeekStart() {
+    const d = new Date();
+    const dow = (d.getDay() + 6) % 7;
+    const s = new Date(d);
+    s.setHours(0, 0, 0, 0);
+    s.setDate(d.getDate() - dow);
+    const iso = s.getFullYear() + '-' + String(s.getMonth() + 1).padStart(2, '0') + '-' + String(s.getDate()).padStart(2, '0');
+    return { start: s, iso };
+}
+async function hubFeeLockInfo(me, data) {
+    const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '' };
+    if (!me) return none;
+    const gate = await hubFeeGateConfig();
+    if (!gate || !gate.enabled || !(gate.amount > 0)) return none;
+    const ov = (gate.overrides && gate.overrides[me.id]) || {};
+    if (ov.exempt) return none;
+    const scope = gate.scope || 'all';
+    if (scope === 'selected' && !ov.picked) return none;
+    if (scope === 'except' && ov.picked) return none;
+    const target = (ov.amount > 0 ? ov.amount : gate.amount) || 0;
+    if (!(target > 0)) return none;
+    if (!data.payments) {
+        try { const extra = await dbGetBatch(['payments']); Object.assign(studentHubCache || {}, extra); data = studentHubCache || data; } catch {}
+    }
+    const { start, iso } = hubWeekStart();
+    const dayOff = ((parseInt(gate.day ?? 1) + 6) % 7);
+    const [hh, mm] = String(gate.time || '12:00').split(':').map(Number);
+    const deadline = new Date(start);
+    deadline.setDate(start.getDate() + dayOff);
+    deadline.setHours(hh || 0, mm || 0, 0, 0);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dueText = dayNames[deadline.getDay()] + ' ' + String(deadline.getHours()).padStart(2, '0') + ':' + String(deadline.getMinutes()).padStart(2, '0');
+    const paid = (data.payments || []).filter(p => p.studentId === me.id && String(p.date || '') >= iso).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const gated = Object.entries(gate.tabs || {}).filter(([, on]) => on !== false).map(([t]) => t);
+    if (Date.now() < deadline.getTime()) return { locked: false, target, paid, gated, grace: true, dueText, deadlineMs: deadline.getTime() };
+    return { locked: paid < target, target, paid, gated, grace: false, dueText, deadlineMs: deadline.getTime() };
+}
+function hubLockedPanel(lock, tabLabel) {
+    const due = Math.max(0, (lock.target || 0) - (lock.paid || 0));
+    return `<div class="card" style="text-align:center;padding:48px 24px;border-top:3px solid var(--danger);">
+        <div style="font-size:44px;margin-bottom:10px;">🔒</div>
+        <h3 style="margin:0 0 8px;">${esc(tabLabel)} Locked</h3>
+        <p style="color:var(--text-muted);font-size:13px;max-width:420px;margin:0 auto 6px;">Weekly fee target not met. Pay <b>KES ${due}</b> more (target KES ${lock.target}, paid KES ${lock.paid} this week, due ${esc(lock.dueText || '')}) to unlock.</p>
+        <button class="btn btn-success" style="margin-top:12px;" onclick="showMpesaPayModal('${(_hubGetMe() || {}).id || ''}')">💰 Pay Now via M-Pesa</button>
+    </div>`;
+}
 
 let _hubComputed = null;
 let _hubComputedCache = null;
@@ -161,6 +216,7 @@ async function renderStudentHub() {
             (data.retakeRequests || []).filter(r => r.studentId === me.id).forEach(r => { _hubLastRetakeStatuses[r.id] = r.status; });
         }
         _hubRenderedTabs = {};
+        try { window._hubFeeLock = await hubFeeLockInfo(me, data); } catch { window._hubFeeLock = { locked: false }; }
 
         const c = _hubComputed;
         content.innerHTML = `
@@ -248,6 +304,20 @@ async function switchHubTab(tab, btn) {
     }
     document.querySelectorAll('[id^="hub-tab-"]').forEach(el => el.style.display = 'none');
     const container = document.getElementById('hub-tab-' + tab);
+    const tabLabels = { courses: 'Courses', exams: 'Exams', quizzes: 'Quizzes', notes: 'Notes', live: 'Live Classes', discussions: 'Discussions' };
+    if (tabLabels[tab]) {
+        try {
+            const me0 = _hubGetMe();
+            const lock0 = await hubFeeLockInfo(me0, studentHubCache || {});
+            window._hubFeeLock = lock0;
+            if (lock0.locked && lock0.gated.includes(tab)) {
+                container.innerHTML = hubLockedPanel(lock0, tabLabels[tab]);
+                _hubRenderedTabs[tab] = true;
+                container.style.display = 'block';
+                return;
+            }
+        } catch {}
+    }
     if (!_hubRenderedTabs[tab]) {
         let c = _hubComputed;
         if (!c) return;
@@ -336,6 +406,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                 <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">💰 Fees</h3>
                 <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Paid</span><b style="color:var(--success);">${typeof formatCurrency === 'function' ? formatCurrency(totalPaid) : totalPaid}</b></div>
                 <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Balance</span><b style="color:${hubFeeBalance(me, totalPaid) > 0 ? 'var(--danger)' : 'var(--success)'};">${typeof formatCurrency === 'function' ? formatCurrency(hubFeeBalance(me, totalPaid)) : hubFeeBalance(me, totalPaid)}</b></div>
+                ${(() => { const L = window._hubFeeLock; if (!L || !L.target) return ''; if (L.locked) return `<div style="font-size:12px;color:var(--danger);font-weight:700;margin-top:6px;">🔒 Tabs locked — pay KES ${Math.max(0, L.target - L.paid)} more (due ${esc(L.dueText || '')})</div>`; if (L.grace) return `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (paid KES ${L.paid})</div>`; return `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (KES ${L.paid}/${L.target})</div>`; })()}
                 <button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>
             </div>
         </div>
