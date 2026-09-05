@@ -419,14 +419,14 @@ function getRoleColor(role) {
 }
 function getRolePermissions(role) {
     const perms = {
-        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage'],
-        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
-        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions'],
-        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions'],
+        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'],
+        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
+        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions','meetings'],
+        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
         student: ['dashboard','student-hub','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate'],
-        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage']
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','meetings'],
+        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings']
     };
     const base = perms[role] ? [...perms[role]] : [];
     if (role === 'coordinator' && _coordinatorAccessCache) {
@@ -1178,7 +1178,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1557,6 +1557,7 @@ function showScreen(id) {
         case 'regions': renderRegions(); break;
         case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
+        case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
     }
 }
@@ -17514,7 +17515,7 @@ function updateCoordAccessLabel(key) {
         status.style.color = on ? 'var(--success)' : 'var(--danger)';
     }
 }
-const ASSISTANT_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage'];
+const ASSISTANT_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'];
 function renderAssistantAccessToggles() {
     const container = document.getElementById('assistant-access-toggles');
     if (!container) return;
@@ -20437,16 +20438,218 @@ function getJitsiUrl(lesson, opts) {
     if (frag.length) url += '#' + frag.join('&');
     return url;
 }
-async function fetchJitsiToken(room, lobby) {
+async function fetchJitsiToken(room, lobby, meetingId) {
     try {
         var u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (!u.username) return { token: '', jwtEnabled: false, base: '' };
         var q = 'room=' + encodeURIComponent(room || '');
         if (lobby) q += '&lobby=1';
+        if (meetingId) q += '&meeting=' + encodeURIComponent(meetingId);
         var res = await fetch('/api/jitsi-token?' + q, { headers: getAuthHeaders() });
         if (!res.ok) return { token: '', jwtEnabled: false, base: '' };
         return await res.json();
     } catch (e) { return { token: '', jwtEnabled: false, base: '' }; }
+}
+// ==================== Boardroom & Virtual Hall ====================
+// Permanent video spaces reusing the Jitsi engine: staff Boardroom (with
+// categories like Coordinators) + Virtual Hall scoped by region/center.
+const MEETING_STAFF_ROLES = ['admin', 'assistant', 'registrar', 'finance', 'lecturer', 'coordinator'];
+function meetingVisibleToClient(user, mtg, myRegion, myCenter) {
+    if (!user || !mtg) return false;
+    if (user.role === 'admin') return true;
+    const aud = mtg.audience || {};
+    const roles = Array.isArray(aud.roles) ? aud.roles : [];
+    if (user.role === 'student') {
+        if (mtg.kind !== 'hall') return false;
+        if (roles.length && roles.indexOf('student') === -1) return false;
+        const rids = Array.isArray(aud.regionIds) ? aud.regionIds.map(String) : [];
+        const cids = Array.isArray(aud.centerIds) ? aud.centerIds.map(String) : [];
+        if (rids.length && rids.indexOf(String(myRegion || '')) === -1) return false;
+        if (cids.length && cids.indexOf(String(myCenter || '')) === -1) return false;
+        return true;
+    }
+    if (roles.length && roles.indexOf(user.role) === -1) return false;
+    if (user.role === 'coordinator' && myRegion) {
+        const rids = Array.isArray(aud.regionIds) ? aud.regionIds.map(String) : [];
+        if (rids.length && rids.indexOf(String(myRegion)) === -1) return false;
+    }
+    return true;
+}
+function meetingIsModerator(user, mtg) {
+    if (!user || !mtg) return false;
+    if (user.role === 'admin') return true;
+    const mods = Array.isArray(mtg.moderatorRoles) ? mtg.moderatorRoles : [];
+    return mods.indexOf(user.role) !== -1;
+}
+function meetingAudienceLabel(mtg, regions, centers) {
+    const aud = (mtg && mtg.audience) || {};
+    const parts = [];
+    if (mtg.kind === 'hall') {
+        const rids = aud.regionIds || [];
+        const cids = aud.centerIds || [];
+        if (!rids.length && !cids.length) parts.push('All students');
+        rids.forEach(id => { const r = (regions || []).find(x => String(x.id) === String(id)); parts.push(r ? r.name : id); });
+        cids.forEach(id => { const c = (centers || []).find(x => String(x.id) === String(id)); parts.push(c ? c.name : id); });
+    } else {
+        const roles = aud.roles || [];
+        parts.push(roles.length ? roles.join(', ') : 'All staff');
+    }
+    return parts.join(' · ') || '—';
+}
+async function renderMeetings() {
+    const box = document.getElementById('meetings-list');
+    if (!box) return;
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    box.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:40px;">Loading meeting spaces...</div>';
+    try {
+        const [meetings, regions, centers] = await Promise.all([
+            dbGetAll('meetings').catch(() => []), dbGetAll('regions').catch(() => []), dbGetAll('studyCenters').catch(() => [])
+        ]);
+        let myRegion = user.regionId || '';
+        let myCenters = [];
+        if (user.role === 'coordinator' && myRegion) {
+            myCenters = (window._allCentersCache || centers).filter(c => String(c.regionId) === String(myRegion)).map(c => c.id);
+        }
+        const visible = (meetings || []).filter(m => meetingVisibleToClient(user, m, myRegion, ''));
+        const canCreate = ['admin', 'assistant', 'coordinator'].indexOf(user.role) !== -1;
+        const rooms = visible.filter(m => (m.kind || 'boardroom') === 'boardroom');
+        const halls = visible.filter(m => m.kind === 'hall');
+        const cats = {};
+        rooms.forEach(m => { const k = m.category || 'General'; if (!cats[k]) cats[k] = []; cats[k].push(m); });
+        const card = (m) => {
+            const live = m.status === 'live';
+            const mod = meetingIsModerator(user, m);
+            const sched = m.scheduled ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">📅 ${escapeHtml(String(m.scheduled).replace('T', ' ').slice(0, 16))}</div>` : '';
+            return `<div class="card" style="border-left:4px solid ${live ? 'var(--danger)' : 'var(--accent)'};margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:200px;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <span style="font-weight:700;font-size:15px;">${escapeHtml(m.title || 'Untitled')}</span>
+                            ${live ? '<span class="badge badge-danger">🔴 LIVE NOW</span>' : (m.status === 'ended' ? '<span class="badge badge-secondary">Ended</span>' : '<span class="badge badge-info">Scheduled</span>')}
+                            ${mod ? '<span class="badge badge-warning">Moderator</span>' : ''}
+                        </div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">👥 ${escapeHtml(meetingAudienceLabel(m, regions, centers))}</div>
+                        ${sched}
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        ${live ? `<button class="btn btn-success btn-sm" onclick="joinMeeting('${m.id}')">🚀 Join Now</button>` : (mod ? `<button class="btn btn-primary btn-sm" onclick="setMeetingLive('${m.id}', true)">▶ Start</button>` : `<span style="font-size:11px;color:var(--text-muted);">Waiting for host…</span>`)}
+                        ${mod && live ? `<button class="btn btn-outline btn-sm" onclick="setMeetingLive('${m.id}', false)">⏹ End</button>` : ''}
+                        ${canCreate ? `<button class="btn btn-outline btn-sm" onclick="showMeetingForm('${m.id}')">✏️</button>` : ''}
+                        ${user.role === 'admin' ? `<button class="btn btn-danger btn-sm" onclick="deleteMeeting('${m.id}')">Del</button>` : ''}
+                    </div>
+                </div>
+            </div>`;
+        };
+        let html = '';
+        html += `<div style="margin-bottom:20px;"><h3 style="color:var(--accent);margin:0 0 4px 0;">🏛 Staff Boardroom</h3><div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Permanent video spaces for staff & coordinators. Green rooms are live — jump straight in.</div>`;
+        const catNames = Object.keys(cats).sort();
+        html += catNames.length ? catNames.map(k => `<h4 style="font-size:13px;color:var(--text-muted);margin:14px 0 8px;text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(k)}</h4>` + cats[k].map(card).join('')).join('') : '<div class="card" style="text-align:center;color:var(--text-muted);padding:24px;">No boardrooms for you yet.</div>';
+        html += `</div>`;
+        html += `<div><h3 style="color:var(--accent);margin:0 0 4px 0;">🎓 Virtual Hall</h3><div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Large gatherings addressed to students by region & center.</div>`;
+        html += halls.length ? halls.map(card).join('') : '<div class="card" style="text-align:center;color:var(--text-muted);padding:24px;">No halls scheduled.</div>';
+        html += `</div>`;
+        box.innerHTML = html;
+        const btn = document.getElementById('meetings-add-btn');
+        if (btn) btn.style.display = canCreate ? '' : 'none';
+    } catch (e) {
+        box.innerHTML = '<div style="color:var(--danger);text-align:center;padding:24px;">Could not load meetings.</div>';
+    }
+}
+function showMeetingForm(id) {
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (['admin', 'assistant', 'coordinator'].indexOf(user.role) === -1) return showToast('Only admins and coordinators can create meetings.', { type: 'danger' });
+    Promise.all([id ? dbGet('meetings', id) : null, dbGetAll('regions').catch(() => []), getCenters()]).then(([m, regions, centers]) => {
+        m = m || { kind: 'boardroom', category: 'General', title: '', room: '', password: '', lobby: true, scheduled: '', moderatorRoles: ['admin'], audience: { roles: [], regionIds: [], centerIds: [] } };
+        const aud = m.audience || {};
+        let regionOpts = regions, centerOpts = centers;
+        if (user.role === 'coordinator' && user.regionId) {
+            regionOpts = regions.filter(r => String(r.id) === String(user.regionId));
+            centerOpts = centers.filter(c => String(c.regionId) === String(user.regionId));
+        }
+        const roleBox = (name, selected, list) => list.map(r => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 8px 2px 0;"><input type="checkbox" data-aud="${name}" value="${r}" ${(selected || []).indexOf(r) !== -1 ? 'checked' : ''}> ${r}</label>`).join('');
+        const content = `
+            <input type="hidden" id="mtg-id" value="${m.id || ''}">
+            <div class="form-row"><div class="form-group"><label>Type *</label><select id="mtg-kind" onchange="toggleMeetingKind()"><option value="boardroom" ${m.kind !== 'hall' ? 'selected' : ''}>🏛 Boardroom (staff)</option><option value="hall" ${m.kind === 'hall' ? 'selected' : ''}>🎓 Virtual Hall (students)</option></select></div>
+            <div class="form-group" id="mtg-cat-group" style="display:${m.kind === 'hall' ? 'none' : ''};"><label>Category</label><input type="text" id="mtg-category" value="${escapeHtml(m.category || 'General')}" placeholder="e.g. Coordinators, Finance"></div></div>
+            <div class="form-group"><label>Title *</label><input type="text" id="mtg-title" value="${escapeHtml(m.title || '')}" placeholder="e.g. Monday Staff Briefing"></div>
+            <div class="form-row"><div class="form-group"><label>Room Name *</label><input type="text" id="mtg-room" value="${escapeHtml(m.room || '')}" placeholder="unique-room-name"></div>
+            <div class="form-group"><label>Room Password</label><input type="text" id="mtg-password" value="${escapeHtml(m.password || '')}"></div></div>
+            <div class="form-row"><div class="form-group"><label>Scheduled (optional)</label><input type="datetime-local" id="mtg-scheduled" value="${escapeHtml(m.scheduled || '')}"></div>
+            <div class="form-group"><label style="display:flex;align-items:center;gap:6px;margin-top:22px;"><input type="checkbox" id="mtg-lobby" ${m.lobby !== false ? 'checked' : ''} style="width:16px;height:16px;"> Lobby (admit guests)</label></div></div>
+            <div class="form-group"><label>Who can enter (empty = everyone in scope)</label><div>${roleBox('roles', aud.roles, MEETING_STAFF_ROLES.concat(['student']))}</div></div>
+            <div class="form-group"><label>Regions (hall: which regions — empty = all)</label><div style="max-height:100px;overflow-y:auto;">${regionOpts.map(r => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 8px 2px 0;"><input type="checkbox" data-aud="regionIds" value="${r.id}" ${(aud.regionIds || []).indexOf(r.id) !== -1 ? 'checked' : ''}> ${escapeHtml(r.name)}</label>`).join('') || '<span style="font-size:12px;color:var(--text-muted);">No regions</span>'}</div></div>
+            <div class="form-group"><label>Study Centers (empty = all)</label><div style="max-height:100px;overflow-y:auto;">${centerOpts.map(c => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 8px 2px 0;"><input type="checkbox" data-aud="centerIds" value="${c.id}" ${(aud.centerIds || []).indexOf(c.id) !== -1 ? 'checked' : ''}> ${escapeHtml(c.name)}</label>`).join('') || '<span style="font-size:12px;color:var(--text-muted);">No centers</span>'}</div></div>
+            <div class="form-group"><label>Moderators (privileged controls)</label><div>${roleBox('mods', m.moderatorRoles, MEETING_STAFF_ROLES)}</div></div>`;
+        showModal(m.id ? 'Edit Meeting Space' : 'New Meeting Space', content, `<button class="btn btn-primary" onclick="saveMeeting()">Save</button>`);
+    });
+}
+function toggleMeetingKind() {
+    const k = document.getElementById('mtg-kind')?.value;
+    const g = document.getElementById('mtg-cat-group');
+    if (g) g.style.display = k === 'hall' ? 'none' : '';
+}
+async function saveMeeting() {
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const id = document.getElementById('mtg-id').value || ('MTG-' + Date.now().toString(36).toUpperCase());
+    const title = document.getElementById('mtg-title').value.trim();
+    const room = document.getElementById('mtg-room').value.trim().replace(/\s+/g, '-').toLowerCase();
+    if (!title || !room) return showToast('Title and room name are required!');
+    const pick = (name) => Array.from(document.querySelectorAll(`input[data-aud="${name}"]:checked`)).map(cb => cb.value);
+    let regionIds = pick('regionIds'), centerIds = pick('centerIds');
+    if (user.role === 'coordinator' && user.regionId) {
+        regionIds = [user.regionId];
+        try {
+            const all = await dbGetAll('studyCenters');
+            const own = new Set(all.filter(c => String(c.regionId) === String(user.regionId)).map(c => c.id));
+            centerIds = centerIds.filter(c => own.has(c));
+        } catch {}
+    }
+    const existing = document.getElementById('mtg-id').value ? await dbGet('meetings', id).catch(() => null) : null;
+    const rec = {
+        id, kind: document.getElementById('mtg-kind').value,
+        category: document.getElementById('mtg-kind').value === 'hall' ? '' : (document.getElementById('mtg-category').value.trim() || 'General'),
+        title, room,
+        password: document.getElementById('mtg-password').value.trim(),
+        scheduled: document.getElementById('mtg-scheduled').value,
+        lobby: !!document.getElementById('mtg-lobby')?.checked,
+        audience: { roles: pick('roles'), regionIds, centerIds },
+        moderatorRoles: pick('mods').length ? pick('mods') : ['admin'],
+        status: (existing && existing.status) || 'scheduled',
+        createdBy: (existing && existing.createdBy) || user.username,
+        createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+    await dbPut('meetings', rec);
+    closeModal(); renderMeetings();
+    showToast('Meeting space saved!');
+    logAudit('saved', 'meeting', { id, title });
+}
+async function deleteMeeting(id) {
+    if (!await showConfirm('Delete', 'Delete this meeting space?')) return;
+    await dbDelete('meetings', id);
+    renderMeetings();
+    showToast('Meeting deleted');
+}
+async function setMeetingLive(id, live) {
+    const m = await dbGet('meetings', id);
+    if (!m) return;
+    m.status = live ? 'live' : 'ended';
+    m.updatedAt = new Date().toISOString();
+    await dbPut('meetings', m);
+    renderMeetings();
+    if (live) joinMeeting(id);
+}
+async function joinMeeting(id) {
+    const m = await dbGet('meetings', id);
+    if (!m) return showToast('Meeting not found', { type: 'danger' });
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const mod = meetingIsModerator(user, m);
+    let tk = { token: '', base: '', appId: '' };
+    try { tk = await fetchJitsiToken(m.room, !!m.lobby, m.id); } catch {}
+    const url = getJitsiUrl({ virtualRoom: m.room, virtualPassword: m.password }, { moderator: mod, user: { displayName: user.name || user.username, avatarUrl: '' }, token: tk.token, jitsiBase: tk.base, appId: tk.appId });
+    if (!url) return showToast('No room configured', { type: 'danger' });
+    showModal((m.status === 'live' ? '🔴 ' : '') + m.title, `<div style="text-align:center;"><iframe src="${url}" allow="camera; microphone; fullscreen; display-capture" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px;"></iframe></div>`, `<button class="btn btn-outline" onclick="window.open('${url}','_blank')">Open in new tab</button>`);
+    logAudit('joined', 'meeting', { id });
 }
 async function loadLessonAttendance(lessonId) {
     try {

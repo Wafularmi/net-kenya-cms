@@ -710,6 +710,39 @@ function canAccessStore(user, store, method) {
     return false;
 }
 
+// Meeting visibility: staff see rooms whose roles include them (or open rooms);
+// students only see Virtual Hall meetings scoped to them.
+function meetingVisibleTo(user, mtg) {
+    if (!user || !mtg) return false;
+    if (user.role === 'admin') return true;
+    const aud = mtg.audience || {};
+    const roles = Array.isArray(aud.roles) ? aud.roles : [];
+    if (user.role === 'student') {
+        if (mtg.kind !== 'hall') return false;
+        if (roles.length && !roles.includes('student')) return false;
+        const su = user.user || {};
+        const sid = String(su.studentId || '');
+        const stu = sid ? ((db.students || []).find(s => String(s.id) === String(sid)) || null) : null;
+        const myCenter = stu ? (stu.studyCenterId || '') : '';
+        let myRegion = '';
+        if (myCenter) {
+            const c = (db.studyCenters || []).find(x => String(x.id) === String(myCenter));
+            myRegion = c ? (c.regionId || '') : '';
+        }
+        const rids = Array.isArray(aud.regionIds) ? aud.regionIds.map(String) : [];
+        const cids = Array.isArray(aud.centerIds) ? aud.centerIds.map(String) : [];
+        if (rids.length && !rids.includes(String(myRegion))) return false;
+        if (cids.length && !cids.includes(String(myCenter))) return false;
+        return true;
+    }
+    if (roles.length && !roles.includes(user.role)) return false;
+    if (user.role === 'coordinator') {
+        const myRegion = user.user.regionId || '';
+        const rids = Array.isArray(aud.regionIds) ? aud.regionIds.map(String) : [];
+        if (rids.length && myRegion && !rids.includes(String(myRegion))) return false;
+    }
+    return true;
+}
 // Restrict which rows of a store a user may see. Students only ever see their
 // own student record and their own login record (users store).
 function filterStoreForUser(user, store, rows) {
@@ -740,6 +773,9 @@ function filterStoreForUser(user, store, rows) {
     }
     if (store === 'feeAgreements') {
         return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
+    if (store === 'meetings') {
+        return rows.filter(r => r && meetingVisibleTo(user, r));
     }
     if (store === 'alumni') {
         return rows.filter(r => {
@@ -2088,7 +2124,15 @@ function handleAPI(req, res) {
         if (!jitsiJwtEnabled()) {
             return json(res, 200, { jwtEnabled: false, token: '', base: '' });
         }
-        const privileged = isPrivilegedRole(user.role);
+        let privileged = isPrivilegedRole(user.role);
+        const meetingId = urlObj.searchParams.get('meeting') || '';
+        if (meetingId) {
+            const mtg = (db.meetings || []).find(m => String(m.id) === String(meetingId));
+            if (!mtg) return json(res, 404, { error: 'Meeting not found' });
+            if (!meetingVisibleTo(user, mtg)) return json(res, 403, { error: 'Not invited to this meeting' });
+            const mods = Array.isArray(mtg.moderatorRoles) ? mtg.moderatorRoles : [];
+            privileged = mods.includes(user.role);
+        }
         const token = buildJitsiJwt(user, privileged);
         return json(res, 200, { jwtEnabled: true, token, base: JITSI_BASE_URL, appId: JWT_APP_ID, moderator: privileged });
     }

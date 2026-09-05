@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=297" as="script">
+    <link rel="preload" href="js/bundle.js?v=298" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -609,6 +609,14 @@
                     <button class="btn btn-primary" onclick="saveFeeGateCoordinator()">Save My Region</button>
                     <div id="fgc-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                 </div>
+            </section>
+
+            <section id="screen-meetings" class="screen">
+                <div class="screen-header"><h2>🏛 Boardroom & Virtual Hall</h2><div class="screen-actions">
+                    <button class="btn btn-primary" id="meetings-add-btn" onclick="showMeetingForm()">+ New Meeting Space</button>
+                    <button class="btn btn-outline" onclick="renderMeetings()">🔄 Refresh</button>
+                </div></div>
+                <div id="meetings-list"></div>
             </section>
 
             <section id="screen-pending" class="screen">
@@ -1322,8 +1330,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=297"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=29"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=298"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=30"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

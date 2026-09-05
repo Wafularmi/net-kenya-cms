@@ -17,7 +17,7 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','meetings'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -503,7 +503,7 @@ async function switchHubTab(tab, btn) {
             else if (tab === 'exams') container.innerHTML = renderHubExams(rc.me, rc.upcomingRegisteredExams, rc.pastRegisteredExams, rc.upcomingAvailableExams, rc.pastAvailableExams, rc.data);
             else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(rc.me, rc.pendingQuizzes, rc.completedQuizzes, rc.data, rc.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
             else if (tab === 'notes') container.innerHTML = renderHubNotes(rc.me, rc.myCourses, rc.myLessons, rc.myNotes, rc.data);
-            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(rc.me, rc.myCourses, rc.myLessons);
+            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(rc.me, rc.myCourses, rc.myLessons, (rc.data.meetings || studentHubCache.meetings || []));
             else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(rc.me, rc.data); return; }
         } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
         _hubRenderedTabs[tab] = true;
@@ -1578,9 +1578,23 @@ function hubVcCountdown(startMs) {
     return hrs + 'h' + (rem ? ' ' + rem + 'm' : '');
 }
 
-function renderHubLiveClasses(me, myCourses, myLessons) {
+function renderHubLiveClasses(me, myCourses, myLessons, halls) {
     const vcLessons = (myLessons || []).filter(l => l && l.virtualEnabled && l.virtualRoom);
-    if (!vcLessons.length) {
+    const hallList = (halls || []).filter(h => h && h.kind === 'hall');
+    const hallHtml = hallList.length ? `<div style="margin-bottom:18px;"><h3 style="color:var(--accent);margin:0 0 4px 0;">🎓 Virtual Hall</h3><div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Large gatherings for your region & center. Join muted; raise your hand to speak.</div>` + hallList.map(h => {
+        const live = h.status === 'live';
+        const sched = h.scheduled ? String(h.scheduled).replace('T', ' ').slice(0, 16) : '';
+        return `<div class="card" style="border-left:4px solid ${live ? 'var(--danger)' : 'var(--accent)'};margin-bottom:10px;padding:14px;background:linear-gradient(135deg,rgba(37,99,235,0.06),rgba(245,158,11,0.06));">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                <div>
+                    <div style="font-weight:700;font-size:15px;">🎓 ${esc(h.title || 'Virtual Hall')}${live ? ' <span class="badge badge-danger">🔴 LIVE NOW</span>' : ''}</div>
+                    ${sched ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">📅 ${esc(sched)}</div>` : ''}
+                </div>
+                <div>${live ? `<button class="btn btn-success" style="padding:8px 18px;font-weight:600;" onclick="hubJoinHall('${h.id}')">🚀 Join Hall</button>` : '<span style="font-size:11px;color:var(--text-muted);">Waiting for host to start…</span>'}</div>
+            </div>
+        </div>`;
+    }).join('') + `</div>` : '';
+    if (!vcLessons.length && !hallList.length) {
         return '<div class="card" style="text-align:center;padding:60px;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:12px;">🎥</div><h3 style="margin-bottom:8px;">No Live Classes Yet</h3><p>Virtual classrooms for your courses will appear here.<br>Ask your lecturers or the admin when a live session is scheduled.</p></div>';
     }
     const rows = vcLessons.map(l => {
@@ -1609,7 +1623,20 @@ function renderHubLiveClasses(me, myCourses, myLessons) {
                 </div>
             </div>`;
     }).join('');
-    return '<div style="margin-bottom:14px;"><h3 style="color:var(--accent);margin:0 0 4px 0;">🎥 Live Classes</h3><div style="font-size:12px;color:var(--text-muted);">Your scheduled virtual classrooms. The join button appears 10 minutes before the start time.</div></div>' + rows;
+    return hallHtml + '<div style="margin-bottom:14px;"><h3 style="color:var(--accent);margin:0 0 4px 0;">🎥 Live Classes</h3><div style="font-size:12px;color:var(--text-muted);">Your scheduled virtual classrooms. The join button appears 10 minutes before the start time.</div></div>' + rows;
+}
+async function hubJoinHall(id) {
+    try {
+        const all = (studentHubCache && studentHubCache.meetings) || await dbGetAll('meetings');
+        const m = (all || []).find(x => String(x.id) === String(id));
+        if (!m) return showToast('Hall not found', { type: 'danger' });
+        if (typeof joinMeeting === 'function') return joinMeeting(id);
+        const me = _hubGetMe();
+        let tk = { token: '', base: '', appId: '' };
+        try { tk = await fetchJitsiToken(m.room, true, m.id); } catch {}
+        const url = getJitsiUrl({ virtualRoom: m.room, virtualPassword: m.password }, { moderator: false, user: { displayName: (me && me.name) || '' }, token: tk.token, jitsiBase: tk.base, appId: tk.appId });
+        showModal('🎓 ' + (m.title || 'Virtual Hall'), `<div style="text-align:center;"><iframe src="${url}" allow="camera; microphone; fullscreen; display-capture" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px;"></iframe></div>`, `<button class="btn btn-outline" onclick="window.open('${url}','_blank')">Open in new tab</button>`);
+    } catch (e) { showToast('Could not join hall', { type: 'danger' }); }
 }
 
 function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
@@ -1878,7 +1905,7 @@ let _hubPollInterval = null;
 let _hubTimestampInterval = null;
 let _hubLastUpdate = Date.now();
 let _hubRenderDebounce = null;
-const _hubRelevantStores = ['notes','lessons','courses','enrollments','exams','examRegistrations','quizzes','submissions','students','payments','attendance','grades','retakeRequests'];
+const _hubRelevantStores = ['notes','lessons','courses','enrollments','exams','examRegistrations','quizzes','submissions','students','payments','attendance','grades','retakeRequests','meetings'];
 
 function _hubIsActive() {
     const el = document.getElementById('screen-student-hub');
