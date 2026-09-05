@@ -236,7 +236,14 @@ async function renderStudentHub() {
             (data.retakeRequests || []).filter(r => r.studentId === me.id).forEach(r => { _hubLastRetakeStatuses[r.id] = r.status; });
         }
         _hubRenderedTabs = {};
-        try { window._hubFeeLock = await hubFeeLockInfo(me, data); } catch { window._hubFeeLock = { locked: false }; }
+        try {
+            const prev = window._hubFeeLock;
+            const next = await hubFeeLockInfo(me, data);
+            window._hubFeeLock = next;
+            if (prev && prev.locked && !next.locked && next.target > 0) {
+                if (typeof showToast === 'function') showToast('✅ Weekly target met — your tabs are unlocked!', { type: 'success', duration: 4000 });
+            }
+        } catch { window._hubFeeLock = { locked: false }; }
 
         const c = _hubComputed;
         content.innerHTML = `
