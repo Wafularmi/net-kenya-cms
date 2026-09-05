@@ -1942,6 +1942,9 @@ function startHubLiveSync() {
 
     try {
         _hubSSE = new EventSource('/api/events?token=' + encodeURIComponent((JSON.parse(sessionStorage.getItem('currentUser') || '{}').session_token) || ''));
+        _hubSSE.addEventListener('maintenance', (e) => {
+            try { if (typeof handleMaintenancePush === 'function') handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
+        });
         _hubSSE.addEventListener('db-change', (e) => {
             try {
                 const { store } = JSON.parse(e.data || '{}');

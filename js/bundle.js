@@ -1652,6 +1652,9 @@ function startAutoRefresh() {
                 else { pollDashboard(); onDBChange(store, record); }
             } catch {}
         });
+        _sseConnection.addEventListener('maintenance', (e) => {
+            try { handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
+        });
         _sseConnection.onerror = () => {
             _sseConnected = false;
             setTimeout(() => { try { if (_sseConnection && _sseConnection.readyState === EventSource.CLOSED) startAutoRefresh(); } catch {} }, 5000);
@@ -20733,8 +20736,45 @@ window.renderLessons = async function () {
 };
 // ==================== End Virtual Classroom Module ====================
 
+// Live maintenance push: works even on the login screen (no session needed).
+// When the admin switches maintenance ON, non-admin pages reload into the
+// maintenance portal; when switched OFF, the maintenance page reloads back.
+let _maintSSE = null;
+function handleMaintenancePush(active) {
+    try {
+        const onMaintPage = /maintenance\.html/.test(location.pathname);
+        const role = (JSON.parse(sessionStorage.getItem('currentUser') || '{}').role) || '';
+        if (active && !onMaintPage && role !== 'admin') {
+            try { sessionStorage.setItem('lastScreen', 'dashboard'); } catch {}
+            location.reload();
+        } else if (!active && onMaintPage) {
+            location.reload();
+        }
+    } catch {}
+}
+function startMaintenanceLiveSync() {
+    try {
+        if (_maintSSE) { try { _maintSSE.close(); } catch {} _maintSSE = null; }
+        _maintSSE = new EventSource('/api/maintenance-events');
+        _maintSSE.addEventListener('maintenance', (e) => {
+            try { handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
+        });
+        _maintSSE.onerror = () => {
+            try { if (_maintSSE && _maintSSE.readyState === EventSource.CLOSED) setTimeout(startMaintenanceLiveSync, 8000); } catch {}
+        };
+        // Fallback: if SSE drops silently, poll the flag every 30s.
+        setInterval(async () => {
+            try {
+                const r = await fetch('/api/maintenance-status');
+                if (!r.ok) return;
+                handleMaintenancePush((await r.json()).active);
+            } catch {}
+        }, 30000);
+    } catch {}
+}
 // Initialize diploma PDF template on page load
 document.addEventListener('DOMContentLoaded', async () => {
+    try { startMaintenanceLiveSync(); } catch {}
     try {
         await loadDiplomaPdfConfig();
     } catch (e) {

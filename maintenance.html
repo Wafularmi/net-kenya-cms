@@ -170,6 +170,22 @@
     <footer>&copy; {{SCHOOL_NAME}} &middot; Maintenance Portal</footer>
 
     <script>
+        // Auto-return to the app the moment maintenance is switched OFF.
+        (function() {
+            function backToApp() { window.location.href = '/'; }
+            try {
+                var es = new EventSource('/api/maintenance-events');
+                es.addEventListener('maintenance', function(e) {
+                    try { if (!JSON.parse(e.data || '{}').active) backToApp(); } catch (x) {}
+                });
+                es.onerror = function() { try { es.close(); } catch (x) {} };
+            } catch (x) {}
+            setInterval(function() {
+                fetch('/api/maintenance-status').then(function(r) { return r.json(); }).then(function(d) {
+                    if (d && !d.active) backToApp();
+                }).catch(function() {});
+            }, 30000);
+        })();
         function toggleAdminForm() {
             var f = document.getElementById('admin-form');
             if (!f) return;

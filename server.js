@@ -124,6 +124,21 @@ function backfillCertIdentifiers(store, rows) {
 
 // SSE clients for real-time updates
 const sseClients = [];
+// Public maintenance-status subscribers (login screen has no session token)
+const maintClients = [];
+function broadcastMaintenance(active) {
+    const msg = `event: maintenance\ndata: ${JSON.stringify({ active: !!active })}\n\n`;
+    for (const list of [sseClients, maintClients]) {
+        for (let i = list.length - 1; i >= 0; i--) {
+            const client = list[i];
+            if (!client.res.writableEnded) {
+                try { client.res.write(msg); } catch {}
+            } else {
+                list.splice(i, 1);
+            }
+        }
+    }
+}
 
 // WebSocket server for discussions
 let wss = null;
@@ -1359,7 +1374,37 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // GET /api/network  â€” list available network interfaces
+    // GET /api/maintenance-status — public maintenance flag (login screen polling/SSE fallback)
+    if (parts.length === 2 && parts[1] === 'maintenance-status' && req.method === 'GET') {
+        return json(res, 200, { active: isMaintenanceActive() });
+    }
+
+    // GET /api/maintenance-events — public SSE stream for maintenance on/off (no auth)
+    if (parts.length === 2 && parts[1] === 'maintenance-events' && req.method === 'GET') {
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Access-Control-Allow-Origin': '*'
+        });
+        res.write('\n');
+        const client = { res, id: Date.now() };
+        maintClients.push(client);
+        try { client.res.write(`event: maintenance\ndata: ${JSON.stringify({ active: isMaintenanceActive() })}\n\n`); } catch {}
+        const keepalive = setInterval(() => {
+            if (!res.writableEnded) res.write(': keepalive\n\n');
+            else clearInterval(keepalive);
+        }, 15000);
+        req.on('close', () => {
+            clearInterval(keepalive);
+            const idx = maintClients.indexOf(client);
+            if (idx >= 0) maintClients.splice(idx, 1);
+        });
+        return true;
+    }
+
+    // GET /api/network  — list available network interfaces
     if (parts.length === 2 && parts[1] === 'network' && req.method === 'GET') {
         const ifaces = os.networkInterfaces();
         const list = [];
@@ -2582,6 +2627,9 @@ return json(res, 200, result);
                     }
                     if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
+                    }
+                    if (store === 'settings' && value.key === 'maintenance') {
+                        try { broadcastMaintenance(!!((value.value || value).active)); } catch {}
                     }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });
