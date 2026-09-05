@@ -642,14 +642,22 @@ function sortCoursesByTranscriptOrder(courses) {
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
     });
 }
-// Sequence position of a course: explicit order field wins, else transcript order, else last.
-function courseSeq(course) {
+// Sequence position of a course: explicit order wins, else transcript position
+// (1..N), else continuing numbers for unlisted courses — never duplicated.
+function courseSeq(course, allCourses) {
     if (course && Number(course.order) > 0) return Number(course.order);
-    const idx = getTranscriptCourseOrder().indexOf(((course && course.name) || '').toUpperCase());
-    return idx === -1 ? 99 : idx + 1;
+    const tList = getTranscriptCourseOrder();
+    const idx = tList.indexOf(((course && course.name) || '').toUpperCase());
+    if (idx !== -1) return idx + 1;
+    const list = allCourses || [];
+    const unlisted = list.filter(c => tList.indexOf(((c && c.name) || '').toUpperCase()) === -1 && !(c && Number(c.order) > 0))
+        .sort((a, b) => String(a.code || a.name || a.id) < String(b.code || b.name || b.id) ? -1 : 1);
+    const pos = unlisted.findIndex(c => course && String(c.id) === String(course.id));
+    return tList.length + 1 + (pos === -1 ? unlisted.length : pos);
 }
 function sortCoursesBySequence(courses) {
-    return (courses || []).slice().sort((a, b) => courseSeq(a) - courseSeq(b));
+    const list = courses || [];
+    return list.slice().sort((a, b) => courseSeq(a, list) - courseSeq(b, list));
 }
 function coursePassMark(course) {
     return (course && Number(course.passMark) > 0) ? Number(course.passMark) : 50;
@@ -17702,7 +17710,7 @@ async function renderContentGateCourses() {
     box.innerHTML = header + sortCoursesBySequence(courses).map(c => {
         const cur = locks[c.id] || 'auto';
         return `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);font-size:12px;">
-        <span style="flex:1;"><b>#${courseSeq(c)}</b> ${escapeHtml(c.code || '')} — ${escapeHtml(c.name || '')}</span>
+        <span style="flex:1;"><b>#${courseSeq(c, courses)}</b> ${escapeHtml(c.code || '')} — ${escapeHtml(c.name || '')}</span>
         <select data-lock="${c.id}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);">${opt('auto', cur, 'Auto (sequence)')}${opt('locked', cur, '🔒 Locked')}${opt('unlocked', cur, '✅ Unlocked')}</select>
     </div>`;
     }).join('') || '<div style="color:var(--text-muted);padding:8px;">No courses.</div>';
@@ -17783,6 +17791,31 @@ async function saveContentGate() {
     const st = document.getElementById('contentgate-status');
     if (st) { st.textContent = `✓ Saved (${nl} locked, ${nu} unlocked)`; st.style.color = 'var(--success)'; setTimeout(() => st.textContent = '', 3000); }
     showToast(`Content gate saved for ${label}! (${nl} locked, ${nu} unlocked)`); logAudit('updated', 'content-gate', { mode: _contentGateFull.mode, scope: label, locked: nl, unlocked: nu });
+}
+async function resetContentGateScope() {
+    const scope = contentGateScopeData();
+    const label = scope.kind === 'global' ? 'Global default' : contentGateScopeLabel();
+    if (!await showConfirm('Reset to Auto', `Clear all Locked/Unlocked ticks for <b>${escapeHtml(label)}</b>? Every course returns to Auto (sequence: future courses show "Locked — finish the earlier courses first").`)) return;
+    if (!_contentGateFull) _contentGateFull = { mode: 'global', centers: {}, regions: {}, students: {} };
+    if (scope.kind === 'student' && scope.sid) {
+        _contentGateFull.students = _contentGateFull.students || {};
+        _contentGateFull.students[scope.sid] = { exempt: !!(_contentGateFull.students[scope.sid] || {}).exempt };
+        if (!Object.keys(_contentGateFull.students[scope.sid]).length) delete _contentGateFull.students[scope.sid];
+    } else if (scope.kind === 'region') {
+        _contentGateFull.regions = _contentGateFull.regions || {};
+        _contentGateFull.regions[scope.rid] = { enabled: !!((_contentGateFull.regions[scope.rid] || {}).enabled) };
+    } else if (scope.kind === 'center') {
+        _contentGateFull.centers = _contentGateFull.centers || {};
+        _contentGateFull.centers[scope.cid] = { enabled: !!((_contentGateFull.centers[scope.cid] || {}).enabled) };
+    } else {
+        const { centers, regions, students, mode, enabled } = _contentGateFull;
+        _contentGateFull = { enabled: !!enabled, mode: mode || 'global', centers: centers || {}, regions: regions || {}, students: students || {} };
+        delete _contentGateFull.locks;
+        delete _contentGateFull.unlocked;
+    }
+    await dbPut('settings', { key: 'contentGate', ..._contentGateFull });
+    showToast('Reset to Auto for ' + label);
+    selectContentGateCenter();
 }
 async function loadContentGate() {
     let s = null;
@@ -18554,7 +18587,7 @@ async function renderCoverage() {
                     <button class="btn btn-sm btn-outline" style="background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.4);" onclick="printFinanceCenterPDF('${center.id}')">💰 Finance</button>
                 </div>
             </div>
-            <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead><tr><th>Student (Adm#)</th>${seqCourses.map(c => `<th style="text-align:center;">${escapeHtml(c.code || c.name)}<br><span style="font-weight:400;font-size:10px;">#${courseSeq(c)}</span></th>`).join('')}<th>Attend%</th><th>Avg%</th></tr></thead><tbody>`;
+            <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead><tr><th>Student (Adm#)</th>${seqCourses.map(c => `<th style="text-align:center;">${escapeHtml(c.code || c.name)}<br><span style="font-weight:400;font-size:10px;">#${courseSeq(c, seqCourses)}</span></th>`).join('')}<th>Attend%</th><th>Avg%</th></tr></thead><tbody>`;
         students.forEach(s => {
             const statuses = studentCourseStatuses(s.id, seqCourses, d);
             let attSum = 0, attN = 0, scoreSum = 0, scoreN = 0;
