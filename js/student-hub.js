@@ -17,7 +17,7 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','meetings'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','meetings','waivers'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -172,7 +172,7 @@ async function hubFeeLockInfo(me, data) {
     const weeksElapsed = Math.max(1, Math.floor((Date.now() - anchor.getTime()) / (7 * 86400000)) + 1);
     const cumulativeTarget = weeksElapsed * target;
     const mine = (data.payments || []).filter(p => p.studentId === me.id);
-    const totalPaid = mine.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const totalPaid = mine.reduce((s, p) => s + (Number(p.amount) || 0), 0) + hubWaivedTotal(me.id, data);
     const { start, iso } = hubWeekStart();
     const weekPaid = mine.filter(p => String(p.date || '') >= iso).reduce((s, p) => s + (Number(p.amount) || 0), 0);
     let totalFee = 0;
@@ -222,7 +222,7 @@ function hubLockedPanel(lock, tabLabel) {
         <div style="font-size:44px;margin-bottom:10px;">🔒</div>
         <h3 style="margin:0 0 8px;">${esc(tabLabel)} Locked</h3>
         <p style="color:var(--text-muted);font-size:13px;max-width:420px;margin:0 auto 6px;">Weekly fee target not met. Pay <b>KES ${due}</b> more (week ${lock.weeksElapsed || 1}, target KES ${lock.target}/week, paid KES ${lock.totalPaid || 0} so far, due ${esc(lock.dueText || '')}) to unlock. Overpayments overflow to coming weeks.${coverLine}</p>
-        <button class="btn btn-success" style="margin-top:12px;" onclick="showMpesaPayModal('${(_hubGetMe() || {}).id || ''}')">💰 Pay Now via M-Pesa</button>
+        ${window._hubMpesaOn ? `<button class="btn btn-success" style="margin-top:12px;" onclick="showMpesaPayModal('${(_hubGetMe() || {}).id || ''}')">💰 Pay Now via M-Pesa</button>` : `<div style="font-size:12px;color:var(--text-muted);margin-top:12px;">Contact the finance office to clear this.</div>`}
     </div>`;
 }
 
@@ -361,6 +361,7 @@ async function renderStudentHub() {
             (data.retakeRequests || []).filter(r => r.studentId === me.id).forEach(r => { _hubLastRetakeStatuses[r.id] = r.status; });
         }
         _hubRenderedTabs = {};
+        try { window._hubMpesaOn = await hubMpesaEnabled(); } catch { window._hubMpesaOn = false; }
         try {
             const prev = window._hubFeeLock;
             const next = await hubFeeLockInfo(me, data);
@@ -515,7 +516,7 @@ async function switchHubTab(tab, btn) {
 function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data, todoItems) {
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
     const myPayments = (data.payments || []).filter(p => p.studentId === me.id);
-    const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0);
+    const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0) + hubWaivedTotal(me.id, data);
     const myAttendance = (data.attendance || []).filter(a => a.studentId === me.id);
     const attended = myAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
     const attendancePct = myAttendance.length ? Math.round((attended / myAttendance.length) * 100) : 0;
@@ -599,15 +600,32 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                     ${L && L.target ? `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">This week (target KES ${L.target})</span><b>KES ${L.weekPaid || 0} · bal KES ${weekDue}</b></div>` : ''}
                     ${status}`;
                 })()}
-                <button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>
+                ${window._hubMpesaOn ? `<button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>` : `<div style="font-size:11px;color:var(--text-muted);margin-top:10px;text-align:center;">Online payments coming soon — contact the finance office.</div>`}
             </div>
         </div>
     `;
 }
+let _hubMpesaOnCache = null;
+let _hubMpesaOnAt = 0;
+async function hubMpesaEnabled() {
+    if (_hubMpesaOnCache !== null && Date.now() - _hubMpesaOnAt < 60000) return _hubMpesaOnCache;
+    try {
+        const r = await dbGet('settings', 'mpesa');
+        const v = r ? (r.value || r) : null;
+        _hubMpesaOnCache = !!(v && v.payButtonEnabled);
+    } catch { _hubMpesaOnCache = false; }
+    _hubMpesaOnAt = Date.now();
+    return _hubMpesaOnCache;
+}
+function hubWaivedTotal(sid, data) {
+    try { return ((data && data.waivers) || []).filter(w => String(w.studentId) === String(sid)).reduce((s, w) => s + (Number(w.amount) || 0), 0); }
+    catch { return 0; }
+}
 function hubFeeBalance(me, totalPaid) {
     try {
         const fee = (typeof getCachedStudentFee === 'function') ? getCachedStudentFee(me) : (me.feeAmount || 0);
-        return Math.max(0, (fee || 0) - (totalPaid || 0));
+        const waived = hubWaivedTotal(me && me.id, studentHubCache || {});
+        return Math.max(0, (fee || 0) - (totalPaid || 0) - waived);
     } catch { return 0; }
 }
 function normalizeMpesaPhone(input) {
@@ -622,8 +640,8 @@ async function showMpesaPayModal(studentId) {
     const sid = studentId || (me && me.id) || '';
     const stu = (data.students || []).find(s => s.id === sid) || me || {};
     const myPayments = (data.payments || []).filter(p => p.studentId === sid);
-    const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0);
-    const balance = hubFeeBalance(stu, totalPaid);
+    const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0) + hubWaivedTotal(sid, data);
+    const balance = hubFeeBalance(stu, myPayments.reduce((s, p) => s + (p.amount || 0), 0));
     let totalFee = 0;
     try { totalFee = (typeof getCachedStudentFee === 'function') ? (getCachedStudentFee(stu) || 0) : (stu.feeAmount || 0); } catch { totalFee = stu.feeAmount || 0; }
     const maxPay = totalFee > 0 ? Math.max(0, totalFee - totalPaid) : 500000;

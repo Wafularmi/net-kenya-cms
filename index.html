@@ -1204,6 +1204,7 @@
                         <div class="form-row"><div class="form-group"><label>Consumer Key (API)</label><input type="text" id="settings-mpesa-key" placeholder="Daraja consumer key"></div><div class="form-group"><label>Consumer Secret</label><input type="password" id="settings-mpesa-secret" placeholder="Daraja consumer secret" autocomplete="off"></div></div>
                         <div class="form-group"><label>Passkey (STK Push)</label><input type="text" id="settings-mpesa-passkey" placeholder="Lipa Na M-Pesa online passkey"></div>
                         <div class="form-row"><div class="form-group"><label>Environment</label><select id="settings-mpesa-env"><option value="sandbox">Sandbox (Test)</option><option value="production">Production (Live)</option></select></div><div class="form-group"><label>Transaction Type</label><select id="settings-mpesa-type"><option value="paybill">Paybill (Customer Paybill)</option><option value="till">Till Number (Buy Goods)</option></select></div></div>
+                        <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="settings-mpesa-paybtn" style="width:18px;height:18px;"> Show "Pay Fees via M-Pesa" button to students (enable only when tested & live)</label></div>
                         <button class="btn btn-primary" onclick="saveMpesaSettings()">Save M-Pesa Settings</button>
                     </div>
 
@@ -1330,8 +1331,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=298"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=30"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=299"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=31"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

@@ -4669,18 +4669,71 @@ async function renderInstallments() {
     }
     document.getElementById('installments-list').innerHTML = html || '<div style="color:var(--text-muted);text-align:center;padding:20px;">No installment plans</div>';
 }
+function waiverTotalFor(sid, waivers) {
+    return (waivers || []).filter(w => String(w.studentId) === String(sid)).reduce((s, w) => s + (Number(w.amount) || 0), 0);
+}
 async function renderBalances() {
     const students = await dbGetAll('students');
     const payments = await dbGetAll('payments');
     const agreements = await dbGetAll('feeAgreements').catch(() => []);
+    const waivers = await dbGetAll('waivers').catch(() => []);
     const today = new Date().toISOString().split('T')[0];
     const activeAgr = (sid) => agreements.find(a => String(a.studentId) === String(sid) && a.status === 'approved' && String(a.dueDate || '') >= today);
     const balances = students.map(s => {
         const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const waived = waiverTotalFor(s.id, waivers);
         const fee = getCachedStudentFee(s);
-        return { ...s, paid, fee, balance: fee - paid, agr: activeAgr(s.id) };
+        return { ...s, paid, waived, fee, balance: fee - paid - waived, agr: activeAgr(s.id) };
     }).filter(s => s.balance > 0).sort((a, b) => b.balance - a.balance);
-    document.getElementById('balances-list').innerHTML = balances.length ? balances.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span><br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">📝 Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:var(--warning);">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button></div></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No outstanding balances</div>';
+    document.getElementById('balances-list').innerHTML = balances.length ? balances.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span><br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)}${s.waived ? ` + Waived: ${formatCurrency(s.waived)}` : ''} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">📝 Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:var(--warning);">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button> <button class="btn btn-warning btn-sm" style="margin-top:4px;" onclick="showWaiverForm('${s.id}')">Waiver</button></div></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No outstanding balances</div>';
+}
+function requireWaiverRole() {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (['admin', 'finance', 'registrar', 'assistant'].includes(u.role)) return true;
+    showToast('Access denied: Only admin/finance/registrar/assistant can grant waivers.', { type: 'danger' });
+    return false;
+}
+async function showWaiverForm(studentId) {
+    if (!requireWaiverRole()) return;
+    const students = await dbGetAll('students');
+    const s = students.find(x => x.id === studentId);
+    if (!s) return showToast('Student not found', { type: 'danger' });
+    const payments = await dbGetAll('payments');
+    const waivers = await dbGetAll('waivers').catch(() => []);
+    const paid = payments.filter(p => p.studentId === studentId).reduce((x, p) => x + p.amount, 0);
+    const alreadyWaived = waiverTotalFor(studentId, waivers);
+    const bal = Math.max(0, getCachedStudentFee(s) - paid - alreadyWaived);
+    const staff = await dbGetAll('staff').catch(() => []);
+    const mine = waivers.filter(w => String(w.studentId) === String(studentId)).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+    const listHtml = mine.length ? mine.map(w => `<div style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;font-size:12px;"><b>${formatCurrency(w.amount)}</b> · ${escapeHtml(w.reason || '')}<br><span style="color:var(--text-muted);">By ${escapeHtml(w.waivedByName || w.waivedBy || '—')} · ${formatDate(w.at)} <button class="btn btn-outline btn-sm" onclick="deleteWaiver('${w.id}','${studentId}')">Del</button></span></div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);">No waivers yet.</div>';
+    const content = `<div style="margin-bottom:8px;font-size:13px;">Student: <b>${escapeHtml(s.name)}</b> · Outstanding: <b>${formatCurrency(bal)}</b></div>
+        ${listHtml}
+        <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
+        <div class="form-group"><label>Waive Amount (KES) *</label><input type="number" id="waiver-amount" min="1" value="${Math.round(bal)}"></div>
+        <div class="form-group"><label>Reason *</label><textarea id="waiver-reason" rows="3" placeholder="e.g. Bursary award, hardship case..."></textarea></div>
+        <div class="form-group"><label>Waiver Given By (staff) *</label><select id="waiver-by"><option value="">Select staff...</option>${staff.filter(x => x.status !== 'inactive').map(x => `<option value="${x.id}">${escapeHtml(x.name)} (${escapeHtml(x.role || 'staff')})</option>`).join('')}</select></div>`;
+    showModal('Fee Waiver — cancel balance', content, `<button class="btn btn-warning" onclick="saveWaiver('${studentId}')">Grant Waiver</button>`);
+}
+async function saveWaiver(studentId) {
+    if (!requireWaiverRole()) return;
+    const amount = parseFloat(document.getElementById('waiver-amount').value);
+    const reason = document.getElementById('waiver-reason').value.trim();
+    const byId = document.getElementById('waiver-by').value;
+    if (!(amount > 0)) return showToast('Enter a waiver amount!');
+    if (!reason) return showToast('A reason is required!');
+    if (!byId) return showToast('Pick the staff member giving the waiver!');
+    const staff = await dbGetAll('staff').catch(() => []);
+    const st = staff.find(x => x.id === byId);
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    await dbPut('waivers', { id: 'WVR-' + Date.now(), studentId, amount, reason, waivedBy: byId, waivedByName: st ? st.name : byId, createdBy: u.username || '', at: new Date().toISOString() });
+    closeModal(); renderBalances(); showToast('Waiver granted: ' + formatCurrency(amount)); logAudit('created', 'waiver', { studentId, amount, reason, waivedBy: byId });
+}
+async function deleteWaiver(id, studentId) {
+    if (!requireWaiverRole()) return;
+    if (!await showConfirm('Delete', 'Delete this waiver? The balance returns.')) return;
+    await dbDelete('waivers', id);
+    renderBalances();
+    showWaiverForm(studentId);
 }
 function requireAgreementRole() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -17947,10 +18000,10 @@ async function loadContentGate() {
     selectContentGateCenter();
 }
 async function saveMpesaSettings() {
-    const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value };
+    const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value, payButtonEnabled: !!document.getElementById('settings-mpesa-paybtn')?.checked };
     await dbPut('settings', s);
     try {
-        const res = await fetch('/api/mpesa/settings', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ shortcode: s.shortcode, businessName: s.businessName, consumerKey: s.consumerKey, consumerSecret: s.consumerSecret, passkey: s.passkey, environment: s.environment, transactionType: s.transactionType }) });
+        const res = await fetch('/api/mpesa/settings', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ shortcode: s.shortcode, businessName: s.businessName, consumerKey: s.consumerKey, consumerSecret: s.consumerSecret, passkey: s.passkey, environment: s.environment, transactionType: s.transactionType, payButtonEnabled: s.payButtonEnabled }) });
         if (!res.ok) showToast('Saved locally but failed to sync to server: ' + (await res.json()).error, { type: 'warning' });
     } catch {
         showToast('Saved locally but server not reachable. Start the server for M-Pesa to work.', { type: 'warning' });
@@ -17972,6 +18025,7 @@ async function loadMpesaSettings() {
     if (s.passkey) id('settings-mpesa-passkey').value = s.passkey;
     if (s.environment) id('settings-mpesa-env').value = s.environment;
     if (s.transactionType) id('settings-mpesa-type').value = s.transactionType;
+    if (id('settings-mpesa-paybtn')) id('settings-mpesa-paybtn').checked = !!s.payButtonEnabled;
 }
 async function getAdmissionPreviewContext() {
     const branding = await dbGet('settings', 'branding');
@@ -18651,12 +18705,12 @@ async function exportStudentsCSV() {
 }
 let _coverageCache = null;
 async function loadCoverageData() {
-    const [students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions] = await Promise.all([
-        dbGetAll('students'), dbGetAll('courses'), dbGetAll('enrollments'), dbGetAll('grades'), dbGetAll('submissions'), dbGetAll('attendance'), dbGetAll('payments'), dbGetAll('studyCenters'), dbGetAll('regions').catch(() => []), dbGetAll('quizzes'), dbGetAll('exams'), dbGetAll('courseCompletions').catch(() => [])
+    const [students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, waivers] = await Promise.all([
+        dbGetAll('students'), dbGetAll('courses'), dbGetAll('enrollments'), dbGetAll('grades'), dbGetAll('submissions'), dbGetAll('attendance'), dbGetAll('payments'), dbGetAll('studyCenters'), dbGetAll('regions').catch(() => []), dbGetAll('quizzes'), dbGetAll('exams'), dbGetAll('courseCompletions').catch(() => []), dbGetAll('waivers').catch(() => [])
     ]);
     let academic = null;
     try { const rec = await dbGet('settings', 'academic'); academic = rec ? (rec.value || rec) : null; } catch {}
-    _coverageCache = { students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, academic, loadedAt: Date.now() };
+    _coverageCache = { students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, waivers, academic, loadedAt: Date.now() };
     return _coverageCache;
 }
 function coverageStudentIds() { return null; }
@@ -18796,8 +18850,9 @@ async function financeRowsFor(centerIds, d) {
     const students = d.students.filter(s => centerIds.includes(s.studyCenterId || ''));
     return students.map(s => {
         const paid = (d.payments || []).filter(p => String(p.studentId) === String(s.id)).reduce((x, p) => x + (Number(p.amount) || 0), 0);
+        const waived = waiverTotalFor(s.id, d.waivers || []);
         const fee = coverageFeeOf(s, d);
-        return { name: s.name, adm: s.admissionNumber || s.id, phone: s.phone || '', fee, paid, bal: Math.max(0, fee - paid) };
+        return { name: s.name, adm: s.admissionNumber || s.id, phone: s.phone || '', fee, paid: paid + waived, waived, bal: Math.max(0, fee - paid - waived) };
     });
 }
 async function printFinanceCenterPDF(centerId) {
@@ -18809,7 +18864,7 @@ async function printFinanceCenterPDF(centerId) {
         const tFee = rows.reduce((s, r) => s + r.fee, 0), tPaid = rows.reduce((s, r) => s + r.paid, 0);
         body += `<h2>${escapeHtml(center.name)} — Expected: ${tFee.toLocaleString()}, Paid: ${tPaid.toLocaleString()}, Balance: ${(tFee - tPaid).toLocaleString()}</h2>`;
         body += `<table><thead><tr><th>#</th><th>Name</th><th>Adm#</th><th>Fee</th><th>Paid</th><th>Balance</th></tr></thead><tbody>`;
-        rows.forEach((r, i) => { body += `<tr><td>${i + 1}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.adm)}</td><td>${r.fee.toLocaleString()}</td><td>${r.paid.toLocaleString()}</td><td>${r.bal.toLocaleString()}</td></tr>`; });
+        rows.forEach((r, i) => { body += `<tr><td>${i + 1}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.adm)}</td><td>${r.fee.toLocaleString()}</td><td>${r.paid.toLocaleString()}${r.waived ? ` (w ${r.waived.toLocaleString()})` : ''}</td><td>${r.bal.toLocaleString()}</td></tr>`; });
         body += `</tbody></table>`;
     }
     coveragePrintDoc('Center Financial Report', list.length === 1 ? list[0].name : 'All Centers', body);

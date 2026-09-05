@@ -632,8 +632,8 @@ function canAccessStore(user, store, method) {
         }
         return false;
     }
-    // Fee agreements: reads for staff, writes admin/finance/registrar/assistant(with Finance tab)
-    if (store === 'feeAgreements') {
+    // Fee agreements + waivers: reads for staff, writes admin/finance/registrar/assistant(with Finance tab)
+    if (store === 'feeAgreements' || store === 'waivers') {
         if (method === 'GET') return true;
         if (user.role === 'admin' || user.role === 'finance' || user.role === 'registrar') return true;
         if (user.role === 'assistant') {
@@ -772,6 +772,9 @@ function filterStoreForUser(user, store, rows) {
         return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
     }
     if (store === 'feeAgreements') {
+        return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
+    if (store === 'waivers') {
         return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
     }
     if (store === 'meetings') {
@@ -2221,7 +2224,8 @@ function handleAPI(req, res) {
                         if (av && av.programFees && Number(av.programFees[stuRec.program]) > 0) courseFee = Number(av.programFees[stuRec.program]);
                     }
                     if (courseFee > 0) {
-                        const paidSoFar = (db.payments || []).filter(p => String(p.studentId) === String(studentId)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                        const paidSoFar = (db.payments || []).filter(p => String(p.studentId) === String(studentId)).reduce((s, p) => s + (Number(p.amount) || 0), 0)
+                            + (db.waivers || []).filter(w => String(w.studentId) === String(studentId)).reduce((s, w) => s + (Number(w.amount) || 0), 0);
                         const remaining = Math.max(0, courseFee - paidSoFar);
                         if (remaining <= 0) return json(res, 400, { error: 'Program fee fully paid. Nothing due.' });
                         if (amount > remaining) return json(res, 400, { error: 'Amount exceeds your remaining program balance of KES ' + Math.round(remaining) + '.' });
@@ -2574,6 +2578,9 @@ function handleAPI(req, res) {
                 rows = rows.filter(r => r && r.key !== 'smsSettings');
             }
             if (name === 'settings') rows = rows.map(injectSettingsBlobs);
+            if (name === 'settings' && (!user || user.role !== 'admin')) {
+                rows = rows.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
+            }
             result[name] = rows;
         }
 return json(res, 200, result);
@@ -2657,6 +2664,9 @@ return json(res, 200, result);
             results = backfillCertIdentifiers(store, results);
             results = externalizeStoreRecords(store, results);
             if (store === 'settings') results = results.map(injectSettingsBlobs);
+            if (store === 'settings' && (!user || user.role !== 'admin')) {
+                results = results.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
+            }
             if (limit > 0 && page > 0) {
                 const start = (page - 1) * limit;
                 const total = results.length;
@@ -2680,6 +2690,9 @@ return json(res, 200, result);
                 const list = externalizeStoreRecords(store, [item]);
                 item = list[0] || null;
                 if (store === 'settings') item = injectSettingsBlobs(item);
+                if (item && store === 'settings' && key === 'mpesa' && (!user || user.role !== 'admin')) {
+                    item = { key: 'mpesa', payButtonEnabled: !!((item.value || item).payButtonEnabled) };
+                }
             }
             return json(res, 200, item);
         }
