@@ -18558,13 +18558,16 @@ async function saveUser() {
     const username = document.getElementById('user-username').value.trim();
     const password = document.getElementById('user-password').value;
     if (!username || !password) return showToast('Username and password required!');
+    if (password.length < 4) return showToast('Password must be at least 4 characters!');
     const role = document.getElementById('user-role').value;
     const studentId = document.getElementById('user-student-id') ? document.getElementById('user-student-id').value : '';
     if (role === 'student' && !studentId) return showToast('Select a student record to link this user account!');
+    const existing = await dbGet('users', username).catch(() => null);
+    if (existing) return showToast(`Username "${username}" is already taken by ${existing.name || existing.role}! Pick another.`, { type: 'danger' });
     const pwHash = await hashPassword(password);
     if (role === 'coordinator' && !document.getElementById('user-region').value) return showToast('Please select a region for this coordinator!');
-    const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim(), role, studentId: studentId || undefined, regionId: role === 'coordinator' ? document.getElementById('user-region').value : undefined, createdAt: new Date().toISOString() };
-    await dbPut('users', user); closeModal(); renderUsers(); showToast('User created!'); logAudit('created', 'user', { username, role });
+    const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim() || username, role, status: 'active', studentId: studentId || undefined, regionId: role === 'coordinator' ? document.getElementById('user-region').value : undefined, createdAt: new Date().toISOString() };
+    await dbPut('users', user); closeModal(); renderUsers(); showToast(`User created! ${role === 'assistant' ? 'They can log in with username "' + username + '".' : ''}`, { type: 'success' }); logAudit('created', 'user', { username, role });
 }
 async function resetUserPassword(username) {
     const newPw = await showPrompt('Reset Password', 'Enter new password for "' + username + '":');
