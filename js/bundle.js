@@ -1103,6 +1103,14 @@ async function showApp(user) {
     const regionName = user.role === 'coordinator' && user.regionId ? (window.__regionMap && window.__regionMap[user.regionId] || user.regionId) : '';
     document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
     document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
+    try {
+        const manualByRole = { admin: '/admin-manual.html', assistant: '/assistant-admin-manual.html', coordinator: '/coordinator-manual.html', student: '/student-manual.html' };
+        const manualLink = document.getElementById('manual-link');
+        if (manualLink) {
+            manualLink.href = manualByRole[user.role] || '/staff-manual.html';
+            manualLink.title = 'Open the ' + (user.role === 'admin' ? 'Administrator' : user.role === 'assistant' ? 'Assistant Administrator' : user.role === 'coordinator' ? 'Coordinator' : user.role === 'student' ? 'Student' : 'Staff') + ' Manual';
+        }
+    } catch {}
     initCoordinatorAccessCache();
     initAssistantAccessCache();
     // For assistant, navigation must wait for cache, so rebuild after load
