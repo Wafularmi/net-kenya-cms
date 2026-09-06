@@ -4130,7 +4130,147 @@ async function renderExams() {
             const pub = e.published !== false;
             return `<tr><td><b>${(e.title || course?.code || e.courseId)}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''}</span>${center ? `<br><span style="font-size:10px;color:var(--accent);">${center.name}</span>` : ''}</td><td>${formatDate(e.date)}</td><td>${e.time}</td><td>${e.venue}</td><td>${examRegs.length}</td><td>${invigilator ? invigilator.name : '--'}</td><td><span class="badge badge-${pub ? 'success' : 'secondary'}" style="cursor:pointer;" onclick="toggleExamPublished('${e.id}')">${pub ? 'Published' : 'Draft'}</span></td><td><button class="btn btn-outline btn-sm" onclick="showExamForm('${e.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showExamRegistration('${e.id}')">Reg</button> <button class="btn btn-outline btn-sm" onclick="showExamResults('${e.id}')">Results</button> <button class="btn btn-warning btn-sm" onclick="showExamNotify('${e.id}')">Notify</button> <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">Del</button></td></tr>`;
         }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No exams scheduled for this semester</td></tr>';
+        renderRetakeRequests();
     }
+}
+async function renderRetakeRequests() {
+    const requests = await dbGetAll('retakeRequests');
+    const pending = requests.filter(r => r.status === 'pending').sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    const resolved = requests.filter(r => r.status !== 'pending').sort((a, b) => (b.resolvedAt || '').localeCompare(a.resolvedAt || ''));
+    const students = await dbGetAll('students');
+    const exams = await dbGetAll('exams');
+    const courses = await dbGetAll('courses');
+    let container = document.getElementById('retake-requests-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'retake-requests-container';
+        const examsTable = document.querySelector('#exams-body')?.closest('.tab-content') || document.querySelector('#screen-exams');
+        if (examsTable) examsTable.appendChild(container);
+    }
+    container.innerHTML = `
+        <div style="margin-top:32px;">
+            <h3 style="color:var(--accent);margin-bottom:4px;">📋 Retake Requests</h3>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${pending.length} pending · ${resolved.length} resolved</div>
+            ${pending.length ? `<div style="margin-bottom:20px;">${pending.map(r => {
+                const st = students.find(s => s.id === r.studentId);
+                const ex = exams.find(e => e.id === r.examId);
+                const co = courses.find(c => c.id === ex?.courseId);
+                return `<div style="padding:14px;border:1px solid var(--warning);border-left:4px solid var(--warning);border-radius:10px;margin-bottom:10px;background:var(--bg-card);">
+                    <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;">
+                        <div style="flex:1;">
+                            <div style="font-weight:700;font-size:14px;">${escapeHtml(st?.name || r.studentId)} <span style="font-size:11px;color:var(--text-muted);">(${escapeHtml(st?.admissionNumber || '')})</span></div>
+                            <div style="font-size:12px;color:var(--text);margin-top:4px;"><b>Exam:</b> ${escapeHtml(ex?.title || co?.code || r.examId)} — ${ex ? formatDate(ex.date) + ' ' + (ex.time || '') : ''}</div>
+                            ${r.requestType ? `<span class="badge badge-info" style="font-size:10px;margin-top:4px;">${r.requestType === 'missed' ? 'Missed Exam' : 'Retake'}</span>` : ''}
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;"><b>Reason:</b> ${escapeHtml(r.reason)}</div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Requested: ${formatDate(r.createdAt)}</div>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                            <button class="btn btn-success btn-sm" onclick="approveRetake('${r.id}')">✓ Approve</button>
+                            <button class="btn btn-danger btn-sm" onclick="rejectRetake('${r.id}')">✗ Reject</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('')}</div>` : '<div style="padding:20px;text-align:center;color:var(--text-muted);background:var(--bg-card);border-radius:10px;margin-bottom:16px;">No pending retake requests.</div>'}
+            ${resolved.length ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--text-muted);margin-bottom:8px;">View resolved requests (${resolved.length})</summary>${resolved.map(r => {
+                const st = students.find(s => s.id === r.studentId);
+                const ex = exams.find(e => e.id === r.examId);
+                const statusColor = r.status === 'approved' ? 'var(--success)' : 'var(--danger)';
+                return `<div style="padding:10px;border:1px solid var(--border);border-left:4px solid ${statusColor};border-radius:8px;margin-bottom:6px;font-size:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span><b>${escapeHtml(st?.name || r.studentId)}</b> — ${escapeHtml(ex?.title || r.examId)} <span class="badge" style="background:${statusColor};color:#fff;font-size:10px;">${r.status}</span></span>
+                        <span style="color:var(--text-muted);font-size:11px;">${formatDate(r.resolvedAt)}</span>
+                    </div>
+                    ${r.adminNote ? `<div style="color:var(--text-muted);margin-top:4px;">Note: ${escapeHtml(r.adminNote)}</div>` : ''}
+                </div>`;
+            }).join('')}</details>` : ''}
+        </div>
+    `;
+}
+async function approveRetake(requestId) {
+    const request = await dbGet('retakeRequests', requestId);
+    if (!request) return;
+    const exam = await dbGet('exams', request.examId);
+    if (!exam) return showToast('Original exam not found', { type: 'danger' });
+    const students = await dbGetAll('students');
+    const student = students.find(s => s.id === request.studentId);
+    const content = `
+        <div style="margin-bottom:16px;">
+            <div style="padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:12px;">
+                <b>Student:</b> ${escapeHtml(student?.name || request.studentId)}<br>
+                <b>Exam:</b> ${escapeHtml(exam.title || exam.courseId)}<br>
+                <b>Reason:</b> ${escapeHtml(request.reason)}
+            </div>
+            <div class="form-group">
+                <label>Supplementary Exam Date *</label>
+                <input type="date" id="supp-date" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);">
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Time *</label><input type="text" id="supp-time" value="${exam.time || '09:00-12:00'}" placeholder="09:00-12:00" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);"></div>
+                <div class="form-group"><label>Venue *</label><input type="text" id="supp-venue" value="${escapeHtml(exam.venue || '')}" placeholder="Hall A" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);"></div>
+            </div>
+            <div class="form-group"><label>Admin Note (optional)</label><input type="text" id="supp-note" placeholder="Note for the student..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);"></div>
+        </div>
+    `;
+    showModal(request.requestType === 'missed' ? 'Approve Missed Exam — Schedule' : 'Approve Retake — Schedule Supplementary', content, `<button class="btn btn-success" onclick="confirmApproveRetake('${requestId}')">Approve & Schedule</button>`);
+}
+async function confirmApproveRetake(requestId) {
+    const request = await dbGet('retakeRequests', requestId);
+    if (!request) return;
+    const exam = await dbGet('exams', request.examId);
+    if (!exam) return;
+    const date = document.getElementById('supp-date').value;
+    const time = document.getElementById('supp-time').value.trim();
+    const venue = document.getElementById('supp-venue').value.trim();
+    const note = document.getElementById('supp-note').value.trim();
+    if (!date || !time || !venue) return showToast('Date, time, and venue required', { type: 'danger' });
+    const suppId = 'EXM-SUPP-' + Date.now();
+    const supplementary = { id: suppId, courseId: exam.courseId, studyCenterId: exam.studyCenterId, date, time, venue, invigilatorId: exam.invigilatorId || '', type: 'supplementary', duration: exam.duration || 180, passMark: exam.passMark || 50, totalMarks: exam.totalMarks || 100, questionIds: exam.questionIds || [], title: (exam.title || 'Exam') + ' — Supplementary', semester: exam.semester, published: true, linkedQuizId: exam.linkedQuizId || '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    await dbPut('exams', supplementary);
+    await dbPut('examRegistrations', { id: `EXREG-${suppId}-${request.studentId}`, examId: suppId, studentId: request.studentId, registeredAt: new Date().toISOString() });
+    const allSeats = (await dbGetAll('seating')).filter(s => s.examId === suppId);
+    const maxSeat = allSeats.reduce((m, s) => Math.max(m, s.seatNumber || 0), 0);
+    await dbPut('seating', { id: `SEAT-${suppId}-${request.studentId}`, examId: suppId, studentId: request.studentId, seatNumber: maxSeat + 1, createdAt: new Date().toISOString() });
+    request.status = 'approved';
+    request.adminNote = note;
+    request.supplementaryExamId = suppId;
+    request.resolvedAt = new Date().toISOString();
+    await dbPut('retakeRequests', request);
+    closeModal();
+    showToast('✅ Retake approved! Supplementary exam scheduled.');
+    logAudit('approved', 'retakeRequest', { requestId, studentId: request.studentId, supplementaryExamId: suppId });
+    renderExams();
+    invalidateStudentHubCache();
+}
+async function rejectRetake(requestId) {
+    const request = await dbGet('retakeRequests', requestId);
+    if (!request) return;
+    const students = await dbGetAll('students');
+    const st = students.find(s => s.id === request.studentId);
+    const content = `
+        <div style="padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:16px;">
+            <b>Student:</b> ${escapeHtml(st?.name || request.studentId)}<br>
+            <b>Reason:</b> ${escapeHtml(request.reason)}
+        </div>
+        <div class="form-group">
+            <label>Rejection reason (optional)</label>
+            <textarea id="reject-note" rows="3" placeholder="Explain why the request was rejected..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;"></textarea>
+        </div>
+    `;
+    showModal('Reject Retake Request', content, `<button class="btn btn-danger" onclick="confirmRejectRetake('${requestId}')">Reject Request</button>`);
+}
+async function confirmRejectRetake(requestId) {
+    const request = await dbGet('retakeRequests', requestId);
+    if (!request) return;
+    const note = document.getElementById('reject-note')?.value.trim() || '';
+    request.status = 'rejected';
+    request.adminNote = note;
+    request.resolvedAt = new Date().toISOString();
+    await dbPut('retakeRequests', request);
+    closeModal();
+    showToast('Request rejected');
+    logAudit('rejected', 'retakeRequest', { requestId, studentId: request.studentId });
+    renderExams();
+    invalidateStudentHubCache();
 }
 async function showExamForm(exam = null) {
     const courses = await dbGetAll('courses');
@@ -11790,7 +11930,7 @@ async function renderWhatsAppTemplates() {
     let html = '';
     for (const [cat, temps] of Object.entries(categories)) {
         html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:1px;margin:8px 0 4px;">${cat}</div>`;
-        html += temps.map(t => `<div class="whatsapp-template" onclick="openQuickSend('${t.id}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><div style="flex:1;min-width:0;"><b>${t.name}</b><br><span style="font-size:11px;color:var(--text-muted);">${t.message.substring(0, 70)}...</span></div><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;flex-shrink:0;" onclick="event.stopPropagation();openTestSend('${t.id}')" title="Send test message to your test phone number">Test</button></div></div>`).join('');
+        html += temps.map(t => `<div class="whatsapp-template" onclick="openQuickSend('${t.id}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><div style="flex:1;min-width:0;"><b>${t.name}</b><br><span style="font-size:11px;color:var(--text-muted);">${t.message.substring(0, 70)}...</span></div><div style="display:flex;gap:4px;flex-shrink:0;"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();openTestSend('${t.id}')" title="Send test message to your test phone number">Test</button><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();editTemplate('${t.id}')" title="Edit template">✏</button><button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();deleteTemplate('${t.id}')" title="Delete template">🗑</button></div></div></div>`).join('');
     }
     document.getElementById('whatsapp-templates').innerHTML = html;
 }
@@ -12218,7 +12358,36 @@ async function saveTemplate() {
 }
 async function renderWhatsAppLog() {
     const log = (await dbGetAll('whatsappLog')).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 100);
-    document.getElementById('whatsapp-log').innerHTML = log.length ? log.map(e => `<div class="whatsapp-log-entry"><span style="font-weight:600;">${e.date} ${e.time}</span> <span class="badge badge-success" style="font-size:9px;">${e.template || 'custom'}</span><br>→ ${e.name || e.phone} <span style="font-size:10px;color:var(--text-muted);">(${e.phone})</span><br><span style="font-size:11px;color:var(--text-muted);">${e.message}</span></div>`).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No messages sent yet</div>';
+    document.getElementById('whatsapp-log').innerHTML = log.length ? log.map(e => `<div class="whatsapp-log-entry"><span style="font-weight:600;">${e.date} ${e.time}</span> <span class="badge badge-success" style="font-size:9px;">${e.template || 'custom'}</span><br>→ ${e.name || e.phone} <span style="font-size:10px;color:var(--text-muted);">(${e.phone})</span><br><span style="font-size:11px;color:var(--text-muted);">${e.message}</span><div style="margin-top:4px;"><button class="btn btn-xs btn-outline" onclick="retryWhatsAppLog('${e.phone}', \`${e.message.replace(/`/g, '\\`')}\`)">↻ Resend</button></div></div>`).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No messages sent yet</div>';
+}
+async function retryWhatsAppLog(phone, message) {
+    if (!phone || !message) return showToast('Invalid log entry');
+    sendWhatsApp(phone, message);
+    showToast('Message resent');
+}
+async function editTemplate(templateId) {
+    const tpl = await dbGet('whatsappTemplates', templateId);
+    if (!tpl) return;
+    const content = `<div class="form-group"><label>Template Name *</label><input type="text" id="tpl-edit-name" value="${escapeHtml(tpl.name)}"></div><div class="form-group"><label>Category</label><select id="tpl-edit-category"><option value="finance" ${tpl.category==='finance'?'selected':''}>💰 Finance</option><option value="academic" ${tpl.category==='academic'?'selected':''}>📚 Academic</option><option value="general" ${tpl.category==='general'?'selected':''}>📢 General</option></select></div><div class="form-group"><label>Message *</label><textarea id="tpl-edit-message" rows="6">${escapeHtml(tpl.message)}</textarea></div><p style="font-size:11px;color:var(--text-muted);">Variables: {{name}}, {{admission}}, {{program}}, {{center}}, {{centerCode}}, {{region}}, {{school}}, {{balance}}, {{fee}}, {{phone}}, {{login}}, {{email}}, {{year}}, {{requested}}, {{portal}}</p>`;
+    showModal('Edit Template — ' + tpl.name, content, `<button class="btn btn-primary" onclick="saveTemplateEdit('${templateId}')">Save Changes</button>`);
+}
+async function saveTemplateEdit(templateId) {
+    const name = document.getElementById('tpl-edit-name').value.trim();
+    const message = document.getElementById('tpl-edit-message').value.trim();
+    const category = document.getElementById('tpl-edit-category').value;
+    if (!name || !message) return showToast('Name and message required!');
+    await dbPut('whatsappTemplates', { id: templateId, name, message, category });
+    logAudit('updated', 'whatsappTemplate', { id: templateId, name, message });
+    closeModal();
+    renderWhatsAppTemplates();
+    showToast('Template updated!');
+}
+async function deleteTemplate(templateId) {
+    if (!await showConfirm('Delete Template', 'Remove this template permanently?')) return;
+    await dbDelete('whatsappTemplates', templateId);
+    logAudit('deleted', 'whatsappTemplate', { id: templateId });
+    renderWhatsAppTemplates();
+    showToast('Template deleted.');
 }
 async function sendBulkWhatsApp(target = 'students') {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');

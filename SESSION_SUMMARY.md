@@ -1,7 +1,7 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `b6df107` · **Assets:** `js/bundle.js?v=306`, `js/student-hub.js?v=31`
+**HEAD:** `9afad68` · **Assets:** `js/bundle.js?v=308`, `js/student-hub.js?v=31`
 **Deploy = `git push origin main`** (commits through this audit all pushed)
 
 ## Committed this session (after previous summary @ `07f2fb4`)
@@ -69,6 +69,14 @@
 - **Duplicate `updateTicketBadge`** (dead override) removed; live one (16646) hardened.
 - **Student T&C persistence fixed**: accepting terms did `dbPut('users', …)` which the server **denied** (403, silently swallowed) → students re-prompted every login. Server now special-cases a student PUTting **only their own username's terms fields** (gate + ownership + field whitelist).
 
+### Audit round 4 (dead-file triage — user: "remove if not needed, plug in if needed")
+- `index.html` loads only `bundle.js`, `student-hub.js`, `discussions.js`, `help.js`; the 10 legacy "split-source" files (`app.js`, `auth.js`, `dashboard.js`, `exams.js`, `whatsapp.js`, `communication.js`, `pending.js`, `students.js`, `utils.js`, `virtual-classroom.js`) were unloaded leftovers from the 2026-08-05 merge. Identifier diff + feature-by-feature check: `app`, `communication`, `pending`, `utils`, `virtual-classroom` were pure duplicates; `auth`/`dashboard`/`students` were superseded by later bundle logic (year auto-calc via `calculateYearOfStudy`/`student-year-auto`, admin enroll buttons, hub-based student flows, terms handling).
+- **Plugged in (were genuinely missing from the live app, ported from sources then deleted):**
+  - WhatsApp template cards now have **✏ Edit / 🗑 Delete** (`editTemplate`, `saveTemplateEdit`, `deleteTemplate`).
+  - WhatsApp send log now has **↻ Resend** per entry (`retryWhatsAppLog`).
+  - **Retake / missed-exam workflow completed**: staff Exam tab now lists pending requests (auto-created container) with **✓ Approve / ✗ Reject** — approval schedules a supplementary exam and auto-registers + allocates the student. (`renderRetakeRequests`, `approveRetake`, `confirmApproveRetake`, `rejectRetake`, `confirmRejectRetake`; previously students could request but staff had no screen to resolve them.)
+- All 10 files **deleted** (history preserved in git); `bundle.js?v=308`.
+
 ## Objectives / project-wide defaults
 - **Push, don't poll**: SSE ~400ms; ≤5s timers; 60s caches; small payloads; debounced atomic writes.
 - Externalize remaining PDF blobs out of `server-data.json`.
@@ -79,7 +87,6 @@
 - Bulk fee reminders (WhatsApp/SMS to debtors).
 - Report cards, QR attendance, offline hub, audit dashboard.
 - `DOC_STRIP_INLINE=1` phase-2 still opt-in.
-- **Dead files in `js/`** (same logic lives in `bundle.js`, NOT loaded by `index.html`): `app.js`, `auth.js`, `dashboard.js`, `students.js`, `exams.js`, `whatsapp.js`, `communication.js`, `pending.js`, `utils.js`, `virtual-classroom.js` — candidates for deletion after user confirmation.
 
 ## Scratch files (do NOT commit)
 `DEPLOY_ENV.md`, `mirror-desktop.ps1`, `test-diploma-local.js`, `test-diploma-output.pdf`, `20260903-152731.pdf`, `COMPLETION CERTIFICATE.pdf`, `NET FOUNDATION SEAL2.png`, `NET LOGO0003.png`
