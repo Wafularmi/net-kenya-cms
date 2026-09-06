@@ -702,7 +702,20 @@ function canAccessStore(user, store, method) {
         return false;
     }
 
-    if (!FINANCIAL_STORES.has(store)) return true;
+    // Restricted/legacy roles — never let an unknown role slip through the net
+    if (user.role === 'librarian') {
+        // Library desk: manage books/borrows; read student names for borrowing only
+        if (['books', 'library', 'borrows', 'borrowings', 'bookCategories'].includes(store)) return true;
+        if (store === 'students' && method === 'GET') return true;
+        return false;
+    }
+    if (user.role === 'staff' || user.role === 'teacher' || user.role === 'trainer') {
+        if (!FINANCIAL_STORES.has(store) && method === 'GET') return true;
+        return false;
+    }
+
+    // Unknown role: read-only on non-financial stores, never writes, never finance
+    if (!FINANCIAL_STORES.has(store) && method === 'GET') return true;
 
     return false;
 }
@@ -813,7 +826,7 @@ function saveSessions() {
     try {
         const arr = [];
         for (const [token, s] of sessions) arr.push({ token, username: s.username, expires: s.expires, createdAt: s.createdAt });
-        fs.writeFileSync(SESSION_FILE, JSON.stringify(arr, null, 2), 'utf8');
+        fs.writeFileSync(SESSION_FILE, JSON.stringify(arr), 'utf8');
         try { if (fs.existsSync(SESSION_FILE) && DATA_ROOT !== '/data') fs.copyFileSync(SESSION_FILE, '/data/sessions.json'); } catch {}
         try { if (fs.existsSync('/data/sessions.json') && !fs.existsSync(SESSION_FILE)) fs.copyFileSync('/data/sessions.json', SESSION_FILE); } catch {}
     } catch (e) { console.error('saveSessions failed:', e.message); }
@@ -1350,14 +1363,16 @@ function buildUrls(ip) {
 }
 
 const _mpesaTokenCache = new Map(); // key -> { token, expires }
+const _mpesaTokenInFlight = new Map(); // key -> Promise so concurrent pushes share one fetch
 async function mpesaToken(env, key, secret) {
     const cacheKey = env + '|' + key;
     const cached = _mpesaTokenCache.get(cacheKey);
     if (cached && cached.expires > Date.now() + 60000) return cached.token;
+    if (_mpesaTokenInFlight.has(cacheKey)) return _mpesaTokenInFlight.get(cacheKey);
     const isSandbox = env === 'sandbox';
     const baseURL = isSandbox ? 'https://sandbox.safaricom.co.ke' : 'https://api.safaricom.co.ke';
     const auth = Buffer.from(key + ':' + secret).toString('base64');
-    return new Promise((resolve, reject) => {
+    const fetching = new Promise((resolve, reject) => {
         const u = new URL(baseURL + '/oauth/v1/generate?grant_type=client_credentials');
         const opts = {
             hostname: u.hostname,
@@ -1374,10 +1389,12 @@ async function mpesaToken(env, key, secret) {
                     if (!j.access_token) return reject('Token rejected (HTTP ' + res.statusCode + '): ' + String(data).slice(0, 120));
                     const ttl = (parseInt(j.expires_in) || 3600) * 1000;
                     _mpesaTokenCache.set(cacheKey, { token: j.access_token, expires: Date.now() + ttl });
+                    _mpesaTokenInFlight.delete(cacheKey);
                     resolve(j.access_token);
                 } catch {
                     const title = (String(data).match(/<title[^>]*>([^<]*)/i) || [])[1] || 'no-title';
                     try { process.stderr.write('DARAJA_BLOCKED status=' + res.statusCode + ' server=' + (res.headers.server || '?') + ' via=' + (res.headers.via || '?') + ' title=' + title + ' url=' + u.hostname + '\n'); } catch {}
+                    _mpesaTokenInFlight.delete(cacheKey);
                     reject('Token fetch failed (HTTP ' + res.statusCode + ' from ' + (res.headers.server || 'unknown') + ' via ' + (res.headers.via || 'unknown') + ' title=' + title + '). Safaricom is blocking the server network — see Railway logs DARAJA_BLOCKED.');
                 }
             });
@@ -1385,6 +1402,8 @@ async function mpesaToken(env, key, secret) {
         req.on('error', reject);
         req.end();
     });
+    _mpesaTokenInFlight.set(cacheKey, fetching);
+    try { return await fetching; } finally { _mpesaTokenInFlight.delete(cacheKey); }
 }
 
 async function mpesaRequest(path, payload, env, key, secret) {
@@ -1546,8 +1565,7 @@ function handleAPI(req, res) {
         if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
         const authUser = getRequestUser(req);
         if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
-        flushDB();
-        const backup = JSON.stringify(db, null, 2);
+        const backup = JSON.stringify(db);
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         auditLog('backup-download', 'database', { bytes: backup.length }, authUser.username);
         res.writeHead(200, {
@@ -1652,17 +1670,20 @@ function handleAPI(req, res) {
                 if (!data || typeof data !== 'object') return json(res, 400, { error: 'Invalid backup file' });
                 const count = Object.keys(data).length;
                 db = data;
-                flushDB();
+                saveDB();
                 auditLog('restore', 'database', { stores: count }, authUser.username);
                 console.log('Database restored â€”', count, 'stores');
+                broadcastEvent('db-restored', { stores: count });
                 json(res, 200, { ok: true, stores: count });
             } catch { json(res, 400, { error: 'Invalid JSON in backup file' }); }
         });
         return true;
     }
 
-    // GET /api/db-size â€” report database stats
+// GET /api/db-size â€” report database stats
     if (parts.length === 2 && parts[1] === 'db-size' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser) return json(res, 401, { error: 'Not authenticated' });
         const stats = {};
         let total = 0;
         for (const key of Object.keys(db)) {
@@ -1796,11 +1817,12 @@ function handleAPI(req, res) {
                 const data = readJSON(backupPath);
                 if (!data || typeof data !== 'object') return json(res, 400, { error: 'Corrupted backup file' });
                 // Also ensure main backup is updated
-                fs.writeFileSync(DB_BACKUP, JSON.stringify(data, null, 2), 'utf8');
+                fs.writeFileSync(DB_BACKUP, JSON.stringify(data), 'utf8');
                 db = data;
-                flushDB();
+                saveDB();
                 auditLog('restore-from-backup', 'database', { name }, authUser.username);
                 console.log('Database restored from backup:', name);
+                broadcastEvent('db-restored', { stores: Object.keys(data).length });
                 json(res, 200, { ok: true, stores: Object.keys(data).length });
             } catch { json(res, 400, { error: 'Restore failed' }); }
         });
@@ -1845,9 +1867,9 @@ function handleAPI(req, res) {
                     if (candidate) {
                         const pwHash = hash(candidate.admissionNumber);
                         if (pwHash === hash(password) || candidate.admissionNumber === password) {
-                            user = { username: candidate.phone, password: pwHash, name: candidate.name, role: 'student', status: 'active', studentId: candidate.id, createdAt: new Date().toISOString() };
+user = { username: candidate.phone, password: pwHash, name: candidate.name, role: 'student', status: 'active', studentId: candidate.id, createdAt: new Date().toISOString() };
                             db.users.push(user);
-                            safeWriteJSON(db);
+                            saveDB();
                         }
                     }
                 }
@@ -1864,7 +1886,7 @@ function handleAPI(req, res) {
 
                 if (!pwMatch) { loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
-                if (user.password !== pwHash) { user.password = pwHash; safeWriteJSON(db); }
+                if (user.password !== pwHash) { user.password = pwHash; saveDB(); }
                 if (user.status === 'locked') return json(res, 403, { error: 'Account locked due to inactivity. Contact administration to reactivate.' });
                 if (user.status === 'inactive') return json(res, 403, { error: 'Account is inactive. Contact administration.' });
                 if (user.status === 'pending') return json(res, 403, { error: 'Account pending approval. Please wait for admin confirmation.' });
@@ -1982,6 +2004,7 @@ function handleAPI(req, res) {
                     rec.value = next;
                     saveDB();
                     auditLog('fee-gate', 'settings', { by: fgUser.username }, fgUser.username);
+                    broadcastEvent('db-change', { store: 'settings' });
                     return json(res, 200, { ok: true });
                 }
                 if (fgUser.role === 'coordinator') {
@@ -1993,6 +2016,7 @@ function handleAPI(req, res) {
                     rec.value = next;
                     saveDB();
                     auditLog('fee-gate-region', 'settings', { region: rid, by: fgUser.username }, fgUser.username);
+                    broadcastEvent('db-change', { store: 'settings' });
                     return json(res, 200, { ok: true, regionId: rid });
                 }
                 return json(res, 403, { error: 'Forbidden' });
@@ -2168,6 +2192,7 @@ function handleAPI(req, res) {
                 db.mpesaSettings = stored;
                 saveDB();
                 auditLog('mpesa-settings', 'mpesa', { saved: true }, authUser.username);
+                broadcastEvent('db-change', { store: 'mpesaSettings' });
                 json(res, 200, { success: true });
             } catch { json(res, 400, { error: 'Invalid JSON' }); }
         });
@@ -2254,6 +2279,7 @@ function handleAPI(req, res) {
                     if (!Array.isArray(db.mpesaTransactions)) db.mpesaTransactions = [];
                     db.mpesaTransactions.push({ id: 'STK-' + Date.now(), checkoutRequestId: result.CheckoutRequestID, merchantRequestId: result.MerchantRequestID || '', studentId, amount, phone: digits, status: 'pending', initiatedBy: stkUser.username, createdAt: new Date().toISOString() });
                     saveDB();
+                    broadcastEvent('db-change', { store: 'mpesaTransactions' });
                 }
                 json(res, 200, result);
             } catch (e) { json(res, 500, { error: e.message || e }); }
@@ -2359,9 +2385,12 @@ function handleAPI(req, res) {
         return true;
     }
 
-    // POST /api/send-sms â€” send bulk SMS via Africa's Talking
+// POST /api/send-sms â€” send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const smsUser = getRequestUser(req);
+        if (!smsUser) return json(res, 401, { error: 'Not authenticated' });
+        if (!canAccessStore(smsUser, 'sms', 'POST')) return json(res, 403, { error: 'Insufficient permissions to send SMS' });
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
@@ -2375,9 +2404,10 @@ function handleAPI(req, res) {
                 if (!db.smsLog) db.smsLog = [];
                 let sent = 0, failed = 0;
 
-                for (let i = 0; i < recipients.length; i++) {
-                    const { phone, message } = recipients[i];
-                    if (!phone || !message) { failed++; continue; }
+                // Send in waves of 10 so a big recipient list doesn't stall the event loop, and
+                // never block the response, but keep ordering of the totals exact.
+                async function sendOne(phone, message) {
+                    if (!phone || !message) { return false; }
                     try {
                         const postData = querystring.stringify({
                             username: cfg.username,
@@ -2411,12 +2441,15 @@ function handleAPI(req, res) {
                         });
                         if (result && result.SMSMessageData && result.SMSMessageData.Recipients) {
                             const r = result.SMSMessageData.Recipients[0];
-                            if (r && (r.status === 'Success' || r.statusCode === '101')) sent++;
-                            else failed++;
-                        } else {
-                            failed++;
+                            return !!(r && (r.status === 'Success' || r.statusCode === '101'));
                         }
-                    } catch (e) { failed++; }
+                        return false;
+                    } catch { return false; }
+                }
+                for (let i = 0; i < recipients.length; i += 10) {
+                    const wave = recipients.slice(i, i + 10).map(({ phone, message }) => sendOne(phone, message));
+                    const results = await Promise.all(wave);
+                    results.forEach(ok => { if (ok) sent++; else failed++; });
                 }
 
                 // Save log entries
@@ -2634,6 +2667,7 @@ return json(res, 200, result);
             db.audit = [];
         }
         saveDB();
+        broadcastEvent('db-change', { store: 'audit' });
         return json(res, 200, { ok: true, remaining: db.audit.length });
     }
 
@@ -2646,7 +2680,11 @@ return json(res, 200, result);
 
         // Authorization check
         const user = getRequestUser(req);
-        if (!canAccessStore(user, store, req.method)) {
+        // Students may NOT write users — EXCEPT their own terms-acceptance record,
+        // which is read by the Terms modal at login. The PUT handler below still
+        // verifies ownership and limits the mutated fields.
+        const studentSelfTerms = req.method === 'PUT' && store === 'users' && user && user.role === 'student';
+        if (!studentSelfTerms && !canAccessStore(user, store, req.method)) {
             return json(res, 403, { error: 'Insufficient permissions for this resource' });
         }
 
@@ -2784,8 +2822,20 @@ return json(res, 200, result);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
-                    if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
+if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
+                    }
+                    // Students updating only their own terms acceptance (allowed past the gate above)
+                    if (store === 'users' && user && user.role === 'student') {
+                        if (String(value[keyPath]) !== String(user.username)) return json(res, 403, { error: 'Students may only update their own account' });
+                        const existing = (db[store] || []).find(r => r[keyPath] === value[keyPath]);
+                        if (!existing) return json(res, 404, { error: 'Account not found' });
+                        const termsKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion'];
+                        for (const k of termsKeys) {
+                            if (k in value) existing[k] = value[k];
+                        }
+                        mutate(existing);
+                        return json(res, 200, { ok: true, key: existing[keyPath] });
                     }
                     const pk = value[keyPath];
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });
@@ -2824,33 +2874,45 @@ return json(res, 200, result);
     }
 
     // Discussion API endpoints
-    if (parts[1] === 'discussions') {
+if (parts[1] === 'discussions') {
         const courseId = parts[2];
-        
-        // GET /api/discussions/:courseId â€” get messages for a course
-        if (parts.length === 3 && req.method === 'GET') {
-            const discussions = db.discussions || [];
-            const courseDiscussions = discussions.filter(d => d.courseId === courseId);
-            return json(res, 200, { messages: courseDiscussions });
+        const dUser = getRequestUser(req);
+
+        // Auth guard: no anonymous read/write on discussions, ever.
+        if (!dUser) return json(res, 401, { error: 'Not authenticated' });
+        if (dUser.role !== 'student' && !canAccessStore(dUser, 'discussions', req.method)) {
+            return json(res, 403, { error: 'Insufficient permissions' });
         }
-        
-        // POST /api/discussions/:courseId â€” post a new message
+        const isModerator = ['admin', 'lecturer', 'registrar', 'coordinator', 'assistant'].includes(dUser.role);
+        const dUid = dUser.user.studentId || dUser.username;
+
+        // GET /api/discussions/:courseId â€” get messages for a course (students: course-enrollment required)
+        if (parts.length === 3 && req.method === 'GET') {
+            if (dUser.role === 'student') {
+                const enrolled = (db.enrollments || []).some(e => String(e.courseId) === String(courseId) && String(e.studentId) === String(dUid));
+                if (!enrolled) return json(res, 403, { error: 'Enrollment required to view this discussion' });
+            }
+            const discussions = db.discussions || [];
+            return json(res, 200, { messages: discussions.filter(d => d.courseId === courseId) });
+        }
+
+        // POST /api/discussions/:courseId â€” post a new message (identity from the session, never the body)
         if (parts.length === 3 && req.method === 'POST') {
             let body = '';
             req.on('data', c => body += c);
             req.on('end', () => {
                 try {
-                    const { userId, userName, userRole, content } = JSON.parse(body);
-                    if (!userId || !userName || !content) return json(res, 400, { error: 'Missing required fields' });
-                    
+                    const { content } = JSON.parse(body);
+                    const text = String(content || '').trim();
+                    if (!text) return json(res, 400, { error: 'Message content required' });
                     const discussions = db.discussions || [];
                     const message = {
                         id: 'DISC-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
                         courseId,
-                        userId,
-                        userName,
-                        userRole,
-                        content,
+                        userId: dUid,
+                        userName: dUser.user.name || dUser.username,
+                        userRole: dUser.role,
+                        content: text.slice(0, 5000),
                         pinned: false,
                         locked: false,
                         likes: [],
@@ -2859,15 +2921,15 @@ return json(res, 200, result);
                     };
                     discussions.push(message);
                     db.discussions = discussions;
-                    flushDB();
+                    saveDB();
                     broadcastEvent('discussion-new', message);
                     json(res, 200, { ok: true, message });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
             });
             return true;
         }
-        
-        // PUT /api/discussions/:courseId/:messageId â€” moderate (pin/lock/delete) or reply/like
+
+        // PUT /api/discussions/:courseId/:messageId â€” moderate (staff only, role from session) or reply/like
         if (parts.length === 4 && req.method === 'PUT') {
             const messageId = parts[3];
             let body = '';
@@ -2875,20 +2937,14 @@ return json(res, 200, result);
             req.on('end', () => {
                 try {
                     const parsed = JSON.parse(body);
-                    const { action, userRole } = parsed;
+                    const { action, content } = parsed;
                     if (!['pin', 'lock', 'unpin', 'unlock', 'delete', 'reply', 'like'].includes(action)) return json(res, 400, { error: 'Invalid action' });
-                    
-                    const isStaff = ['admin', 'lecturer', 'registrar'].includes(userRole);
-                    if (!isStaff && !['reply', 'like'].includes(action)) return json(res, 403, { error: 'Insufficient permissions' });
-                    
+                    if (!isModerator && !['reply', 'like'].includes(action)) return json(res, 403, { error: 'Insufficient permissions' });
                     const discussions = db.discussions || [];
                     const idx = discussions.findIndex(d => d.id === messageId && d.courseId === courseId);
                     if (idx === -1) return json(res, 404, { error: 'Message not found' });
-                    
-                    // Ensure sub-arrays exist on legacy messages
                     if (!discussions[idx].likes) discussions[idx].likes = [];
                     if (!discussions[idx].replies) discussions[idx].replies = [];
-                    
                     if (action === 'delete') {
                         discussions.splice(idx, 1);
                     } else if (action === 'pin') {
@@ -2900,30 +2956,24 @@ return json(res, 200, result);
                     } else if (action === 'unlock') {
                         discussions[idx].locked = false;
                     } else if (action === 'reply') {
-                        const { userId, userName, content } = parsed;
-                        if (!userId || !userName || !content) return json(res, 400, { error: 'Missing required fields for reply' });
+                        const text = String(content || '').trim();
+                        if (!text) return json(res, 400, { error: 'Reply content required' });
                         discussions[idx].replies.push({
                             id: 'REP-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
                             messageId,
-                            userId,
-                            userName,
-                            userRole: userRole || 'student',
-                            content,
+                            userId: dUid,
+                            userName: dUser.user.name || dUser.username,
+                            userRole: dUser.role,
+                            content: text.slice(0, 5000),
                             timestamp: new Date().toISOString()
                         });
                     } else if (action === 'like') {
-                        const { userId } = parsed;
-                        if (!userId) return json(res, 400, { error: 'Missing userId' });
-                        const likeIdx = discussions[idx].likes.indexOf(userId);
-                        if (likeIdx >= 0) {
-                            discussions[idx].likes.splice(likeIdx, 1);
-                        } else {
-                            discussions[idx].likes.push(userId);
-                        }
+                        const likeIdx = discussions[idx].likes.indexOf(dUid);
+                        if (likeIdx >= 0) discussions[idx].likes.splice(likeIdx, 1);
+                        else discussions[idx].likes.push(dUid);
                     }
-                    
                     db.discussions = discussions;
-                    flushDB();
+                    saveDB();
                     broadcastEvent('discussion-update', { courseId, messageId, action });
                     json(res, 200, { ok: true });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }

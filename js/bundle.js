@@ -1125,9 +1125,13 @@ async function showApp(user) {
     } catch {}
     initCoordinatorAccessCache();
     initAssistantAccessCache();
-    // For assistant, navigation must wait for cache, so rebuild after load
+    // For assistant AND coordinator, navigation must wait for the access cache,
+    // which is loaded asynchronously — rebuild after load so their tabs reflect
+    // the real permissions immediately instead of a stale default.
     if (user.role === 'assistant') {
         initAssistantAccessCache().then(() => buildNavigation(user));
+    } else if (user.role === 'coordinator') {
+        initCoordinatorAccessCache().then(() => buildNavigation(user));
     }
     buildNavigation(user);
     const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
@@ -1142,26 +1146,26 @@ async function showApp(user) {
     document.getElementById('chapel-date').value = new Date().toISOString().split('T')[0];
     document.getElementById('audit-from').value = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
     document.getElementById('audit-to').value = new Date().toISOString().split('T')[0];
-    renderDashboard();
-    renderStudents();
-    renderCourses();
-    renderStaff();
-    renderFinance();
-    renderPayroll();
-    renderLibrary();
-    renderEvents();
-    renderHostels();
-    renderInventory();
-    renderAlumni();
-    renderExams();
-    renderWhatsAppTemplates();
-    renderWhatsAppLog();
-    renderTickets();
-    updateTicketBadge();
-    renderStudyCenters();
-    renderUsers();
-    renderGradRequirements();
-    renderAudit();
+    renderDashboard().catch(() => {});
+    renderStudents().catch(() => {});
+    renderCourses().catch(() => {});
+    renderStaff().catch(() => {});
+    renderFinance().catch(() => {});
+    renderPayroll().catch(() => {});
+    renderLibrary().catch(() => {});
+    renderEvents().catch(() => {});
+    renderHostels().catch(() => {});
+    renderInventory().catch(() => {});
+    renderAlumni().catch(() => {});
+    renderExams().catch(() => {});
+    renderWhatsAppTemplates().catch(() => {});
+    renderWhatsAppLog().catch(() => {});
+    renderTickets().catch(() => {});
+    updateTicketBadge().catch(() => {});
+    renderStudyCenters().catch(() => {});
+    renderUsers().catch(() => {});
+    renderGradRequirements().catch(() => {});
+    renderAudit().catch(() => {});
     initSmartSearch();
     renderAlertBell();
     initBackgroundRefresh();
@@ -1500,7 +1504,7 @@ async function refreshMessagesBadge() {
     if (badge) badge.textContent = unread.length > 0 ? unread.length : '';
 }
 async function refreshTicketsBadge() {
-    const tickets = await dbGetAll('tickets');
+    const tickets = await dbGetAll('tickets').catch(() => []);
     const badge = document.getElementById('ticket-badge');
     if (badge) {
         const open = tickets.filter(t => t.status === 'open').length;
@@ -1908,7 +1912,7 @@ async function renderDashboard() {
         }
         document.querySelector('#screen-dashboard .screen-actions') && (document.querySelector('#screen-dashboard .screen-actions').style.display = '');
         const actions = document.querySelector('#screen-dashboard .screen-actions');
-        const canManageFinance = ['admin', 'finance', 'registrar'].includes(currentUser.role);
+        const canManageFinance = hasFinanceManage();
         if (actions && canManageFinance) {
             if (!actions.querySelector('#dash-record-payment')) {
                 actions.insertAdjacentHTML('beforeend', `<button class="btn btn-primary" id="dash-record-payment" onclick="showPaymentForm()">+ Record Payment</button>`);
@@ -1999,7 +2003,7 @@ async function renderDashboard() {
     }).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">All students meeting attendance requirements</div>';
     const lowStock = inventory.filter(i => i.quantity <= (i.minStock || 5));
     document.getElementById('dash-stock-alerts').innerHTML = isAdmin ? (lowStock.length ? lowStock.slice(0, 5).map(i => `<div class="event-item"><span>${i.name}</span><span class="badge badge-${i.quantity <= 0 ? 'danger' : 'warning'}">${i.quantity} left</span></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">All items well stocked</div>') : '';
-    const tickets = await dbGetAll('tickets');
+    const tickets = await dbGetAll('tickets').catch(() => []);
     const openTickets = tickets.filter(t => t.status === 'open' || t.status === 'in-progress');
     const urgentTickets = tickets.filter(t => t.priority === 'urgent' && t.status !== 'closed');
         document.getElementById('dash-tickets').innerHTML = tickets.length ? (openTickets.length ? openTickets.slice(0, 4).map(t => {
@@ -3474,8 +3478,16 @@ document.getElementById('course-search').addEventListener('input', debounce(rend
 //  - The "officially enrolled" count lets the UI explain any difference.
 function attendanceRoster(students, enrollments, courseId, centerId) {
     const active = students.filter(s => s.status === 'active');
-    const enrolledIds = new Set((enrollments || []).filter(e => String(e.courseId) === String(courseId)).map(e => String(e.studentId)));
-    let roster = centerId ? active.filter(s => String(s.studyCenterId) === String(centerId)) : active.filter(s => enrolledIds.has(String(s.id)));
+    const courseEnrollments = (enrollments || []).filter(e => String(e.courseId) === String(courseId));
+    const enrolledIds = new Set(courseEnrollments.map(e => String(e.studentId)));
+    let roster;
+    if (centerId) {
+        roster = active.filter(s => String(s.studyCenterId) === String(centerId));
+    } else if (courseEnrollments.length === 0) {
+        roster = active;
+    } else {
+        roster = active.filter(s => enrolledIds.has(String(s.id)));
+    }
     const officiallyEnrolled = roster.filter(s => enrolledIds.has(String(s.id))).length;
     return { roster, enrolledCount: officiallyEnrolled };
 }
@@ -4703,7 +4715,7 @@ async function renderFinance() {
         <div class="stat-card"><div class="stat-label">Outstanding Fees</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(outstanding)}</div></div>
     `;
     const financeActions = document.querySelector('#screen-finance .screen-actions');
-    const canManageFinance = ['admin', 'finance', 'registrar'].includes(currentUser.role);
+    const canManageFinance = hasFinanceManage();
     if (financeActions && canManageFinance) {
         if (!financeActions.querySelector('#finance-record-payment')) {
             financeActions.insertAdjacentHTML('afterbegin', `<button class="btn btn-primary" id="finance-record-payment" onclick="showPaymentForm()">+ Record Payment</button>`);
@@ -4767,11 +4779,18 @@ async function renderBalances() {
     }).filter(s => s.balance > 0).sort((a, b) => b.balance - a.balance);
     document.getElementById('balances-list').innerHTML = balances.length ? balances.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span><br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)}${s.waived ? ` + Waived: ${formatCurrency(s.waived)}` : ''} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">📝 Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:var(--warning);">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button> <button class="btn btn-warning btn-sm" style="margin-top:4px;" onclick="showWaiverForm('${s.id}')">Waiver</button></div></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No outstanding balances</div>';
 }
-function requireWaiverRole() {
+function canGrantWaiversOrAgreements() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (['admin', 'finance', 'registrar', 'assistant'].includes(u.role)) return true;
-    showToast('Access denied: Only admin/finance/registrar/assistant can grant waivers.', { type: 'danger' });
+    if (['admin', 'finance', 'registrar'].includes(u.role)) return true;
+    if (u.role === 'assistant') return !(_assistantAccessCache && _assistantAccessCache['finance'] === false);
     return false;
+}
+function requireWaiverRole() {
+    if (!canGrantWaiversOrAgreements()) {
+        showToast('Access denied: Only admin/finance/registrar/assistant can grant waivers.', { type: 'danger' });
+        return false;
+    }
+    return true;
 }
 async function showWaiverForm(studentId) {
     if (!requireWaiverRole()) return;
@@ -4816,10 +4835,11 @@ async function deleteWaiver(id, studentId) {
     showWaiverForm(studentId);
 }
 function requireAgreementRole() {
-    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (['admin', 'finance', 'registrar', 'assistant'].includes(u.role)) return true;
-    showToast('Access denied: Only admin/finance/registrar/assistant can manage agreements.', { type: 'danger' });
-    return false;
+    if (!canGrantWaiversOrAgreements()) {
+        showToast('Access denied: Only admin/finance/registrar/assistant can manage agreements.', { type: 'danger' });
+        return false;
+    }
+    return true;
 }
 async function showAgreementForm(studentId) {
     if (!requireAgreementRole()) return;
@@ -4889,9 +4909,14 @@ async function deleteAgreement(id, studentId) {
     renderBalances();
     showAgreementForm(studentId);
 }
-function requireFinanceRole() {
+function hasFinanceManage() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (u.role !== 'admin' && u.role !== 'finance') { showToast('Access denied: Only finance officers and admins can manage payments.', { type: 'danger' }); return false; }
+    if (['admin', 'finance', 'registrar', 'coordinator'].includes(u.role)) return true;
+    if (u.role === 'assistant') return !(_assistantAccessCache && _assistantAccessCache['finance'] === false);
+    return false;
+}
+function requireFinanceRole() {
+    if (!hasFinanceManage()) { showToast('Access denied: Only finance officers and admins can manage payments.', { type: 'danger' }); return false; }
     return true;
 }
 function showPaymentForm() {
@@ -14834,9 +14859,6 @@ function timeAgo(dateStr) {
     if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
     return new Date(dateStr).toLocaleDateString();
 }
-
-// Override updateTicketBadge to use unified system
-async function updateTicketBadge() { await updateNotificationBadge(); }
     }
     phrases.sort((a, b) => b.length - a.length);
     return phrases.slice(0, 25);
@@ -16426,9 +16448,10 @@ async function rejectRegistration(studentId) {
 }
 
 async function renderTickets() {
-    const tickets = await dbGetAll('tickets');
-    const students = await dbGetAll('students');
-    const staff = await dbGetAll('staff');
+    const data = await dbGetBatch(['tickets', 'students', 'staff']);
+    const tickets = data.tickets || [];
+    const students = data.students || [];
+    const staff = data.staff || [];
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const studentMap = {};
     students.forEach(s => { studentMap[s.id] = s.name; });
@@ -16515,7 +16538,7 @@ async function saveTicket() {
     if (!studentId) return showToast('Select a student!');
     if (!subject) return showToast('Subject is required!');
     if (!details) return showToast('Details are required!');
-    const ticketCount = (await dbGetAll('tickets')).length + 1;
+    const ticketCount = (await dbGetAll('tickets').catch(() => [])).length + 1;
     const ticketNo = `TKT-${String(ticketCount).padStart(4, '0')}`;
     const assignEl = document.getElementById('ticket-assign');
     const assignedTo = assignEl ? assignEl.value : null;
@@ -16629,7 +16652,7 @@ async function deleteTicket(ticketId) {
     logAudit('deleted', 'ticket', { ticketId });
 }
 async function updateTicketBadge() {
-    const tickets = await dbGetAll('tickets');
+    const tickets = await dbGetAll('tickets').catch(() => []);
     const openCount = tickets.filter(t => t.status === 'open' || t.status === 'in-progress').length;
     const badge = document.getElementById('notif-badge');
     if (badge) {
