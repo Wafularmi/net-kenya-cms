@@ -1,7 +1,7 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `9afad68` · **Assets:** `js/bundle.js?v=308`, `js/student-hub.js?v=31`
+**HEAD:** `0c212fd` · **Assets:** `js/bundle.js?v=308`, `js/student-hub.js?v=31`
 **Deploy = `git push origin main`** (commits through this audit all pushed)
 
 ## Committed this session (after previous summary @ `07f2fb4`)
