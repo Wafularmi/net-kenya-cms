@@ -2585,6 +2585,41 @@ function handleAPI(req, res) {
 return json(res, 200, result);
     }
 
+    // POST /api/db/batch — upsert many records in ONE request: one broadcast, one debounced
+    // save. Used by attendance save (was N sequential PUTs + N broadcasts per student).
+    if (parts.length === 3 && parts[1] === 'db' && parts[2] === 'batch' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!user) return json(res, 401, { error: 'Not authenticated' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body);
+                const store = parsed.store;
+                const records = parsed.records;
+                if (!store || !Array.isArray(records)) return json(res, 400, { error: 'Expected { store, records[] }' });
+                if (!canAccessStore(user, store, 'PUT')) return json(res, 403, { error: 'Insufficient permissions for this resource' });
+                const KEY_PATHS = { settings: 'key', counters: 'key', users: 'username', transcriptVerifications: 'docId', manuals: 'id' };
+                const keyPath = KEY_PATHS[store] || 'id';
+                if (!db[store]) db[store] = [];
+                const result = { ok: 0, errors: [] };
+                for (const rec of records) {
+                    if (!rec || typeof rec !== 'object') { result.errors.push({ error: 'Not an object' }); continue; }
+                    const pk = rec[keyPath];
+                    if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
+                    const idx = db[store].findIndex(r => r[keyPath] === pk);
+                    if (idx >= 0) db[store][idx] = rec;
+                    else db[store].push(rec);
+                    result.ok++;
+                }
+                if (result.ok) { broadcastEvent('db-change', { store }); saveDB(); }
+                return json(res, 200, result);
+            } catch (e) { return json(res, 400, { error: 'Invalid JSON' }); }
+        });
+        return true;
+    }
+
     // DELETE /api/db/settings/prune-audit?keep=N  â€” admin only prune audit log
     if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'settings' && parts[3] === 'prune-audit' && req.method === 'DELETE') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);

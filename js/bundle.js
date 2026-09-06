@@ -60,6 +60,16 @@ async function dbAdd(store, data) {
     if (!res.ok) throw new Error(`dbAdd ${store} failed: ${res.status}`);
     return res.json();
 }
+async function dbPutBatch(store, records) {
+    if (!records.length) return { ok: 0, errors: [] };
+    const res = await fetch(`/api/db/batch`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ store, records })
+    });
+    if (!res.ok) throw new Error(`dbPutBatch ${store} failed: ${res.status}`);
+    return res.json();
+}
 async function dbDelete(store, key) {
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}`, {
         method: 'DELETE',
@@ -3457,6 +3467,19 @@ async function saveCourseEnrollment() {
 }
 document.getElementById('course-search').addEventListener('input', debounce(renderCourses, 300));
 
+// Single source of truth for the attendance roster (used by load, save, and print so
+// they can never disagree):
+//  - A center selected => ALL active students of that center (classroom roll).
+//  - All Centers      => active students enrolled in the course (global course roster).
+//  - The "officially enrolled" count lets the UI explain any difference.
+function attendanceRoster(students, enrollments, courseId, centerId) {
+    const active = students.filter(s => s.status === 'active');
+    const enrolledIds = new Set((enrollments || []).filter(e => String(e.courseId) === String(courseId)).map(e => String(e.studentId)));
+    let roster = centerId ? active.filter(s => String(s.studyCenterId) === String(centerId)) : active.filter(s => enrolledIds.has(String(s.id)));
+    const officiallyEnrolled = roster.filter(s => enrolledIds.has(String(s.id))).length;
+    return { roster, enrolledCount: officiallyEnrolled };
+}
+
 async function populateAttendanceCourses() {
     const type = document.getElementById('attendance-type').value;
     const centers = await getCenters();
@@ -3475,17 +3498,15 @@ async function loadAttendance() {
     const date = document.getElementById('attendance-date').value;
     const centerId = document.getElementById('attendance-center').value;
     if (!courseId || !date) return showToast('Select course and date!');
-    const enrollments = (await dbGetAll('enrollments')).filter(e => e.courseId === courseId);
+    const enrollments = await dbGetAll('enrollments');
     const regionalIds = await getRegionalStudentIdSet();
     const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
     const attendance = await dbGetAll('attendance');
     const course = await dbGet('courses', courseId);
     const centers = await getCenters();
-    let studentIds = enrollments.map(e => e.studentId);
-    let courseStudents = students.filter(s => studentIds.includes(s.id) && s.status === 'active');
-    if (centerId) courseStudents = courseStudents.filter(s => s.studyCenterId === centerId);
+    const { roster: courseStudents, enrolledCount } = attendanceRoster(students, enrollments, courseId, centerId);
     const centerName = centerId ? (centers.find(c => c.id === centerId)?.name || '') : '';
-    let html = `<div style="margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><span><b>${course ? course.name : courseId}</b> — ${formatDate(date)}${centerName ? ' — ' + centerName : ''}</span><span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;"><span id="att-counts" style="font-size:12px;display:flex;gap:8px;"><span style="color:#16a34a;">P: <b id="cnt-present">0</b></span><span style="color:#dc2626;">A: <b id="cnt-absent">0</b></span><span style="color:#d97706;">L: <b id="cnt-late">0</b></span><span style="color:var(--text-muted);">Unmarked: <b id="cnt-unmarked">${courseStudents.length}</b></span></span><span style="font-size:12px;color:var(--text-muted);">${courseStudents.length} students</span></span></div>`;
+    let html = `<div style="margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><span><b>${course ? course.name : courseId}</b> — ${formatDate(date)}${centerName ? ' — ' + centerName : ''}</span><span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;"><span id="att-counts" style="font-size:12px;display:flex;gap:8px;"><span style="color:#16a34a;">P: <b id="cnt-present">0</b></span><span style="color:#dc2626;">A: <b id="cnt-absent">0</b></span><span style="color:#d97706;">L: <b id="cnt-late">0</b></span><span style="color:var(--text-muted);">Unmarked: <b id="cnt-unmarked">${courseStudents.length}</b></span></span><span style="font-size:12px;color:var(--text-muted);">${courseStudents.length} students ${centerId && enrolledCount !== courseStudents.length ? `<span style="font-size:10px;color:var(--warning);">(${enrolledCount} officially enrolled)</span>` : ''}</span></span></div>`;
     html += `<div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
         <button class="btn btn-success btn-sm" onclick="bulkMarkAttendance('present')">✅ Mark All Present</button>
         <button class="btn btn-outline btn-sm" onclick="bulkMarkAttendance('absent')">❌ Mark All Absent</button>
@@ -3552,25 +3573,23 @@ function selectAttendance(label) {
     updateAttendanceCounts();
 }
 async function saveAttendance(courseId, date) {
-    const enrollments = (await dbGetAll('enrollments')).filter(e => e.courseId === courseId);
-    const students = await dbGetAll('students');
-    const studentIds = enrollments.map(e => e.studentId);
-    const courseStudents = students.filter(s => studentIds.includes(s.id) && s.status === 'active');
     const centerId = document.getElementById('attendance-center')?.value || '';
+    const students = await dbGetAll('students');
+    const enrollments = await dbGetAll('enrollments');
+    const { roster } = attendanceRoster(students, enrollments, courseId, centerId);
     // Preserve filters: the sheet may have been rebuilt since load; restore so refresh works.
     const savedFilters = { courseId, date, centerId };
-    const filtered = centerId ? courseStudents.filter(s => s.studyCenterId === centerId) : courseStudents;
-    let saved = 0;
-    for (const s of filtered) {
+    const records = [];
+    for (const s of roster) {
         const radio = document.querySelector(`input[name="att-${s.id}"]:checked`);
         const notes = document.getElementById(`att-note-${s.id}`);
         if (radio) {
-            const record = { id: `ATT-${s.id}-${courseId}-${date}`, studentId: s.id, courseId, date, status: radio.value, notes: notes ? notes.value.trim() : '', createdAt: new Date().toISOString() };
-            await dbPut('attendance', record); saved++;
+            records.push({ id: `ATT-${s.id}-${courseId}-${date}`, studentId: s.id, courseId, date, status: radio.value, notes: notes ? notes.value.trim() : '', createdAt: new Date().toISOString() });
         }
     }
-    showToast(`✅ Attendance saved for ${saved} of ${filtered.length} students!`, { type: 'success', duration: 4000 });
-    logAudit('saved', 'attendance', { courseId, date, count: saved, center: centerId || 'all' });
+    const res = await dbPutBatch('attendance', records);
+    showToast(`✅ Attendance saved for ${res.ok} of ${roster.length} students!`, { type: 'success', duration: 4000 });
+    logAudit('saved', 'attendance', { courseId, date, count: res.ok, center: centerId || 'all' });
     try {
         const cs = document.getElementById('attendance-course');
         const dt = document.getElementById('attendance-date');
@@ -3606,9 +3625,7 @@ async function printAttendanceWindow() {
         dbGet('settings', 'branding'),
         getCenters()
     ]);
-    const studentIds = enrollments.filter(e => e.courseId === courseId).map(e => e.studentId);
-    let courseStudents = students.filter(s => studentIds.includes(s.id) && s.status === 'active');
-    if (centerId) courseStudents = courseStudents.filter(s => s.studyCenterId === centerId);
+    const { roster: courseStudents } = attendanceRoster(students, enrollments, courseId, centerId);
     const center = centerId ? centers.find(c => c.id === centerId) : null;
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const tagline = branding ? (branding.tagline || '') : '';
