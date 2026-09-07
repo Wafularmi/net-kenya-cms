@@ -248,6 +248,12 @@ body {
     flex-wrap: wrap;
 }
 
+.hub-account-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .stats-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1085,6 +1091,12 @@ body {
 
     .screen-actions button {
         width: 100%;
+        justify-content: center;
+    }
+
+    .screen-actions .hub-account-row .btn {
+        flex: 1;
+        width: auto;
         justify-content: center;
     }
 

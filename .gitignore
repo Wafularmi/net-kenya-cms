@@ -7,6 +7,10 @@ server-data.backup.json
 server-data-backups/
 System backups/
 
+# Runtime-generated security/integrity state
+integrity.json
+sessions.json
+
 # Environment
 .env
 .env.local

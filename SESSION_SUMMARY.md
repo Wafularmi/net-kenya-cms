@@ -1,8 +1,35 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `0c212fd` · **Assets:** `js/bundle.js?v=308`, `js/student-hub.js?v=31`
+**HEAD:** `45e5e2b` · **Assets:** `js/bundle.js?v=310`, `js/student-hub.js?v=32`
 **Deploy = `git push origin main`** (commits through this audit all pushed)
+
+## Latest batch (v=310 / student-hub v=32)
+
+### Security & integrity watch (server)
+- **SHA-256 baseline** of all served code (`index.html`, manuals, `css/*.css`, `js/*.js`) taken at every boot; 15-min watchdog re-hashes.
+- Any file modified while running → **blocked from serving (HTTP 403)** + **danger alert** (ruleId `sec-file-tamper`) + audit + **WhatsApp push** to the configured admin number (wa.me deep link) until the admin **rebaselines** (`/api/security/rebaseline`).
+- Cross-restart file changes logged (non-blocking) as `baseline-changed` audit entries.
+- **Security headers** on every response: CSP (inline + same-origin + https), HSTS, Referrer-Policy, Permissions-Policy, X-Permitted-Cross-Domain-Policies, Cross-Origin-*.
+- **Input sanitization** on all DB writes (control chars stripped, field length capped).
+- Endpoints: `GET|POST /api/security/status|check|rebaseline|cleanup` (admin; assistant sees status only).
+
+### Cleanup with per-item consensus
+- Routine (every 30 min + on demand) gathers candidates: **resolved/old alerts**, **responded or 30-day-old read messages**, **closed tickets >14 days**. Nothing deletes automatically.
+- Client: bell dropdown **🧹 Cleanup** + floating chip → modal with **per-item Confirm/Skip**; only confirmed rows are deleted (`POST /api/security/cleanup`).
+- Dismissing an alert now **resolves** it (status `resolved`) instead of deleting; resolved alerts enter the cleanup queue.
+
+### Notification/message fixes
+- **`#msg-badge` now actually shows the unread message count** on the 💬 icon (was stuck hidden by the `display:none` + `display:flex` conflict; also dropped the 24h window).
+- SSE events `cleanup-candidates` and `security-push` handled (WhatsApp admin deep-link fires once per alert).
+
+### Also in this batch
+- Change-Password button no longer stretches full-width on ≤768px (`.hub-account-row`, CSS main + main.146).
+- Student Dashboard removed (landing = student-hub; `renderStudentDashboard` deleted).
+- Coverage tab includes **inactive/unassigned students** (status badges + "Unassigned (no study center)" group).
+- Document verifier shows pretty doc-type labels (Diploma/Completion/Transcript/etc., server + client).
+- Hub fee card waiver-aware: shows 🎁 waiver line, "Paid so far (incl. waiver)", and ✓ covered (incl. waiver) instead of a bogus weekly balance.
+- `.gitignore`: `integrity.json`, `sessions.json` (runtime-generated).
 
 ## Committed this session (after previous summary @ `07f2fb4`)
 

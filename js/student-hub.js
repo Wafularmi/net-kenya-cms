@@ -593,11 +593,17 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                         else if (L.grace) status = `<div style="font-size:12px;color:var(--warning);margin-top:6px;">⏳ Weekly target KES ${L.target} due ${esc(L.dueText || '')} (this week KES ${L.weekPaid || 0})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}${coverTxt}</div>`;
                         else status = `<div style="font-size:12px;color:var(--success);margin-top:6px;">✅ Weekly target met (week ${L.weeksElapsed || 1})${L.weeksAhead > 0 ? ' · ' + L.weeksAhead + ' week(s) prepaid' : ''}${coverTxt}</div>`;
                     }
+                    const waiverTotal = hubWaivedTotal(me.id, data) || 0;
+                    const weekCovered = L && L.target ? ((L.weekPaid || 0) >= L.target || Math.max(0, (L.cumulativeTarget || L.target) - (L.totalPaid || 0)) <= 0) : false;
+                    const waiverLine = waiverTotal > 0 ? `<div style="font-size:12px;color:var(--info);margin-top:4px;">🎁 Fee waiver applied: ${fmt(waiverTotal)} (counted toward your fees/weekly targets)</div>` : '';
+                    const weekRow = L && L.target ? `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">This week (target KES ${L.target})</span><b>${weekCovered ? '<span style="color:var(--success);">✓ covered' + (waiverTotal ? ' (incl. waiver)' : '') + '</span>' : 'KES ' + (L.weekPaid || 0) + ' · bal KES ' + weekDue}</b></div>` : '';
+                    const paidLabel = waiverTotal > 0 ? 'Paid so far (incl. waiver)' : 'Paid so far';
                     return `
                     <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Total fee required</span><b>${fmt(fee)}</b></div>
-                    <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Paid so far</span><b style="color:var(--success);">${fmt(paid)}</b></div>
+                    <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">${paidLabel}</span><b style="color:var(--success);">${fmt(paid)}</b></div>
                     <div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">Total program balance</span><b style="color:${progBal > 0 ? 'var(--danger)' : 'var(--success)'};">${fmt(progBal)}</b></div>
-                    ${L && L.target ? `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;"><span style="color:var(--text-muted);">This week (target KES ${L.target})</span><b>KES ${L.weekPaid || 0} · bal KES ${weekDue}</b></div>` : ''}
+                    ${weekRow}
+                    ${waiverLine}
                     ${status}`;
                 })()}
                 ${window._hubMpesaOn ? `<button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>` : `<div style="font-size:11px;color:var(--text-muted);margin-top:10px;text-align:center;">Online payments coming soon — contact the finance office.</div>`}

@@ -956,6 +956,257 @@ function auditLog(action, entity, details, user) {
 } catch (e) {}
 }
 
+// ---- Security & integrity layer ----
+// The served code files (index.html, manuals, css/*.css, js/*.js) are hashed at
+// boot into a baseline. A routine watchdog re-hashes them: any file that no
+// longer matches the boot baseline is BLOCKED from being served (HTTP 403) and
+// raises a severe admin alert + audit + WhatsApp push until an admin rebaselines
+// or restores it. The baseline is re-taken on every server start (a restart is a
+// fresh, trusted code deployment), so the watchdog catches runtime tampering
+// while the process is alive.
+const SECURITY_DB_FILE = path.join(DATA_ROOT, 'integrity.json');
+const SECURE = {
+    manifest: null,             // { version, createdAt, updatedAt, files: { rel: sha } }
+    blockedFiles: new Set(),    // absolute paths currently withheld from serving
+    blockedAnnounced: new Set(),// rel paths with an already-announced tamper alert (dedupe)
+    lastCheck: null,
+    candidates: [],             // current cleanup candidates (server memory)
+    candidatesAt: null,
+    checking: false
+};
+function trackedCodeFiles() {
+    const out = [];
+    try {
+        const push = f => { if (f && /\.(js|css|html)$/i.test(f)) out.push(path.resolve(f)); };
+        push(path.join(ROOT, 'index.html'));
+        push(path.join(ROOT, 'maintenance.html'));
+        push(path.join(ROOT, 'student-manual.html'));
+        push(path.join(ROOT, 'coordinator-manual.html'));
+        push(path.join(ROOT, 'admin-manual.html'));
+        push(path.join(ROOT, 'assistant-admin-manual.html'));
+        push(path.join(ROOT, 'staff-manual.html'));
+        for (const dir of ['css', 'js']) {
+            const full = path.join(ROOT, dir);
+            if (!fs.existsSync(full)) continue;
+            for (const name of fs.readdirSync(full)) {
+                if (/\.(js|css|html)$/i.test(name)) push(path.join(full, name));
+            }
+        }
+    } catch (e) { console.error('trackedCodeFiles failed:', e.message); }
+    return out;
+}
+function sha256File(file) {
+    try { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
+    catch { return null; }
+}
+// Helper for use inside handleAPI where the module-level `path` is shadowed by
+// the URL pathname variable of the same name.
+function relTracked(absPath) {
+    return path.relative(ROOT, absPath).split('\\').join('/');
+}
+function loadIntegrityManifest() {
+    try { SECURE.manifest = JSON.parse(fs.readFileSync(SECURITY_DB_FILE, 'utf8')); }
+    catch { SECURE.manifest = null; }
+}
+function saveIntegrityManifest() {
+    try {
+        fs.writeFileSync(SECURITY_DB_FILE, JSON.stringify(SECURE.manifest, null, 2), 'utf8');
+        try { if (fs.existsSync(SECURITY_DB_FILE) && DATA_ROOT !== '/data') fs.copyFileSync(SECURITY_DB_FILE, path.join('/data', 'integrity.json')); } catch {}
+    } catch (e) { console.error('saveIntegrityManifest failed:', e.message); }
+}
+function createIntegrityBaseline() {
+    const oldFiles = SECURE.manifest && SECURE.manifest.files ? SECURE.manifest.files : null;
+    const manifest = { version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), files: {} };
+    for (const f of trackedCodeFiles()) {
+        const h = sha256File(f);
+        if (h) manifest.files[path.relative(ROOT, f).split('\\').join('/')] = h;
+    }
+    if (oldFiles) {
+        const changed = [];
+        for (const rel of Object.keys(manifest.files)) {
+            if (oldFiles[rel] && oldFiles[rel] !== manifest.files[rel]) changed.push(rel);
+        }
+        if (changed.length) {
+            console.log('Baseline changed across restart (expected on deploy):', changed.length, 'file(s)');
+            for (const rel of changed.slice(0, 10)) { try { auditLog('baseline-changed', 'security', { file: rel }, 'system'); } catch (e) {} }
+        }
+    }
+    SECURE.manifest = manifest;
+    SECURE.blockedFiles.clear();
+    SECURE.blockedAnnounced.clear();
+    saveIntegrityManifest();
+    console.log('Integrity baseline:', Object.keys(manifest.files).length, 'files');
+}
+// Push a WhatsApp + whatsappLog record to the configured admin number for severe events.
+function notifyAdminSecurity(title, details) {
+    try {
+        const rec = (db.settings || []).find(s => s.key === 'whatsapp');
+        const adminNumber = rec && rec.adminNumber ? String(rec.adminNumber).trim() : '';
+        if (adminNumber) {
+            if (!db.whatsappLog) db.whatsappLog = [];
+            db.whatsappLog.push({
+                id: 'SEC-WA-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+                phone: adminNumber, name: 'Admin', template: 'security',
+                message: '🔐 ' + title + ' — ' + details,
+                date: new Date().toISOString().slice(0, 10), time: new Date().toISOString().slice(11, 19),
+                createdAt: new Date().toISOString()
+            });
+            saveDB();
+            broadcastEvent('db-change', { store: 'whatsappLog' });
+            broadcastEvent('security-push', { phone: adminNumber, title, details });
+        }
+    } catch (e) { console.error('notifyAdminSecurity failed:', e.message); }
+}
+function runIntegrityCheck() {
+    if (SECURE.checking) return;
+    SECURE.checking = true;
+    try {
+        if (!SECURE.manifest) return;
+        const files = trackedCodeFiles();
+        const now = new Date().toISOString();
+        for (const f of files) {
+            const rel = path.relative(ROOT, f).split('\\').join('/');
+            const expected = SECURE.manifest.files[rel];
+            if (!expected) continue;
+            const h = sha256File(f);
+            if (h && h !== expected) {
+                SECURE.blockedFiles.add(path.resolve(f));
+                if (!SECURE.blockedAnnounced.has(rel)) {
+                    SECURE.blockedAnnounced.add(rel);
+                    try {
+                        if (!db.alerts) db.alerts = [];
+                        if (!db.alerts.some(a => a.ruleId === 'sec-file-tamper' && a.entityId === rel && a.status === 'active')) {
+                            db.alerts.push({
+                                id: 'ALERT-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+                                ruleId: 'sec-file-tamper', entityId: rel, type: 'danger', severity: 'severe',
+                                title: '⚠ Code file tampered',
+                                message: rel + ' no longer matches the approved baseline. The file is now blocked from being served with HTTP 403 until an administrator rebaselines or restores it.',
+                                createdAt: now, read: false, status: 'active'
+                            });
+                            saveDB();
+                            broadcastEvent('db-change', { store: 'alerts' });
+                        }
+                        auditLog('file-tamper-detected', 'security', { file: rel }, 'system');
+                        notifyAdminSecurity('Code file tampered', rel + ' was modified outside the approved baseline and is now blocked from serving.');
+                    } catch (e) { console.error('tamper alert failed:', e.message); }
+                }
+            }
+        }
+        SECURE.lastCheck = now;
+    } catch (e) { console.error('runIntegrityCheck failed:', e.message); }
+    SECURE.checking = false;
+}
+// Routine cleanup: gather candidates (with consent rules).
+//  - alerts: status 'resolved' (responded/seen) or older than 45 days
+//  - messages: read messages the recipient has since replied to (responded), or read older than 30 days
+//  - tickets: closed/resolved tickets older than 14 days
+// Nothing is deleted here — each candidate must be explicitly confirmed by an admin.
+function collectCleanupCandidates() {
+    try {
+        const nowTs = Date.now();
+        const day = 86400000;
+        const candidates = [];
+        const seen = new Set();
+        const add = (store, id, kind, label, when) => {
+            if (!id || seen.has(store + ':' + id)) return;
+            seen.add(store + ':' + id);
+            candidates.push({ store, id, kind, label: String(label || '').slice(0, 200), at: when || new Date(nowTs).toISOString() });
+        };
+        for (const a of (db.alerts || [])) {
+            const created = a.createdAt ? Date.parse(a.createdAt) : 0;
+            if (a.status === 'resolved' || (created && nowTs - created > 45 * day)) {
+                add('alerts', a.id, 'alert', (a.title || a.message || a.id).slice(0, 90), a.createdAt);
+            }
+        }
+        const msgs = db.messages || [];
+        for (const m of msgs) {
+            if (!m || !m.id || !m.sender || !m.recipient || !m.read) continue;
+            const mt = Date.parse(m.timestamp || m.createdAt || 0) || 0;
+            const replied = msgs.some(m2 => m2 && m2.sender === m.recipient && m2.recipient === m.sender && ((Date.parse(m2.timestamp || m2.createdAt || 0)) || 0) > mt);
+            if (replied || (mt && nowTs - mt > 30 * day)) {
+                add('messages', m.id, 'message', (m.message || m.text || m.content || '').toString().slice(0, 90) || m.id, m.timestamp || m.createdAt);
+            }
+        }
+        for (const t of (db.tickets || [])) {
+            if (!t || !t.id) continue;
+            const isClosed = /closed|resolved|answered|complete/i.test(String(t.status || ''));
+            const tTime = Date.parse(t.updatedAt || t.createdAt || 0) || 0;
+            if (isClosed && tTime && nowTs - tTime > 14 * day) {
+                add('tickets', t.id, 'ticket', (t.subject || t.title || t.id).toString().slice(0, 90), t.updatedAt || t.createdAt);
+            }
+        }
+        SECURE.candidates = candidates;
+        SECURE.candidatesAt = new Date(nowTs).toISOString();
+        return candidates;
+    } catch (e) { console.error('collectCleanupCandidates failed:', e.message); return []; }
+}
+function announceCleanupCandidates() {
+    try {
+        const c = collectCleanupCandidates();
+        broadcastEvent('cleanup-candidates', { count: c.length, at: SECURE.candidatesAt });
+    } catch (e) {}
+}
+// Apply ADMIN-CONFIRMED deletions only. Unconfirmed candidates are untouched.
+function applyCleanupConfirmations(confirmations) {
+    const results = { ok: 0, errors: [], remaining: 0 };
+    try {
+        const byStore = {};
+        for (const c of (confirmations || [])) {
+            if (!c || !c.store || !c.id) { results.errors.push({ error: 'Missing store/id' }); continue; }
+            if (!byStore[c.store]) byStore[c.store] = [];
+            byStore[c.store].push(String(c.id));
+        }
+        const KEY_PATHS = { settings: 'key', counters: 'key', users: 'username', transcriptVerifications: 'docId', manuals: 'id' };
+        for (const store of Object.keys(byStore)) {
+            const arr = db[store];
+            if (!Array.isArray(arr)) { results.errors.push({ store, error: 'Unknown store' }); continue; }
+            const keyPath = KEY_PATHS[store] || 'id';
+            const ids = byStore[store];
+            let changed = false;
+            for (let i = arr.length - 1; i >= 0; i--) {
+                const rec = arr[i];
+                if (!rec) continue;
+                const pk = String(rec[keyPath] || rec.id || '');
+                if (ids.indexOf(pk) >= 0) { arr.splice(i, 1); results.ok++; changed = true; }
+            }
+            if (changed) {
+                try {
+                    broadcastEvent('db-change', { store });
+                    saveDB();
+                    auditLog('cleanup-confirmed', store, { deleted: results.ok }, 'system');
+                } catch (e) { console.error('cleanup save failed:', e.message); }
+            }
+        }
+    } catch (e) { console.error('applyCleanupConfirmations failed:', e.message); }
+    SECURE.candidates = collectCleanupCandidates();
+    results.remaining = SECURE.candidates.length;
+    try { broadcastEvent('cleanup-candidates', { count: SECURE.candidates.length, at: SECURE.candidatesAt }); } catch {}
+    return results;
+}
+// Strip ASCII control characters (except tab/newline) and cap field length on
+// anything written into the DB, to blunt injection / corruption attempts.
+function sanitizeBodyFields(obj, maxLen) {
+    if (!obj || typeof obj !== 'object') return obj;
+    const cap = maxLen || 20000;
+    for (const k of Object.keys(obj)) {
+        const v = obj[k];
+        if (typeof v === 'string') {
+            obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, cap);
+        } else if (v && typeof v === 'object' && !Buffer.isBuffer(v)) {
+            sanitizeBodyFields(v, cap);
+        }
+    }
+    return obj;
+}
+// Boot + watchdog: fresh restart = fresh trust baseline (a legit deploy), then
+// the 15-minute watchdog blocks any runtime tampering while the process lives.
+try { loadIntegrityManifest(); } catch (e) {}
+try { createIntegrityBaseline(); } catch (e) { console.error('integrity baseline failed:', e.message); }
+setTimeout(() => { try { runIntegrityCheck(); } catch (e) {} }, 5000);
+setInterval(() => { try { runIntegrityCheck(); } catch (e) {} }, 15 * 60 * 1000);
+setTimeout(() => { try { announceCleanupCandidates(); } catch (e) {} }, 12000);
+setInterval(() => { try { announceCleanupCandidates(); } catch (e) {} }, 30 * 60 * 1000);
+
 // Pass 1: Extract text positions directly from the PDF content stream via pdf.js.
 // This is free, instant, and works for any PDF where labels live in the text layer
 // (not just raster images).
@@ -2108,7 +2359,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     program: (stu && stu.program) || record.program || '',
                     studyCenter,
                     docId: record.docId || did,
-                    docTitle: record.docTitle || record.type || '',
+                    docTitle: record.docTitle || (isTranscript ? 'Official Transcript' : (record.type ? ({ diploma: 'Diploma Certificate', completion: 'Completion Certificate', transcript: 'Official Transcript', admission: 'Admission Letter', enrollment: 'Enrollment Letter', recommendation: 'Recommendation Letter', 'fee-statement': 'Fee Statement' }[record.type] || (String(record.type)[0].toUpperCase() + String(record.type).slice(1))) : 'Certificate')),
                     generatedAt: record.generatedAt || record.createdAt || '',
                     revoked: record.docStatus === 'revoked',
                     revokedBy: record.revokedBy || '',
@@ -2594,6 +2845,53 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
     }
 
     // -----------------------------------------------------------
+    // Security & cleanup endpoints â€” /api/security/*
+    // (admin only)
+    // -----------------------------------------------------------
+    if (parts.length >= 2 && parts[1] === 'security') {
+        const secUser = getRequestUser(req);
+        if (!secUser || (secUser.role !== 'admin' && secUser.role !== 'assistant')) return json(res, 403, { error: 'Admin only' });
+        if (secUser.role === 'assistant' && parts[2] !== 'status') return json(res, 403, { error: 'Admin only' });
+        if (parts.length === 2 || parts[2] === 'status') {
+            const blocked = [];
+            SECURE.blockedFiles.forEach(p => blocked.push(relTracked(p)));
+            const secAudit = (db.audit || []).filter(a => String(a.action || '').indexOf('tamper') !== -1 || String(a.entity || '') === 'security').slice(-15);
+            return json(res, 200, {
+                ok: true,
+                baseline: SECURE.manifest ? { createdAt: SECURE.manifest.createdAt, updatedAt: SECURE.manifest.updatedAt, files: Object.keys(SECURE.manifest.files).length } : null,
+                lastCheck: SECURE.lastCheck,
+                blockedFiles: blocked,
+                candidates: collectCleanupCandidates(),
+                candidatesAt: SECURE.candidatesAt,
+                recentSecurityAudit: secAudit
+            });
+        }
+        if (parts[2] === 'check' && req.method === 'POST') {
+            runIntegrityCheck();
+            return json(res, 200, { ok: true, lastCheck: SECURE.lastCheck, blockedFiles: Array.from(SECURE.blockedFiles).map(relTracked) });
+        }
+        if (parts[2] === 'rebaseline' && req.method === 'POST') {
+            createIntegrityBaseline();
+            auditLog('rebaselined', 'security', { files: Object.keys(SECURE.manifest.files).length }, secUser.username);
+            return json(res, 200, { ok: true, message: 'Baseline updated — all served code files are now trusted.' });
+        }
+        if (parts[2] === 'cleanup' && req.method === 'POST') {
+            let body = '';
+            req.on('data', c => body += c);
+            req.on('end', () => {
+                try {
+                    const parsed = JSON.parse(body) || {};
+                    const confirmations = Array.isArray(parsed.confirmations) ? parsed.confirmations : [];
+                    const results = applyCleanupConfirmations(confirmations);
+                    json(res, 200, results);
+                } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
+            });
+            return true;
+        }
+        return json(res, 404, { error: 'Unknown security action' });
+    }
+
+    // -----------------------------------------------------------
     // Generic DB CRUD endpoints â€” /api/db/:store[/:key]
     // -----------------------------------------------------------
     // GET /api/db/batch?stores=users,students,courses  â€” batch fetch multiple stores
@@ -2639,6 +2937,7 @@ return json(res, 200, result);
                 const result = { ok: 0, errors: [] };
                 for (const rec of records) {
                     if (!rec || typeof rec !== 'object') { result.errors.push({ error: 'Not an object' }); continue; }
+                    sanitizeBodyFields(rec);
                     const pk = rec[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
@@ -2777,6 +3076,7 @@ return json(res, 200, result);
                 try {
                     const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
+                    sanitizeBodyFields(value);
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
@@ -2818,6 +3118,7 @@ return json(res, 200, result);
                 try {
                     const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
+                    sanitizeBodyFields(value);
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
@@ -2986,6 +3287,19 @@ if (parts[1] === 'discussions') {
 }
 
 const server = http.createServer((req, res) => {
+    // Security headers applied to every response (harmless over plain HTTP,
+    // honored over HTTPS). CSP keeps the app functional (inline styles/handlers,
+    // same-origin + https) while blocking cross-origin script injection.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data: https:; connect-src 'self' https: http://localhost:8080 ws: wss:; media-src 'self' blob: https:; frame-src 'self' https:; worker-src 'self' blob:;");
+
     if (req.method === 'OPTIONS') {
         res.writeHead(204, {
             'Access-Control-Allow-Origin': '*',
@@ -3050,9 +3364,16 @@ const server = http.createServer((req, res) => {
         filePath = path.join(ROOT, url);
     }
 
-    if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
+if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
         res.writeHead(403);
         return res.end('Forbidden');
+    }
+
+    // Integrity watchdog: refuse to serve files that were modified while the
+    // server was running (tamper detection). Admin must rebaseline or restore.
+    if (SECURE.blockedFiles.size && SECURE.blockedFiles.has(path.resolve(filePath))) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end('403 Forbidden — This file is blocked by security integrity checks. Contact the administrator to rebaseline or restore it.');
     }
 
     // Inject branding into index.html and manual pages at serve-time
