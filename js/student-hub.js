@@ -248,10 +248,40 @@ function hubSkeleton() {
         <div style="height:120px;background:var(--bg-input);border-radius:8px;overflow:hidden;"><div style="width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);animation:hub-shimmer 1.5s infinite;"></div></div>
     </div><style>@keyframes hub-shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>`;
 }
+function hubFmtCountdown(ms){
+    if(ms<=0) return '00:00:00';
+    const s=Math.floor(ms/1000); const h=String(Math.floor(s/3600)).padStart(2,'0'); const m=String(Math.floor((s%3600)/60)).padStart(2,'0'); const sec=String(s%60).padStart(2,'0');
+    return `${h}:${m}:${sec}`;
+}
+let _hubCountdownTimer=null;
+function hubStartCountdowns(){
+    if(_hubCountdownTimer) clearInterval(_hubCountdownTimer);
+    _hubCountdownTimer=setInterval(()=>{
+        document.querySelectorAll('[data-countdown]').forEach(el=>{
+            const target=parseInt(el.getAttribute('data-countdown')||'0',10);
+            if(!target) return;
+            const diff=target-Date.now();
+            if(diff>0){
+                el.textContent='Starts in '+hubFmtCountdown(diff);
+                el.style.color='';
+            }else{
+                const elapsed=Math.abs(diff);
+                // For live, show elapsed; for upcoming show "Started"
+                if(el.getAttribute('data-mode')==='live'){
+                    el.textContent='● Live • '+hubFmtCountdown(elapsed)+' elapsed';
+                    el.style.color='#fff';
+                }else{
+                    el.textContent='● Live now';
+                }
+            }
+        });
+    },1000);
+}
 function hubLiveBanner(c) {
     try {
-        const halls = (c.data.meetings || c.data.halls || []).filter(h => h && h.kind === 'hall' && h.status === 'live');
-        const liveHall = halls[0];
+        const halls = (c.data.meetings || c.data.halls || []).filter(h => h && h.kind === 'hall');
+        const liveHall = halls.find(h=>h.status==='live');
+        const upcomingHall = halls.filter(h=>h.status!=='live'&&h.scheduled).sort((a,b)=>String(a.scheduled).localeCompare(String(b.scheduled)))[0];
         const vcLessons = (c.myLessons || []).filter(l => l && l.virtualEnabled && l.virtualRoom);
         // Heuristic: a VC lesson is "live" if it has a scheduled time within +/- 2 hours of now and is virtualEnabled
         const now = Date.now();
@@ -262,13 +292,14 @@ function hubLiveBanner(c) {
         }) || (vcLessons.length ? vcLessons[0] : null);
         const banners = [];
         if (liveHall) {
+            const target = liveHall.scheduled ? new Date(String(liveHall.scheduled).replace(' ','T')).getTime() : Date.now();
             banners.push(`<div id="hub-live-banner-hall" style="background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;padding:14px 18px;border-radius:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 14px rgba(22,163,74,0.35);border:1px solid rgba(255,255,255,0.25);">
                 <div style="display:flex;align-items:center;gap:12px;min-width:0;">
                     <span style="width:12px;height:12px;background:#fff;border-radius:50%;animation:hub-pulse 1.4s infinite;flex-shrink:0;box-shadow:0 0 0 6px rgba(255,255,255,0.25);"></span>
                     <div style="min-width:0;">
                         <div style="font-weight:800;font-size:13px;line-height:1.2;letter-spacing:0.3px;opacity:0.95;">HALL MEETING</div>
                         <div style="font-weight:800;font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔴 LIVE NOW: ${esc(liveHall.title || 'Virtual Hall')}</div>
-                        <div style="font-size:12px;opacity:0.95;margin-top:2px;">${liveHall.scheduled ? 'Started ' + esc(String(liveHall.scheduled).slice(0,16).replace('T',' ')) : 'Join muted — raise hand to speak'} · Large gathering</div>
+                        <div style="font-size:12px;opacity:0.95;margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span data-countdown="${target}" data-mode="live" style="font-weight:700;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:6px;">● Live • 00:00:00 elapsed</span><span>Large gathering</span></div>
                     </div>
                 </div>
                 <button class="btn" style="background:#fff;color:#15803d;font-weight:800;padding:8px 18px;border-radius:8px;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.15);" onclick="hubJoinHall('${liveHall.id}')">🚀 Join Hall</button>
@@ -277,24 +308,30 @@ function hubLiveBanner(c) {
         if (liveLesson) {
             const course = (c.myCourses || []).find(cc => cc.id === liveLesson.courseId);
             const lessonTitle = liveLesson.title || liveLesson.topic || 'Live Class';
+            const lessonTarget = liveLesson.virtualScheduled ? new Date(String(liveLesson.virtualScheduled).replace(' ','T')).getTime() : Date.now();
             banners.push(`<div id="hub-live-banner-class" style="background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;padding:14px 18px;border-radius:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 14px rgba(37,99,235,0.35);border:1px solid rgba(255,255,255,0.25);">
                 <div style="display:flex;align-items:center;gap:12px;min-width:0;">
                     <span style="width:12px;height:12px;background:#fff;border-radius:50%;animation:hub-pulse 1.4s infinite;flex-shrink:0;box-shadow:0 0 0 6px rgba(255,255,255,0.25);"></span>
                     <div style="min-width:0;">
                         <div style="font-weight:800;font-size:11px;letter-spacing:0.8px;opacity:0.9;">LIVE CLASS</div>
                         <div style="font-weight:800;font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📚 ${esc(lessonTitle)} ${course ? '· ' + esc(course.name) : ''}</div>
-                        <div style="font-size:12px;opacity:0.92;margin-top:2px;">${liveLesson.virtualScheduled ? esc(String(liveLesson.virtualScheduled).slice(0,16).replace('T',' ')) : 'Virtual classroom is open'} · Tap to join</div>
+                        <div style="font-size:12px;opacity:0.92;margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span data-countdown="${lessonTarget}" data-mode="live" style="font-weight:700;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:6px;">● Live • 00:00:00 elapsed</span><span>${liveLesson.virtualScheduled ? esc(String(liveLesson.virtualScheduled).slice(0,16).replace('T',' ')) : 'Virtual classroom is open'}</span></div>
                     </div>
                 </div>
                 <button class="btn" style="background:#fff;color:#1d4ed8;font-weight:800;padding:8px 18px;border-radius:8px;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.15);" onclick="switchHubTab('live')">🎥 Join Class</button>
             </div>`);
         }
-        if (banners.length) return banners.join('');
-        // No live but has scheduled halls - show subtle upcoming banner
+        if (banners.length) {
+            setTimeout(hubStartCountdowns, 50);
+            return banners.join('');
+        }
+        // No live but has scheduled halls - show subtle upcoming banner with countdown
         const upcoming = (c.data.meetings || []).filter(h => h && h.kind === 'hall' && h.status !== 'live' && h.scheduled).sort((a,b)=>String(a.scheduled).localeCompare(String(b.scheduled)))[0];
         if (upcoming) {
+            const upTarget = new Date(String(upcoming.scheduled).replace(' ','T')).getTime();
+            setTimeout(hubStartCountdowns, 50);
             return `<div id="hub-live-banner" style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:12px 16px;border-radius:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-                <div style="font-size:13px;font-weight:600;">🎥 Next Hall Meeting: <b>${esc(upcoming.title || 'Virtual Hall')}</b> — ${esc(String(upcoming.scheduled).slice(0,16).replace('T',' '))}</div>
+                <div style="font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span>🎥 Next Hall Meeting: <b>${esc(upcoming.title || 'Virtual Hall')}</b> — ${esc(String(upcoming.scheduled).slice(0,16).replace('T',' '))}</span><span data-countdown="${upTarget}" style="font-weight:800;background:#166534;color:#fff;padding:3px 10px;border-radius:6px;">Starts in 00:00:00</span></div>
                 <button class="btn btn-outline btn-sm" onclick="switchHubTab('live')">View</button>
             </div>`;
         }
