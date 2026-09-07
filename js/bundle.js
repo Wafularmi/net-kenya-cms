@@ -9223,7 +9223,6 @@ if (typeof pdfjsLib !== 'undefined') {
             };
         }
 
-        crosshair = document.getElementById('diploma-crosshair');
         if (crosshair) {
             const canvas = document.getElementById('diploma-pdf-canvas');
             if (canvas) {

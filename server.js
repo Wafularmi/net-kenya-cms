@@ -73,6 +73,48 @@ function maybeStripInline(cert) {
     delete out.content;
     return out;
 }
+// Archive LARGE HTML document content to disk (same idea as the PDF-template
+// blobs) so server-data.json stays small. Re-injected transparently on read.
+// Small docs (< threshold) stay inline; any stale archive is removed on update.
+const HTML_DOC_MAX_INLINE = 60000;
+function htmlContentPath(key) { return path.join(DOC_STORE_DIR, 'cert-html-' + docSafeKey(key) + '.html'); }
+function archiveHtmlContent(cert) {
+    if (!cert || typeof cert.content !== 'string') return cert;
+    const c = String(cert.content).trim();
+    if (/^JVBERi0/.test(c) || /^%PDF-/.test(c)) return cert; // PDFs handled by externalizeCertificate
+    const key = docSafeKey(cert.id || cert.docId || cert.vCode || 'doc');
+    const file = htmlContentPath(key);
+    const out = Object.assign({}, cert);
+    if (c.length > HTML_DOC_MAX_INLINE) {
+        try {
+            ensureDocStore();
+            fs.writeFileSync(file, cert.content);
+            out.contentArchived = key;
+            delete out.content;
+            return out;
+        } catch (e) { console.error('archiveHtmlContent failed:', key, e); return cert; }
+    }
+    if (cert.contentArchived || fs.existsSync(file)) {
+        try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+        delete out.contentArchived;
+    }
+    return out;
+}
+// Transparency for archived docs: if a record was parked on disk, refill its
+// `content` from the archive so every client viewer works unchanged.
+function maybeReinjectArchived(rec) {
+    if (!rec || !rec.contentArchived) return rec;
+    if (typeof rec.content === 'string' && rec.content) return rec;
+    const file = htmlContentPath(rec.contentArchived);
+    try {
+        if (fs.existsSync(file)) {
+            const out = Object.assign({}, rec);
+            out.content = fs.readFileSync(file, 'utf8');
+            return out;
+        }
+    } catch (e) { console.error('reinject html failed:', rec.id, e); }
+    return rec;
+}
 // Lazily externalize the inline PDF of every certificate/idCard record on read,
 // so legacy records get a disk copy + contentPath without a full migration job.
 // Returns records safe to serialize back to the client. Triggers a saveDB only
@@ -82,14 +124,14 @@ function externalizeStoreRecords(store, rows) {
     let changed = false;
     const out = [];
     for (const r of rows) {
-        if (!r || !r.content) { out.push(maybeStripInline(r)); continue; }
+        if (!r || !r.content) { out.push(maybeReinjectArchived(maybeStripInline(r))); continue; }
         const res = externalizeCertificate(r);
         const gainedPath = !!res.record.contentPath && res.record.contentPath !== r.contentPath;
         if (gainedPath) {
             const idx = db[store].findIndex(x => x === r);
             if (idx >= 0) { db[store][idx] = res.record; changed = true; }
         }
-        out.push(maybeStripInline(res.record));
+        out.push(maybeReinjectArchived(maybeStripInline(res.record)));
     }
     if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
     return out;
@@ -1191,13 +1233,21 @@ function applyCleanupConfirmations(confirmations) {
 }
 // Strip ASCII control characters (except tab/newline) and cap field length on
 // anything written into the DB, to blunt injection / corruption attempts.
-function sanitizeBodyFields(obj, maxLen) {
+// Pass `preserve` (array of top-level keys) to skip the LENGTH cap for those
+// fields only (control chars are still stripped). Documents carry long HTML
+// content (transcripts ~99KB, letters embed logo/signatures as base64) and were
+// being silently truncated mid-tag, which is why generated documents broke.
+function sanitizeBodyFields(obj, maxLen, preserve) {
     if (!obj || typeof obj !== 'object') return obj;
     const cap = maxLen || 20000;
     for (const k of Object.keys(obj)) {
         const v = obj[k];
         if (typeof v === 'string') {
-            obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, cap);
+            if (preserve && preserve.includes(k)) {
+                obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+            } else {
+                obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, cap);
+            }
         } else if (v && typeof v === 'object' && !Buffer.isBuffer(v)) {
             sanitizeBodyFields(v, cap);
         }
@@ -2937,6 +2987,8 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
             if (name === 'settings' && (!user || user.role !== 'admin')) {
                 rows = rows.filter(r => r && r.key !== 'smsSettings');
             }
+            rows = backfillCertIdentifiers(name, rows);
+            rows = externalizeStoreRecords(name, rows);
             if (name === 'settings') rows = rows.map(injectSettingsBlobs);
             if (name === 'settings' && (!user || user.role !== 'admin')) {
                 rows = rows.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
@@ -2965,18 +3017,23 @@ return json(res, 200, result);
                 const keyPath = KEY_PATHS[store] || 'id';
                 if (!db[store]) db[store] = [];
                 const result = { ok: 0, errors: [] };
+                const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
                 for (const rec of records) {
                     if (!rec || typeof rec !== 'object') { result.errors.push({ error: 'Not an object' }); continue; }
                     if (store === 'settings') {
                         const extErr = externalizeSettingsRecord(rec);
                         if (extErr) { result.errors.push({ error: extErr }); continue; }
                     }
-                    sanitizeBodyFields(rec);
-                    const pk = rec[keyPath];
+                    let r = rec;
+                    if (isDocStore) {
+                        r = archiveHtmlContent(externalizeCertificate(rec).record);
+                    }
+                    sanitizeBodyFields(r, 20000, isDocStore ? ['content'] : null);
+                    const pk = r[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
-                    const idx = db[store].findIndex(r => r[keyPath] === pk);
-                    if (idx >= 0) db[store][idx] = rec;
-                    else db[store].push(rec);
+                    const idx = db[store].findIndex(x => x[keyPath] === pk);
+                    if (idx >= 0) db[store][idx] = r;
+                    else db[store].push(r);
                     result.ok++;
                 }
                 if (result.ok) { broadcastEvent('db-change', { store }); saveDB(); }
@@ -3118,23 +3175,25 @@ const parsed = JSON.parse(body);
                         const extErr = externalizeSettingsRecord(value);
                         if (extErr) return json(res, 400, { error: extErr });
                     }
-                    sanitizeBodyFields(value);
+                    // Document records get their PDF content parked on disk and their
+                    // long HTML content archived to disk (re-injected on read) so the
+                    // field cap NEVER truncates a generated letter mid-image-tag.
+                    const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
+                    let toStore = value;
+                    if (isDocStore) {
+                        toStore = archiveHtmlContent(externalizeCertificate(value).record);
+                    }
+                    sanitizeBodyFields(toStore, 20000, isDocStore ? ['content'] : null);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
                     if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
                     }
-                    const pk = value[keyPath];
+                    const pk = toStore[keyPath];
                     if (pk === undefined || pk === null) {
-                        console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(value));
+                        console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(toStore));
                         return json(res, 400, { error: `Record missing key field "${keyPath}"` });
-                    }
-                    // Phase 1: externalize any big base64 PDF in documents before they
-                    // land in the in-memory JSON DB, so the JSON stays small to read/write.
-                    let toStore = value;
-                    if (store === 'certificates' || store === 'idCards' || store === 'idcards') {
-                        toStore = externalizeCertificate(value).record;
                     }
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = toStore;
@@ -3158,11 +3217,16 @@ const parsed = JSON.parse(body);
                     const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
-                    if (store === 'settings') {
+if (store === 'settings') {
                         const extErr = externalizeSettingsRecord(value);
                         if (extErr) return json(res, 400, { error: extErr });
                     }
-                    sanitizeBodyFields(value);
+                    const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
+                    let toStore = value;
+                    if (isDocStore) {
+                        toStore = archiveHtmlContent(externalizeCertificate(value).record);
+                    }
+                    sanitizeBodyFields(toStore, 20000, isDocStore ? ['content'] : null);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
@@ -3171,24 +3235,24 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     }
                     // Students updating only their own terms acceptance (allowed past the gate above)
                     if (store === 'users' && user && user.role === 'student') {
-                        if (String(value[keyPath]) !== String(user.username)) return json(res, 403, { error: 'Students may only update their own account' });
-                        const existing = (db[store] || []).find(r => r[keyPath] === value[keyPath]);
+                        if (String(toStore[keyPath]) !== String(user.username)) return json(res, 403, { error: 'Students may only update their own account' });
+                        const existing = (db[store] || []).find(r => r[keyPath] === toStore[keyPath]);
                         if (!existing) return json(res, 404, { error: 'Account not found' });
                         const termsKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion'];
                         for (const k of termsKeys) {
-                            if (k in value) existing[k] = value[k];
+                            if (k in toStore) existing[k] = toStore[k];
                         }
                         mutate(existing);
                         return json(res, 200, { ok: true, key: existing[keyPath] });
                     }
-                    const pk = value[keyPath];
+                    const pk = toStore[keyPath];
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     const exists = db[store].some(r => r[keyPath] === pk);
                     if (exists) return json(res, 409, { error: `Record with ${keyPath}="${pk}" already exists` });
-                    db[store].push(value);
-                    mutate(value);
-                    if (store === 'settings' && value.key === 'maintenance') {
-                        try { broadcastMaintenance(!!((value.value || value).active)); } catch {}
+                    db[store].push(toStore);
+                    mutate(toStore);
+                    if (store === 'settings' && toStore.key === 'maintenance') {
+                        try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }
                     json(res, 200, { ok: true, key: pk });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
