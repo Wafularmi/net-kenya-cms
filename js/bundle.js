@@ -2891,8 +2891,20 @@ async function saveStaff() {
         existingUser = allUsers.find(u => u.username === username) || null;
     } else if (editId) {
         const prev = await dbGet('staff', editId);
-        existingUser = (prev && prev.phone) ? allUsers.find(u => String(u.username || '').toLowerCase() === String(prev.phone).toLowerCase()) || null : null;
-        username = phone || (existingUser ? existingUser.username : '');
+        if (prev) {
+            const candidates = [prev.phone, prev.email, prev.loginUsername].filter(Boolean).map(v => String(v).toLowerCase());
+            existingUser = allUsers.find(u => {
+                const uname = String(u.username || '').toLowerCase();
+                const uemail = String(u.email || '').toLowerCase();
+                return candidates.includes(uname) || (uemail && candidates.includes(uemail));
+            }) || null;
+            // Fallback: legacy accounts where username was staff ID or name
+            if (!existingUser && prev.name) {
+                const n = String(prev.name).toLowerCase();
+                existingUser = allUsers.find(u => String(u.name || '').toLowerCase() === n && ['admin','lecturer','professor','dean','assistant','support','staff','coordinator'].includes(String(u.role||'').toLowerCase())) || null;
+            }
+        }
+        username = phone || (existingUser ? existingUser.username : '') || (prev && prev.email ? prev.email : '');
     }
     if (!username) return showToast('Phone / Username is required for login!');
     const clash = allUsers.find(u => String(u.username || '').toLowerCase() === String(username).toLowerCase() && (!existingUser || String(u.username || '').toLowerCase() !== String(existingUser.username || '').toLowerCase()));
@@ -11383,7 +11395,7 @@ function certStatusBadge(c) {
     const status = c.docStatus || 'active';
     if (status === 'revoked') return '<span class="badge badge-danger">Revoked</span>';
     if (c._acknowledged) return '<span class="badge badge-success">Acknowledged</span>';
-    return '<span class="badge badge-warning">Flagged</span>';
+    return '';
 }
 
 function renderDuplicateAlerts() {
@@ -17563,9 +17575,9 @@ async function loadBranding() {
         const loginLogo = document.getElementById('login-logo');
         const headerImg = document.getElementById('header-logo-img');
         const headerPlaceholder = document.getElementById('header-logo-placeholder');
-        if (settings.logo) {
-            if (headerImg) { headerImg.src = settings.logo; headerImg.style.display = 'block'; headerPlaceholder.style.display = 'none'; }
-            if (loginLogo) { loginLogo.innerHTML = ''; loginLogo.style.background = `transparent url("${settings.logo}") no-repeat center / cover`; }
+        if (settings.logo || settings.receiptLogo) {
+            if (headerImg && settings.logo) { headerImg.src = settings.logo; headerImg.style.display = 'block'; headerPlaceholder.style.display = 'none'; }
+            if (loginLogo) { const _loginSrc = settings.receiptLogo || settings.logo; loginLogo.innerHTML = ''; loginLogo.style.background = `transparent url("${_loginSrc}") no-repeat center / cover`; }
             const termsLogo = document.querySelector('.terms-logo');
             if (termsLogo) { termsLogo.innerHTML = ''; termsLogo.style.background = `transparent url("${settings.logo}") no-repeat center / cover`; }
             const logoPreview = document.getElementById('settings-logo-preview');

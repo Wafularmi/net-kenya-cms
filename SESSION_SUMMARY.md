@@ -1,10 +1,31 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `45e5e2b` · **Assets:** `js/bundle.js?v=310`, `js/student-hub.js?v=32`
-**Deploy = `git push origin main`** (commits through this audit all pushed)
+**HEAD:** `v313` · **Assets:** `js/bundle.js?v=313`, `js/student-hub.js?v=32`
+**Deploy = `git push origin main`** (Railway auto-deploy)
 
-## Latest batch (v=310 / student-hub v=32)
+## Latest batch (v=313) — Polish: flagged banner, logo mapping, staff password (pending push)
+
+- **Preview modal** no longer shows "Flagged" badge — `bundle.js:11382` `certStatusBadge()` now returns `''` for active/flagged docs (keeps `Revoked`/`Acknowledged`); the yellow "Flagged" pill in `viewCertificate()` (`bundle.js:11569`) is gone.
+- **Logo mapping** per request: `receiptLogo` → login screen, `logo` → every document + system header/interface. `server.js:3508` now injects `receiptLogo || logo` for `#login-logo` and `logo` for `#header-logo-img`/`.terms-logo`; `bundle.js:17563` `loadBranding()` mirrors it (header `settings.logo`, login `settings.receiptLogo || settings.logo`).
+- **Staff & Faculty password reset** — `bundle.js:2892` `saveStaff()` now resolves the linked `users` account via `phone|email|loginUsername` (and fallback by name/role), so changing the password in the Staff form reliably updates the correct login account. Admin can also reset any account via **Settings → Users → 🔑 Pwd** (`bundle.js:18836` `resetUserPassword()`), which directly `hashPassword()` + `dbPut('users')`. Server `canAccessStore()` already allows `admin` to `PUT users:*` (`server.js:665`).
+
+## Previous batch (v=312+) — Documents fully working (e7a193c → 82d5211)
+
+The 20,000-char DB field cap was the recurring villain. It silently truncated:
+(a) the diploma/completion **PDF template** base64 (fixed in `d7eb721`: templates externalize to disk BEFORE the cap + `%PDF-` magic validation; live templates re-uploaded byte-exact — diploma 798,977 B, completion 260,629 B), and
+(b) every **generated letter/transcript** HTML (embedding the logo + signatures as base64 data-URIs, they routinely exceed 20KB) — content was chopped mid-image-tag, so documents saved broken ("Generate Document not working as before").
+(c) **Branding logos** — `branding.logo` / `receiptLogo` / `sig_*` (368k PNGs) were also capped to 20k → only the top half of the logo rendered on letters. Fixed by preserving all logo/sig/template keys from the cap.
+
+- **`sanitizeBodyFields(obj, maxLen, preserve)`** now takes a `preserve` list and propagates it recursively; certificate/`idCards` `content` is never length-capped (PUT, POST, `POST /api/db/batch` all updated). Branding path uses `brandingImageKeys()` (`logo|logoDark|receiptLogo|sig*|template`) — `server.js:1261,3037,3192,3236`.
+- **Large HTML archived to disk** (`cert-html-<key>.html`, threshold 60KB) and transparently re-injected on read (`externalizeStoreRecords` + batch GET now run `backfillCertIdentifiers`/`externalizeStoreRecords` too) — `server-data.json` stays small, all client viewers work unchanged.
+- Certificate PDF content externalized **before** the cap in every write path.
+- **`renderPdfOnCanvas`** no longer reassigns `const crosshair` (was throwing `TypeError`, aborting the diploma template designer field overlay).
+- **Ephemeral-disk fix** (`82d5211`): `externalizeSettingsRecord()` no longer nulls `template` after writing to disk — Railway restarts previously wiped `docs/settings-*` and `loadGeneratorTemplateBytes()` (`bundle.js:10633`) fell through to the "Please upload and save a PDF template" toast even after a successful save. Templates now persist in DB (also preserved from the cap) and remain usable after restarts; `GET /api/settings-template/:key` still serves the disk copy when present.
+- Preview CSP already shipped (`d4ba880`: `frame-src 'self' https: blob:` etc.) — in-app PDF previews render.
+- **Verified**: headless local run of all 5 letter types → complete HTML (`</style></div>`), transcript 137KB auto-archived + re-injected, all previews modal-ok; live round-trip of a 50KB transcript → saved byte-exact then deleted; live `branding.logo` restored from `NET LOGO0003.png` (368,042 b64, was 20,000) and `receiptLogo` likewise; fresh `PUT /api/db/certificates` with full logo (368,342) round-trips correctly; 4 live PDF certs (2 completions, 2 diplomas) remain and preview correctly; `Generate Document` (letters) now embeds the full logo.
+
+## Earlier batch (v=310 / student-hub v=32)
 
 ### Security & integrity watch (server)
 - **SHA-256 baseline** of all served code (`index.html`, manuals, `css/*.css`, `js/*.js`) taken at every boot; 15-min watchdog re-hashes.

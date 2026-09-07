@@ -3508,10 +3508,15 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
             const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
             const schoolName = branding && branding.schoolName ? branding.schoolName : 'NET Foundation Kenya';
             const initials = branding && branding.initials ? branding.initials : 'NET';
-            const logoData = branding && branding.logo ? branding.logo : '';
+            const headerLogoData = branding && branding.logo ? branding.logo : '';
+            const loginLogoData = branding && (branding.receiptLogo || branding.logo) ? (branding.receiptLogo || branding.logo) : '';
+            const logoData = headerLogoData;
             let logoCss = '';
-            if (branding && branding.logo) {
-                logoCss = '<style>#login-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover !important;text-indent:-9999px!important;background-color:transparent!important}#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + branding.logo + '\') no-repeat center / cover}</style>';
+            if (headerLogoData || loginLogoData) {
+                logoCss = '<style>';
+                if (loginLogoData) logoCss += '#login-logo{background:transparent url(\'' + loginLogoData + '\') no-repeat center / cover !important;text-indent:-9999px!important;background-color:transparent!important}';
+                if (headerLogoData) logoCss += '#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + headerLogoData + '\') no-repeat center / cover}';
+                logoCss += '</style>';
             }
             const maintSetting = getMaintenanceSetting();
             const maintMsg = maintSetting.message && String(maintSetting.message).trim()
