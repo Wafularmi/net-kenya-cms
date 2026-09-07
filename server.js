@@ -1261,7 +1261,7 @@ function sanitizeBodyFields(obj, maxLen, preserve) {
 function brandingImageKeys(rec) {
     const holder = rec && rec.value && typeof rec.value === 'object' ? rec.value : (rec || null);
     if (!holder) return [];
-    return Object.keys(holder).filter(k => k === 'logo' || k === 'logoDark' || k.indexOf('sig') === 0);
+    return Object.keys(holder).filter(k => k === 'logo' || k === 'logoDark' || k === 'receiptLogo' || k.indexOf('sig') === 0 || k.toLowerCase().includes('logo'));
 }
 // Boot + watchdog: fresh restart = fresh trust baseline (a legit deploy), then
 // the 15-minute watchdog blocks any runtime tampering while the process lives.
