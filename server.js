@@ -3341,7 +3341,7 @@ const server = http.createServer((req, res) => {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data: https:; connect-src 'self' https: http://localhost:8080 ws: wss:; media-src 'self' blob: https:; frame-src 'self' https:; worker-src 'self' blob:;");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data: https:; connect-src 'self' https: http://localhost:8080 ws: wss:; media-src 'self' blob: https:; frame-src 'self' https: blob:; object-src 'self' blob:; worker-src 'self' blob:;");
 
     if (req.method === 'OPTIONS') {
         res.writeHead(204, {
