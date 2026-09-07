@@ -31,6 +31,10 @@
 - Hub fee card waiver-aware: shows 🎁 waiver line, "Paid so far (incl. waiver)", and ✓ covered (incl. waiver) instead of a bogus weekly balance.
 - `.gitignore`: `integrity.json`, `sessions.json` (runtime-generated).
 
+### Student Hub usability (no version bump; v=310/v=32)
+- **Notes tab defaults to a specific course** (first enrolled / last used, persisted per student via `hub-notes-filter-<id>`); selecting a course in the dropdown shows **only that course's lessons**; "View Notes" on a course card jumps into that course.
+- Student Hub header: **Refresh button moved onto the same row** as Student Manual + Change Password; its countdown timer removed (the welcome-card `Live … ago` pill is now the only timer); refresh button now shows a **continuous green blinking dot** (`hub-live-blink`) as the live indicator.
+
 ## Committed this session (after previous summary @ `07f2fb4`)
 
 ### Fee-gated learning (per-student)

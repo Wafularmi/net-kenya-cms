@@ -254,6 +254,22 @@ body {
     gap: 8px;
 }
 
+.hub-live-blink {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+    margin-right: 6px;
+    vertical-align: middle;
+    animation: hub-live-pulse 1s ease-in-out infinite;
+}
+
+@keyframes hub-live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
 .stats-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

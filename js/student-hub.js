@@ -613,6 +613,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
 }
 let _hubMpesaOnCache = null;
 let _hubMpesaOnAt = 0;
+let _hubNotesPreselect = null;
 async function hubMpesaEnabled() {
     if (_hubMpesaOnCache !== null && Date.now() - _hubMpesaOnAt < 60000) return _hubMpesaOnCache;
     try {
@@ -725,7 +726,7 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
                     <div style="color:var(--text);font-size:13px;margin-top:4px;font-weight:500;">${esc(c.name)}</div>
                     ${isLocked ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">${esc(reasonTxt)}.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
                     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;">
-                        ${isLocked ? '' : `<button class="btn btn-outline btn-sm" onclick="switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
+                        ${isLocked ? '' : `<button class="btn btn-outline btn-sm" onclick="_hubNotesPreselect='${c.id}';switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
                         <button class="btn btn-outline btn-sm" onclick="hubDropCourse('${c.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);">Drop</button>
                     </div>
                 </div>`;
@@ -1668,12 +1669,21 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
         return '<div class="card" style="text-align:center;padding:60px;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:12px;">📄</div><h3 style="margin-bottom:8px;">No Notes Available</h3><p>Enroll in courses to access study notes.</p></div>';
     }
     const readLessons = safeGetLocal('read-lessons-' + me.id, {});
+    const notesFilterKey = 'hub-notes-filter-' + me.id;
+    const savedFilter = safeGetLocal(notesFilterKey, 'all');
+    const validIds = myCourses.map(c => c.id);
+    let defaultFilter = 'all';
+    if (myCourses.length === 1) defaultFilter = myCourses[0].id;
+    else if (_hubNotesPreselect && validIds.includes(_hubNotesPreselect)) defaultFilter = _hubNotesPreselect;
+    else if (savedFilter && validIds.includes(savedFilter)) defaultFilter = savedFilter;
+    else if (myCourses.length) defaultFilter = myCourses[0].id;
+    _hubNotesPreselect = null;
     let html = `
         <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="text" id="hub-notes-search" placeholder="🔍 Search notes..." oninput="filterHubNotes()" style="flex:1;min-width:200px;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;">
             <select id="hub-notes-filter" onchange="filterHubNotes()" style="padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;">
                 <option value="all">All Courses</option>
-                ${myCourses.map(c => `<option value="${esc(c.id)}">${esc(c.code)}</option>`).join('')}
+                ${myCourses.map(c => `<option value="${esc(c.id)}"${c.id === defaultFilter ? ' selected' : ''}>${esc(c.code)}</option>`).join('')}
             </select>
         </div>
         <div id="hub-notes-list">
@@ -1721,7 +1731,7 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                             </div>
                         `;
                     }).join('')}</div>` : '<div style="color:var(--text-muted);padding:12px;text-align:center;">No lessons published yet.</div>'}
-                    ${courseNotes.filter(n => !n.lessonId).length ? `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+                    ${courseNotes.filter(n => !n.lessonId).length ? `<div class="hub-note-general" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
                         <h4 style="font-size:12px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">📄 General Notes</h4>
                         ${courseNotes.filter(n => !n.lessonId).map(n => `
                             <div class="hub-note-card event-item" data-search="${esc((n.title + ' ' + (n.content || '')).toLowerCase())}" onclick="viewHubNote('${n.id}')" style="cursor:pointer;padding:10px;border-radius:6px;margin-bottom:4px;" onmouseover="this.style.background='var(--bg-input)'" onmouseout="this.style.background=''">
@@ -1741,11 +1751,14 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
     return html;
 }
 
-function renderHubNotesSearch() {}
+function renderHubNotesSearch() { filterHubNotes(); }
 
 function filterHubNotes() {
     const q = (document.getElementById('hub-notes-search')?.value || '').toLowerCase();
-    const courseId = document.getElementById('hub-notes-filter')?.value || 'all';
+    const sel = document.getElementById('hub-notes-filter');
+    const courseId = sel?.value || 'all';
+    const me = _hubGetMe();
+    if (sel && me && me.id) safeSetLocal('hub-notes-filter-' + me.id, courseId);
     let visibleCount = 0;
     document.querySelectorAll('.hub-note-course').forEach(courseEl => {
         const matchesCourse = courseId === 'all' || courseEl.dataset.courseId === courseId;
@@ -1755,6 +1768,10 @@ function filterHubNotes() {
             const show = matchesCourse && matchesSearch;
             card.style.display = show ? '' : 'none';
             if (show) { courseHasVisible = true; visibleCount++; }
+        });
+        courseEl.querySelectorAll('.hub-note-general').forEach(g => {
+            const anyVisible = g.querySelectorAll('.hub-note-card').length && [...g.querySelectorAll('.hub-note-card')].some(c => c.style.display !== 'none');
+            g.style.display = anyVisible ? '' : 'none';
         });
         courseEl.style.display = courseHasVisible ? '' : 'none';
     });
@@ -1972,13 +1989,6 @@ function _hubDebouncedRender() {
 }
 
 function _updateHubRefreshButton() {
-    const btn = document.querySelector('#screen-student-hub .screen-actions button[onclick="renderStudentHub()"]');
-    if (btn) {
-        const secs = Math.floor((Date.now() - _hubLastUpdate) / 1000);
-        if (secs < 3) btn.innerHTML = '🟢 Live';
-        else if (secs < 60) btn.innerHTML = `🔄 ${secs}s ago`;
-        else btn.innerHTML = `🔄 ${Math.floor(secs/60)}m ago`;
-    }
     const pillText = document.getElementById('hub-live-text');
     const pillDot = document.getElementById('hub-live-dot');
     if (pillText) {
