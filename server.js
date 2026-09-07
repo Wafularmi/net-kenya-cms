@@ -154,11 +154,12 @@ function externalizeSettingsRecord(rec) {
         try {
             ensureDocStore();
             fs.writeFileSync(settingsBlobPath(rec.key), buf);
-            const verify = fs.statSync(settingsBlobPath(rec.key));
-            if (verify.size > 0) {
-                if (rec.value && typeof rec.value === 'object') rec.value[field] = null;
-                else rec[field] = null;
-            }
+            // Keep base64 in DB as persistent source of truth (disk is
+            // ephemeral on Railway). Previously we nulled the field and
+            // relied solely on disk - a restart wiped the template and
+            // `loadGeneratorTemplateBytes` fell through to the "upload
+            // template" toast even though the user had saved. We now keep
+            // the value so `config.template` remains usable after restarts.
             return null;
         } catch (e) { console.error('externalizeSettingsRecord failed:', rec.key, e); return 'Could not write the PDF template to disk: ' + (e.message || e); }
     } else if (!tpl) {
@@ -1255,13 +1256,16 @@ function sanitizeBodyFields(obj, maxLen, preserve) {
     return obj;
 }
 
-// Branding images (logo + signature fields) should never be length-capped the
-// same way normal settings strings are; a truncated base64 PNG silently breaks
-// every letter/certificate that embeds it.
+// Branding images (logo + signature fields) and PDF templates should never be
+// length-capped the same way normal settings strings are; a truncated base64
+// silently breaks every letter/certificate or diploma that embeds it.
 function brandingImageKeys(rec) {
     const holder = rec && rec.value && typeof rec.value === 'object' ? rec.value : (rec || null);
     if (!holder) return [];
-    return Object.keys(holder).filter(k => k === 'logo' || k === 'logoDark' || k === 'receiptLogo' || k.indexOf('sig') === 0 || k.toLowerCase().includes('logo'));
+    const keys = Object.keys(holder).filter(k => k === 'logo' || k === 'logoDark' || k === 'receiptLogo' || k.indexOf('sig') === 0 || k.toLowerCase().includes('logo') || k === 'template');
+    // Always preserve the PDF template field for diploma/completion configs
+    if (rec && rec.key && SETTINGS_BLOBS[rec.key] && !keys.includes(SETTINGS_BLOBS[rec.key])) keys.push(SETTINGS_BLOBS[rec.key]);
+    return keys;
 }
 // Boot + watchdog: fresh restart = fresh trust baseline (a legit deploy), then
 // the 15-minute watchdog blocks any runtime tampering while the process lives.
