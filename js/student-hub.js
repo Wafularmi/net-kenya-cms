@@ -248,6 +248,59 @@ function hubSkeleton() {
         <div style="height:120px;background:var(--bg-input);border-radius:8px;overflow:hidden;"><div style="width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);animation:hub-shimmer 1.5s infinite;"></div></div>
     </div><style>@keyframes hub-shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>`;
 }
+function hubLiveBanner(c) {
+    try {
+        const halls = (c.data.meetings || c.data.halls || []).filter(h => h && h.kind === 'hall' && h.status === 'live');
+        const liveHall = halls[0];
+        const vcLessons = (c.myLessons || []).filter(l => l && l.virtualEnabled && l.virtualRoom);
+        // Heuristic: a VC lesson is "live" if it has a scheduled time within +/- 2 hours of now and is virtualEnabled
+        const now = Date.now();
+        const liveLesson = vcLessons.find(l => {
+            if (!l.virtualScheduled) return true; // if no schedule but enabled, treat as live when hall-like
+            const t = new Date(String(l.virtualScheduled).replace(' ','T')).getTime();
+            return !isNaN(t) && Math.abs(now - t) < 2*3600*1000;
+        }) || (vcLessons.length ? vcLessons[0] : null);
+        const banners = [];
+        if (liveHall) {
+            banners.push(`<div id="hub-live-banner-hall" style="background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;padding:14px 18px;border-radius:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 14px rgba(22,163,74,0.35);border:1px solid rgba(255,255,255,0.25);">
+                <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+                    <span style="width:12px;height:12px;background:#fff;border-radius:50%;animation:hub-pulse 1.4s infinite;flex-shrink:0;box-shadow:0 0 0 6px rgba(255,255,255,0.25);"></span>
+                    <div style="min-width:0;">
+                        <div style="font-weight:800;font-size:13px;line-height:1.2;letter-spacing:0.3px;opacity:0.95;">HALL MEETING</div>
+                        <div style="font-weight:800;font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔴 LIVE NOW: ${esc(liveHall.title || 'Virtual Hall')}</div>
+                        <div style="font-size:12px;opacity:0.95;margin-top:2px;">${liveHall.scheduled ? 'Started ' + esc(String(liveHall.scheduled).slice(0,16).replace('T',' ')) : 'Join muted — raise hand to speak'} · Large gathering</div>
+                    </div>
+                </div>
+                <button class="btn" style="background:#fff;color:#15803d;font-weight:800;padding:8px 18px;border-radius:8px;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.15);" onclick="hubJoinHall('${liveHall.id}')">🚀 Join Hall</button>
+            </div>`);
+        }
+        if (liveLesson) {
+            const course = (c.myCourses || []).find(cc => cc.id === liveLesson.courseId);
+            const lessonTitle = liveLesson.title || liveLesson.topic || 'Live Class';
+            banners.push(`<div id="hub-live-banner-class" style="background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;padding:14px 18px;border-radius:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 14px rgba(37,99,235,0.35);border:1px solid rgba(255,255,255,0.25);">
+                <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+                    <span style="width:12px;height:12px;background:#fff;border-radius:50%;animation:hub-pulse 1.4s infinite;flex-shrink:0;box-shadow:0 0 0 6px rgba(255,255,255,0.25);"></span>
+                    <div style="min-width:0;">
+                        <div style="font-weight:800;font-size:11px;letter-spacing:0.8px;opacity:0.9;">LIVE CLASS</div>
+                        <div style="font-weight:800;font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📚 ${esc(lessonTitle)} ${course ? '· ' + esc(course.name) : ''}</div>
+                        <div style="font-size:12px;opacity:0.92;margin-top:2px;">${liveLesson.virtualScheduled ? esc(String(liveLesson.virtualScheduled).slice(0,16).replace('T',' ')) : 'Virtual classroom is open'} · Tap to join</div>
+                    </div>
+                </div>
+                <button class="btn" style="background:#fff;color:#1d4ed8;font-weight:800;padding:8px 18px;border-radius:8px;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.15);" onclick="switchHubTab('live')">🎥 Join Class</button>
+            </div>`);
+        }
+        if (banners.length) return banners.join('');
+        // No live but has scheduled halls - show subtle upcoming banner
+        const upcoming = (c.data.meetings || []).filter(h => h && h.kind === 'hall' && h.status !== 'live' && h.scheduled).sort((a,b)=>String(a.scheduled).localeCompare(String(b.scheduled)))[0];
+        if (upcoming) {
+            return `<div id="hub-live-banner" style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:12px 16px;border-radius:10px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div style="font-size:13px;font-weight:600;">🎥 Next Hall Meeting: <b>${esc(upcoming.title || 'Virtual Hall')}</b> — ${esc(String(upcoming.scheduled).slice(0,16).replace('T',' '))}</div>
+                <button class="btn btn-outline btn-sm" onclick="switchHubTab('live')">View</button>
+            </div>`;
+        }
+    } catch {}
+    return '';
+}
 
 function _hubBuildComputed(data, me) {
     const studentId = me.id;
@@ -386,6 +439,7 @@ async function renderStudentHub() {
                     <span id="hub-live-text">Live</span>
                 </div>
             </div>
+            ${hubLiveBanner(c)}
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;">
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('courses')"><div class="stat-label">📚 Enrolled Courses</div><div class="stat-value" style="color:var(--success);">${c.myCourses.length}</div></div>
