@@ -1249,10 +1249,19 @@ function sanitizeBodyFields(obj, maxLen, preserve) {
                 obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, cap);
             }
         } else if (v && typeof v === 'object' && !Buffer.isBuffer(v)) {
-            sanitizeBodyFields(v, cap);
+            sanitizeBodyFields(v, cap, preserve);
         }
     }
     return obj;
+}
+
+// Branding images (logo + signature fields) should never be length-capped the
+// same way normal settings strings are; a truncated base64 PNG silently breaks
+// every letter/certificate that embeds it.
+function brandingImageKeys(rec) {
+    const holder = rec && rec.value && typeof rec.value === 'object' ? rec.value : (rec || null);
+    if (!holder) return [];
+    return Object.keys(holder).filter(k => k === 'logo' || k === 'logoDark' || k.indexOf('sig') === 0);
 }
 // Boot + watchdog: fresh restart = fresh trust baseline (a legit deploy), then
 // the 15-minute watchdog blocks any runtime tampering while the process lives.
@@ -3028,7 +3037,7 @@ return json(res, 200, result);
                     if (isDocStore) {
                         r = archiveHtmlContent(externalizeCertificate(rec).record);
                     }
-                    sanitizeBodyFields(r, 20000, isDocStore ? ['content'] : null);
+                    sanitizeBodyFields(r, 20000, isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(rec) : null));
                     const pk = r[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
                     const idx = db[store].findIndex(x => x[keyPath] === pk);
@@ -3183,7 +3192,8 @@ const parsed = JSON.parse(body);
                     if (isDocStore) {
                         toStore = archiveHtmlContent(externalizeCertificate(value).record);
                     }
-                    sanitizeBodyFields(toStore, 20000, isDocStore ? ['content'] : null);
+                    const preserveFields = isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(value) : null);
+                    sanitizeBodyFields(toStore, 20000, preserveFields);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
@@ -3226,7 +3236,8 @@ if (store === 'settings') {
                     if (isDocStore) {
                         toStore = archiveHtmlContent(externalizeCertificate(value).record);
                     }
-                    sanitizeBodyFields(toStore, 20000, isDocStore ? ['content'] : null);
+                    const preserveFields = isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(value) : null);
+                    sanitizeBodyFields(toStore, 20000, preserveFields);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
