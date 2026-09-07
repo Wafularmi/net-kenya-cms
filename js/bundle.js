@@ -7094,11 +7094,17 @@ async function generateGraduationList() {
     }
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
-    const listHtml = `<div id="grad-list-print">
-        <div style="text-align:center;margin-bottom:24px;">
+    const ROWS_PER_PAGE = 28;
+    const totalPages = Math.max(1, Math.ceil(eligible.length / ROWS_PER_PAGE));
+    let pagesHtml = '';
+    for (let p = 0; p < totalPages; p++) {
+        const slice = eligible.slice(p * ROWS_PER_PAGE, (p + 1) * ROWS_PER_PAGE);
+        const pageNum = p + 1;
+        pagesHtml += `<div class="grad-page" style="${p < totalPages - 1 ? 'page-break-after:always;' : ''}padding-bottom:12px;">
+        <div style="text-align:center;margin-bottom:16px;${p > 0 ? 'padding-top:12px;border-top:1px solid var(--border);' : ''}">
             <div style="font-size:18px;font-weight:700;">${schoolName}</div>
             <div style="font-size:14px;font-weight:600;">GRADUATION LIST — ${program || 'ALL PROGRAMS'} ${year || ''}</div>
-            <div style="font-size:11px;color:var(--text-muted);">Generated: ${dateStr} | Total Eligible: ${eligible.length}</div>
+            <div style="font-size:11px;color:var(--text-muted);">Generated: ${dateStr} | Total Eligible: ${eligible.length} | Page ${pageNum} of ${totalPages}</div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
             <thead><tr style="background:var(--accent);color:#fff;">
@@ -7110,7 +7116,7 @@ async function generateGraduationList() {
                 <th style="padding:6px 8px;text-align:left;">Classification</th>
                 <th style="padding:6px 8px;text-align:left;">GPA</th>
             </tr></thead>
-            <tbody>${eligible.map((e, i) => `<tr style="border-bottom:1px solid var(--border);">
+            <tbody>${slice.map((e, idx) => { const i = p * ROWS_PER_PAGE + idx; return `<tr style="border-bottom:1px solid var(--border);">
                 <td style="padding:6px 8px;">${i + 1}</td>
                 <td style="padding:6px 8px;">${e.admissionNumber || e.id}</td>
                 <td style="padding:6px 8px;font-weight:500;">${e.name}</td>
@@ -7118,10 +7124,12 @@ async function generateGraduationList() {
                 <td style="padding:6px 8px;">${e.centerName || 'Main'}</td>
                 <td style="padding:6px 8px;">${e.classification}</td>
                 <td style="padding:6px 8px;">${typeof e.cgpa === 'number' ? e.cgpa.toFixed(2) : e.cgpa}</td>
-            </tr>`).join('')}</tbody>
+            </tr>`; }).join('')}</tbody>
         </table>
-        <div style="margin-top:16px;text-align:center;font-size:10px;color:var(--text-muted);">${schoolName} — Graduation List — Page 1 of 1</div>
-    </div>
+        <div style="margin-top:12px;text-align:center;font-size:10px;color:var(--text-muted);">${schoolName} — Graduation List — Page ${pageNum} of ${totalPages}</div>
+    </div>`;
+    }
+    const listHtml = `<div id="grad-list-print" style="@media print{.grad-page{page-break-inside:avoid;}}">${pagesHtml}</div>
     <div style="margin-top:12px;display:flex;gap:8px;">
         <button class="btn btn-primary" onclick="printGraduationList()">🖨️ Print</button>
     <button class="btn btn-outline" onclick="downloadGraduationListCSV()">📥 Download CSV</button>

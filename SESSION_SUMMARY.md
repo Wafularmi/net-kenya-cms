@@ -1,10 +1,14 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `v314` · **Assets:** `js/bundle.js?v=314`, `js/student-hub.js?v=32`
+**HEAD:** `v315` · **Assets:** `js/bundle.js?v=315`, `js/student-hub.js?v=32`
 **Deploy = `git push origin main`** (Railway auto-deploy)
 
-## Latest batch (v=314) — Staff table + password, banner, logos
+## Latest batch (v=315) — Graduation list pagination
+
+- **Graduation list** `js/bundle.js:7047` `generateGraduationList()` no longer hard-codes `Page 1 of 1` (`js/bundle.js:7123`). Now paginates at 28 rows/page, computes `totalPages = ceil(eligible/28)` and renders each page as `.grad-page` with `page-break-after:always` and footer `Page X of Y` + header `Page X of Y` — both screen and `js/bundle.js:7202` `printGraduationList()` now show correct numbering (was world-class blocker: last page read "1 of 1").
+
+## Previous batch (v=314) — Staff table + password, banner, logos
 
 - **Staff & Faculty table** `index.html:185` header now `Photo | ID | Name | Role | Department | Campus | Contact | Status | Actions` — matches `js/bundle.js:2824` `renderStaff()` 9-column row (photo + ID + name + role + dept + campus + contact + status + actions). Empty state `colspan` `8→9`.
 - **Staff password via Staff & Faculty** `js/bundle.js:2892` — robust lookup (`phone|email|loginUsername` + name fallback), clash check excludes the resolved account, new `hashPassword()` applied, and if username (phone) changed the orphaned old `users` entry is deleted (`js/bundle.js:2929`). Previously editing staff whose login was email-based left the old account untouched, so new password appeared not to take. Admin can also reset anywhere via **Settings → Users → 🔑 Pwd** `js/bundle.js:18836` / `DELETE users` and directly via `PUT users` (`server.js:665` allows `admin`).
