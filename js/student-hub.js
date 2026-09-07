@@ -292,14 +292,15 @@ function hubLiveBanner(c) {
         }) || (vcLessons.length ? vcLessons[0] : null);
         const banners = [];
         if (liveHall) {
-            const target = liveHall.scheduled ? new Date(String(liveHall.scheduled).replace(' ','T')).getTime() : Date.now();
+            const raw = liveHall.updatedAt || liveHall.createdAt || liveHall.scheduled || '';
+            const target = raw ? new Date(String(raw).replace(' ','T')).getTime() : Date.now();
             banners.push(`<div id="hub-live-banner-hall" style="background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;padding:14px 18px;border-radius:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 14px rgba(22,163,74,0.35);border:1px solid rgba(255,255,255,0.25);">
                 <div style="display:flex;align-items:center;gap:12px;min-width:0;">
                     <span style="width:12px;height:12px;background:#fff;border-radius:50%;animation:hub-pulse 1.4s infinite;flex-shrink:0;box-shadow:0 0 0 6px rgba(255,255,255,0.25);"></span>
                     <div style="min-width:0;">
                         <div style="font-weight:800;font-size:13px;line-height:1.2;letter-spacing:0.3px;opacity:0.95;">HALL MEETING</div>
                         <div style="font-weight:800;font-size:14px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔴 LIVE NOW: ${esc(liveHall.title || 'Virtual Hall')}</div>
-                        <div style="font-size:12px;opacity:0.95;margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span data-countdown="${target}" data-mode="live" style="font-weight:700;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:6px;">● Live • 00:00:00 elapsed</span><span>Large gathering</span></div>
+                        <div style="font-size:12px;opacity:0.95;margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span data-countdown="${target}" data-mode="live" style="font-weight:700;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:6px;">● Live • 00:00:00 elapsed</span><span>Started at ${raw ? esc(String(raw).slice(0,16).replace('T',' ')) : 'just now'} • Countdown from creation</span></div>
                     </div>
                 </div>
                 <button class="btn" style="background:#fff;color:#15803d;font-weight:800;padding:8px 18px;border-radius:8px;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,0.15);" onclick="hubJoinHall('${liveHall.id}')">🚀 Join Hall</button>
