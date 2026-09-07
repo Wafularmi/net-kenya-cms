@@ -99,24 +99,30 @@ function externalizeStoreRecords(store, rows) {
 const SETTINGS_BLOBS = { diplomaPdfConfig: 'template', completionPdfConfig: 'template' };
 function settingsBlobPath(key) { return path.join(DOC_STORE_DIR, 'settings-' + docSafeKey(key) + '-template.pdf'); }
 function externalizeSettingsRecord(rec) {
-    if (!rec || !SETTINGS_BLOBS[rec.key]) return rec;
+    if (!rec || !SETTINGS_BLOBS[rec.key]) return null;
     const field = SETTINGS_BLOBS[rec.key];
     const holder = rec.value && typeof rec.value === 'object' ? rec.value : rec;
     const tpl = holder ? holder[field] : null;
     if (typeof tpl === 'string' && tpl.length > 1000) {
+        let buf;
+        try { buf = Buffer.from(tpl, 'base64'); } catch (e) { return 'Invalid PDF template encoding. Please re-upload the template.'; }
+        if (buf.length < 8 || buf.slice(0, 5).toString('ascii') !== '%PDF-') {
+            return 'Uploaded file is not a valid PDF. Please save a real PDF template (e.g. export from Word/Canva) and upload that.';
+        }
         try {
             ensureDocStore();
-            fs.writeFileSync(settingsBlobPath(rec.key), Buffer.from(tpl, 'base64'));
+            fs.writeFileSync(settingsBlobPath(rec.key), buf);
             const verify = fs.statSync(settingsBlobPath(rec.key));
             if (verify.size > 0) {
                 if (rec.value && typeof rec.value === 'object') rec.value[field] = null;
                 else rec[field] = null;
             }
-        } catch (e) { console.error('externalizeSettingsRecord failed:', rec.key, e); }
+            return null;
+        } catch (e) { console.error('externalizeSettingsRecord failed:', rec.key, e); return 'Could not write the PDF template to disk: ' + (e.message || e); }
     } else if (!tpl) {
         try { if (fs.existsSync(settingsBlobPath(rec.key))) fs.unlinkSync(settingsBlobPath(rec.key)); } catch {}
     }
-    return rec;
+    return null;
 }
 function injectSettingsBlobs(rec) {
     if (!rec || !SETTINGS_BLOBS[rec.key]) return rec;
@@ -2961,6 +2967,10 @@ return json(res, 200, result);
                 const result = { ok: 0, errors: [] };
                 for (const rec of records) {
                     if (!rec || typeof rec !== 'object') { result.errors.push({ error: 'Not an object' }); continue; }
+                    if (store === 'settings') {
+                        const extErr = externalizeSettingsRecord(rec);
+                        if (extErr) { result.errors.push({ error: extErr }); continue; }
+                    }
                     sanitizeBodyFields(rec);
                     const pk = rec[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
@@ -3098,10 +3108,17 @@ return json(res, 200, result);
             req.on('data', c => body += c);
             req.on('end', () => {
                 try {
-                    const parsed = JSON.parse(body);
+const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
-                    sanitizeBodyFields(value);
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
+                    // PDF templates are externalized to disk BEFORE the generic 20k
+                    // field cap would truncate their base64 (this silently corrupted
+                    // every stored template and made generation fail).
+                    if (store === 'settings') {
+                        const extErr = externalizeSettingsRecord(value);
+                        if (extErr) return json(res, 400, { error: extErr });
+                    }
+                    sanitizeBodyFields(value);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
@@ -3119,8 +3136,6 @@ return json(res, 200, result);
                     if (store === 'certificates' || store === 'idCards' || store === 'idcards') {
                         toStore = externalizeCertificate(value).record;
                     }
-                    // Heavy PDF templates in settings go straight to disk, never the JSON.
-                    if (store === 'settings') externalizeSettingsRecord(value);
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);
@@ -3142,8 +3157,12 @@ return json(res, 200, result);
                 try {
                     const parsed = JSON.parse(body);
                     const value = parsed.value || parsed;
-                    sanitizeBodyFields(value);
                     if (!value || typeof value !== 'object') return json(res, 400, { error: 'Invalid body' });
+                    if (store === 'settings') {
+                        const extErr = externalizeSettingsRecord(value);
+                        if (extErr) return json(res, 400, { error: extErr });
+                    }
+                    sanitizeBodyFields(value);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
