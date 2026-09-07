@@ -1,14 +1,15 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `v313` · **Assets:** `js/bundle.js?v=313`, `js/student-hub.js?v=32`
+**HEAD:** `v314` · **Assets:** `js/bundle.js?v=314`, `js/student-hub.js?v=32`
 **Deploy = `git push origin main`** (Railway auto-deploy)
 
-## Latest batch (v=313) — Polish: flagged banner, logo mapping, staff password (pending push)
+## Latest batch (v=314) — Staff table + password, banner, logos
 
-- **Preview modal** no longer shows "Flagged" badge — `bundle.js:11382` `certStatusBadge()` now returns `''` for active/flagged docs (keeps `Revoked`/`Acknowledged`); the yellow "Flagged" pill in `viewCertificate()` (`bundle.js:11569`) is gone.
-- **Logo mapping** per request: `receiptLogo` → login screen, `logo` → every document + system header/interface. `server.js:3508` now injects `receiptLogo || logo` for `#login-logo` and `logo` for `#header-logo-img`/`.terms-logo`; `bundle.js:17563` `loadBranding()` mirrors it (header `settings.logo`, login `settings.receiptLogo || settings.logo`).
-- **Staff & Faculty password reset** — `bundle.js:2892` `saveStaff()` now resolves the linked `users` account via `phone|email|loginUsername` (and fallback by name/role), so changing the password in the Staff form reliably updates the correct login account. Admin can also reset any account via **Settings → Users → 🔑 Pwd** (`bundle.js:18836` `resetUserPassword()`), which directly `hashPassword()` + `dbPut('users')`. Server `canAccessStore()` already allows `admin` to `PUT users:*` (`server.js:665`).
+- **Staff & Faculty table** `index.html:185` header now `Photo | ID | Name | Role | Department | Campus | Contact | Status | Actions` — matches `js/bundle.js:2824` `renderStaff()` 9-column row (photo + ID + name + role + dept + campus + contact + status + actions). Empty state `colspan` `8→9`.
+- **Staff password via Staff & Faculty** `js/bundle.js:2892` — robust lookup (`phone|email|loginUsername` + name fallback), clash check excludes the resolved account, new `hashPassword()` applied, and if username (phone) changed the orphaned old `users` entry is deleted (`js/bundle.js:2929`). Previously editing staff whose login was email-based left the old account untouched, so new password appeared not to take. Admin can also reset anywhere via **Settings → Users → 🔑 Pwd** `js/bundle.js:18836` / `DELETE users` and directly via `PUT users` (`server.js:665` allows `admin`).
+- **Preview modal** no longer shows "Flagged" badge — `js/bundle.js:11382` `certStatusBadge()` now returns `''` for active/flagged docs (keeps `Revoked`/`Acknowledged`); the yellow "Flagged" pill in `viewCertificate()` (`js/bundle.js:11569`) is gone.
+- **Logo mapping** per request: `receiptLogo` → login screen, `logo` → every document + system header/interface. `server.js:3508` now injects `receiptLogo || logo` for `#login-logo` and `logo` for `#header-logo-img`/`.terms-logo`; `js/bundle.js:17563` `loadBranding()` mirrors it (header `settings.logo`, login `settings.receiptLogo || settings.logo`).
 
 ## Previous batch (v=312+) — Documents fully working (e7a193c → 82d5211)
 

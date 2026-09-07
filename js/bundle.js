@@ -2829,7 +2829,7 @@ async function renderStaff() {
         const subInfo = 'Login: ' + (s.phone || s.loginUsername || '—') + (s.email ? ' • ' + s.email : '');
         const centerInfo = isCoord ? '—' : (campus ? campus.name : 'Main');
         return `<tr><td style="width:40px;">${!isCoord && s.photo ? `<img src="${s.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;border:1px solid var(--border);">` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--bg-input);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);">${(s.name || '?').charAt(0).toUpperCase()}</div>`}</td><td><b>${isCoord ? 'Coordinator' : s.id}</b></td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${subInfo}</div></td><td>${roleDisplay}</td><td>${s.department || '--'}</td><td>${centerInfo}</td><td>${s.phone || '--'}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span></td><td><button class="btn btn-outline btn-sm" onclick="editStaff('${s.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStaff('${s.id}')">Del</button></td></tr>`;
-    }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No staff records.</td></tr>';
+    }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No staff records.</td></tr>';
 }
 async function showStaffForm(staff = null) {
     const isEdit = !!staff;
@@ -2926,6 +2926,10 @@ async function saveStaff() {
         ...(role === 'coordinator' ? { regionId: document.getElementById('staff-region').value } : {}),
         ...(existingUser ? { createdAt: existingUser.createdAt } : { createdAt: new Date().toISOString() })
     };
+    // Admin override: if username changed, clean up orphaned old login so the new password/username is the only valid account
+    if (existingUser && String(existingUser.username).toLowerCase() !== String(username).toLowerCase()) {
+        try { await dbDelete('users', existingUser.username); } catch {}
+    }
     await dbPut('users', user);
 
     if (role === 'coordinator') {
