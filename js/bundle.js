@@ -10189,7 +10189,6 @@ function _completionPersistRestored() { try { localStorage.setItem('completion_r
 async function showCompletionPdfGenerator() {
     const rec = await dbGet('settings', 'completionPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
-    if (!config || !config.template) return showToast('Upload and save a PDF template first!', { type: 'danger' });
     const students = await dbGetAll('students');
     const certificates = await dbGetAll('certificates');
     const active = students.filter(s => s.status === 'active');
@@ -10268,23 +10267,17 @@ async function generateCompletionPdf() {
     if (!compDate) return showToast('Enter completion date!');
     const rec = await dbGet('settings', 'completionPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
-    if (!config || !config.template) return showToast('Upload a PDF template first!', { type: 'danger' });
     try {
         closeModal();
         showToast('Generating completion certificate...', { type: 'info' });
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
-        if (!config.template || typeof config.template !== 'string') throw new Error('No valid PDF template configured.');
-        let pdfBytes;
-        try {
-            pdfBytes = Uint8Array.from(atob(config.template), c => c.charCodeAt(0));
-        } catch (e) {
-            throw new Error('Invalid PDF template encoding. Please re-upload the template.');
-        }
+        let pdfBytes = await loadGeneratorTemplateBytes(config, 'completionPdfConfig');
+        if (!pdfBytes) throw new Error('No PDF template available. Please upload and save a PDF template first in Settings → Completion PDF.');
         let pdfDoc;
         try {
             pdfDoc = await PDFDocument.load(pdfBytes);
         } catch (e) {
-            throw new Error('Failed to load PDF template. The template may be corrupted.');
+            throw new Error('Failed to load PDF template. The delivered template bytes could not be parsed — please re-upload the template in Settings (a freshly saved template is streamed directly from disk).');
         }
         let page = pdfDoc.getPages()[0];
         const fontMap = { 'Times Roman': StandardFonts.TimesRoman, 'Helvetica': StandardFonts.Helvetica, 'Courier': StandardFonts.Courier };
@@ -10556,7 +10549,6 @@ function _diplomaPersistRestored() { try { localStorage.setItem('diploma_restore
 async function showDiplomaPdfGenerator() {
     const rec = await dbGet('settings', 'diplomaPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
-    if (!config || !config.template) return showToast('Upload and save a PDF template first!', { type: 'danger' });
     const students = await dbGetAll('students');
     const certificates = await dbGetAll('certificates');
     const active = students.filter(s => s.status === 'active');
@@ -10635,6 +10627,23 @@ function removeRestoredDiplomaName(id) {
     _diplomaPersistRestored();
     renderDiplomaGenDropdown();
 }
+// Resolve template bytes for the Diploma/Completion PDF generators.
+// Priority: inline base64 from the settings record, then the authoritative
+// on-disk blob streamed via /api/settings-template/:key (avoids any JSON
+// truncation/corruption of the huge base64 field in server-data.json).
+async function loadGeneratorTemplateBytes(config, configKey) {
+    if (config && typeof config.template === 'string' && config.template.length > 200) {
+        try { return Uint8Array.from(atob(config.template), c => c.charCodeAt(0)); } catch {}
+    }
+    try {
+        const r = await fetch('/api/settings-template/' + encodeURIComponent(configKey), { headers: getAuthHeaders() });
+        if (r.ok) {
+            const buf = await r.arrayBuffer();
+            if (buf && buf.byteLength > 100) return new Uint8Array(buf);
+        }
+    } catch {}
+    return null;
+}
 async function generateDiplomaPdf() {
     const studentId = document.getElementById('diploma-pdf-student').value;
     const gradDate = document.getElementById('diploma-pdf-date').value;
@@ -10643,30 +10652,20 @@ async function generateDiplomaPdf() {
     if (!gradDate) return showToast('Enter graduation date!');
     const rec = await dbGet('settings', 'diplomaPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
-    if (!config || !config.template) return showToast('Upload a PDF template first!', { type: 'danger' });
     try {
         closeModal();
         showToast('Generating diploma...', { type: 'info' });
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
-        
-        // Validate template
-        if (!config.template || typeof config.template !== 'string') {
-            throw new Error('No valid PDF template configured. Please upload and save a template first.');
-        }
-        
-        let pdfBytes;
-        try {
-            pdfBytes = Uint8Array.from(atob(config.template), c => c.charCodeAt(0));
-        } catch (e) {
-            throw new Error('Invalid PDF template encoding. Please re-upload the template.');
-        }
-        
+
+        let pdfBytes = await loadGeneratorTemplateBytes(config, 'diplomaPdfConfig');
+        if (!pdfBytes) throw new Error('No PDF template available. Please upload and save a PDF template first in Settings → Diploma PDF.');
+
         let pdfDoc;
         try {
             pdfDoc = await PDFDocument.load(pdfBytes);
         } catch (e) {
             console.error('PDF load error:', e);
-            throw new Error('Failed to load PDF template. The template may be corrupted or have circular references. Please re-upload a simpler PDF.');
+            throw new Error('Failed to load PDF template. The delivered template bytes could not be parsed — please re-upload the template in Settings (a freshly saved template is streamed directly from disk).');
         }
         
         let page = pdfDoc.getPages()[0];

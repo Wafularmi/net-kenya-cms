@@ -2844,6 +2844,30 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         return true;
     }
 
+    // Raw PDF template stream — bypasses the settings JSON/base64 pipeline so the
+    // generator always loads the authoritative bytes from disk (docs/settings-<key>-template.pdf).
+    if (parts.length === 3 && parts[1] === 'settings-template' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const key = parts[2];
+        if (!SETTINGS_BLOBS[key]) return json(res, 404, { error: 'Unknown template' });
+        const user = getRequestUser(req);
+        if (!canAccessStore(user, 'certificates', 'GET')) return json(res, 403, { error: 'Forbidden' });
+        const file = settingsBlobPath(key);
+        if (!fs.existsSync(file)) return json(res, 404, { error: 'No template stored. Upload a PDF template in Settings.' });
+        try {
+            const buf = fs.readFileSync(file);
+            res.writeHead(200, {
+                'Content-Type': 'application/pdf',
+                'Content-Length': buf.length,
+                'Content-Disposition': 'inline; filename="template.pdf"',
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-store'
+            });
+            res.end(buf);
+        } catch (e) { json(res, 500, { error: e.message || e }); }
+        return true;
+    }
+
     // -----------------------------------------------------------
     // Security & cleanup endpoints â€” /api/security/*
     // (admin only)
