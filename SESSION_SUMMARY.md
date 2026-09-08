@@ -1,10 +1,16 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `v316` · **Assets:** `js/bundle.js?v=316`, `js/student-hub.js?v=36`
+**HEAD:** `v317` · **Assets:** `js/bundle.js?v=317`, `js/student-hub.js?v=36`
 **Deploy = `git push origin main`** (Railway auto-deploy)
 
-## Latest batch (v=316) — Emergency: lessons & videos "Lesson not found"
+## Latest batch (v=317) — Attendance: Moi's Bridge missing (Damaris Wamboi)
+
+- **Attendance roster** `js/bundle.js: attendanceRoster()` now includes `inactive` / `on-leave` (excludes only `graduated|dropped|alumni|suspended`) — fixes `STU-MP2HGL9POLS0` **DAMARIS WAMBOI** `SC-MNSC` (Moi's Bridge, `status:inactive`) not appearing when recording attendance for **Moi's Bridge Study Center**. Replicated check: 73 other `s.status === 'active'` filters remain correct for graduation/fees, but attendance system-wide now shows blocked students.
+- **Students table search** `js/bundle.js:2141` — when searching by name/admission (e.g., "Damaris") the `statusFilter` is now ignored (`if (statusFilter && !search)`), so blocked/inactive matches are found even when filter is `Active`.
+- **Previous** `v316` emergency lessons & videos kept.
+
+## Previous batch (v=316) — Emergency: lessons & videos "Lesson not found"
 
 - **Student Hub** `js/student-hub.js:1874` `viewHubLessonNote()` and `js/bundle.js:3247` `viewStudentLesson()` now resilient: if the 60s `loadStudentHubData()` cache or content-gating filtered the lesson, they fallback to `dbGet('lessons', id)` then `dbGetAll('lessons')` before showing the toast — emergency `showToast('Lesson not found')` no longer blocks videos/notes. Video source now checks `videoUrl||video||videoLink` (`js/bundle.js:3257`, `js/student-hub.js:1901`) and badge uses `_videoSrcHub`, so **all video lessons open** after `📖 Read notes first` gate passes.
 - **Previous** `v315` graduation pagination kept.

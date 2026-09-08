@@ -2152,7 +2152,8 @@ async function renderStudents() {
             return nameMatch || admMatch || emailMatch;
         });
     }
-    if (statusFilter) filtered = filtered.filter(s => s.status === statusFilter);
+    // When searching by name/admission (e.g., finding Damaris Wamboi in blocked list), show matches regardless of status filter — fixes Moi's Bridge case where inactive students were hidden
+    if (statusFilter && !search) filtered = filtered.filter(s => s.status === statusFilter);
     if (campusFilter) filtered = filtered.filter(s => s.studyCenterId === campusFilter);
     if (programFilter) filtered = filtered.filter(s => s.program === programFilter);
     filtered.sort((a, b) => new Date(b.enrollDate) - new Date(a.enrollDate));
@@ -3402,16 +3403,17 @@ document.getElementById('course-search').addEventListener('input', debounce(rend
 //  - All Centers      => active students enrolled in the course (global course roster).
 //  - The "officially enrolled" count lets the UI explain any difference.
 function attendanceRoster(students, enrollments, courseId, centerId) {
-    const active = students.filter(s => s.status === 'active');
+    // Include active + inactive/on-leave for attendance — graduated/dropped/alumni are excluded; this fixes Moi's Bridge (Damaris Wamboi) and is replicated system-wide
+    const eligible = students.filter(s => !['graduated','dropped','alumni','suspended'].includes(s.status));
     const courseEnrollments = (enrollments || []).filter(e => String(e.courseId) === String(courseId));
     const enrolledIds = new Set(courseEnrollments.map(e => String(e.studentId)));
     let roster;
     if (centerId) {
-        roster = active.filter(s => String(s.studyCenterId) === String(centerId));
+        roster = eligible.filter(s => String(s.studyCenterId) === String(centerId));
     } else if (courseEnrollments.length === 0) {
-        roster = active;
+        roster = eligible;
     } else {
-        roster = active.filter(s => enrolledIds.has(String(s.id)));
+        roster = eligible.filter(s => enrolledIds.has(String(s.id)));
     }
     const officiallyEnrolled = roster.filter(s => enrolledIds.has(String(s.id))).length;
     return { roster, enrolledCount: officiallyEnrolled };
