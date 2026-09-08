@@ -1,10 +1,15 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `v317` · **Assets:** `js/bundle.js?v=317`, `js/student-hub.js?v=36`
+**HEAD:** `v318` · **Assets:** `js/bundle.js?v=317`, `js/student-hub.js?v=37`
 **Deploy = `git push origin main`** (Railway auto-deploy)
 
-## Latest batch (v=317) — Attendance: Moi's Bridge missing (Damaris Wamboi)
+## Latest batch (v=318) — Notes: revert to gated, rectify logo
+
+- **Notes gating reverted** `js/student-hub.js:582` `myNotes` now filtered by `ok.has(n.courseId)` again (gated) — per your "revert to gated notes" and "filter was on different course" clarification; notes for locked courses correctly hidden until unlocked, while course management (admin) still shows all.
+- **Logo on notes** `js/bundle.js: downloadNote()` `logoUrl = branding.logo` already correct — `branding.logo` is the documents/system header logo per your mapping (`receiptLogo → login`, `logo → header/docs/notes PDFs`). No change needed; verified `server.js:3508` and `js/bundle.js:17563` mapping.
+
+## Previous batch (v=317) — Attendance: Moi's Bridge missing (Damaris Wamboi)
 
 - **Attendance roster** `js/bundle.js: attendanceRoster()` now includes `inactive` / `on-leave` (excludes only `graduated|dropped|alumni|suspended`) — fixes `STU-MP2HGL9POLS0` **DAMARIS WAMBOI** `SC-MNSC` (Moi's Bridge, `status:inactive`) not appearing when recording attendance for **Moi's Bridge Study Center**. Replicated check: 73 other `s.status === 'active'` filters remain correct for graduation/fees, but attendance system-wide now shows blocked students.
 - **Students table search** `js/bundle.js:2141` — when searching by name/admission (e.g., "Damaris") the `statusFilter` is now ignored (`if (statusFilter && !search)`), so blocked/inactive matches are found even when filter is `Active`.
