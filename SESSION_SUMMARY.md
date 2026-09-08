@@ -1,10 +1,15 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `v315` · **Assets:** `js/bundle.js?v=315`, `js/student-hub.js?v=32`
+**HEAD:** `v316` · **Assets:** `js/bundle.js?v=316`, `js/student-hub.js?v=36`
 **Deploy = `git push origin main`** (Railway auto-deploy)
 
-## Latest batch (v=315) — Graduation list pagination
+## Latest batch (v=316) — Emergency: lessons & videos "Lesson not found"
+
+- **Student Hub** `js/student-hub.js:1874` `viewHubLessonNote()` and `js/bundle.js:3247` `viewStudentLesson()` now resilient: if the 60s `loadStudentHubData()` cache or content-gating filtered the lesson, they fallback to `dbGet('lessons', id)` then `dbGetAll('lessons')` before showing the toast — emergency `showToast('Lesson not found')` no longer blocks videos/notes. Video source now checks `videoUrl||video||videoLink` (`js/bundle.js:3257`, `js/student-hub.js:1901`) and badge uses `_videoSrcHub`, so **all video lessons open** after `📖 Read notes first` gate passes.
+- **Previous** `v315` graduation pagination kept.
+
+## Previous batch (v=315) — Graduation list pagination
 
 - **Graduation list** `js/bundle.js:7047` `generateGraduationList()` no longer hard-codes `Page 1 of 1` (`js/bundle.js:7123`). Now paginates at 28 rows/page, computes `totalPages = ceil(eligible/28)` and renders each page as `.grad-page` with `page-break-after:always` and footer `Page X of Y` + header `Page X of Y` — both screen and `js/bundle.js:7202` `printGraduationList()` now show correct numbering (was world-class blocker: last page read "1 of 1").
 

@@ -1874,10 +1874,14 @@ function filterHubNotes() {
 async function viewHubLessonNote(lessonId, courseId) {
     try {
         const data = await loadStudentHubData();
-        const lesson = (data.lessons || []).find(l => l.id === lessonId);
-        const course = (data.courses || []).find(c => c.id === courseId);
-        const note = (data.notes || []).find(n => n.lessonId === lessonId);
-        if (!lesson) return showToast('Lesson not found', { type: 'danger' });
+        let lesson = (data.lessons || []).find(l => String(l.id) === String(lessonId));
+        if (!lesson) { try { lesson = await dbGet('lessons', lessonId); } catch {} }
+        if (!lesson) { try { const all = await dbGetAll('lessons'); lesson = (all||[]).find(l=>String(l.id)===String(lessonId)); } catch {} }
+        let course = (data.courses || []).find(c => String(c.id) === String(courseId));
+        if (!course) { try { course = await dbGet('courses', courseId); } catch {} }
+        let note = (data.notes || []).find(n => String(n.lessonId) === String(lessonId));
+        if (!note) { try { const allN = await dbGetAll('notes'); note = (allN||[]).find(n=>String(n.lessonId)===String(lessonId)); } catch {} }
+        if (!lesson) return showToast('Lesson not found — please refresh and try again (ID: ' + lessonId + ')', { type: 'danger' });
 
         const content = note?.content || lesson.description || lesson.reference || 'No content available for this lesson yet.';
         const readTime = estimateReadTime(content);
@@ -1898,14 +1902,15 @@ async function viewHubLessonNote(lessonId, courseId) {
 
         const contentEscaped = esc(content);
         const safeContent = contentEscaped.replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
-        const videoHtml = lesson.videoUrl ? `<div style="max-width:720px;margin:0 auto 20px;">${embedVideo(lesson.videoUrl)}</div>` : '';
+        const _videoSrcHub = lesson.videoUrl || lesson.video || lesson.videoLink || '';
+        const videoHtml = _videoSrcHub ? `<div style="max-width:720px;margin:0 auto 20px;">${embedVideo(_videoSrcHub)}</div>` : '';
         const html = `
             <div style="max-width:760px;margin:0 auto;">
                 ${videoHtml}
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">${esc(course?.code || '')} · ${esc(course?.name || '')}</div>
                 <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(lesson.title)}</h2>
                 <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:20px;flex-wrap:wrap;align-items:center;">
-                    ${lesson.videoUrl ? '<span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;font-size:10px;">🎬 VIDEO</span>' : ''}
+                    ${_videoSrcHub ? '<span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;font-size:10px;">🎬 VIDEO</span>' : ''}
                     <span>⏱ ${readTime} min read</span>
                     ${currentIdx >= 0 ? `<span>📖 Lesson ${currentIdx + 1} of ${courseLessons.length}</span>` : ''}
                     ${note ? '<span style="color:var(--success);">📄 Study notes attached</span>' : ''}

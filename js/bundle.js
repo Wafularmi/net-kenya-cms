@@ -3245,9 +3245,17 @@ async function viewStudentCourse(courseId) {
     showModal(course.name + ' — Lessons & Resources', html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
 }
 async function viewStudentLesson(lessonId) {
-    const lesson = await dbGet('lessons', lessonId);
-    if (!lesson) return showToast('Lesson not found');
-    if (lesson.videoUrl) {
+    let lesson = null;
+    try { lesson = await dbGet('lessons', lessonId); } catch {}
+    if (!lesson) {
+        try {
+            const all = await dbGetAll('lessons');
+            lesson = (all || []).find(l => String(l.id) === String(lessonId));
+        } catch {}
+    }
+    if (!lesson) return showToast('Lesson not found — please refresh the page and try again. If it persists, contact admin (ID: ' + lessonId + ')', { type: 'danger' });
+    const _videoSrc = lesson.videoUrl || lesson.video || lesson.videoLink || '';
+    if (_videoSrc) {
         const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (currentUser.role === 'student') {
             const studentId = currentUser.studentId || currentUser.username;
@@ -3267,8 +3275,8 @@ async function viewStudentLesson(lessonId) {
     let html = `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course ? course.code + ' — ' + course.name : ''}</b></div>`;
     html += `<h3 style="margin:0 0 4px;">${lesson.order ? lesson.order + '. ' : ''}${lesson.title}</h3>`;
     if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
-    if (lesson.videoUrl) {
-        html += `<div style="max-width:720px;margin:0 auto 16px;">${embedVideo(lesson.videoUrl)}</div>`;
+    if (_videoSrc) {
+        html += `<div style="max-width:720px;margin:0 auto 16px;">${embedVideo(_videoSrc)}</div>`;
     }
     if (lesson.virtualEnabled && lesson.virtualRoom) {
         const vcSchedStr = lesson.virtualScheduled ? String(lesson.virtualScheduled) : '';
