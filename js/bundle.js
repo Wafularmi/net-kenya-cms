@@ -15353,7 +15353,7 @@ async function downloadNote(id, format = 'txt') {
  .header{text-align:center;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #2563eb;}
  .header h1{color:#2563eb;font-size:14px;margin:0;text-transform:uppercase;letter-spacing:1px;}
  .header h2{font-size:22px;margin:8px 0 0;color:#0f172a;}
- .logo{width:60px;height:60px;margin-bottom:8px;border-radius:50%;object-fit:cover;}
+ .logo{width:auto;max-width:140px;height:60px;margin-bottom:8px;border-radius:0;object-fit:contain;}
  .meta{font-size:12px;color:#64748b;margin-bottom:20px;text-align:center;}
  .content{font-size:14px;line-height:1.8;white-space:pre-line;}
  .footer{text-align:center;font-size:10px;color:#94a3b8;margin-top:30px;padding-top:12px;border-top:1px solid #e2e8f0;}
