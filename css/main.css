@@ -51,8 +51,8 @@ body {
 }
 
 .logo-container {
-    width: 48px;
-    height: 48px;
+    width: 77px;
+    height: 77px;
     border-radius: var(--radius);
     overflow: hidden;
     flex-shrink: 0;
@@ -73,7 +73,7 @@ body {
     background: var(--accent);
     color: var(--bg);
     font-weight: 700;
-    font-size: 18px;
+    font-size: 29px;
     border-radius: var(--radius);
 }
 
