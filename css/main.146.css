@@ -1083,10 +1083,10 @@ body {
 
     .header-right {
         gap: 6px;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
         align-items: center;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
+        justify-content: flex-end;
+        max-width: 100%;
     }
 
     .user-badge {
@@ -1095,16 +1095,33 @@ body {
         display: inline-flex;
         align-items: center;
     }
-    /* Keep bell + help + Exit on one row — balanced, no wrap */
+    /* Keep bell + help + Exit balanced on one row — no spill */
     .header-right .btn-icon,
     .header-right #btn-help,
-    .header-right .user-badge,
     .header-right #header-close-btn {
         flex-shrink: 0;
     }
     #header-close-btn {
         padding: 6px 12px;
         font-size: 12px;
+    }
+    /* Mobile-friendly: prevent any spill */
+    html, body, #app, #main-header, #main-content {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+    .header-left {
+        min-width: 0;
+        flex: 1;
+    }
+    .header-info {
+        min-width: 0;
+        overflow: hidden;
+    }
+    .header-info h1, .header-info .tagline {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .dashboard-grid .dashboard-cards {
