@@ -3859,6 +3859,8 @@ function studentIdSet(studentId, users) {
     }
     return ids;
 }
+// Attendance award threshold: 80%+ attendance earns the full attendance weight (binary).
+const ATT_AWARD_MIN = 80;
 function computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users) {
     const wt = course.weightage || [
         { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
@@ -3886,13 +3888,15 @@ function computeWeightedGrade(studentId, courseId, course, quizzes, submissions,
     const quizAvg = quizScores.length ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
     const catAvg = catScores.length ? catScores.reduce((a, b) => a + b, 0) / catScores.length : 0;
     const attPct = studentAttendance.length ? (studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100 : 0;
+    // Attendance award: binary — 80%+ earns the full attendance weight, below earns nothing.
+    const attAward = attPct >= ATT_AWARD_MIN ? 100 : 0;
     const examWeight = getWt('exam');
     const quizWeight = getWt('quiz');
     const catWeight = getWt('cat');
     const attWeight = getWt('attendance');
     const otherWeight = Math.max(0, 1 - examWeight - quizWeight - catWeight - attWeight);
-    const weightedScore = (examAvg * examWeight) + (quizAvg * quizWeight) + (catAvg * catWeight) + (attPct * attWeight);
-    const result = { examAvg, quizAvg, catAvg, attPct, weightedScore, examCount: examScores.length, quizCount: quizScores.length, catCount: catScores.length, attTotal: studentAttendance.length, examWeight: examWeight * 100, quizWeight: quizWeight * 100, catWeight: catWeight * 100, attWeight: attWeight * 100, otherWeight: otherWeight * 100 };
+    const weightedScore = (examAvg * examWeight) + (quizAvg * quizWeight) + (catAvg * catWeight) + (attAward * attWeight);
+    const result = { examAvg, quizAvg, catAvg, attPct, attAwarded: attPct >= ATT_AWARD_MIN, weightedScore, examCount: examScores.length, quizCount: quizScores.length, catCount: catScores.length, attTotal: studentAttendance.length, examWeight: examWeight * 100, quizWeight: quizWeight * 100, catWeight: catWeight * 100, attWeight: attWeight * 100, otherWeight: otherWeight * 100 };
     result.weightage = wt;
     return result;
 }
@@ -4696,6 +4700,8 @@ async function startExam(examId) {
     if (!regs.length) return showToast('Not registered for this exam!');
     const subs = (await dbGetAll('submissions')).filter(s => s.quizId === examId && s.studentId === studentId);
     if (subs.length) return showToast('Already submitted this exam!');
+    // Auto-generated finals: sit the linked quiz so the score flows into the 50% exam weight.
+    if (exam.quizId) { try { const lq = await dbGet('quizzes', exam.quizId); if (lq) return startQuiz(exam.quizId); } catch {} }
     // Drip: exam opens only when every drip lesson in its course is complete (students only).
     if (currentUser.role === 'student') {
         try {
@@ -9539,7 +9545,7 @@ async function embedTemplateOnPaperPage(pdfDoc, srcPage, tgtW, tgtH, templateB64
     const srcH = srcPage.getHeight();
     const ratio = Math.min(tgtW / srcW, tgtH / srcH);
     const renderScale = ratio * 2;
-    const pdfData = Uint8Array.from(atob(templateB64), c => c.charCodeAt(0));
+    const pdfData = (templateB64 instanceof Uint8Array) ? templateB64 : Uint8Array.from(atob(templateB64), c => c.charCodeAt(0));
     const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: renderScale });
@@ -9819,6 +9825,7 @@ async function saveDiplomaPdfConfig() {
     };
     try {
         await dbSet('settings', 'diplomaPdfConfig', config);
+        try { tplCacheClear('diplomaPdfConfig'); } catch {}
         showToast('Diploma PDF configuration saved!', { type: 'success' });
         if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
     } catch (e) {
@@ -10199,6 +10206,7 @@ async function saveCompletionPdfConfig() {
     };
     try {
         await dbSet('settings', 'completionPdfConfig', config);
+        try { tplCacheClear('completionPdfConfig'); } catch {}
         showToast('Completion Certificate PDF configuration saved!', { type: 'success' });
         if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
     } catch (e) {
@@ -10397,13 +10405,23 @@ async function generateCompletionPdf() {
     const nameOverride = document.getElementById('completion-pdf-name-override').value.trim();
     if (!studentId) return showToast('Select a student!');
     if (!compDate) return showToast('Enter completion date!');
-    const rec = await dbGet('settings', 'completionPdfConfig');
-    const config = (rec && rec.value) ? rec.value : rec;
+    // Student + template config in parallel; template bytes reused from session cache.
+    const studentP = dbGet('students', studentId);
+    let config = null, pdfBytes = null;
+    try {
+        const hit = tplCacheGet('completionPdfConfig');
+        if (hit && hit.pdfBytes) { config = hit.config; pdfBytes = hit.pdfBytes; }
+        else {
+            const rec = await dbGet('settings', 'completionPdfConfig');
+            config = (rec && rec.value) ? rec.value : rec;
+            pdfBytes = await loadGeneratorTemplateBytes(config, 'completionPdfConfig');
+            if (config && pdfBytes) tplCacheSet('completionPdfConfig', config, pdfBytes);
+        }
+    } catch {}
     try {
         closeModal();
         showToast('Generating completion certificate...', { type: 'info' });
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
-        let pdfBytes = await loadGeneratorTemplateBytes(config, 'completionPdfConfig');
         if (!pdfBytes) throw new Error('No PDF template available. Please upload and save a PDF template first in Settings → Completion PDF.');
         let pdfDoc;
         try {
@@ -10426,13 +10444,14 @@ async function generateCompletionPdf() {
             const tgtHpt = paperMm.hMm * mmToPt;
             if (Math.abs(page.getWidth() - tgtWpt) > 1 || Math.abs(page.getHeight() - tgtHpt) > 1) {
                 try {
-                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, config.template);
+                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, pdfBytes);
                 } catch (ee) {
                     console.warn('Paper resize failed, using template page size:', ee);
                 }
             }
         }
-        const student = await dbGet('students', studentId);
+        const student = await studentP;
+        if (!student) throw new Error('Student not found — please refresh and retry.');
         const displayName = nameOverride || student.name;
         const docId = 'CMP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         const vCode = generateVerificationCode();
@@ -10763,6 +10782,12 @@ function removeRestoredDiplomaName(id) {
 // Priority: inline base64 from the settings record, then the authoritative
 // on-disk blob streamed via /api/settings-template/:key (avoids any JSON
 // truncation/corruption of the huge base64 field in server-data.json).
+// Session cache for PDF templates: skips re-downloading ~1MB+ template per generation.
+// Invalidated on save (same session) + 10-min TTL (cross-tab staleness).
+const _tplCache = {};
+function tplCacheGet(key) { const e = _tplCache[key]; if (!e) return null; if (Date.now() - e.at > 600000) { delete _tplCache[key]; return null; } return e; }
+function tplCacheSet(key, config, pdfBytes) { _tplCache[key] = { config, pdfBytes, at: Date.now() }; }
+function tplCacheClear(key) { if (key) delete _tplCache[key]; else Object.keys(_tplCache).forEach(k => delete _tplCache[k]); }
 async function loadGeneratorTemplateBytes(config, configKey) {
     if (config && typeof config.template === 'string' && config.template.length > 200) {
         try { return Uint8Array.from(atob(config.template), c => c.charCodeAt(0)); } catch {}
@@ -10782,14 +10807,24 @@ async function generateDiplomaPdf() {
     const nameOverride = document.getElementById('diploma-pdf-name-override').value.trim();
     if (!studentId) return showToast('Select a student!');
     if (!gradDate) return showToast('Enter graduation date!');
-    const rec = await dbGet('settings', 'diplomaPdfConfig');
-    const config = (rec && rec.value) ? rec.value : rec;
+    // Student + template config in parallel; template bytes reused from session cache.
+    const studentP = dbGet('students', studentId);
+    let config = null, pdfBytes = null;
+    try {
+        const hit = tplCacheGet('diplomaPdfConfig');
+        if (hit && hit.pdfBytes) { config = hit.config; pdfBytes = hit.pdfBytes; }
+        else {
+            const rec = await dbGet('settings', 'diplomaPdfConfig');
+            config = (rec && rec.value) ? rec.value : rec;
+            pdfBytes = await loadGeneratorTemplateBytes(config, 'diplomaPdfConfig');
+            if (config && pdfBytes) tplCacheSet('diplomaPdfConfig', config, pdfBytes);
+        }
+    } catch {}
     try {
         closeModal();
         showToast('Generating diploma...', { type: 'info' });
         const { PDFDocument, StandardFonts, rgb } = PDFLib;
 
-        let pdfBytes = await loadGeneratorTemplateBytes(config, 'diplomaPdfConfig');
         if (!pdfBytes) throw new Error('No PDF template available. Please upload and save a PDF template first in Settings → Diploma PDF.');
 
         let pdfDoc;
@@ -10815,13 +10850,14 @@ async function generateDiplomaPdf() {
             const tgtHpt = paperMm.hMm * mmToPt;
             if (Math.abs(page.getWidth() - tgtWpt) > 1 || Math.abs(page.getHeight() - tgtHpt) > 1) {
                 try {
-                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, config.template);
+                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, pdfBytes);
                 } catch (ee) {
                     console.warn('Paper resize failed, using template page size:', ee);
                 }
             }
         }
-        const student = await dbGet('students', studentId);
+        const student = await studentP;
+        if (!student) throw new Error('Student not found — please refresh and retry.');
         const displayName = nameOverride || student.name;
         const docId = 'DIP-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         const vCode = generateVerificationCode();
@@ -11222,9 +11258,8 @@ async function generateCertificate() {
     if (currentUser.role === 'student') return showToast('Students cannot generate documents. Please contact the administration office.');
     const studentId = document.getElementById('cert-student').value;
     if (!studentId) return showToast('Select a student!');
-    const student = await dbGet('students', studentId);
-    const branding = await dbGet('settings', 'branding');
-    const academicSettings = await dbGet('settings', 'academic');
+    // Parallel fetches: 3 round-trips collapse into 1.
+    const [student, branding, academicSettings] = await Promise.all([dbGet('students', studentId), dbGet('settings', 'branding'), dbGet('settings', 'academic')]);
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const tagline = branding ? branding.tagline : '';
     const initials = branding ? branding.initials : 'CM';
@@ -11375,14 +11410,10 @@ async function generateCertificate() {
         ${a4PrintStyle}</div>`;
     } else if (type === 'transcript') {
         docTitle = 'Official Transcript';
-        const grades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
-        const courses = await dbGetAll('courses');
-        const payments = await dbGetAll('payments');
-        const chapel = await dbGetAll('chapel');
-        const attendance = await dbGetAll('attendance');
-        const centers = await getCenters();
-        const academic = await dbGet('settings', 'academic');
-        const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
+        // Parallel fetches: 7 round-trips collapse into 1.
+        const [gradesAll, courses, payments, chapel, attendance, centers, academic] = await Promise.all([dbGetAll('grades'), dbGetAll('courses'), dbGetAll('payments'), dbGetAll('chapel'), dbGetAll('attendance'), getCenters(), dbGet('settings', 'academic')]);
+        const grades = gradesAll.filter(g => g.studentId === studentId);
+        const allGrades = grades;
         const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
         const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
         const studentAttendance = attendance.filter(a => a.studentId === studentId);
@@ -11442,8 +11473,7 @@ async function generateCertificate() {
     } catch (e) { console.error('generateCertificate error:', e); showToast('Error: ' + e.message, { type: 'danger' }); }
 }
 async function renderDocumentHistory() {
-    const certs = await dbGetAll('certificates');
-    const students = await dbGetAll('students');
+    const [certs, students] = await Promise.all([dbGetAll('certificates'), dbGetAll('students')]);
     const studentMap = {};
     students.forEach(s => { studentMap[s.id] = s.name; });
     if (!certs.length) {
@@ -11461,15 +11491,15 @@ async function renderDocumentHistory() {
     html += '</tbody></table></div>';
     document.getElementById('certificates-list').innerHTML = html;
 
-    // Duplicate document detection + admin review UI
-    renderDuplicateAlerts();
+    // Duplicate document detection reuses the already-fetched lists (no extra round-trips).
+    renderDuplicateAlerts(certs, students);
 }
 
 // Group documents so we can spot multiple of the same kind issued to the same
 // student with different Document IDs / Verification Codes (potential duplicates).
-async function findDuplicateDocuments() {
-    const certs = await dbGetAll('certificates');
-    const students = await dbGetAll('students');
+async function findDuplicateDocuments(preCerts, preStudents) {
+    const certs = preCerts || await dbGetAll('certificates');
+    const students = preStudents || await dbGetAll('students');
     const studentMap = {};
     students.forEach(s => { studentMap[s.id] = s.name; });
     const groups = {};
@@ -11519,10 +11549,10 @@ function certStatusBadge(c) {
     return '';
 }
 
-function renderDuplicateAlerts() {
+function renderDuplicateAlerts(preCerts, preStudents) {
     const el = document.getElementById('duplicate-doc-alerts');
     if (!el) return;
-    findDuplicateDocuments().then(groups => {
+    findDuplicateDocuments(preCerts, preStudents).then(groups => {
         if (!groups.length) { el.innerHTML = ''; return; }
         let html = `
             <div style="border:1px solid #f59e0b;border-radius:10px;overflow:hidden;background:#fffbeb;">
@@ -14713,6 +14743,96 @@ async function renderStudentQuiz() {
     }
     const portal = document.getElementById('portal-quizzes');
     if (portal) portal.innerHTML = html || '<div style="color:var(--text-muted);text-align:center;padding:20px;">No assessments available</div>';
+}
+// ---------- Auto-generate assessment set: Quiz(15) + Mid(30) + Final(50), no reuse ----------
+// Priority is highest-stakes first (Final → Mid → Quiz). Standard weights 20/20/50/10 applied to the course.
+const AUTOGEN_LEVELS = [
+    { level: 'final', n: 50, assessmentType: 'exam', title: 'Final Examination', timeLimit: 120, maxRetakes: 1 },
+    { level: 'mid', n: 30, assessmentType: 'cat', title: 'Mid-Semester Exam', timeLimit: 60, maxRetakes: 1 },
+    { level: 'quiz', n: 15, assessmentType: 'quiz', title: 'Quiz', timeLimit: 20, maxRetakes: 2 }
+];
+function autoGenPick(bank, n) {
+    // Stratified round-robin across lessons (General bucket last); groups pre-shuffled.
+    const groups = {};
+    bank.forEach(q => { const k = q.lessonId || '__general__'; (groups[k] = groups[k] || []).push(q); });
+    Object.values(groups).forEach(g => { for (let i = g.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = g[i]; g[i] = g[j]; g[j] = t; } });
+    const keys = Object.keys(groups).sort((a, b) => (a === '__general__' ? 1 : 0) - (b === '__general__' ? 1 : 0));
+    const picks = [];
+    let round = 0;
+    while (picks.length < n) {
+        let took = false;
+        for (const k of keys) { if (picks.length >= n) break; const g = groups[k]; if (round < g.length) { picks.push(g[round]); took = true; } }
+        if (!took) break;
+        round++;
+    }
+    return picks;
+}
+async function showAutoGenForm() {
+    const courses = await dbGetAll('courses');
+    const qf = document.getElementById('quiz-course');
+    const def = (qf && qf.value) || '';
+    const content = `<div class="form-group"><label>Course *</label><select id="autogen-course" onchange="updateAutoGenInfo()" style="width:100%;"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${c.id === def ? 'selected' : ''}>${c.code} - ${c.name}</option>`).join('')}</select></div><div id="autogen-info" style="font-size:12px;background:var(--bg-input);border-radius:6px;padding:10px;margin-bottom:8px;"></div><div style="font-size:11px;color:var(--text-muted);">Re-running replaces this course's previous auto set only — manual papers are never touched. Papers go live immediately; the Final also lands in Examinations as Draft for scheduling.</div>`;
+    showModal('⚡ Auto-Generate Assessment Set', content, `<button class="btn btn-primary" onclick="runAutoGen()">⚡ Generate Set</button>`);
+    updateAutoGenInfo();
+}
+async function updateAutoGenInfo() {
+    const courseId = document.getElementById('autogen-course') ? document.getElementById('autogen-course').value : '';
+    const el = document.getElementById('autogen-info');
+    if (!el) return;
+    if (!courseId) { el.innerHTML = 'Select a course to preview.'; return; }
+    const bank = (await dbGetAll('questionBank')).filter(q => q.courseId === courseId);
+    const need = 95;
+    el.innerHTML = `Bank: <b>${bank.length}</b> questions → Final 50 + Mid 30 + Quiz 15 (no reuse, highest stakes first). Weights → Quiz 20 / Mid 20 / Final 50 / Attendance 10 (80%+).` + (bank.length < need ? `<br><span style="color:var(--warning);font-weight:700;">⚠ Short by ${need - bank.length} — lower levels will be partial.</span>` : '<br><span style="color:var(--success);">✓ Full set covered.</span>');
+}
+async function runAutoGen() {
+    const courseId = document.getElementById('autogen-course') ? document.getElementById('autogen-course').value : '';
+    if (!courseId) return showToast('Select a course!');
+    const course = await dbGet('courses', courseId);
+    if (!course) return showToast('Course not found!');
+    const bank = (await dbGetAll('questionBank')).filter(q => q.courseId === courseId);
+    if (!bank.length) return showToast('Question bank is empty for this course — add questions first!', { type: 'danger' });
+    const batch = 'AG-' + Date.now().toString(36).toUpperCase();
+    // Replace this course's previous auto set (manual papers untouched).
+    try {
+        const existingQ = (await dbGetAll('quizzes')).filter(q => q.courseId === courseId && q.autoGen);
+        for (const q of existingQ) { try { await dbDelete('quizzes', q.id); } catch {} }
+        const existingE = (await dbGetAll('exams')).filter(e => e.courseId === courseId && e.autoGen);
+        for (const e of existingE) { try { await dbDelete('exams', e.id); } catch {} }
+    } catch {}
+    let pool = bank.slice();
+    const made = [];
+    const now = new Date().toISOString();
+    const codePrefix = course.code ? course.code + ' ' : '';
+    for (const lv of AUTOGEN_LEVELS) {
+        const picks = autoGenPick(pool, lv.n);
+        pool = pool.filter(q => picks.indexOf(q) === -1);
+        if (!picks.length) { made.push({ level: lv.level, count: 0 }); continue; }
+        const qid = generateId('QUIZ');
+        const quiz = { id: qid, courseId, lessonId: '', title: codePrefix + lv.title + ' (Auto)', assessmentType: lv.assessmentType, passMark: 50, timeLimit: lv.timeLimit, maxRetakes: lv.maxRetakes, questionIds: picks.map(q => q.id), points: picks.reduce((s, q) => s + (q.points || 1), 0), published: true, autoGen: true, genLevel: lv.level, genBatch: batch, createdAt: now, updatedAt: now };
+        await dbPut('quizzes', quiz);
+        made.push({ level: lv.level, count: picks.length, id: qid, title: quiz.title, points: quiz.points });
+    }
+    // Final scheduling twin in Examinations (Draft for date/venue; sitters take the linked quiz so grades flow).
+    const fin = made.find(m => m.level === 'final' && m.count);
+    if (fin) {
+        let sem = (document.getElementById('exam-semester') && document.getElementById('exam-semester').value) || '';
+        if (!sem) { try { const ac = await dbGet('settings', 'academic'); sem = (ac && ac.semester) || '1'; } catch { sem = '1'; } }
+        const fq = await dbGet('quizzes', fin.id);
+        const exam = { id: 'EXM-' + Date.now(), courseId, studyCenterId: '', date: '', time: '', venue: '', invigilatorId: '', type: 'final', duration: 120, passMark: 50, totalMarks: fin.points || fin.count, questionIds: (fq && fq.questionIds ? fq.questionIds.slice() : []), title: codePrefix + 'Final Examination (Auto)', semester: String(sem), published: false, quizId: fin.id, autoGen: true, genLevel: 'final', genBatch: batch, createdAt: now, updatedAt: now };
+        await dbPut('exams', exam);
+    }
+    // Apply the 20/20/50/10 standard to the course.
+    course.weightage = [{ label: 'Final Examination', value: 50, type: 'exam' }, { label: 'Mid-Semester', value: 20, type: 'cat' }, { label: 'Quizzes', value: 20, type: 'quiz' }, { label: 'Attendance (80%+ = full)', value: 10, type: 'attendance' }];
+    course.examWeight = 50; course.quizWeight = 20; course.catWeight = 20; course.attWeight = 10;
+    await dbPut('courses', course);
+    closeModal();
+    try { renderQuizzes(); } catch {}
+    try { renderExams(); } catch {}
+    try { updateCourseDropdowns(); } catch {}
+    const summary = made.map(m => `${m.level}: ${m.count}`).join(' · ');
+    const short = 95 - made.reduce((s, m) => s + m.count, 0);
+    showToast(`Auto set created (${summary}). Weights 20/20/50/10 applied.` + (short > 0 ? ` Bank short by ${short} — add questions and re-run.` : ''), { duration: 8000 });
+    logAudit('created', 'autogen-set', { courseId, batch, made: summary });
 }
 async function startQuiz(quizId) {
     const quiz = await dbGet('quizzes', quizId);
