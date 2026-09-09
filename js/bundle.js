@@ -1110,11 +1110,23 @@ function adjustHeaderPadding() {
 async function showApp(user) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    document.getElementById('user-name-display').textContent = user.name || user.username;
-    const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
-    const regionName = user.role === 'coordinator' && user.regionId ? (window.__regionMap && window.__regionMap[user.regionId] || user.regionId) : '';
-    document.getElementById('user-role-badge').textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
-    document.getElementById('user-role-badge').className = 'badge badge-' + getRoleColor(user.role);
+    // Header badge removed — guard so stale/missing nodes never crash login flow
+    try {
+        const nameEl = document.getElementById('user-name-display');
+        if (nameEl) nameEl.textContent = user.name || user.username;
+        const roleEl = document.getElementById('user-role-badge');
+        if (roleEl) {
+            const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+            const regionName = user.role === 'coordinator' && user.regionId ? (window.__regionMap && window.__regionMap[user.regionId] || user.regionId) : '';
+            roleEl.textContent = regionName ? roleLabel + ' — ' + regionName : roleLabel;
+            roleEl.className = 'badge badge-' + getRoleColor(user.role);
+        }
+    } catch {}
+    // Belt-and-braces: students must never see Quick Enroll / WhatsApp Blast
+    if (user.role === 'student') {
+        const dashActions = document.querySelector('#screen-dashboard .screen-actions');
+        if (dashActions) dashActions.style.display = 'none';
+    }
     try {
         const manualByRole = { admin: '/admin-manual.html', assistant: '/assistant-admin-manual.html', coordinator: '/coordinator-manual.html', student: '/student-manual.html' };
         const manualLink = document.getElementById('manual-link');
