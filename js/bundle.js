@@ -847,13 +847,27 @@ async function loadMaintenanceMode() {
 
 async function setMaintenanceMode(checked) {
     var msg = document.getElementById('settings-maintenance-message');
-    var rec = null;
-    try { rec = await dbGet('settings', 'maintenance'); } catch (e) {}
-    var cur = (rec && rec.value) || {};
-    var value = { active: !!checked, message: (msg && msg.value ? msg.value.trim() : '') || cur.message || '' };
-    await dbPut('settings', { key: 'maintenance', value: value, updatedAt: new Date().toISOString(), updatedBy: (JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || '') });
-    showToast(checked ? 'Maintenance mode ON — visitors will see the maintenance page.' : 'Maintenance mode OFF — the system is live again.', { type: checked ? 'warning' : 'success' });
-    loadMaintenanceMode();
+    // Optimistic UI: toggle + status update instantly (server round-trip lags on big DB writes)
+    var cbEl = document.getElementById('settings-maintenance');
+    var statusEl = document.getElementById('maintenance-status');
+    function paintMaint(on) {
+        if (cbEl) cbEl.checked = !!on;
+        if (statusEl) { statusEl.textContent = on ? 'ON' : 'OFF'; statusEl.style.color = on ? 'var(--danger)' : 'var(--success)'; }
+    }
+    paintMaint(checked);
+    try {
+        var rec = null;
+        try { rec = await dbGet('settings', 'maintenance'); } catch (e) {}
+        var cur = (rec && rec.value) || {};
+        var value = { active: !!checked, message: (msg && msg.value ? msg.value.trim() : '') || cur.message || '' };
+        await dbPut('settings', { key: 'maintenance', value: value, updatedAt: new Date().toISOString(), updatedBy: (JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || '') });
+        showToast(checked ? 'Maintenance mode ON — visitors will see the maintenance page.' : 'Maintenance mode OFF — the system is live again.', { type: checked ? 'warning' : 'success' });
+    } catch (e) {
+        paintMaint(!checked); // revert on failure so UI never lies
+        showToast('Could not save maintenance mode: ' + (e && e.message ? e.message : e), { type: 'danger' });
+        return;
+    }
+    loadMaintenanceMode(); // confirm final state from server
 }
 
 async function saveMaintenanceMode() {
