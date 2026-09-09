@@ -14677,13 +14677,16 @@ async function showLangSelectionModal(studentId, currentLang, onConfirm) {
     window._langConfirm = async function() {
         const el = document.getElementById('lang-choice');
         const chosenLang = el ? el.value : 'en';
-        const student = await dbGet('students', studentId);
-        if (student) {
-            student.langPref = chosenLang;
-            await dbPut('students', student);
-        }
+        // Language saving must NEVER block starting — fail soft and always launch.
+        try {
+            const student = await dbGet('students', studentId);
+            if (student) {
+                student.langPref = chosenLang;
+                await dbPut('students', student);
+            }
+        } catch (e) { console.error('langPref save failed (non-blocking):', e); }
         closeModal();
-        onConfirm(chosenLang);
+        try { onConfirm(chosenLang); } catch (e) { console.error('quiz launch failed:', e); showToast('Could not start: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
     };
     const content = '<div style="text-align:center;padding:20px;">' +
         '<div style="font-size:48px;margin-bottom:16px;">🌐</div>' +
@@ -14835,11 +14838,16 @@ async function runAutoGen() {
     logAudit('created', 'autogen-set', { courseId, batch, made: summary });
 }
 async function startQuiz(quizId) {
-    const quiz = await dbGet('quizzes', quizId);
-    if (!quiz) return;
+    let quiz = null;
+    try {
+    quiz = await dbGet('quizzes', quizId);
+    } catch (e) { console.error('startQuiz load failed:', e); return showToast('Could not load: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
+    if (!quiz) return showToast('Assessment not found — please refresh and retry.');
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
-    const submissions = (await dbGetAll('submissions')).filter(s => s.quizId === quizId && s.studentId === studentId);
+    let studentId = currentUser.studentId || currentUser.username;
+    try { studentId = await resolveStudentId(currentUser) || studentId; } catch (e) { console.error('resolveStudentId failed (non-blocking):', e); }
+    let submissions = [];
+    try { submissions = (await dbGetAll('submissions')).filter(s => s.quizId === quizId && s.studentId === studentId); } catch (e) { console.error('submissions load failed:', e); return showToast('Could not reach server — check connection and retry.', { type: 'danger' }); }
     if (submissions.length >= (quiz.maxRetakes || 1)) return showToast('Maximum attempts reached!');
     // Drip: lesson-linked quiz requires its lesson unlocked (students only).
     if (currentUser.role === 'student' && quiz.lessonId) {
@@ -14852,11 +14860,14 @@ async function startQuiz(quizId) {
     const questions = await dbGetAll('questionBank');
     const quizQuestions = quiz.questionIds.map(id => questions.find(q => q.id === id)).filter(q => q);
     if (!quizQuestions.length) return showToast('No questions in this assessment!');
-    const studentLang = await getStudentPreferredLang(studentId);
-    showLangSelectionModal(studentId, studentLang, (chosenLang) => {
-        quizTimeRemaining = quiz.timeLimit ? quiz.timeLimit * 60 : 0;
-        showQuizInterface(quiz, quizQuestions, chosenLang);
-    });
+    let studentLang = 'en';
+    try { studentLang = await getStudentPreferredLang(studentId); } catch (e) { console.error('lang lookup failed (defaulting en):', e); }
+    try {
+        showLangSelectionModal(studentId, studentLang, (chosenLang) => {
+            quizTimeRemaining = quiz.timeLimit ? quiz.timeLimit * 60 : 0;
+            showQuizInterface(quiz, quizQuestions, chosenLang);
+        });
+    } catch (e) { console.error('startQuiz open failed:', e); showToast('Could not open: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
 }
 function showQuizInterface(quiz, questions, lang) {
     lang = lang || 'en';
