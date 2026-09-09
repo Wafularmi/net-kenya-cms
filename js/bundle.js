@@ -21391,11 +21391,11 @@ function startMaintenanceLiveSync() {
             try { handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
         });
         _maintSSE.onerror = () => {
-            try { if (_maintSSE && _maintSSE.readyState === EventSource.CLOSED) setTimeout(startMaintenanceLiveSync, 8000); } catch {}
+            try { if (_maintSSE && _maintSSE.readyState === EventSource.CLOSED) setTimeout(startMaintenanceLiveSync, 3000); } catch {}
         };
         // Fallback: tiny flag poll every 5s + immediate check on focus/return.
         if (!_maintPoll) {
-            _maintPoll = setInterval(checkMaintenanceNow, 5000);
+            _maintPoll = setInterval(checkMaintenanceNow, 2000);
             document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkMaintenanceNow(); });
             window.addEventListener('focus', checkMaintenanceNow);
             window.addEventListener('pageshow', checkMaintenanceNow);
