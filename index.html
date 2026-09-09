@@ -8,10 +8,10 @@
     <meta http-equiv="Expires" content="0">
     <title id="page-title">{{SCHOOL_NAME}} - Management System</title>
     <link rel="stylesheet" href="css/theme.css?v=127">
-    <link rel="stylesheet" href="css/main.146.css">
+    <link rel="stylesheet" href="css/main.146.css?v=147">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=323" as="script">
+    <link rel="preload" href="js/bundle.js?v=324" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -518,7 +518,7 @@
             <section id="screen-questions" class="screen">
                 <div class="screen-header"><h2>Question Bank</h2><div class="screen-actions">
                     <select id="qb-course" class="filter-select"><option value="">All Courses</option></select>
-                    <select id="qb-type" class="filter-select"><option value="">All Types</option><option value="mcq">Multiple Choice</option><option value="essay">Essay</option><option value="truefalse">True/False</option><option value="matching">🔗 Matching</option></select>
+                    <select id="qb-type" class="filter-select"><option value="">All Types</option><option value="mcq">Multiple Choice</option><option value="essay">Essay</option><option value="truefalse">True/False</option><option value="matching">🔗 Matching</option><option value="fillin">📝 Fill in the Blanks</option></select>
                     <button class="btn btn-primary" onclick="showQuestionForm()">+ Add Question</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Lesson</th><th>Type</th><th>Question</th><th>Answer</th><th>Points</th><th>Actions</th></tr></thead><tbody id="questions-body"></tbody></table></div></div>
@@ -1091,7 +1091,7 @@
                     <div class="card"><h3>Academic Settings</h3>
                         <div class="form-group"><label>Current Academic Year</label><input type="text" id="settings-academic-year"></div>
                         <div class="form-row"><div class="form-group"><label>Semester</label><select id="settings-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4" selected>Semester 4</option></select></div><div class="form-group"><label>Grading Scale</label><select id="settings-grading"><option value="standard">Standard (A-F, B+, B-)</option><option value="gpa4">GPA 4.0 Scale</option><option value="gpa5">GPA 5.0 Scale</option><option value="ects">ECTS (A-F)</option><option value="percent">Percentage Only</option></select></div></div>
-                        <div class="form-row"><div class="form-group"><label>Currency Code</label><input type="text" id="settings-currency-code" value="KES" maxlength="3" style="text-transform:uppercase;"></div><div class="form-group"><label>Currency Symbol</label><input type="text" id="settings-currency-symbol" value="KES" maxlength="10"></div><div class="form-group"><label>Decimals</label><select id="settings-currency-decimals"><option value="0">0</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></div></div>
+                        <div class="form-row"><div class="form-group"><label>Currency Code</label><input type="text" id="settings-currency-code" value="KES" maxlength="3" style="text-transform:uppercase;"></div><div class="form-group"><label>Currency Symbol</label><input type="text" id="settings-currency-symbol" value="KES" maxlength="10"></div><div class="form-group"><label>Decimals</label><select id="settings-currency-decimals"><option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></div></div>
                         <div class="form-group"><label>Programs (comma separated)</label><textarea id="settings-programs" rows="2" oninput="onProgramsChanged()"></textarea></div>
                         <div id="program-fees-container" style="margin-bottom:12px;"></div>
                         <div class="form-group"><label>Departments (comma separated)</label><textarea id="settings-departments" rows="2"></textarea></div>
@@ -1328,7 +1328,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=312"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=324"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=39"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

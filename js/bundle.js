@@ -3201,8 +3201,18 @@ async function updateCourseDropdowns() {
     const options = '<option value="">Select Course...</option>' + courses.map(c => `<option value="${c.id}">${c.code} - ${c.name}</option>`).join('');
     const attendanceSelect = document.getElementById('attendance-course');
     const gradesSelect = document.getElementById('grades-course');
-    if (attendanceSelect) attendanceSelect.innerHTML = options;
-    if (gradesSelect) gradesSelect.innerHTML = options;
+    // Never clobber the Chapel Service option, and never drop a live selection.
+    const attType = document.getElementById('attendance-type') ? document.getElementById('attendance-type').value : 'class';
+    if (attendanceSelect && attType !== 'chapel') {
+        const attVal = attendanceSelect.value;
+        attendanceSelect.innerHTML = options;
+        if (attVal && courses.some(c => c.id === attVal)) attendanceSelect.value = attVal;
+    }
+    if (gradesSelect) {
+        const grdVal = gradesSelect.value;
+        gradesSelect.innerHTML = options;
+        if (grdVal && courses.some(c => c.id === grdVal)) gradesSelect.value = grdVal;
+    }
 }
 async function renderSchedule() {
     const courses = await dbGetAll('courses');
@@ -4345,7 +4355,7 @@ async function onExamCourseChange(selectedLessonId, selectedIds) {
     document.getElementById('exam-lesson-select').innerHTML = '<option value="">All Lessons</option>' + filtered.map(l => `<option value="${l.id}" ${selectedLessonId === l.id ? 'selected' : ''}>${l.title}</option>`).join('');
     const qFiltered = questions.filter(q => q.courseId === courseId && (!selectedLessonId || q.lessonId === selectedLessonId));
     const sel = selectedIds || [];
-    const typeIcons = { 'mcq': '\u{1F538}', 'truefalse': '\u2705', 'matching': '\u{1F517}', 'essay': '\u{1F4DD}' };
+    const typeIcons = { 'mcq': '\u{1F538}', 'truefalse': '\u2705', 'matching': '\u{1F517}', 'fillin': '\u{1F4DD}', 'essay': '\u{1F4DD}' };
     document.getElementById('exam-question-list').innerHTML = qFiltered.map(q => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;"><input type="checkbox" class="exam-q-check" value="${q.id}" ${sel.includes(q.id) ? 'checked' : ''} onchange="updateExamQCount()"> <span style="font-weight:600;">${typeIcons[q.type] || '\u2753'}</span> ${q.question.substring(0, 80)}${q.question.length > 80 ? '...' : ''} <span class="badge badge-info" style="font-size:9px;">${q.points || 1}pt</span></label>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No questions available for this course</div>';
     updateExamQCount();
     if (course) {
@@ -6188,7 +6198,7 @@ async function renderMpesaTab() {
     const sel = document.getElementById('mpesa-student');
     if (sel) {
         const current = sel.value;
-        sel.innerHTML = '<option value="">Select student...</option>' + students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.admissionNumber || s.id})</option>`).join('');
+        sel.innerHTML = '<option value="">Select student...</option>' + students.map(s => `<option value="${s.id}">${s.name} (${s.admissionNumber || s.id})${s.status && s.status !== 'active' ? ' — ' + s.status : ''}</option>`).join('');
         if (current) sel.value = current;
         sel.onchange = async function () {
             const phoneInput = document.getElementById('mpesa-phone');
@@ -13852,6 +13862,8 @@ async function renderQuestionBank() {
     courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
     if (savedCourse && courses.some(c => c.id === savedCourse)) courseSelect.value = savedCourse;
     const typeSelect = document.getElementById('qb-type');
+    courseSelect.onchange = renderQuestions;
+    typeSelect.onchange = renderQuestions;
     const courseFilter = courseSelect.value;
     const typeFilter = typeSelect.value;
     let filtered = questions;
@@ -14326,8 +14338,11 @@ async function renderSubmissions() {
     const submissions = await dbGetAll('submissions');
     const students = await dbGetAll('students');
     const quizSelect = document.getElementById('sub-quiz');
+    const savedQuiz = quizSelect.value;
     quizSelect.innerHTML = '<option value="">All Quizzes</option>' + quizzes.map(q => `<option value="${q.id}">${q.title}</option>`).join('');
+    if (savedQuiz && quizzes.some(q => q.id === savedQuiz)) quizSelect.value = savedQuiz;
     const statusSelect = document.getElementById('sub-status');
+    const savedStatus = statusSelect.value;
     const quizFilter = quizSelect.value;
     const statusFilter = statusSelect.value;
     let filtered = submissions;
@@ -14343,6 +14358,7 @@ async function renderSubmissions() {
         const reviewBtn = isPendingReview ? `<button class="btn btn-warning btn-sm" onclick="showEssayReviewPanel('${s.id}')">📝 Review</button> ` : '';
         return `<tr><td>${student ? student.name : s.studentId}</td><td style="font-size:12px;">${quiz ? quiz.title : s.quizId}</td><td style="font-weight:700;">${s.score}%</td><td>${pointsDisplay}</td><td>${s.grade || '--'}</td><td><span class="badge badge-${isPendingReview ? 'warning' : statusClass}">${isPendingReview ? 'PENDING REVIEW' : s.status.toUpperCase()}</span></td><td>${s.attempts || 1}</td><td style="font-size:11px;">${formatDate(s.submittedAt)}</td><td>${reviewBtn}${s.essayAnalysis ? `<button class="btn btn-outline btn-sm" onclick="viewEssayAnalysis('${s.id}')">View AI</button>` : ''} <button class="btn btn-outline btn-sm" onclick="viewSubmissionDetails('${s.id}')">Details</button> <button class="btn btn-danger btn-sm" onclick="deleteSubmission('${s.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No submissions yet.</td></tr>';
+    if (savedStatus) statusSelect.value = savedStatus;
     quizSelect.onchange = renderSubmissions;
     statusSelect.onchange = renderSubmissions;
 }
@@ -19671,7 +19687,7 @@ function onStatementTypeChange() {
 async function populateStatementStudents() {
     const students = await dbGetAll('students');
     const sel = document.getElementById('stmt-student');
-    sel.innerHTML = '<option value="">Select student...</option>' + students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${escapeHtml(s.name)} ${s.admissionNumber ? '(' + escapeHtml(s.admissionNumber) + ')' : ''}</option>`).join('');
+    sel.innerHTML = '<option value="">Select student...</option>' + students.map(s => `<option value="${s.id}">${escapeHtml(s.name)} ${s.admissionNumber ? '(' + escapeHtml(s.admissionNumber) + ')' : ''}${s.status && s.status !== 'active' ? ' — ' + escapeHtml(s.status) : ''}</option>`).join('');
 }
 function generateStatement() {
     const type = document.getElementById('stmt-type').value;
@@ -20025,7 +20041,7 @@ async function loadPayrollStaffSelect() {
     const staff = await dbGetAll('staff');
     const sel = document.getElementById('payroll-staff');
     if (sel) {
-        sel.innerHTML = '<option value="">All Staff</option>' + staff.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+        sel.innerHTML = '<option value="">All Staff</option>' + staff.map(s => `<option value="${s.id}">${escapeHtml(s.name)}${s.status && s.status !== 'active' ? ' — ' + escapeHtml(s.status) : ''}</option>`).join('');
     }
     const m = document.getElementById('payroll-month');
     if (m) m.value = new Date().toISOString().slice(0, 7);
