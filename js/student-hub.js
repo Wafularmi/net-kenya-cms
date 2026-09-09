@@ -393,7 +393,7 @@ function _hubBuildComputed(data, me) {
         });
     });
     allScores.sort((a, b) => (b.submission?.submittedAt || b.grade?.gradedAt || '').localeCompare(a.submission?.submittedAt || a.grade?.gradedAt || ''));
-    const myLessons = (data.lessons || []).filter(l => enrolledIds.has(l.courseId) && l.published !== false);
+    const myLessons = (data.lessons || []).filter(l => enrolledIds.has(l.courseId) && (typeof isLessonLive === 'function' ? isLessonLive(l) : l.published !== false));
     const myNotes = (data.notes || []).filter(n => enrolledIds.has(n.courseId));
     const todoItems = [
         ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: (data.courses || []).find(c => c.id === q.courseId)?.name || '', date: q.dueDate || '' })),
@@ -1882,10 +1882,14 @@ async function viewHubLessonNote(lessonId, courseId) {
         let note = (data.notes || []).find(n => String(n.lessonId) === String(lessonId));
         if (!note) { try { const allN = await dbGetAll('notes'); note = (allN||[]).find(n=>String(n.lessonId)===String(lessonId)); } catch {} }
         if (!lesson) return showToast('Lesson not found — please refresh and try again (ID: ' + lessonId + ')', { type: 'danger' });
+        if (typeof isLessonLive === 'function' ? !isLessonLive(lesson) : lesson.published === false) {
+            const __viewer = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+            if (__viewer.role === 'student') return showToast('⏳ This lesson opens on ' + (typeof fmtPublishAt === 'function' ? fmtPublishAt(lesson.publishAt) : (lesson.publishAt || '')) + ' — please check back then.', { type: 'warning', duration: 5000 });
+        }
 
         const content = note?.content || lesson.description || lesson.reference || 'No content available for this lesson yet.';
         const readTime = estimateReadTime(content);
-        const courseLessons = (data.lessons || []).filter(l => l.courseId === courseId && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+        const courseLessons = (data.lessons || []).filter(l => l.courseId === courseId && (typeof isLessonLive === 'function' ? isLessonLive(l) : l.published !== false)).sort((a, b) => (a.order || 0) - (b.order || 0));
         const currentIdx = courseLessons.findIndex(l => l.id === lessonId);
         const prevLesson = currentIdx > 0 ? courseLessons[currentIdx - 1] : null;
         const nextLesson = currentIdx >= 0 && currentIdx < courseLessons.length - 1 ? courseLessons[currentIdx + 1] : null;

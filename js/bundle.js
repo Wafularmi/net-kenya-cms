@@ -3030,7 +3030,7 @@ async function renderCourses() {
             lessonsByCourseId[l.courseId] = { published: 0, total: 0, videos: 0 };
         }
         lessonsByCourseId[l.courseId].total++;
-        if (l.published) {
+        if (isLessonLive(l)) {
             lessonsByCourseId[l.courseId].published++;
             if (l.videoUrl) lessonsByCourseId[l.courseId].videos++;
         }
@@ -3267,6 +3267,10 @@ async function viewStudentLesson(lessonId) {
         } catch {}
     }
     if (!lesson) return showToast('Lesson not found — please refresh the page and try again. If it persists, contact admin (ID: ' + lessonId + ')', { type: 'danger' });
+    if (!isLessonLive(lesson)) {
+        const _viewer = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (_viewer.role === 'student') return showToast('⏳ This lesson opens on ' + fmtPublishAt(lesson.publishAt) + ' — please check back then.', { type: 'warning', duration: 5000 });
+    }
     const _videoSrc = lesson.videoUrl || lesson.video || lesson.videoLink || '';
     if (_videoSrc) {
         const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -3286,6 +3290,7 @@ async function viewStudentLesson(lessonId) {
     const lessonFiles = files.filter(f => f.lessonId === lessonId);
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦', 'mp4': '🎬', 'mp3': '🎵' };
     let html = `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course ? course.code + ' — ' + course.name : ''}</b></div>`;
+    if (isLessonScheduled(lesson)) html += `<div style="margin-bottom:12px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1d4ed8;">⏳ <b>Scheduled</b> — auto-publishes to students on ${fmtPublishAt(lesson.publishAt)}. Students cannot see it yet.</div>`;
     html += `<h3 style="margin:0 0 4px;">${lesson.order ? lesson.order + '. ' : ''}${lesson.title}</h3>`;
     if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
     if (_videoSrc) {
@@ -13136,6 +13141,11 @@ async function uploadRegistrarSignature() {
     reader.readAsDataURL(file);
 }
 
+// Scheduled publishing: publishAt (ISO/datetime-local, '' = immediate).
+// Live = published flag on AND (no publishAt OR publishAt passed). Scheduled = published AND publishAt in future.
+function isLessonLive(l) { if (!l || l.published === false) return false; if (!l.publishAt) return true; const t = new Date(l.publishAt).getTime(); return isNaN(t) || t <= Date.now(); }
+function isLessonScheduled(l) { if (!l || l.published === false || !l.publishAt) return false; const t = new Date(l.publishAt).getTime(); return !isNaN(t) && t > Date.now(); }
+function fmtPublishAt(p) { try { const d = new Date(p); if (isNaN(d.getTime())) return p || ''; return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return p || ''; } }
 async function renderLessons() {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
@@ -13151,6 +13161,7 @@ async function renderLessons() {
     const statusFilter = document.getElementById('lesson-status-filter').value;
     if (statusFilter === 'published') filtered = filtered.filter(l => l.published !== false);
     if (statusFilter === 'draft') filtered = filtered.filter(l => l.published === false);
+    if (statusFilter === 'scheduled') filtered = filtered.filter(isLessonScheduled);
     filtered.sort((a, b) => (a.order || 0) - (b.order || 0));
     document.getElementById('lessons-body').innerHTML = filtered.map((l, idx) => {
         const course = courses.find(c => c.id === l.courseId);
@@ -13158,7 +13169,9 @@ async function renderLessons() {
         const lessonNotes = notes.filter(n => n.lessonId === l.id).length;
         const lessonFiles = files.filter(f => f.lessonId === l.id).length;
         const isPublished = l.published !== false;
-        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? '' : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
+        const scheduled = isLessonScheduled(l);
+        const schedBadge = scheduled ? ' <span class="badge badge-info" style="font-size:9px;" title="Auto-publishes">⏳ ' + fmtPublishAt(l.publishAt) + '</span>' : '';
+        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? schedBadge : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No lessons yet. Click "+ Add Lesson" to create one.</td></tr>';
     courseSelect.addEventListener('change', renderLessons);
     document.getElementById('lesson-status-filter').addEventListener('change', renderLessons);
@@ -13184,7 +13197,7 @@ async function showLessonForm(lesson = null) {
     <div class="form-row"><div class="form-group"><label>Scheduled Time</label><input type="datetime-local" id="lesson-virtual-scheduled" value="${lesson && lesson.virtualScheduled ? lesson.virtualScheduled.replace(' ', 'T').slice(0,16) : ''}"></div>    <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;"><input type="checkbox" id="lesson-virtual-recording" ${lesson && lesson.virtualRecording ? 'checked' : ''}> <label style="margin:0;font-size:13px;">Record session</label></div></div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Integrates with Jitsi Meet. Students see "Join Live Class" in the course.</div>
 </div>
-<div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div>`;
+<div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div><div class="form-group"><label>⏳ Publish on (schedule — optional)</label><input type="datetime-local" id="lesson-publishAt" value="${lesson && lesson.publishAt ? String(lesson.publishAt).replace(' ', 'T').slice(0,16) : ''}" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Leave empty to publish immediately. A future date hides the lesson from students and auto-publishes it when the time arrives.</div></div>`;
     showModal(isEdit ? 'Edit Lesson' : 'Add Lesson', content, `<button class="btn btn-primary" onclick="saveLesson()">${isEdit ? 'Update' : 'Save'}</button>`);
     setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); }, 100);
 }
@@ -13210,6 +13223,7 @@ async function saveLesson() {
         reference: document.getElementById('lesson-reference').value.trim(),
         videoUrl: document.getElementById('lesson-video').value.trim(),
         published: document.getElementById('lesson-published').checked,
+        publishAt: (document.getElementById('lesson-publishAt') && document.getElementById('lesson-publishAt').value) || '',
         virtualEnabled: document.getElementById('lesson-virtual-enabled') ? document.getElementById('lesson-virtual-enabled').checked : (existing ? !!existing.virtualEnabled : false),
         virtualRoom: document.getElementById('lesson-virtual-room') ? document.getElementById('lesson-virtual-room').value.trim() : (existing ? existing.virtualRoom : ''),
         virtualPassword: document.getElementById('lesson-virtual-password') ? document.getElementById('lesson-virtual-password').value.trim() : (existing ? existing.virtualPassword : ''),
@@ -13220,7 +13234,8 @@ async function saveLesson() {
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
-    await dbPut('lessons', lesson); closeModal(); renderLessons(); invalidatePortalCache(); invalidateProgressCache(); showToast(editId ? 'Lesson updated!' : 'Lesson created!'); logAudit(editId ? 'updated' : 'created', 'lesson', { id, courseId, title });
+    if (lesson.publishAt && new Date(lesson.publishAt).getTime() > Date.now()) lesson.published = true; // future date = scheduled, auto-publishes at time
+    await dbPut('lessons', lesson); closeModal(); renderLessons(); invalidatePortalCache(); invalidateProgressCache(); showToast(isLessonScheduled(lesson) ? 'Lesson scheduled ⏳ — auto-publishes ' + fmtPublishAt(lesson.publishAt) : (editId ? 'Lesson updated!' : 'Lesson created!')); logAudit(editId ? 'updated' : 'created', 'lesson', { id, courseId, title });
 }
 async function editLesson(id) {
     const lesson = await dbGet('lessons', id);
@@ -13736,7 +13751,7 @@ async function renderQuizzes() {
             dbGetAll('students'), dbGetAll('quizRegistrations'), dbGetAll('examRegistrations')
         ]);
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-        const publishedLessonIds = new Set(lessons.filter(l => l.published).map(l => l.id));
+        const publishedLessonIds = new Set(lessons.filter(isLessonLive).map(l => l.id));
         const availableQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !inactiveCourseIds.has(q.courseId));
         const quizRegs = allQuizRegs.filter(r => r.studentId === studentId);
         const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
@@ -15185,7 +15200,7 @@ function renderProgressContent(studentId, selectedCourse, data) {
         const course = data.courses.find(c => c.id === courseId);
         if (!course) continue;
         const courseLessons = data.lessons.filter(l => l.courseId === courseId);
-        const coursePublishedLessons = courseLessons.filter(l => l.published);
+        const coursePublishedLessons = courseLessons.filter(isLessonLive);
         const courseQuizzes = data.quizzes.filter(q => q.courseId === courseId);
         const courseSubmissions = data.submissions.filter(s => s.studentId === studentId && courseQuizzes.some(q => q.id === s.quizId));
         const passedSubs = courseSubmissions.filter(s => s.status === 'pass');
@@ -15476,7 +15491,7 @@ async function renderPortalNotes(studentId) {
     const lessons = await dbGetAll('lessons');
     const files = await dbGetAll('lessonFiles');
     const courses = await dbGetAll('courses');
-    const publishedLessonIds = lessons.filter(l => l.published !== false).map(l => l.id);
+    const publishedLessonIds = lessons.filter(isLessonLive).map(l => l.id);
     const filtered = notes.filter(n => n.courseId && n.lessonId && publishedLessonIds.includes(n.lessonId));
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦' };
     let html = '';
@@ -15714,7 +15729,7 @@ function renderPortalContent(studentId, data, isStudentUser) {
     const portalEnrolledByCourse = {};
     (data.enrollments || []).filter(e => allPortalStudentIds.has(e.studentId)).forEach(e => { portalEnrolledByCourse[e.courseId] = e; });
     const portalCourseHtml = portalCourses.length ? portalCourses.map(c => {
-        const courseLessons = data.lessons.filter(l => l.courseId === c.id && l.published);
+        const courseLessons = data.lessons.filter(l => l.courseId === c.id && isLessonLive(l));
         const courseVideoCount = courseLessons.filter(l => l.videoUrl).length;
         const courseQuizzes = data.quizzes.filter(q => q.courseId === c.id);
         const enrollment = portalEnrolledByCourse[c.id];
@@ -15747,7 +15762,7 @@ function renderPortalContent(studentId, data, isStudentUser) {
         if (s.status === 'pass') submissionStatusByQuiz[s.quizId] = 'pass';
     });
     const enrollmentCourseIds = new Set(data.enrollments ? data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId) : []);
-    const publishedCourseIds = new Set(data.lessons.filter(l => l.published).map(l => l.courseId));
+        const publishedCourseIds = new Set(data.lessons.filter(isLessonLive).map(l => l.courseId));
     const allCourses = new Set(data.courses.map(c => c.id));
     const visibleCourseIds = isStudentUser ? (enrollmentCourseIds.size > 0 ? enrollmentCourseIds : publishedCourseIds) : allCourses;
     const quizRegIds = new Set((data.quizRegistrations || []).filter(r => r.studentId === studentId).map(r => r.quizId));
@@ -15820,7 +15835,7 @@ function renderPortalNotesCached(studentId, data) {
     if (isStudentUser) {
         const enrolledCourseIds = new Set(data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(data.courses.filter(c => c.status === 'inactive').map(c => c.id));
-        visibleLessons = data.lessons.filter(l => l.published && enrolledCourseIds.has(l.courseId) && !inactiveCourseIds.has(l.courseId));
+            visibleLessons = data.lessons.filter(l => isLessonLive(l) && enrolledCourseIds.has(l.courseId) && !inactiveCourseIds.has(l.courseId));
     } else {
         visibleLessons = data.lessons.filter(l => l.courseId);
     }
