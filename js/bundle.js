@@ -1561,6 +1561,8 @@ function showScreen(id) {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const perms = getRolePermissions(user.role);
     if (!perms.includes(id)) return showToast('Access denied: You do not have permission to view this section.');
+    // Drip: keep the learner's unlock maps warm on every navigation (cached 120s, cheap).
+    if (user.role === 'student' && typeof loadDripMaps === 'function') { try { loadDripMaps(user.studentId || user.username); } catch {} }
     if (id === 'coordinator-manual') {
         window.open('/coordinator-manual.html', '_blank');
         return;
@@ -3044,7 +3046,7 @@ async function renderCourses() {
             lessonsByCourseId[l.courseId] = { published: 0, total: 0, videos: 0 };
         }
         lessonsByCourseId[l.courseId].total++;
-        if (isLessonLive(l)) {
+        if (lessonVisible(l)) {
             lessonsByCourseId[l.courseId].published++;
             if (l.videoUrl) lessonsByCourseId[l.courseId].videos++;
         }
@@ -3281,20 +3283,26 @@ async function viewStudentLesson(lessonId) {
         } catch {}
     }
     if (!lesson) return showToast('Lesson not found — please refresh the page and try again. If it persists, contact admin (ID: ' + lessonId + ')', { type: 'danger' });
-    if (!isLessonLive(lesson)) {
+    if (!lessonVisible(lesson)) {
         const _viewer = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-        if (_viewer.role === 'student') return showToast('⏳ This lesson opens on ' + fmtPublishAt(lesson.publishAt) + ' — please check back then.', { type: 'warning', duration: 5000 });
+        if (_viewer.role === 'student') {
+            const _lm = lessonMode(lesson);
+            if (_lm === 'drip') {
+                await loadDripMaps(_viewer.studentId || _viewer.username);
+                await ensureDripUnlocks(_viewer.studentId || _viewer.username, lesson.courseId);
+                if (!lessonVisible(lesson)) return showToast('🔗 This lesson is still locked — complete the previous lesson, keep fees current, and allow 3½ days between lessons.', { type: 'warning', duration: 5000 });
+            } else return showToast('⏳ This lesson opens on ' + fmtPublishAt(lesson.publishAt) + ' — please check back then.', { type: 'warning', duration: 5000 });
+        }
     }
     const _videoSrc = lesson.videoUrl || lesson.video || lesson.videoLink || '';
-    if (_videoSrc) {
-        const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-        if (currentUser.role === 'student') {
-            const studentId = currentUser.studentId || currentUser.username;
-            const readKey = 'read-lessons-' + studentId;
-            const readLessons = JSON.parse(localStorage.getItem(readKey) || '{}');
-            if (!readLessons[lessonId]) {
-                return showToast('📖 Please read the lesson notes first before watching the video.', { type: 'warning', duration: 4000 });
-            }
+    const _viewerB = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const _dripVB = !!(_videoSrc && _viewerB.role === 'student' && lessonMode(lesson) === 'drip');
+    if (_videoSrc && _viewerB.role === 'student' && !_dripVB) {
+        const studentId = _viewerB.studentId || _viewerB.username;
+        const readKey = 'read-lessons-' + studentId;
+        const readLessons = JSON.parse(localStorage.getItem(readKey) || '{}');
+        if (!readLessons[lessonId]) {
+            return showToast('📖 Please read the lesson notes first before watching the video.', { type: 'warning', duration: 4000 });
         }
     }
     const course = await dbGet('courses', lesson.courseId);
@@ -3302,14 +3310,25 @@ async function viewStudentLesson(lessonId) {
     const files = await dbGetAll('lessonFiles');
     const lessonNotes = notes.filter(n => n.lessonId === lessonId);
     const lessonFiles = files.filter(f => f.lessonId === lessonId);
+    let _dripVDone = false, _dripVReq = 0, _dripVStart = 0, _dripVSid = null;
+    if (_dripVB) {
+        _dripVSid = _viewerB.studentId || _viewerB.username;
+        try { await loadDripMaps(_dripVSid); } catch {}
+        try { _dripVReq = dripRequiredSecs(lesson, lessonNotes[0] || null); } catch { _dripVReq = 480; }
+        const dc0 = (_dripC && _dripC[lessonId]) || null;
+        _dripVStart = (dc0 && dc0.readSecs) || 0;
+        _dripVDone = _dripVStart >= _dripVReq;
+    }
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦', 'mp4': '🎬', 'mp3': '🎵' };
     let html = `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course ? course.code + ' — ' + course.name : ''}</b></div>`;
     if (isLessonScheduled(lesson)) html += `<div style="margin-bottom:12px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1d4ed8;">⏳ <b>Scheduled</b> — auto-publishes to students on ${fmtPublishAt(lesson.publishAt)}. Students cannot see it yet.</div>`;
     html += `<h3 style="margin:0 0 4px;">${lesson.order ? lesson.order + '. ' : ''}${lesson.title}</h3>`;
     if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
     if (_videoSrc) {
-        html += `<div style="max-width:720px;margin:0 auto 16px;">${embedVideo(_videoSrc)}</div>`;
+        if (_dripVB && !_dripVDone) html += `<div id="drip-video-slot-b" style="max-width:720px;margin:0 auto 16px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video.</div></div>`;
+        else html += `<div style="max-width:720px;margin:0 auto 16px;" id="drip-video-slot-b">${embedVideo(_videoSrc)}</div>`;
     }
+    if (_dripVB) html += `<div style="margin:0 0 12px;"><div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:4px;" id="drip-read-label-b">${_dripVDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(_dripVReq / 60) + ' min required'}</div><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div id="drip-read-bar-b" style="height:100%;width:${_dripVDone ? 100 : Math.min(100, Math.round(_dripVStart / Math.max(1, _dripVReq) * 100))}%;background:linear-gradient(90deg,var(--success),var(--accent));transition:width 0.5s;"></div></div></div>`;
     if (lesson.virtualEnabled && lesson.virtualRoom) {
         const vcSchedStr = lesson.virtualScheduled ? String(lesson.virtualScheduled) : '';
         const vcDateStr = vcSchedStr ? (vcSchedStr.indexOf(' ') !== -1 ? vcSchedStr.split(' ')[0] : (vcSchedStr.split('T')[0] || '')) : '';
@@ -3346,6 +3365,35 @@ async function viewStudentLesson(lessonId) {
             </div>`;
         });
     }
+    try { if (window._dripReadTimerB) { clearInterval(window._dripReadTimerB); window._dripReadTimerB = null; } } catch {}
+    if (_dripVB && !_dripVDone && _dripVSid) {
+        let pending = 0, ticks = 0, finished = false;
+        const reqS = _dripVReq, sidH = _dripVSid, lidH = lessonId, startS = _dripVStart, vSrc = _videoSrc, cId = lesson.courseId;
+        window._dripReadTimerB = setInterval(async () => {
+            try {
+                const bar = document.querySelector('#drip-read-bar-b');
+                if (!bar && !document.querySelector('#drip-video-slot-b')) { if (pending > 0) { const p = pending; pending = 0; try { await dripRecordRead(sidH, { id: lidH, courseId: cId }, p); } catch {} } clearInterval(window._dripReadTimerB); window._dripReadTimerB = null; return; }
+                if (finished || document.visibilityState !== 'visible') return;
+                pending += 5; ticks++;
+                const cur = startS + ticks * 5;
+                if (bar) { bar.style.width = Math.min(100, Math.round(cur / reqS * 100)) + '%'; const lb = document.querySelector('#drip-read-label-b'); if (lb) lb.textContent = cur >= reqS ? '✓ Reading complete' : '📖 Reading time: ' + Math.floor(cur / 60) + 'm ' + (cur % 60) + 's / ' + Math.ceil(reqS / 60) + ' min required'; }
+                if (ticks % 6 === 0 && pending > 0) { const p = pending; pending = 0; try { await dripRecordRead(sidH, { id: lidH, courseId: cId }, p); } catch {} }
+                if (cur >= reqS) {
+                    finished = true;
+                    if (pending > 0) { const p = pending; pending = 0; try { await dripRecordRead(sidH, { id: lidH, courseId: cId }, p); } catch {} }
+                    try { const rk = 'read-lessons-' + sidH; const o = JSON.parse(localStorage.getItem(rk) || '{}'); o[lidH] = Date.now(); localStorage.setItem(rk, JSON.stringify(o)); } catch {}
+                    const slot = document.querySelector('#drip-video-slot-b');
+                    if (slot && vSrc && typeof embedVideo === 'function') slot.innerHTML = embedVideo(vSrc);
+                    if (bar) bar.style.width = '100%';
+                    const lb2 = document.querySelector('#drip-read-label-b');
+                    if (lb2) lb2.textContent = '✓ Reading complete';
+                    showToast('✓ Notes complete — video unlocked! 🎬');
+                    if (typeof evalLessonCompletion === 'function') { try { const lz = await dbGet('lessons', lidH); if (lz) await evalLessonCompletion(sidH, lz); } catch {} }
+                    try { clearInterval(window._dripReadTimerB); window._dripReadTimerB = null; } catch {}
+                }
+            } catch {}
+        }, 5000);
+    }
     showModal(lesson.title, html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
 }
 async function viewStudentQuizzes(courseId) {
@@ -3354,7 +3402,10 @@ async function viewStudentQuizzes(courseId) {
     if (!course) return showToast('Course not found');
     const quizzes = await dbGetAll('quizzes');
     const submissions = await dbGetAll('submissions');
-    const courseQuizzes = quizzes.filter(q => q.courseId === courseId);
+    if (currentUser.role === 'student') { try { await loadDripMaps(currentUser.studentId || currentUser.username); await ensureDripUnlocks(currentUser.studentId || currentUser.username, courseId); } catch {} }
+    let _lesMap = {};
+    try { (await dbGetAll('lessons')).forEach(l => _lesMap[l.id] = l); } catch {}
+    const courseQuizzes = quizzes.filter(q => q.courseId === courseId).filter(q => !q.lessonId || !_lesMap[q.lessonId] || lessonVisible(_lesMap[q.lessonId]));
     const studentSubmissions = submissions.filter(s => s.studentId === currentUser.studentId || s.studentId === currentUser.username);
     const quizRegs = (await dbGetAll('quizRegistrations')).filter(r => r.studentId === (currentUser.studentId || currentUser.username));
     const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
@@ -4635,6 +4686,13 @@ async function startExam(examId) {
     if (!regs.length) return showToast('Not registered for this exam!');
     const subs = (await dbGetAll('submissions')).filter(s => s.quizId === examId && s.studentId === studentId);
     if (subs.length) return showToast('Already submitted this exam!');
+    // Drip: exam opens only when every drip lesson in its course is complete (students only).
+    if (currentUser.role === 'student') {
+        try {
+            const gate = await dripExamOpen(studentId, exam);
+            if (!gate.open) return showToast(`🔗 Exam locked — complete ${gate.remaining} more lesson${gate.remaining !== 1 ? 's' : ''} first${gate.next ? ` (next: ${gate.next.title})` : ''}.`, { type: 'warning', duration: 5000 });
+        } catch {}
+    }
     const questions = await dbGetAll('questionBank');
     const examQuestions = (exam.questionIds || []).map(id => questions.find(q => q.id === id)).filter(q => q);
     if (!examQuestions.length) return showToast('No questions in this exam!');
@@ -13160,6 +13218,219 @@ async function uploadRegistrarSignature() {
 function isLessonLive(l) { if (!l || l.published === false) return false; if (!l.publishAt) return true; const t = new Date(l.publishAt).getTime(); return isNaN(t) || t <= Date.now(); }
 function isLessonScheduled(l) { if (!l || l.published === false || !l.publishAt) return false; const t = new Date(l.publishAt).getTime(); return !isNaN(t) && t > Date.now(); }
 function fmtPublishAt(p) { try { const d = new Date(p); if (isNaN(d.getTime())) return p || ''; return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return p || ''; } }
+// ---------- Drip engine: per-learner sequential unlock, max 2 lessons/week ----------
+// Lesson modes: 'immediate' | 'date' (publishAt) | 'drip'. Stores: lessonCompletions (LC-), lessonUnlocks (LU-).
+const DRIP_DAYS = 3.5, DRIP_MS = 3.5 * 86400000, DRIP_PASS = 50;
+let _dripU = {}, _dripC = {}, _dripSid = null, _dripAt = 0;
+function lessonMode(l) { if (!l) return 'immediate'; if (l.releaseMode === 'drip' || l.releaseMode === 'date' || l.releaseMode === 'immediate') return l.releaseMode; return l.publishAt ? 'date' : 'immediate'; }
+function dripId(prefix, sid, lid) { return prefix + '-' + String(sid).replace(/[^A-Za-z0-9-]/g, '') + '-' + String(lid).replace(/[^A-Za-z0-9-]/g, ''); }
+async function loadDripMaps(sid, force) {
+    if (!sid) return;
+    if (!force && _dripSid === sid && _dripU && Date.now() - _dripAt < 120000) return;
+    _dripSid = sid; _dripU = {}; _dripC = {};
+    try {
+        const u = await dbGetAll('lessonUnlocks').catch(() => []);
+        const c = await dbGetAll('lessonCompletions').catch(() => []);
+        (u || []).forEach(r => { if (String(r.studentId) === String(sid)) _dripU[r.lessonId] = r; });
+        (c || []).forEach(r => { if (String(r.studentId) === String(sid)) _dripC[r.lessonId] = r; });
+        _dripAt = Date.now();
+    } catch {}
+}
+// Role-aware visibility: staff see every published lesson; students need drip unlocks.
+function lessonVisible(l) {
+    if (!l || l.published === false) return false;
+    const m = lessonMode(l);
+    if (m === 'date') return isLessonLive(l);
+    if (m !== 'drip') return true;
+    let role = '';
+    try { role = (JSON.parse(sessionStorage.getItem('currentUser') || '{}').role) || ''; } catch {}
+    if (role !== 'student') return true;
+    return !!(_dripU && _dripU[l.id]);
+}
+function dripLessonContent(lesson, note) { return (note && note.content) || lesson.description || lesson.reference || ''; }
+function dripRequiredSecs(lesson, note) {
+    let mins = 1;
+    try { mins = (typeof estimateReadTime === 'function' ? estimateReadTime(dripLessonContent(lesson, note)) : 1) || 1; } catch { mins = 1; }
+    return Math.max(15, mins * 60);
+}
+async function dripMe(sid) {
+    try { if (typeof _hubGetMe === 'function') { const m = _hubGetMe(); if (m && String(m.id) === String(sid)) return m; } } catch {}
+    try { const all = await dbGetAll('students'); return (all || []).find(s => String(s.id) === String(sid)) || null; } catch { return null; }
+}
+// Fee condition: weekly target paid (waivers count) OR approved agreement. Fail-open when undeterminable.
+async function dripFeeOk(sid) {
+    try {
+        const me = await dripMe(sid);
+        if (!me || typeof hubFeeLockInfo !== 'function') return true;
+        let data = { payments: [], waivers: [] };
+        try {
+            const p = await dbGetAll('payments').catch(() => []);
+            const w = await dbGetAll('waivers').catch(() => []);
+            data = { payments: p || [], waivers: w || [] };
+        } catch {}
+        const lock = await hubFeeLockInfo(me, data);
+        return !lock.locked;
+    } catch { return true; }
+}
+async function dripWriteUnlock(sid, lesson, by) {
+    const rec = { id: dripId('LU', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, unlockedAt: new Date().toISOString(), by: by || 'drip' };
+    try { await dbPut('lessonUnlocks', rec); } catch {}
+    _dripU[lesson.id] = rec;
+    return rec;
+}
+// Sweeper: unlocks whatever is due for a learner (chain + 3.5-day pace + fees). Self-healing and idempotent.
+async function ensureDripUnlocks(sid, courseId) {
+    if (!sid) return;
+    await loadDripMaps(sid);
+    let lessons = [];
+    try { lessons = await dbGetAll('lessons'); } catch { return; }
+    if (courseId) lessons = lessons.filter(l => String(l.courseId) === String(courseId));
+    const byCourse = {};
+    lessons.forEach(l => { (byCourse[l.courseId] = byCourse[l.courseId] || []).push(l); });
+    for (const cid of Object.keys(byCourse)) {
+        const ordered = byCourse[cid].filter(l => l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+        if (!ordered.some(l => lessonMode(l) === 'drip')) continue;
+        const feeOk = await dripFeeOk(sid);
+        for (let i = 0; i < ordered.length; i++) {
+            const l = ordered[i];
+            if (lessonMode(l) !== 'drip' || _dripU[l.id]) continue;
+            if (!feeOk) break; // whole chain waits on fees
+            if (i === 0) { await dripWriteUnlock(sid, l, 'drip'); continue; }
+            const prev = ordered[i - 1];
+            const pc = _dripC[prev.id];
+            if (!pc || !pc.completedAt) break; // previous not complete → chain stops
+            const pu = _dripU[prev.id];
+            const anchor = Math.max(pu ? (+new Date(pu.unlockedAt) || 0) : 0, +new Date(pc.completedAt) || 0);
+            if (Date.now() - anchor < DRIP_MS) break; // 3.5-day pace: max 2 lessons/week
+            await dripWriteUnlock(sid, l, 'drip');
+        }
+    }
+}
+async function dripRecordRead(sid, lesson, addSecs) {
+    await loadDripMaps(sid);
+    let comp = _dripC[lesson.id];
+    if (!comp) comp = { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0 };
+    comp.readSecs = Math.min((comp.readSecs || 0) + addSecs, 24 * 3600);
+    try { await dbPut('lessonCompletions', comp); } catch {}
+    _dripC[lesson.id] = comp;
+    return comp;
+}
+// Fail → repeat: wipe timed-read so the lesson must be re-read and retaken.
+async function dripResetForRepeat(sid, lesson) {
+    await loadDripMaps(sid);
+    let comp = _dripC[lesson.id] || { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0 };
+    comp.readSecs = 0; comp.readDoneAt = null; comp.completedAt = null; comp.quizPassedAt = null;
+    try { await dbPut('lessonCompletions', comp); } catch {}
+    _dripC[lesson.id] = comp;
+    try { const rk = 'read-lessons-' + sid; const o = JSON.parse(localStorage.getItem(rk) || '{}'); delete o[lesson.id]; localStorage.setItem(rk, JSON.stringify(o)); } catch {}
+}
+// Re-evaluate completion: timed read + every linked quiz at >=50%. Congratulates once, then sweeps unlocks.
+async function evalLessonCompletion(sid, lesson, opts) {
+    opts = opts || {};
+    await loadDripMaps(sid);
+    let note = null;
+    try { const notes = await dbGetAll('notes'); note = (notes || []).find(n => String(n.lessonId) === String(lesson.id)); } catch {}
+    const req = dripRequiredSecs(lesson, note);
+    let comp = _dripC[lesson.id];
+    if (!comp) comp = { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0, requiredSecs: req };
+    comp.requiredSecs = req;
+    const readDone = (comp.readSecs || 0) >= req;
+    let quizzes = [];
+    try { const all = await dbGetAll('quizzes'); quizzes = (all || []).filter(q => String(q.lessonId) === String(lesson.id) && q.published !== false); } catch {}
+    let quizDone = true, best = null;
+    if (quizzes.length) {
+        let subs = [], grades = [];
+        try { subs = await dbGetAll('submissions'); } catch {}
+        try { grades = await dbGetAll('grades'); } catch {}
+        const qids = new Set(quizzes.map(q => q.id));
+        let top = -1;
+        (subs || []).forEach(s => { if (qids.has(s.quizId) && String(s.studentId) === String(sid) && s.status !== 'pending_review' && typeof s.score === 'number') top = Math.max(top, s.score); });
+        (grades || []).forEach(g => { if (qids.has(g.quizId) && String(g.studentId) === String(sid) && typeof g.score === 'number') top = Math.max(top, g.score); });
+        best = top < 0 ? null : top;
+        quizDone = top >= DRIP_PASS;
+        if (top >= 0) comp.quizBest = top;
+        if (quizDone && !comp.quizPassedAt) comp.quizPassedAt = new Date().toISOString();
+    }
+    const wasComplete = !!comp.completedAt;
+    if (readDone && !comp.readDoneAt) comp.readDoneAt = new Date().toISOString();
+    if (readDone && quizDone && !comp.completedAt) comp.completedAt = new Date().toISOString();
+    try { await dbPut('lessonCompletions', comp); } catch {}
+    _dripC[lesson.id] = comp;
+    if (readDone && quizDone && !wasComplete) {
+        await ensureDripUnlocks(sid, lesson.courseId);
+        if (!comp.congratsShown && !opts.silent) {
+            comp.congratsShown = true;
+            try { await dbPut('lessonCompletions', comp); } catch {}
+            _dripC[lesson.id] = comp;
+            dripCongrats(sid, lesson, best);
+        }
+    }
+    return comp;
+}
+async function dripCongrats(sid, lesson, best) {
+    let name = 'Learner';
+    try { const me = await dripMe(sid); if (me && (me.name || me.fullName)) name = me.name || me.fullName; } catch {}
+    let nextTxt = '';
+    try {
+        const all = await dbGetAll('lessons');
+        const ordered = (all || []).filter(l => String(l.courseId) === String(lesson.courseId) && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+        const idx = ordered.findIndex(l => String(l.id) === String(lesson.id));
+        const nx = idx >= 0 ? ordered[idx + 1] : null;
+        if (nx) {
+            if (_dripU[nx.id]) nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is now open — tap it to begin! 🚀';
+            else nextTxt = (await dripFeeOk(sid)) ? 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> opens 3½ days after this win — well-earned rest! 📚' : 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is ready — just clear the week\'s fee target to unlock it. 💰';
+        } else nextTxt = 'That was the last lesson in this course — outstanding! 🎓';
+    } catch {}
+    const hasVideo = !!(lesson.videoUrl || lesson.video || lesson.videoLink);
+    showModal('🎉 Congratulations, ' + escapeHtml(name) + '!', '<div style="text-align:center;padding:12px;"><div style="font-size:52px;">🎉</div><h3 style="margin:8px 0;">Well done, ' + escapeHtml(name) + '!</h3><p style="font-size:14px;">You completed <b>' + escapeHtml(lesson.title) + '</b>' + (best !== null && best !== undefined ? ' with <b>' + best + '%</b>' : '') + '.</p>' + (hasVideo ? '<p style="font-size:14px;">🎬 Your lesson video is now open — watch it next.</p>' : '') + '<p style="font-size:14px;">' + nextTxt + '</p></div>',
+        (hasVideo ? '<button class="btn btn-primary" onclick="closeModal();viewStudentLesson(\'' + lesson.id + '\')">▶ Watch Video</button> ' : '') + '<button class="btn btn-outline" onclick="closeModal();if(typeof renderStudentHub===\'function\'){try{renderStudentHub();}catch{}}">Continue</button>');
+}
+// Exams are course-level: open only when every drip lesson in the course is complete.
+async function dripExamOpen(sid, exam) {
+    try {
+        await loadDripMaps(sid);
+        const all = await dbGetAll('lessons');
+        const drips = (all || []).filter(l => String(l.courseId) === String(exam.courseId) && lessonMode(l) === 'drip' && l.published !== false);
+        if (!drips.length) return { open: true };
+        const incomplete = drips.filter(l => !(_dripC[l.id] && _dripC[l.id].completedAt)).sort((a, b) => (a.order || 0) - (b.order || 0));
+        if (!incomplete.length) return { open: true };
+        return { open: false, remaining: incomplete.length, next: incomplete[0] };
+    } catch { return { open: true }; }
+}
+// Staff overrides (Manage Lesson → per learner).
+async function dripManualUnlock(sid, lessonId) {
+    await loadDripMaps(sid);
+    let lesson = null;
+    try { lesson = await dbGet('lessons', lessonId); } catch {}
+    if (!lesson) return showToast('Lesson not found', { type: 'danger' });
+    await dripWriteUnlock(sid, lesson, 'manual');
+    showToast('Lesson unlocked for learner ✓');
+    try { manageLesson(lessonId); } catch {}
+}
+async function dripMarkComplete(sid, lessonId) {
+    await loadDripMaps(sid);
+    let lesson = null;
+    try { lesson = await dbGet('lessons', lessonId); } catch {}
+    if (!lesson) return showToast('Lesson not found', { type: 'danger' });
+    let comp = _dripC[lessonId] || { id: dripId('LC', sid, lessonId), studentId: sid, lessonId, courseId: lesson.courseId, readSecs: 0 };
+    const now = new Date().toISOString();
+    comp.readDoneAt = comp.readDoneAt || now; comp.quizPassedAt = comp.quizPassedAt || now;
+    comp.completedAt = comp.completedAt || now; comp.congratsShown = true; comp.manualBy = 'staff';
+    try { await dbPut('lessonCompletions', comp); } catch {}
+    _dripC[lessonId] = comp;
+    await ensureDripUnlocks(sid, lesson.courseId);
+    showToast('Marked complete by staff ✓ — chain advanced');
+    try { manageLesson(lessonId); } catch {}
+}
+async function dripResetProgress(sid, lessonId) {
+    await loadDripMaps(sid);
+    try { if (typeof dbDelete === 'function' && _dripC[lessonId]) await dbDelete('lessonCompletions', _dripC[lessonId].id); } catch {}
+    try { if (typeof dbDelete === 'function' && _dripU[lessonId]) await dbDelete('lessonUnlocks', _dripU[lessonId].id); } catch {}
+    delete _dripC[lessonId]; delete _dripU[lessonId];
+    try { const rk = 'read-lessons-' + sid; const o = JSON.parse(localStorage.getItem(rk) || '{}'); delete o[lessonId]; localStorage.setItem(rk, JSON.stringify(o)); } catch {}
+    showToast('Learner progress reset for this lesson');
+    try { const lid = lessonId; manageLesson(lid); } catch {}
+}
 async function renderLessons() {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
@@ -13176,6 +13447,7 @@ async function renderLessons() {
     if (statusFilter === 'published') filtered = filtered.filter(l => l.published !== false);
     if (statusFilter === 'draft') filtered = filtered.filter(l => l.published === false);
     if (statusFilter === 'scheduled') filtered = filtered.filter(isLessonScheduled);
+    if (statusFilter === 'drip') filtered = filtered.filter(l => (l.releaseMode || (l.publishAt ? 'date' : 'immediate')) === 'drip');
     filtered.sort((a, b) => (a.order || 0) - (b.order || 0));
     document.getElementById('lessons-body').innerHTML = filtered.map((l, idx) => {
         const course = courses.find(c => c.id === l.courseId);
@@ -13185,7 +13457,9 @@ async function renderLessons() {
         const isPublished = l.published !== false;
         const scheduled = isLessonScheduled(l);
         const schedBadge = scheduled ? ' <span class="badge badge-info" style="font-size:9px;" title="Auto-publishes">⏳ ' + fmtPublishAt(l.publishAt) + '</span>' : '';
-        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? schedBadge : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
+        const lmode = (l.releaseMode || (l.publishAt ? 'date' : 'immediate'));
+        const modeBadge = lmode === 'drip' ? ' <span class="badge" style="font-size:9px;background:#e0e7ff;color:#3730a3;" title="Drip: unlocks per learner after prev complete + 3.5 days + fees">🔗 DRIP</span>' : '';
+        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No lessons yet. Click "+ Add Lesson" to create one.</td></tr>';
     courseSelect.addEventListener('change', renderLessons);
     document.getElementById('lesson-status-filter').addEventListener('change', renderLessons);
@@ -13204,6 +13478,7 @@ async function showLessonForm(lesson = null) {
     const courses = await dbGetAll('courses');
     const isEdit = !!lesson;
     const isPublished = lesson ? lesson.published !== false : false;
+    const relMode = lesson ? (lesson.releaseMode || (lesson.publishAt ? 'date' : 'immediate')) : 'immediate';
     const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
 <div id="lesson-virtual-settings" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-input);">
     <div class="form-row"><div class="form-group"><label>Room Name / URL</label><input type="text" id="lesson-virtual-room" value="${lesson && lesson.virtualRoom ? lesson.virtualRoom : ''}" placeholder="e.g. netcohort or https://meet.jit.si/netcohort" style="width:100%;"></div><div class="form-group"><label>Password</label><input type="text" id="lesson-virtual-password" value="${lesson && lesson.virtualPassword ? lesson.virtualPassword : ''}"></div></div>
@@ -13211,9 +13486,18 @@ async function showLessonForm(lesson = null) {
     <div class="form-row"><div class="form-group"><label>Scheduled Time</label><input type="datetime-local" id="lesson-virtual-scheduled" value="${lesson && lesson.virtualScheduled ? lesson.virtualScheduled.replace(' ', 'T').slice(0,16) : ''}"></div>    <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;"><input type="checkbox" id="lesson-virtual-recording" ${lesson && lesson.virtualRecording ? 'checked' : ''}> <label style="margin:0;font-size:13px;">Record session</label></div></div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Integrates with Jitsi Meet. Students see "Join Live Class" in the course.</div>
 </div>
-<div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Publish lesson — make visible to students immediately</label></div><div class="form-group"><label>⏳ Publish on (schedule — optional)</label><input type="datetime-local" id="lesson-publishAt" value="${lesson && lesson.publishAt ? String(lesson.publishAt).replace(' ', 'T').slice(0,16) : ''}" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Leave empty to publish immediately. A future date hides the lesson from students and auto-publishes it when the time arrives.</div></div>`;
+<div class="form-group"><label>🚦 Release mode</label><select id="lesson-release" onchange="toggleLessonRelease()" style="width:100%;"><option value="immediate">Immediate — visible at once</option><option value="date">Set date — auto-publish on the date below</option><option value="drip">Drip — unlocks per learner (prev complete + 3.5 days + fees)</option></select><div id="lesson-drip-hint" style="display:none;font-size:11px;color:var(--text-muted);margin-top:4px;">🔗 Drip: Lesson 1 opens once week-1 fees/waiver/agreement hold. Each next lesson unlocks 3.5 days after the previous is completed (timed reading + 50% quiz/exam) and fees stay current. Max 2 lessons/week.</div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Published — master switch (Draft hides under every mode)</label></div><div class="form-group" id="lesson-date-row"><label>⏳ Publish on (for Set-date mode)</label><input type="datetime-local" id="lesson-publishAt" value="${lesson && lesson.publishAt ? String(lesson.publishAt).replace(' ', 'T').slice(0,16) : ''}" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">A future date hides the lesson from students and auto-publishes it when the time arrives.</div></div>`;
     showModal(isEdit ? 'Edit Lesson' : 'Add Lesson', content, `<button class="btn btn-primary" onclick="saveLesson()">${isEdit ? 'Update' : 'Save'}</button>`);
-    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); }, 100);
+    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); const rs = document.getElementById('lesson-release'); if (rs) { rs.value = relMode; toggleLessonRelease(); } }, 100);
+}
+function toggleLessonRelease() {
+    const v = document.getElementById('lesson-release') ? document.getElementById('lesson-release').value : 'immediate';
+    const dr = document.getElementById('lesson-date-row');
+    if (dr) dr.style.display = v === 'date' ? '' : 'none';
+    const dh = document.getElementById('lesson-drip-hint');
+    if (dh) dh.style.display = v === 'drip' ? '' : 'none';
+    const pc = document.getElementById('lesson-published');
+    if (pc && v === 'drip') pc.checked = true;
 }
 function previewLessonVideo() {
     const url = document.getElementById('lesson-video').value.trim();
@@ -13238,6 +13522,7 @@ async function saveLesson() {
         videoUrl: document.getElementById('lesson-video').value.trim(),
         published: document.getElementById('lesson-published').checked,
         publishAt: (document.getElementById('lesson-publishAt') && document.getElementById('lesson-publishAt').value) || '',
+        releaseMode: (document.getElementById('lesson-release') && document.getElementById('lesson-release').value) || 'immediate',
         virtualEnabled: document.getElementById('lesson-virtual-enabled') ? document.getElementById('lesson-virtual-enabled').checked : (existing ? !!existing.virtualEnabled : false),
         virtualRoom: document.getElementById('lesson-virtual-room') ? document.getElementById('lesson-virtual-room').value.trim() : (existing ? existing.virtualRoom : ''),
         virtualPassword: document.getElementById('lesson-virtual-password') ? document.getElementById('lesson-virtual-password').value.trim() : (existing ? existing.virtualPassword : ''),
@@ -13248,8 +13533,9 @@ async function saveLesson() {
         createdAt: existing ? existing.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
-    if (lesson.publishAt && new Date(lesson.publishAt).getTime() > Date.now()) lesson.published = true; // future date = scheduled, auto-publishes at time
-    await dbPut('lessons', lesson); closeModal(); renderLessons(); invalidatePortalCache(); invalidateProgressCache(); showToast(isLessonScheduled(lesson) ? 'Lesson scheduled ⏳ — auto-publishes ' + fmtPublishAt(lesson.publishAt) : (editId ? 'Lesson updated!' : 'Lesson created!')); logAudit(editId ? 'updated' : 'created', 'lesson', { id, courseId, title });
+    if (lesson.releaseMode === 'drip') lesson.published = true; // drip governs visibility per learner
+    else if (lesson.releaseMode === 'date' && lesson.publishAt && new Date(lesson.publishAt).getTime() > Date.now()) lesson.published = true; // future date = scheduled
+    await dbPut('lessons', lesson); closeModal(); renderLessons(); invalidatePortalCache(); invalidateProgressCache(); showToast(lesson.releaseMode === 'drip' ? 'Drip mode 🔗 — unlocks per learner (prev complete + 3.5 days + fees)' : (isLessonScheduled(lesson) ? 'Lesson scheduled ⏳ — auto-publishes ' + fmtPublishAt(lesson.publishAt) : (editId ? 'Lesson updated!' : 'Lesson created!'))); logAudit(editId ? 'updated' : 'created', 'lesson', { id, courseId, title });
 }
 async function editLesson(id) {
     const lesson = await dbGet('lessons', id);
@@ -13292,6 +13578,7 @@ async function manageLesson(lessonId) {
             <button class="tab-btn" onclick="switchLessonTab('questions','${lessonId}')">❓ Questions (${(await dbGetAll('questionBank')).filter(q => q.lessonId === lessonId).length})</button>
             <button class="tab-btn" onclick="switchLessonTab('files','${lessonId}')">📁 Files (${(await dbGetAll('lessonFiles')).filter(f => f.lessonId === lessonId).length})</button>
             <button class="tab-btn" onclick="switchLessonTab('virtual','${lessonId}')">🎥 Virtual Classroom</button>
+            <button class="tab-btn" onclick="switchLessonTab('drip','${lessonId}')">🔗 Drip</button>
         </div>
         <div id="lesson-tab-content" style="margin-top:12px;"></div>
     `;
@@ -13386,6 +13673,28 @@ async function switchLessonTab(tab, lessonId) {
             html += '</div>';
         } else {
             html += '<p style="color:var(--text-muted);text-align:center;padding:20px;">No files uploaded. Click "Upload File" to add PDFs, documents, images, etc.</p>';
+        }
+        container.innerHTML = html;
+    } else if (tab === 'drip') {
+        const enrollments = (await dbGetAll('enrollments')).filter(e => String(e.courseId) === String(lesson.courseId));
+        const students = await dbGetAll('students');
+        const uMap = {}, cMap = {};
+        try { (await dbGetAll('lessonUnlocks')).forEach(u => { if (String(u.lessonId) === String(lessonId)) uMap[u.studentId] = u; }); } catch {}
+        try { (await dbGetAll('lessonCompletions')).forEach(c => { if (String(c.lessonId) === String(lessonId)) cMap[c.studentId] = c; }); } catch {}
+        let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Mode: <b>${lessonMode(lesson)}</b> · Rule: previous lesson complete + 3.5 days + fees current. Max 2/week.</div>`;
+        if (!enrollments.length) {
+            html += '<p style="color:var(--text-muted);text-align:center;padding:20px;">No learners enrolled in this course.</p>';
+        } else {
+            html += '<div style="max-height:350px;overflow-y:auto;">';
+            enrollments.forEach(e => {
+                const s = students.find(x => String(x.id) === String(e.studentId));
+                const nm = s ? (s.name || s.id) : e.studentId;
+                const u = uMap[e.studentId], c = cMap[e.studentId];
+                const st = (c && c.completedAt) ? '✅ Complete' : (u ? '🔓 Unlocked' + (u.by === 'manual' ? ' (manual)' : '') : '🔒 Locked');
+                const extra = (c ? ` · ⏱ ${Math.floor((c.readSecs || 0) / 60)}m read` : '') + ((c && c.quizBest !== null && c.quizBest !== undefined) ? ` · Quiz best ${c.quizBest}%` : '');
+                html += `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;"><div style="font-size:12px;"><b>${nm}</b><br><span style="color:var(--text-muted);">${st}${extra}</span></div><div style="display:flex;gap:4px;flex-shrink:0;">${u ? '' : `<button class="btn btn-success btn-sm" onclick="dripManualUnlock('${e.studentId}','${lessonId}')">Unlock</button>`}${(c && c.completedAt) ? '' : `<button class="btn btn-primary btn-sm" onclick="dripMarkComplete('${e.studentId}','${lessonId}')">✓ Complete</button>`}<button class="btn btn-outline btn-sm" onclick="dripResetProgress('${e.studentId}','${lessonId}')">Reset</button></div></div>`;
+            });
+            html += '</div>';
         }
         container.innerHTML = html;
     }
@@ -13765,7 +14074,7 @@ async function renderQuizzes() {
             dbGetAll('students'), dbGetAll('quizRegistrations'), dbGetAll('examRegistrations')
         ]);
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-        const publishedLessonIds = new Set(lessons.filter(isLessonLive).map(l => l.id));
+        const publishedLessonIds = new Set(lessons.filter(lessonVisible).map(l => l.id));
         const availableQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !inactiveCourseIds.has(q.courseId));
         const quizRegs = allQuizRegs.filter(r => r.studentId === studentId);
         const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
@@ -14329,6 +14638,14 @@ async function startQuiz(quizId) {
     const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
     const submissions = (await dbGetAll('submissions')).filter(s => s.quizId === quizId && s.studentId === studentId);
     if (submissions.length >= (quiz.maxRetakes || 1)) return showToast('Maximum attempts reached!');
+    // Drip: lesson-linked quiz requires its lesson unlocked (students only).
+    if (currentUser.role === 'student' && quiz.lessonId) {
+        try {
+            await loadDripMaps(studentId);
+            const lz = await dbGet('lessons', quiz.lessonId);
+            if (lz && !lessonVisible(lz)) return showToast('🔗 This quiz is still locked — complete the previous lesson first.', { type: 'warning', duration: 5000 });
+        } catch {}
+    }
     const questions = await dbGetAll('questionBank');
     const quizQuestions = quiz.questionIds.map(id => questions.find(q => q.id === id)).filter(q => q);
     if (!quizQuestions.length) return showToast('No questions in this assessment!');
@@ -14638,6 +14955,42 @@ async function submitQuiz(quizId) {
         };
         await dbPut('grades', gradeEntry);
     }
+    // Drip 50% rule: pass advances the lesson (congrats + invite follow); fail resets it for repeat.
+    try {
+        if (!hasEssays && currentUser.role === 'student') {
+            const isExamSub = quiz.assessmentType === 'exam';
+            const lid = !isExamSub ? quiz.lessonId : null;
+            if (lid) {
+                let lz = null;
+                try { lz = await dbGet('lessons', lid); } catch {}
+                if (lz && typeof lessonMode === 'function' && lessonMode(lz) === 'drip') {
+                    await loadDripMaps(studentId, true);
+                    if (totalScore >= DRIP_PASS) {
+                        const before = (_dripC[lid] && _dripC[lid].completedAt) || null;
+                        await evalLessonCompletion(studentId, lz, { silent: true });
+                        try { await loadDripMaps(studentId, true); } catch {}
+                        const after = (_dripC[lid] && _dripC[lid].completedAt) || null;
+                        if (!before && after) {
+                            try { const cc = _dripC[lid]; cc.congratsShown = true; await dbPut('lessonCompletions', cc); } catch {}
+                            setTimeout(() => { try { dripCongrats(studentId, lz, totalScore); } catch {} }, 11000);
+                        }
+                        try {
+                            const meN = await dripMe(studentId);
+                            showToast(`🎉 Well done ${escapeHtml((meN && (meN.name || meN.fullName)) || 'Learner')}! ${totalScore}% — lesson complete!`, { duration: 6000 });
+                        } catch {}
+                    } else {
+                        await dripResetForRepeat(studentId, lz);
+                        showToast(`You scored ${totalScore}% — you need ${DRIP_PASS}%+. Go back and repeat "${lz.title}", then retake. 💪`, { type: 'warning', duration: 7000 });
+                    }
+                }
+            } else if (isExamSub && totalScore >= DRIP_PASS) {
+                try {
+                    const meN = await dripMe(studentId);
+                    showToast(`🎉 Congratulations ${escapeHtml((meN && (meN.name || meN.fullName)) || 'Learner')}! You passed "${quiz.title}" with ${totalScore}%!`, { duration: 6000 });
+                } catch {}
+            }
+        }
+    } catch (e) { console.error('drip submit hook:', e); }
     const autoGradedCount = answers.filter(a => a.type !== 'essay').length;
     const autoGradedEarned = answers.filter(a => a.type !== 'essay').reduce((s, a) => s + a.earned, 0);
     const autoGradedTotal = answers.filter(a => a.type !== 'essay').reduce((s, a) => s + a.points, 0);
@@ -15214,7 +15567,7 @@ function renderProgressContent(studentId, selectedCourse, data) {
         const course = data.courses.find(c => c.id === courseId);
         if (!course) continue;
         const courseLessons = data.lessons.filter(l => l.courseId === courseId);
-        const coursePublishedLessons = courseLessons.filter(isLessonLive);
+        const coursePublishedLessons = courseLessons.filter(lessonVisible);
         const courseQuizzes = data.quizzes.filter(q => q.courseId === courseId);
         const courseSubmissions = data.submissions.filter(s => s.studentId === studentId && courseQuizzes.some(q => q.id === s.quizId));
         const passedSubs = courseSubmissions.filter(s => s.status === 'pass');
@@ -15505,7 +15858,7 @@ async function renderPortalNotes(studentId) {
     const lessons = await dbGetAll('lessons');
     const files = await dbGetAll('lessonFiles');
     const courses = await dbGetAll('courses');
-    const publishedLessonIds = lessons.filter(isLessonLive).map(l => l.id);
+    const publishedLessonIds = lessons.filter(lessonVisible).map(l => l.id);
     const filtered = notes.filter(n => n.courseId && n.lessonId && publishedLessonIds.includes(n.lessonId));
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦' };
     let html = '';
@@ -15743,7 +16096,7 @@ function renderPortalContent(studentId, data, isStudentUser) {
     const portalEnrolledByCourse = {};
     (data.enrollments || []).filter(e => allPortalStudentIds.has(e.studentId)).forEach(e => { portalEnrolledByCourse[e.courseId] = e; });
     const portalCourseHtml = portalCourses.length ? portalCourses.map(c => {
-        const courseLessons = data.lessons.filter(l => l.courseId === c.id && isLessonLive(l));
+        const courseLessons = data.lessons.filter(l => l.courseId === c.id && lessonVisible(l));
         const courseVideoCount = courseLessons.filter(l => l.videoUrl).length;
         const courseQuizzes = data.quizzes.filter(q => q.courseId === c.id);
         const enrollment = portalEnrolledByCourse[c.id];
@@ -15776,7 +16129,7 @@ function renderPortalContent(studentId, data, isStudentUser) {
         if (s.status === 'pass') submissionStatusByQuiz[s.quizId] = 'pass';
     });
     const enrollmentCourseIds = new Set(data.enrollments ? data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId) : []);
-        const publishedCourseIds = new Set(data.lessons.filter(isLessonLive).map(l => l.courseId));
+        const publishedCourseIds = new Set(data.lessons.filter(lessonVisible).map(l => l.courseId));
     const allCourses = new Set(data.courses.map(c => c.id));
     const visibleCourseIds = isStudentUser ? (enrollmentCourseIds.size > 0 ? enrollmentCourseIds : publishedCourseIds) : allCourses;
     const quizRegIds = new Set((data.quizRegistrations || []).filter(r => r.studentId === studentId).map(r => r.quizId));
@@ -15849,7 +16202,7 @@ function renderPortalNotesCached(studentId, data) {
     if (isStudentUser) {
         const enrolledCourseIds = new Set(data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(data.courses.filter(c => c.status === 'inactive').map(c => c.id));
-            visibleLessons = data.lessons.filter(l => isLessonLive(l) && enrolledCourseIds.has(l.courseId) && !inactiveCourseIds.has(l.courseId));
+            visibleLessons = data.lessons.filter(l => lessonVisible(l) && enrolledCourseIds.has(l.courseId) && !inactiveCourseIds.has(l.courseId));
     } else {
         visibleLessons = data.lessons.filter(l => l.courseId);
     }
