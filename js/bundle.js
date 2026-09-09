@@ -13968,43 +13968,108 @@ function renderFillInFields(question) {
     div.style.display = question && question.type === 'fillin' ? 'block' : 'none';
     const fillData = question && question.type === 'fillin' ? question : null;
     div.innerHTML = `
-        <div class="form-group"><label>Paragraph (use {b} for each blank)</label>
+        <div class="form-group"><label>Paragraph — where should the blanks go?</label>
+        <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="insertFillBlank()">＋ Insert blank here</button>
+            <span style="font-size:11px;color:var(--text-muted);align-self:center;">Tip: place the cursor and click the button — or just type <b>___</b> (it converts automatically).</span>
+        </div>
         <textarea id="q-fill-paragraph" rows="5" oninput="onFillParagraphInput()" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:13px;">${fillData ? fillData.question : ''}</textarea></div>
-        <div id="q-fill-blanks-container"><div style="font-size:12px;color:var(--text-muted);padding:8px;">Type {b} in the paragraph above to add blanks. Each blank will appear here for configuration.</div></div>`;
+        <div class="form-group"><label>Live preview (exactly what the learner will see)</label>
+        <div id="q-fill-preview" style="padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:13px;line-height:2;background:var(--bg-input);color:var(--text-muted);">Type the paragraph above to preview…</div></div>
+        <div id="q-fill-blanks-container"><div style="font-size:12px;color:var(--text-muted);padding:8px;">Add a blank above — each blank appears here. Type the choices, then <b>pick</b> the correct one (no re-typing).</div></div>`;
     const essayFields = document.getElementById('q-essay-fields');
     if (essayFields) essayFields.parentNode.insertBefore(div, essayFields);
     if (fillData && fillData.blanks) {
         setTimeout(() => {
-            document.getElementById('q-fill-paragraph').value = fillData.question || '';
+            const ta = document.getElementById('q-fill-paragraph');
+            if (ta) ta.value = fillData.question || '';
             onFillParagraphInput();
             const rows = document.querySelectorAll('.q-fill-blank-row');
             fillData.blanks.forEach((b, i) => {
                 if (rows[i]) {
                     rows[i].querySelector('.q-fill-options').value = (b.options || []).join(', ');
+                    refreshFillAnswerSelect(i);
                     rows[i].querySelector('.q-fill-answer').value = b.answer || '';
                 }
             });
         }, 100);
     }
 }
+function insertFillBlank() {
+    const ta = document.getElementById('q-fill-paragraph');
+    if (!ta) return;
+    const s = ta.selectionStart || ta.value.length, e = ta.selectionEnd || ta.value.length;
+    ta.value = ta.value.slice(0, s) + '{b}' + ta.value.slice(e);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = s + 3;
+    onFillParagraphInput();
+}
+function fillBlankChips(text) {
+    let n = 0;
+    return String(text || '').replace(/\{b\}/g, () => { n++; return ` <span style="display:inline-block;min-width:34px;text-align:center;font-weight:700;font-size:11px;color:#fff;background:var(--accent);border-radius:4px;padding:1px 8px;margin:0 2px;">${n}</span> `; });
+}
+function refreshFillAnswerSelect(i) {
+    const rows = document.querySelectorAll('.q-fill-blank-row');
+    const row = rows[i];
+    if (!row) return;
+    const sel = row.querySelector('.q-fill-answer');
+    const prev = sel ? sel.value : '';
+    const opts = row.querySelector('.q-fill-options').value.split(',').map(s => s.trim()).filter(s => s);
+    // de-dupe, keep order
+    const seen = new Set(), uniq = [];
+    opts.forEach(o => { if (!seen.has(o.toLowerCase())) { seen.add(o.toLowerCase()); uniq.push(o); } });
+    sel.innerHTML = '<option value="">— pick correct —</option>' + uniq.map(o => `<option value="${o.replace(/"/g, '&quot;')}">${o.replace(/</g, '&lt;')}</option>`).join('');
+    if (uniq.some(o => o === prev)) sel.value = prev;
+}
 function onFillParagraphInput() {
-    const text = document.getElementById('q-fill-paragraph').value;
+    const ta = document.getElementById('q-fill-paragraph');
+    if (!ta) return;
+    // Auto-convert ___ (3+ underscores) into {b}, keeping the cursor sane.
+    if (/_{3,}/.test(ta.value)) {
+        const pos = ta.selectionStart || 0;
+        const before = ta.value.slice(0, pos);
+        const convBefore = (before.match(/_{3,}/g) || []).reduce((n, m) => n + m.length - 3, 0);
+        ta.value = ta.value.replace(/_{3,}/g, '{b}');
+        const np = Math.max(0, pos - convBefore);
+        try { ta.selectionStart = ta.selectionEnd = np; } catch {}
+    }
+    const text = ta.value;
     const count = (text.match(/\{b\}/g) || []).length;
+    const preview = document.getElementById('q-fill-preview');
+    if (preview) {
+        preview.innerHTML = count ? fillBlankChips(text.replace(/&/g, '&amp;').replace(/</g, '&lt;')) : '<span style="color:var(--text-muted);">Insert a blank above to preview…</span>';
+        if (count) preview.style.color = '';
+    }
     const container = document.getElementById('q-fill-blanks-container');
     if (!container) return;
+    const existing = container.querySelectorAll('.q-fill-blank-row').length;
     if (count === 0) {
-        container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px;">Type {b} in the paragraph above to add blanks.</div>';
+        container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px;">Add a blank above — each blank appears here. Type the choices, then <b>pick</b> the correct one (no re-typing).</div>';
         return;
     }
-    let html = '<div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">Blanks</div>';
+    if (count === existing && existing > 0) return; // keep typed values; only preview updates
+    // Rebuild rows but carry over already-typed options/answers by position.
+    const kept = [];
+    container.querySelectorAll('.q-fill-blank-row').forEach(row => {
+        kept.push({ opts: row.querySelector('.q-fill-options').value, ans: row.querySelector('.q-fill-answer').value });
+    });
+    let html = '<div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">Blanks — type choices, then pick the correct one</div>';
     for (let i = 0; i < count; i++) {
         html += `<div class="q-fill-blank-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;padding:6px;background:var(--bg-input);border-radius:4px;">
             <span style="font-size:11px;font-weight:600;min-width:20px;">#${i + 1}</span>
-            <input type="text" class="q-fill-options" placeholder="Options (comma-separated)" style="flex:2;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
-            <input type="text" class="q-fill-answer" placeholder="Correct answer" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+            <input type="text" class="q-fill-options" placeholder="Choices, comma-separated — e.g. Nairobi, Mombasa, Kisumu" oninput="refreshFillAnswerSelect(${i})" style="flex:2;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+            <select class="q-fill-answer" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;max-width:180px;"><option value="">— pick correct —</option></select>
         </div>`;
     }
     container.innerHTML = html;
+    const rows = container.querySelectorAll('.q-fill-blank-row');
+    kept.forEach((k, i) => {
+        if (rows[i]) {
+            rows[i].querySelector('.q-fill-options').value = k.opts;
+            refreshFillAnswerSelect(i);
+            if (k.ans) rows[i].querySelector('.q-fill-answer').value = k.ans;
+        }
+    });
 }
 async function saveQuestion() {
     const questionEn = (document.getElementById('q-text-en') || {value:''}).value.trim();
@@ -14041,13 +14106,15 @@ async function saveQuestion() {
         const paragraph = document.getElementById('q-fill-paragraph').value.trim();
         if (!paragraph) return showToast('Paragraph is required!');
         const rows = document.querySelectorAll('.q-fill-blank-row');
+        if (!rows.length) return showToast('Insert at least one blank {b} in the paragraph!');
         const blanks = Array.from(rows).map(row => {
             const opts = row.querySelector('.q-fill-options').value.split(',').map(s => s.trim()).filter(s => s);
             const answer = row.querySelector('.q-fill-answer').value.trim();
             return { options: opts, answer };
         });
-        if (blanks.some(b => !b.options.length || !b.answer)) return showToast('Each blank needs options and a correct answer!');
-        if (blanks.some(b => !b.options.includes(b.answer))) return showToast('Correct answer must be one of the options for each blank!');
+        if (blanks.some(b => b.options.length < 2)) return showToast('Each blank needs at least 2 choices (comma-separated)!');
+        if (blanks.some(b => !b.answer)) return showToast('Pick the correct answer for each blank!');
+        if (blanks.some(b => !b.options.includes(b.answer))) return showToast('Correct answer must be one of the choices for each blank!');
         q.question = paragraph;
         q.blanks = blanks;
     } else {
@@ -14766,8 +14833,11 @@ function showQuizInterface(quiz, questions, lang) {
             const blanks = q.blanks || [];
             let paraHtml = q.question || '';
             blanks.forEach((b, i) => {
-                const opts = (b.options || []).map(o => `<option value="${o}">${o}</option>`).join('');
-                paraHtml = paraHtml.replace('{b}', `<select id="fill-${q.id}-${i}" style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:4px;font-size:14px;background:#fff;margin:0 2px;"><option value="">—</option>${opts}</select>`);
+                // Shuffle so position can't be memorized; escape staff text for safety.
+                const shuffled = (b.options || []).slice();
+                for (let k = shuffled.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); const t = shuffled[k]; shuffled[k] = shuffled[j]; shuffled[j] = t; }
+                const opts = shuffled.map(o => { const e = String(o).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); return `<option value="${e}">${e}</option>`; }).join('');
+                paraHtml = paraHtml.replace('{b}', `<select id="fill-${q.id}-${i}" style="padding:6px 10px;border:2px solid #cbd5e1;border-radius:6px;font-size:15px;background:#fff;margin:0 4px;max-width:230px;"><option value="">— choose —</option>${opts}</select>`);
             });
             qHtml += `<div style="font-size:15px;line-height:2;color:#1e293b;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">${paraHtml}</div>`;
         } else {
@@ -14923,7 +14993,9 @@ async function submitQuiz(quizId) {
             blanks.forEach((b, bi) => {
                 const sel = document.getElementById(`fill-${q.id}-${bi}`);
                 const userAnswer = sel ? sel.value : '';
-                const isCorrect = userAnswer === b.answer;
+                // Forgiving mark: ignores case, extra spaces, leading/trailing gaps.
+                const normFill = s => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+                const isCorrect = !!normFill(userAnswer) && normFill(userAnswer) === normFill(b.answer);
                 if (isCorrect) fillCorrect++;
                 blankResults.push({ blankIndex: bi, correct: b.answer, userAnswer, isCorrect });
             });
@@ -15020,8 +15092,9 @@ async function submitQuiz(quizId) {
                 <b>Q${idx + 1} (Matching):</b> ${a.correctMatches}/${a.totalPairs} correct — <b>${Math.round(a.earned * 10) / 10}/${a.points} pts</b>
             </div>`;
         } else if (a.type === 'fillin') {
+            const perBlank = (a.blankResults || []).map(r => `<div style="margin-top:2px;color:${r.isCorrect ? 'var(--success)' : 'var(--danger)'};">${r.isCorrect ? '✓' : '✗'} Blank ${r.blankIndex + 1}: you chose <b>${r.userAnswer || '(none)'}</b>${r.isCorrect ? '' : ` — correct: <b>${r.correct}</b>`}</div>`).join('');
             detailHTML += `<div style="padding:8px;margin:4px 0;border:1px solid var(--border);border-radius:6px;font-size:12px;">
-                <b>Q${idx + 1} (Fill-in):</b> ${a.correctBlanks}/${a.totalBlanks} correct — <b>${Math.round(a.earned * 10) / 10}/${a.points} pts</b>
+                <b>Q${idx + 1} (Fill-in):</b> ${a.correctBlanks}/${a.totalBlanks} correct — <b>${Math.round(a.earned * 10) / 10}/${a.points} pts</b>${perBlank}
             </div>`;
         } else if (a.type !== 'essay') {
             const displayAnswer = Array.isArray(a.answer) ? a.answer.join(', ') : a.answer;
