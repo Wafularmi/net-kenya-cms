@@ -25,18 +25,51 @@ let _httpsPort = null; // set after HTTPS starts
 // parsed/rewritten on every request, which does not scale. We keep the heavy
 // bytes on disk under DOC_STORE_DIR and reference them by path on the record.
 //
-// TWO-PHASE ROLLOUT (non-destructive by default):
-//   Phase 1 (current): the PDF is written to disk AND the inline base64 copy is
-//   KEPT in the JSON record as a backup/rollback source. Reads prefer the disk
-//   file (via /api/doc-content) and fall back to the inline copy if it's absent.
-//   Phase 2 (later, opt-in): set DOC_STRIP_INLINE=1 to remove the inline base64
-//   on read once disk backups are confirmed -> the JSON DB shrinks for real.
+// Phase 2 (active): PDF bytes live in docs/ (+ persistent /data volume copies)
+// and are STRIPPED from server-data.json once the volume copy is confirmed.
+// Reads serve the disk file (via /api/doc-content). server-data.json stays small
+// so every save is milliseconds and the event loop never freezes the live system.
 const DOC_STORE_DIR = process.env.DOC_STORE_DIR || path.join(DATA_ROOT, 'docs');
 const DOC_STRIP_INLINE = process.env.DOC_STRIP_INLINE === '1';
+// Persistent volume for document files (mirrors the DB volume strategy).
+// /data exists on Railway; absent locally (dev keeps inline copies as before).
+const DOC_VOLUME_DIR = process.env.DOC_VOLUME_DIR || '/data/docs';
+function volumeRoot() { try { return path.dirname(DOC_VOLUME_DIR); } catch { return '/data'; } }
+function volumeAvailable() { try { return fs.existsSync(volumeRoot()); } catch { return false; } }
+function syncDocFileToVolume(filename) {
+    // Best-effort persistent copy. Returns true only when the volume copy is confirmed.
+    try {
+        const src = path.join(DOC_STORE_DIR, filename);
+        if (!fs.existsSync(src)) return false;
+        try { fs.mkdirSync(DOC_VOLUME_DIR, { recursive: true }); } catch {}
+        fs.copyFileSync(src, path.join(DOC_VOLUME_DIR, filename));
+        return fs.existsSync(path.join(DOC_VOLUME_DIR, filename));
+    } catch (e) { return false; }
+}
+function restoreDocsFromVolume() {
+    // After an ephemeral restart, bring back doc files from the persistent volume.
+    let restored = 0;
+    try {
+        ensureDocStore();
+        if (!fs.existsSync(DOC_VOLUME_DIR)) return 0;
+        const files = fs.readdirSync(DOC_VOLUME_DIR).filter(f => f.endsWith('.pdf') || f.endsWith('.html'));
+        for (const f of files) {
+            try {
+                const dest = path.join(DOC_STORE_DIR, f);
+                if (!fs.existsSync(dest)) { fs.copyFileSync(path.join(DOC_VOLUME_DIR, f), dest); restored++; }
+            } catch {}
+        }
+    } catch (e) { console.error('restoreDocsFromVolume failed:', e.message); }
+    return restored;
+}
 function docSafeKey(key) {
     return String(key || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200) || ('doc-' + Date.now());
 }
 function docPath(key) { return path.join(DOC_STORE_DIR, docSafeKey(key) + '.pdf'); }
+// Module-scope file helpers (the request handler shadows `path`, so plain
+// path.join() there would throw "path.join is not a function").
+function docPathByKey(key) { try { return path.join(DOC_STORE_DIR, docSafeKey(key) + '.pdf'); } catch { return null; } }
+function docVolPathByKey(key) { try { return path.join(DOC_VOLUME_DIR, docSafeKey(key) + '.pdf'); } catch { return null; } }
 function ensureDocStore() {
     try { if (!fs.existsSync(DOC_STORE_DIR)) fs.mkdirSync(DOC_STORE_DIR, { recursive: true }); } catch (e) { console.error('docstore mkdir failed:', e); }
 }
@@ -55,12 +88,19 @@ function externalizeCertificate(cert) {
     const file = docPath(key);
     const rec = Object.assign({}, cert);
     rec.contentPath = '/api/doc-content/' + encodeURIComponent(key);
-    if (fs.existsSync(file)) return { record: rec, stored: true };
+    if (!fs.existsSync(file)) {
+        try {
+            const buf = Buffer.from(b64, 'base64');
+            fs.writeFileSync(file, buf);
+        } catch (e) { console.error('externalizeCertificate failed:', key, e); return { record: cert, stored: false }; }
+    }
+    // Disk copy verified (pre-existing or just written): persist to the volume,
+    // then drop the inline bytes so server-data.json stays small. Inline is kept
+    // ONLY when no persistent volume exists (local dev) or the copy failed.
     try {
-        const buf = Buffer.from(b64, 'base64');
-        fs.writeFileSync(file, buf);
-        return { record: rec, stored: true };
-    } catch (e) { console.error('externalizeCertificate failed:', key, e); return { record: cert, stored: false }; }
+        if (syncDocFileToVolume(docSafeKey(key) + '.pdf')) delete rec.content;
+    } catch {}
+    return { record: rec, stored: true };
 }
 // Apply phase-2 stripping during a GET read: remove the inline base64 backup
 // copy once the disk file is confirmed present and DOC_STRIP_INLINE is enabled.
@@ -89,6 +129,7 @@ function archiveHtmlContent(cert) {
         try {
             ensureDocStore();
             fs.writeFileSync(file, cert.content);
+            try { syncDocFileToVolume('cert-html-' + key + '.html'); } catch {}
             out.contentArchived = key;
             delete out.content;
             return out;
@@ -202,6 +243,39 @@ function backfillSettingsBlobs() {
         if (changed) saveDB();
     } catch (e) { console.error('backfillSettingsBlobs failed:', e); }
 }
+// One-time (idempotent) migration: move legacy inline PDF bytes to disk +
+// volume, then strip them from server-data.json. Only strips when the volume
+// copy is confirmed, so data is never at risk. Shrinks the DB for real.
+function stripStoredInlineBlobs() {
+    try {
+        if (!volumeAvailable()) return 0; // local dev: keep inline copies
+        let stripped = 0;
+        for (const store of ['certificates', 'idCards', 'idcards']) {
+            const rows = db[store];
+            if (!Array.isArray(rows)) continue;
+            for (const r of rows) {
+                if (!r || typeof r.content !== 'string') continue;
+                const c = r.content.trim();
+                if (!(/^JVBERi0/.test(c) || /^%PDF-/.test(c))) continue;
+                const key = r.id || r.docId || r.vCode;
+                if (!key) continue;
+                try {
+                    ensureDocStore();
+                    const file = docPath(key);
+                    if (!fs.existsSync(file)) {
+                        const b64 = c.startsWith('data:') ? (c.split(',')[1] || '') : c;
+                        if (!b64) continue;
+                        fs.writeFileSync(file, Buffer.from(b64, 'base64'));
+                    }
+                    r.contentPath = '/api/doc-content/' + encodeURIComponent(key);
+                    if (syncDocFileToVolume(docSafeKey(key) + '.pdf')) { delete r.content; stripped++; }
+                } catch (e) { console.error('stripStoredInlineBlobs failed:', key, e.message); }
+            }
+        }
+        if (stripped) saveDB();
+        return stripped;
+    } catch (e) { console.error('stripStoredInlineBlobs failed:', e.message); return 0; }
+}
 const CERT_ID_PREFIX = { diploma: 'DIP', admission: 'ADL', completion: 'CMP', enrollment: 'ENL', recommendation: 'REC', 'fee-statement': 'FEE', transcript: 'TRX', 'final-transcript': 'FTR', certificate: 'CERT' };
 function certDocId(cert) {
     const p = (CERT_ID_PREFIX[(cert || {}).type] || 'DOC').toUpperCase();
@@ -283,8 +357,8 @@ function safeWriteJSON(data) {
     try {
         // Write to temp file first
         fs.writeFileSync(DB_TEMP, json, 'utf8');
-        // Verify temp file is valid JSON
-        JSON.parse(fs.readFileSync(DB_TEMP, 'utf8'));
+        // No verify re-read: it doubled every save's I/O (read + full re-parse
+        // on the event loop) and serializer output needs no validation.
         // Atomic rename with retry (AV may lock temp file temporarily)
         let renamed = false;
         for (let retries = 0; retries < 15; retries++) {
@@ -922,6 +996,8 @@ try {
     loadSessions();
 } catch (e) { console.error('loadSessions at startup failed:', e.message); }
 try { backfillSettingsBlobs(); } catch (e) { console.error('backfillSettingsBlobs failed:', e.message); }
+try { const n = restoreDocsFromVolume(); if (n) console.log('restoreDocsFromVolume: restored', n, 'doc files from volume'); } catch (e) { console.error('restoreDocsFromVolume failed:', e.message); }
+try { const n = stripStoredInlineBlobs(); if (n) console.log('stripStoredInlineBlobs: stripped inline bytes from', n, 'records'); } catch (e) { console.error('stripStoredInlineBlobs failed:', e.message); }
 
 // Brute-force protection for /api/login
 const loginAttempts = new Map(); // ip -> { count, windowStart, blockedUntil }
@@ -3287,7 +3363,17 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
         // DELETE /api/db/:store/:key  â€” remove single record
         if (req.method === 'DELETE' && key) {
             const idx = db[store].findIndex(r => String(r[keyPath]) === key);
+            const doomed = idx >= 0 ? db[store][idx] : null;
             if (idx >= 0) db[store].splice(idx, 1);
+            // Remove orphaned doc files for deleted certificates/idCards (docs + volume).
+            if (doomed && (store === 'certificates' || store === 'idCards' || store === 'idcards')) {
+                try {
+                    const delPaths = [docPathByKey(doomed.id || doomed.docId || doomed.vCode || key), docVolPathByKey(doomed.id || doomed.docId || doomed.vCode || key)];
+                    for (const f of delPaths) {
+                        try { if (typeof f === 'string' && f && fs.existsSync(f)) { fs.unlinkSync(f); } } catch {}
+                    }
+                } catch (e) { console.error('DEL-CLEAN err:', e && e.message); }
+            }
             mutate({ [keyPath]: key, _deleted: true });
             auditLog('delete', store, { key }, user && user.username);
             return json(res, 200, { ok: true, deleted: idx >= 0 });

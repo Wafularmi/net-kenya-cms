@@ -1,8 +1,54 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
-**HEAD:** `v318` · **Assets:** `js/bundle.js?v=317`, `js/student-hub.js?v=37`
-**Deploy = `git push origin main`** (Railway auto-deploy)
+**HEAD:** `9da39f2` · **Assets:** `js/bundle.js?v=327` (preload + script tags), `js/student-hub.js?v=39`, `css/main.146.css?v=147`
+**Deploy = `git push origin main`** (Railway auto-deploy, ~1–3 min) · hard-refresh (`Ctrl+Shift+R`) after every deploy
+
+## Session 2026-09-09 (this conversation — start here)
+
+### `9da39f2` — "Start Assessment" did nothing
+- Root cause: the language-modal confirm (`showLangSelectionModal`, `bundle.js:14703`) saved `langPref` first — any failure (network/503/slow PUT) killed the handler silently: modal stuck, quiz never launched, no message.
+- Fix: language save is now non-blocking (always launches); `startQuiz` hardened end-to-end with error toasts (load paper, resolve student, submissions, open quiz). Same modal serves exams, so both paths fixed.
+
+### `f22057e` — Documents almost instant + auto-generate assessment set (ONE push)
+- Speed: letters 3 sequential fetches → 1 parallel batch; transcripts 8 (incl. a duplicate full grades download, removed) → 1 batch; diploma/completion PDFs fetch config+student in parallel + **template bytes session-cached** (no re-download/re-decode; auto-clears on template save, 10-min TTL); history refresh 4 fetches → 2 shared with duplicate detector. Server save path untouched (crash-safe).
+- Auto-gen (Quizzes → ⚡ Auto-Generate Set): per course creates **Quiz (15 Qs)** + **Mid-Semester CAT (30)** + **Final Exam (50)** from the bank — stratified across lessons, **no reuse** (Final → Mid → Quiz priority), pass 50, Quiz 20min/2 retakes, Mid 60/1, Final 120/1, papers live; Final also lands in Examinations as Draft linked via `quizId`, and `startExam` bridges to `startQuiz` so scores flow into the 50% weight. Short banks → partials + reported shortfall; re-run replaces only the previous auto set.
+- Weights auto-applied per course: **Quiz 20 / Mid(CAT) 20 / Final(Exam) 50 / Attendance 10** (=100).
+- **Attendance award is binary** (`computeWeightedGrade`, `ATT_AWARD_MIN = 80`): ≥80% → full attendance weight, below → 0 (measured % still displayed; re-run Compute Weighted to apply).
+
+### `7992aaf` — Fill-in-the-blank made easy
+- Create: ＋ Insert-blank button, `___` auto-converts to `{b}`, **live preview** with numbered chips, rows rebuild only on count change (typed choices no longer wiped), **pick-correct dropdown** fed from choices (typos impossible), ≥2 choices required.
+- Take: choices **shuffled**, bigger selects, **forgiving marking** (case/space-insensitive); result breakdown shows per-blank you-chose vs correct.
+
+### `6fd30f3` — Filters/drop-downs audit (49 selects + all dynamic)
+- 🔴 **Everyone was running stale code**: executing tag stuck at `bundle.js?v=312` while only the preload tag was bumped. Both tags now bumped in lockstep every release; `main.146.css` got its first cache-buster (`v=147`).
+- Fixed: `qb-type` missing Fill-in option; Quiz Results filters never stuck (selection wiped on re-render); Question Bank course/type filters had no wiring; `updateCourseDropdowns()` wiped the Chapel Service option (+ selections); M-Pesa/fee-statement/payroll selects hid non-active people (now all statuses, tagged); exam fill-in icon; currency decimals +1.
+
+### `f4cfccb` — Drip release mode (per-lesson Immediate / Set-date / Drip)
+- Lesson form 🚦 mode; `publishAt` picker for dates; drip = sequential per-learner unlock (chain + 3.5-day pace + weekly fee gate incl. Lesson 1), max 2/week. Server stores `lessonUnlocks`/`lessonCompletions` (cross-device).
+- Completion = **timed reading** (active tab time ≥ read time, video locked until done: lesson → video) + **≥50% on linked quizzes** (best of submissions/grades; essays on grading). Fail → repeat (timer reset, video re-locked). Pass → personal congrats modal naming learner + next-lesson invite.
+- Quizzes/exams progress-gated everywhere (hub lists, registration, `startQuiz`/`startExam`); staff Manage Lesson → 🔗 Drip tab per-learner Unlock/✓ Complete/Reset.
+
+### `d631055` + `ac861a1` — Maintenance portal flip
+- Admin keeps bypass cookie by design (never sees portal on own browser — verify incognito). Flip sped to ~2s (poll 5s→2s, SSE retry 8s→3s both directions); toggle paints **optimistically** (instant ON/OFF, reverts + errors on save failure).
+
+### `1320f1f` — Scheduled lessons (`publishAt`, auto-publish on time; Scheduled ⏳ filter/badge)
+
+### `d2dff36` — Login crash: `showApp` wrote to removed badge nodes → froze post-login on admin dashboard (that's how Quick Enroll leaked to students). Guarded + students get dashboard actions hidden.
+
+### Header/logo series (`b4c316d` → `0a7e257`)
+- Final state: rectangular interface logo 1.6× (`main.146.css:53`), rectangular notes-PDF logo (`downloadNote`, `v318`), 📘 removed, single red **✕ Exit** top-right on one row with 🔔💬❓ (`header-right: nowrap/wrap`, `flex-shrink:0`), `user-badge` removed, mobile no-spill (`100vw` + ellipsis). Logo mapping stands: `receiptLogo`→login, `logo`→header/docs.
+
+## Standing rules (learned this session)
+- **Bump BOTH bundle tags** (`<link rel=preload>` line 14 AND `<script>` line ~1331) + `student-hub.js` tag + CSS `?v=` on every release — or users run stale code and report fixed bugs as broken.
+- PowerShell 5.1: no `&&`/`head`; long `node -e` times out — write `.cjs` files; byte-level edits (emoji/`\u` escapes) need script files.
+- Never commit: `DEPLOY_ENV.md` (live creds), proposal PDF/.md, `NET LOGO*.png`, `docs/`, test scripts. Live admin `admin` / local `admin123`.
+- Plan-before-code for new behavior; user okays direct fixes ("proceed and fix it"). Big features end with `node --check` + logic test + single push + hard-refresh note.
+
+## Open / suggested next
+- Re-run **Compute Weighted** to apply binary attendance + 20/20/50/10 on courses with generated sets.
+- Confirm assistant-admin password reset end-to-end (GATIMU `staff-STF-0010` vs LAZARUS/ADMIN1) if re-raised.
+- Unify restored-name dropdowns (diploma ↔ completion); bulk fee reminders.
 
 ## Latest batch (v=318) — Notes: revert to gated, rectify logo
 
