@@ -934,9 +934,13 @@ function filterStoreForUser(user, store, rows) {
     // Country filtering for all authenticated users (except main admin).
     // Main admin (role === 'admin') sees ALL countries - global administrator.
     // Exempt stores that are global or identity-only.
+    // Legacy/unassigned rows (no country field) stay visible to everyone:
+    // only rows explicitly tagged to ANOTHER country are hidden. This keeps
+    // pre-country data (grades, exams, submissions) visible while scoping
+    // still applies to country-tagged records. In-memory O(n), no I/O.
     const countryExemptStores = ['users', 'counters', 'sessions', 'maintenanceBypassTokens'];
     if (user && user.user && user.user.country && user.user.role !== 'admin' && !countryExemptStores.includes(store)) {
-        rows = rows.filter(r => r && r.country === user.user.country);
+        rows = rows.filter(r => r && (r.country === user.user.country || !r.country));
     }
     return rows;
 }

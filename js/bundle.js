@@ -962,15 +962,25 @@ async function syncUserAccounts() {
         console.error('syncUserAccounts error:', err);
     }
 }
+async function loadCountries() {
+    try {
+        const data = await fetch('/api/countries').then(r => r.json());
+        const sel = document.getElementById('login-country');
+        if (!sel || !data.countries) return;
+        sel.innerHTML = '<option value="">-- Select country --</option>' + data.countries.map(c => '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.brandName || c.name) + '</option>').join('');
+    } catch {}
+}
 async function login() {
     try {
         const input = sanitizeInput(document.getElementById('login-user').value.trim());
         const password = document.getElementById('login-pass').value;
+        const country = document.getElementById('login-country') ? document.getElementById('login-country').value : '';
         if (!input || !password) return showLoginError('Enter username and password');
+        // Country is required for non-admin users (enforced server-side); main admin is global and may log in without a country
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input, password })
+            body: JSON.stringify({ input, password, country })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -3120,7 +3130,7 @@ function showCourseForm(course = null) {
         { label: 'Attendance', value: 10, type: 'attendance' }
     ];
     const wtItemsHtml = wtSrc.map(w => buildWeightageRow(w.label, w.value, w.type)).join('');
-    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
+    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Lesson pacing (days between lessons)</label><input type="number" id="course-drip-days" value="${course && course.dripDaysBetween != null ? course.dripDaysBetween : ''}" min="0" max="60" step="0.5" placeholder="3.5 = max 2 lessons per week"><small style="display:block;opacity:.7;">0 = a lesson unlocks instantly after the previous one is completed. Used by Sequenced lessons.</small></div><div class="form-group"><label>Default when left blank</label><input type="text" value="3.5 days (max 2 lessons per week)" disabled style="background:var(--bg);color:var(--text);opacity:.75;"></div></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
     showModal(isEdit ? 'Edit Course' : 'Add New Course', content, `<button class="btn btn-primary" onclick="saveCourse()">${isEdit ? 'Update' : 'Create'}</button>`);
     loadStaffDropdown();
     loadCampusDropdownForCourse();
@@ -3152,7 +3162,8 @@ async function saveCourse() {
     const quizW = weightage.find(w => w.type === 'quiz');
     const catW = weightage.find(w => w.type === 'cat');
     const attW = weightage.find(w => w.type === 'attendance');
-    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW ? examW.value : 30, quizWeight: quizW ? quizW.value : 20, catWeight: catW ? catW.value : 25, attWeight: attW ? attW.value : 10, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
+    const dripEl = document.getElementById('course-drip-days');
+    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW ? examW.value : 30, quizWeight: quizW ? quizW.value : 20, catWeight: catW ? catW.value : 25, attWeight: attW ? attW.value : 10, dripDaysBetween: dripEl ? (dripEl.value.trim() === '' ? null : Math.max(0, parseFloat(dripEl.value) || 0)) : null, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
     await dbPut('courses', course); closeModal(); renderCourses(); updateCourseDropdowns(); showToast(editId ? 'Course updated!' : 'Course created!'); logAudit(editId ? 'updated' : 'created', 'course', course);
 }
 function buildWeightageRow(label, value, type) {
@@ -4943,14 +4954,28 @@ async function renderBalances() {
     const waivers = await dbGetAll('waivers').catch(() => []);
     const today = new Date().toISOString().split('T')[0];
     const activeAgr = (sid) => agreements.find(a => String(a.studentId) === String(sid) && a.status === 'approved' && String(a.dueDate || '') >= today);
-    const balances = students.map(s => {
+    const rows = students.map(s => {
         const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
         const waived = waiverTotalFor(s.id, waivers);
         const fee = getCachedStudentFee(s);
         return { ...s, paid, waived, fee, balance: fee - paid - waived, agr: activeAgr(s.id) };
-    }).filter(s => s.balance > 0).sort((a, b) => b.balance - a.balance);
-    document.getElementById('balances-list').innerHTML = balances.length ? balances.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span><br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)}${s.waived ? ` + Waived: ${formatCurrency(s.waived)}` : ''} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">📝 Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:var(--warning);">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button> <button class="btn btn-warning btn-sm" style="margin-top:4px;" onclick="showWaiverForm('${s.id}')">Waiver</button></div></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No outstanding balances</div>';
+    });
+    const statusOf = r => r.fee > 0 ? (r.balance > 0 ? 'balance' : 'paid') : 'sponsored';
+    const counts = { all: rows.length, balance: 0, paid: 0, sponsored: 0 };
+    rows.forEach(r => { const sk = statusOf(r); counts[sk]++; });
+    const shown = rows.filter(r => _balancesFilter === 'all' || statusOf(r) === _balancesFilter).sort((a, b) => b.balance - a.balance);
+    const badgeHtml = r => {
+        const sk = statusOf(r);
+        if (sk === 'sponsored') return '<span class="badge badge-info" style="font-size:10px;">Sponsored</span>';
+        return sk === 'paid' ? '<span class="badge badge-success" style="font-size:10px;">Fully Paid</span>' : '<span class="badge badge-warning" style="font-size:10px;">Balance</span>';
+    };
+    const filterBtn = (key, label) => `<button class="btn btn-sm ${_balancesFilter === key ? 'btn-primary' : 'btn-outline'}" onclick="setBalancesFilter('${key}')">${label} (${counts[key]})</button>`;
+    const outstanding = rows.reduce((t, r) => t + (r.balance > 0 ? r.balance : 0), 0);
+    const listHtml = shown.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span> ${badgeHtml(s)}${s.status && s.status !== 'active' ? `<br><span style="font-size:10px;color:var(--text-muted);">Status: ${escapeHtml(s.status)}</span>` : ''}<br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)}${s.waived ? ` + Waived: ${formatCurrency(s.waived)}` : ''} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:${s.balance > 0 ? 'var(--warning)' : 'var(--success)'};">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button> <button class="btn btn-warning btn-sm" style="margin-top:4px;" onclick="showWaiverForm('${s.id}')">Waiver</button></div></div>`).join('');
+    document.getElementById('balances-list').innerHTML = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-input);"><div style="display:flex;gap:6px;flex-wrap:wrap;">${filterBtn('all', 'All')}${filterBtn('balance', 'Balance')}${filterBtn('paid', 'Fully Paid')}${filterBtn('sponsored', 'Sponsored')}</div><div style="flex:1;text-align:right;font-size:12px;color:var(--text-muted);">Students: <b>${counts.all}</b> | Outstanding: <b style="color:var(--warning);">${formatCurrency(outstanding)}</b></div></div>` + (shown.length ? listHtml : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No students match this filter</div>');
 }
+let _balancesFilter = 'all';
+function setBalancesFilter(v) { _balancesFilter = v; renderBalances(); }
 function canGrantWaiversOrAgreements() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (['admin', 'finance', 'registrar'].includes(u.role)) return true;
@@ -10399,6 +10424,44 @@ function removeRestoredCompletionName(id) {
     _completionPersistRestored();
     renderCompletionGenDropdown();
 }
+function _signatureTimeout(ms) { return new Promise((_, rej) => setTimeout(() => rej(new Error('signature embed timeout')), ms)); }
+// Embed a signatory signature image into a generator's PDF without ever hanging
+// the tab: validates the payload (shape, atob-safety, PNG magic/dimensions/IEND
+// terminator) and races embedPng/embedJpg against a timeout. Malformed or
+// truncated images are skipped so a single corrupt signature can never wedge
+// pdf-lib (pako inflate on a truncated PNG feeds an infinite loop) or the browser.
+async function embedGeneratorSignature(pdfDoc, sig) {
+    let imgData = sig && sig.img;
+    if (imgData && typeof imgData === 'object') imgData = imgData.img || imgData.data || null;
+    if (!imgData || typeof imgData !== 'string' || !imgData.startsWith('data:image/')) return null;
+    const b64 = (imgData.split(',')[1]) || '';
+    if (!b64 || b64.length % 4 !== 0) return null;
+    let bytes;
+    try { bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
+    catch (e) { return null; }
+    if (bytes.length < 24) return null;
+    const isPng = imgData.indexOf('/png') > 0 && imgData.indexOf('/jpeg') < 0;
+    if (isPng) {
+        if (bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return null;
+        const w = ((bytes[16] << 24) >>> 0) + (bytes[17] << 16) + (bytes[18] << 8) + bytes[19];
+        const h = ((bytes[20] << 24) >>> 0) + (bytes[21] << 16) + (bytes[22] << 8) + bytes[23];
+        if (!w || !h || w > 4096 || h > 4096) return null;
+        let iend = false;
+        for (let i = bytes.length - 8; i >= bytes.length - 64 && i >= 0; i--) {
+            if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 && bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) { iend = true; break; }
+        }
+        if (!iend) return null;
+    }
+    try {
+        return await Promise.race([
+            (isPng ? pdfDoc.embedPng(bytes) : pdfDoc.embedJpg(bytes)),
+            _signatureTimeout(4000)
+        ]);
+    } catch (e) {
+        console.warn('Signature embed skipped:', e && e.message);
+        return null;
+    }
+}
 async function generateCompletionPdf() {
     const studentId = document.getElementById('completion-pdf-student').value;
     const compDate = document.getElementById('completion-pdf-date').value;
@@ -10478,14 +10541,10 @@ async function generateCompletionPdf() {
         drawField('Verify: ' + vCode, config.fields.vcode);
         for (const role of ['registrar', 'dean', 'director']) {
             const sig = config.sigs && config.sigs[role];
-            let imgData = sig && sig.img;
-            if (imgData && typeof imgData === 'object') imgData = imgData.img || imgData.data || null;
-            if (!sig || !imgData || typeof imgData !== 'string' || !imgData.startsWith('data:')) continue;
+            if (!sig) continue;
             try {
-                const b64 = imgData.split(',')[1];
-                const sigBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-                const isPng = imgData.includes('image/png');
-                const sigImg = isPng ? await pdfDoc.embedPng(sigBytes) : await pdfDoc.embedJpg(sigBytes);
+                const sigImg = await embedGeneratorSignature(pdfDoc, sig);
+                if (!sigImg) continue;
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
                 page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
@@ -10889,14 +10948,10 @@ async function generateDiplomaPdf() {
         }
         for (const role of ['registrar', 'dean', 'director']) {
             const sig = config.sigs && config.sigs[role];
-            let imgData = sig && sig.img;
-            if (imgData && typeof imgData === 'object') imgData = imgData.img || imgData.data || null;
-            if (!sig || !imgData || typeof imgData !== 'string' || !imgData.startsWith('data:')) continue;
+            if (!sig) continue;
             try {
-                const b64 = imgData.split(',')[1];
-                const sigBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-                const isPng = imgData.includes('image/png');
-                const sigImg = isPng ? await pdfDoc.embedPng(sigBytes) : await pdfDoc.embedJpg(sigBytes);
+                const sigImg = await embedGeneratorSignature(pdfDoc, sig);
+                if (!sigImg) continue;
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
                 page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
@@ -13261,13 +13316,36 @@ function fmtPublishAt(p) { try { const d = new Date(p); if (isNaN(d.getTime())) 
 // ---------- Drip engine: per-learner sequential unlock, max 2 lessons/week ----------
 // Lesson modes: 'immediate' | 'date' (publishAt) | 'drip'. Stores: lessonCompletions (LC-), lessonUnlocks (LU-).
 const DRIP_DAYS = 3.5, DRIP_MS = 3.5 * 86400000, DRIP_PASS = 50;
-let _dripU = {}, _dripC = {}, _dripSid = null, _dripAt = 0;
+let _dripU = {}, _dripC = {}, _dripSid = null, _dripAt = 0, _dripNext = null, _dripFee = null;
 function lessonMode(l) { if (!l) return 'immediate'; if (l.releaseMode === 'drip' || l.releaseMode === 'date' || l.releaseMode === 'immediate') return l.releaseMode; return l.publishAt ? 'date' : 'immediate'; }
 function dripId(prefix, sid, lid) { return prefix + '-' + String(sid).replace(/[^A-Za-z0-9-]/g, '') + '-' + String(lid).replace(/[^A-Za-z0-9-]/g, ''); }
+// Talk to the authoritative server drip engine (/api/drip/sync). The server owns
+// every unlock + completion decision (chain order, per-course pacing, weekly fee
+// gate); the client only reports reading milestones and renders the results.
+async function dripApi(body) {
+    try {
+        const res = await fetch('/api/drip/sync', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify(body) });
+        if (!res || !res.ok) { try { const j = await res.clone().json(); console.warn('drip sync rejected:', res.status, j && j.error); } catch (e) {} return null; }
+        return await res.json();
+    } catch (e) { console.warn('drip api fail:', e && e.message); return null; }
+}
+function dripApplyMaps(data) {
+    if (!data) return false;
+    if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
+    if (Array.isArray(data.completions)) { data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+    if (data.next) _dripNext = data.next;
+    if (data.fee) _dripFee = data.fee;
+    _dripAt = Date.now();
+    return true;
+}
 async function loadDripMaps(sid, force) {
     if (!sid) return;
     if (!force && _dripSid === sid && _dripU && Date.now() - _dripAt < 120000) return;
-    _dripSid = sid; _dripU = {}; _dripC = {};
+    _dripSid = sid; _dripU = {}; _dripC = {}; _dripNext = null; _dripFee = null;
+    // Authoritative source: the server sweeps the chain and returns fresh maps.
+    const data = await dripApi({ action: 'state', studentId: sid });
+    if (dripApplyMaps(data)) return;
+    // Fallback: direct store reads (keeps the offline/dev-local path usable).
     try {
         const u = await dbGetAll('lessonUnlocks').catch(() => []);
         const c = await dbGetAll('lessonCompletions').catch(() => []);
@@ -13312,118 +13390,65 @@ async function dripFeeOk(sid) {
         return !lock.locked;
     } catch { return true; }
 }
-async function dripWriteUnlock(sid, lesson, by) {
-    const rec = { id: dripId('LU', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, unlockedAt: new Date().toISOString(), by: by || 'drip' };
-    try { await dbPut('lessonUnlocks', rec); } catch {}
-    _dripU[lesson.id] = rec;
-    return rec;
-}
-// Sweeper: unlocks whatever is due for a learner (chain + 3.5-day pace + fees). Self-healing and idempotent.
+// Sweeper: ask the server to grant whatever is due (chain order + per-course pace + fee gate).
 async function ensureDripUnlocks(sid, courseId) {
     if (!sid) return;
-    await loadDripMaps(sid);
-    let lessons = [];
-    try { lessons = await dbGetAll('lessons'); } catch { return; }
-    if (courseId) lessons = lessons.filter(l => String(l.courseId) === String(courseId));
-    const byCourse = {};
-    lessons.forEach(l => { (byCourse[l.courseId] = byCourse[l.courseId] || []).push(l); });
-    for (const cid of Object.keys(byCourse)) {
-        const ordered = byCourse[cid].filter(l => l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
-        if (!ordered.some(l => lessonMode(l) === 'drip')) continue;
-        const feeOk = await dripFeeOk(sid);
-        for (let i = 0; i < ordered.length; i++) {
-            const l = ordered[i];
-            if (lessonMode(l) !== 'drip' || _dripU[l.id]) continue;
-            if (!feeOk) break; // whole chain waits on fees
-            if (i === 0) { await dripWriteUnlock(sid, l, 'drip'); continue; }
-            const prev = ordered[i - 1];
-            const pc = _dripC[prev.id];
-            if (!pc || !pc.completedAt) break; // previous not complete → chain stops
-            const pu = _dripU[prev.id];
-            const anchor = Math.max(pu ? (+new Date(pu.unlockedAt) || 0) : 0, +new Date(pc.completedAt) || 0);
-            if (Date.now() - anchor < DRIP_MS) break; // 3.5-day pace: max 2 lessons/week
-            await dripWriteUnlock(sid, l, 'drip');
-        }
-    }
+    const data = await dripApi({ action: 'state', studentId: sid, ...(courseId ? { courseId: String(courseId) } : {}) });
+    if (!dripApplyMaps(data)) await loadDripMaps(sid, true);
 }
 async function dripRecordRead(sid, lesson, addSecs) {
     await loadDripMaps(sid);
+    const data = await dripApi({ action: 'read', studentId: sid, lessonId: String(lesson.id), readSecs: addSecs });
+    if (data && data.completion) { _dripC[lesson.id] = data.completion; return data.completion; }
     let comp = _dripC[lesson.id];
     if (!comp) comp = { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0 };
     comp.readSecs = Math.min((comp.readSecs || 0) + addSecs, 24 * 3600);
-    try { await dbPut('lessonCompletions', comp); } catch {}
     _dripC[lesson.id] = comp;
     return comp;
 }
 // Fail → repeat: wipe timed-read so the lesson must be re-read and retaken.
 async function dripResetForRepeat(sid, lesson) {
     await loadDripMaps(sid);
-    let comp = _dripC[lesson.id] || { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0 };
-    comp.readSecs = 0; comp.readDoneAt = null; comp.completedAt = null; comp.quizPassedAt = null;
-    try { await dbPut('lessonCompletions', comp); } catch {}
-    _dripC[lesson.id] = comp;
+    const data = await dripApi({ action: 'manual', studentId: sid, lessonId: String(lesson.id), op: 'repeat' });
+    if (data && data.completion) _dripC[lesson.id] = data.completion; else delete _dripC[lesson.id];
     try { const rk = 'read-lessons-' + sid; const o = JSON.parse(localStorage.getItem(rk) || '{}'); delete o[lesson.id]; localStorage.setItem(rk, JSON.stringify(o)); } catch {}
 }
-// Re-evaluate completion: timed read + every linked quiz at >=50%. Congratulates once, then sweeps unlocks.
+// Server re-evaluates completion (timed read + every linked published quiz at >=50%)
+// and sweeps the drip chain; the client renders the authoritative result.
 async function evalLessonCompletion(sid, lesson, opts) {
     opts = opts || {};
-    await loadDripMaps(sid);
-    let note = null;
-    try { const notes = await dbGetAll('notes'); note = (notes || []).find(n => String(n.lessonId) === String(lesson.id)); } catch {}
-    const req = dripRequiredSecs(lesson, note);
-    let comp = _dripC[lesson.id];
-    if (!comp) comp = { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0, requiredSecs: req };
-    comp.requiredSecs = req;
-    const readDone = (comp.readSecs || 0) >= req;
-    let quizzes = [];
-    try { const all = await dbGetAll('quizzes'); quizzes = (all || []).filter(q => String(q.lessonId) === String(lesson.id) && q.published !== false); } catch {}
-    let quizDone = true, best = null;
-    if (quizzes.length) {
-        let subs = [], grades = [];
-        try { subs = await dbGetAll('submissions'); } catch {}
-        try { grades = await dbGetAll('grades'); } catch {}
-        const qids = new Set(quizzes.map(q => q.id));
-        let top = -1;
-        (subs || []).forEach(s => { if (qids.has(s.quizId) && String(s.studentId) === String(sid) && s.status !== 'pending_review' && typeof s.score === 'number') top = Math.max(top, s.score); });
-        (grades || []).forEach(g => { if (qids.has(g.quizId) && String(g.studentId) === String(sid) && typeof g.score === 'number') top = Math.max(top, g.score); });
-        best = top < 0 ? null : top;
-        quizDone = top >= DRIP_PASS;
-        if (top >= 0) comp.quizBest = top;
-        if (quizDone && !comp.quizPassedAt) comp.quizPassedAt = new Date().toISOString();
+    const data = await dripApi({ action: 'evaluate', studentId: sid, lessonId: String(lesson.id) });
+    if (data && data.completion) {
+        _dripC[lesson.id] = data.completion;
+        if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
+        if (Array.isArray(data.completions)) { data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+        if (data.next) _dripNext = data.next;
+        if (data.fee) _dripFee = data.fee;
+        if (data.justCompleted && !opts.silent) { try { await dripCongrats(sid, lesson, data.completion.quizBest); } catch (e) {} }
+        return data.completion;
     }
-    const wasComplete = !!comp.completedAt;
-    if (readDone && !comp.readDoneAt) comp.readDoneAt = new Date().toISOString();
-    if (readDone && quizDone && !comp.completedAt) comp.completedAt = new Date().toISOString();
-    try { await dbPut('lessonCompletions', comp); } catch {}
-    _dripC[lesson.id] = comp;
-    if (readDone && quizDone && !wasComplete) {
-        await ensureDripUnlocks(sid, lesson.courseId);
-        if (!comp.congratsShown && !opts.silent) {
-            comp.congratsShown = true;
-            try { await dbPut('lessonCompletions', comp); } catch {}
-            _dripC[lesson.id] = comp;
-            dripCongrats(sid, lesson, best);
-        }
-    }
-    return comp;
+    try { if (typeof loadDripMaps === 'function') await loadDripMaps(sid); } catch {}
+    return _dripC[lesson.id] || null;
 }
 async function dripCongrats(sid, lesson, best) {
     let name = 'Learner';
     try { const me = await dripMe(sid); if (me && (me.name || me.fullName)) name = me.name || me.fullName; } catch {}
     let nextTxt = '';
-    try {
-        const all = await dbGetAll('lessons');
-        const ordered = (all || []).filter(l => String(l.courseId) === String(lesson.courseId) && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
-        const idx = ordered.findIndex(l => String(l.id) === String(lesson.id));
-        const nx = idx >= 0 ? ordered[idx + 1] : null;
-        if (nx) {
-            if (_dripU[nx.id]) nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is now open — tap it to begin! 🚀';
-            else nextTxt = (await dripFeeOk(sid)) ? 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> opens 3½ days after this win — well-earned rest! 📚' : 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is ready — just clear the week\'s fee target to unlock it. 💰';
-        } else nextTxt = 'That was the last lesson in this course — outstanding! 🎓';
-    } catch {}
+    const nx = _dripNext || null;
+    if (nx) {
+        if (nx.reason === 'open') nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is now open - tap it to begin!';
+        else if (nx.reason === 'pace' && nx.opensAtMs) {
+            const days = Math.max(1, Math.ceil((nx.opensAtMs - Date.now()) / 86400000));
+            const opens = new Date(nx.opensAtMs).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+            nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> opens in <b>' + days + ' day' + (days !== 1 ? 's' : '') + '</b> (' + opens + ') - well-earned rest!';
+        }
+        else if (nx.reason === 'fees') nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is ready - just clear the weekly fee target to unlock it.';
+        else nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> unlocks after this one is fully completed - keep going!';
+    } else nextTxt = 'That was the last lesson in this course - outstanding!';
     const hasVideo = !!(lesson.videoUrl || lesson.video || lesson.videoLink);
-    showModal('🎉 Congratulations, ' + escapeHtml(name) + '!', '<div style="text-align:center;padding:12px;"><div style="font-size:52px;">🎉</div><h3 style="margin:8px 0;">Well done, ' + escapeHtml(name) + '!</h3><p style="font-size:14px;">You completed <b>' + escapeHtml(lesson.title) + '</b>' + (best !== null && best !== undefined ? ' with <b>' + best + '%</b>' : '') + '.</p>' + (hasVideo ? '<p style="font-size:14px;">🎬 Your lesson video is now open — watch it next.</p>' : '') + '<p style="font-size:14px;">' + nextTxt + '</p></div>',
-        (hasVideo ? '<button class="btn btn-primary" onclick="closeModal();viewStudentLesson(\'' + lesson.id + '\')">▶ Watch Video</button> ' : '') + '<button class="btn btn-outline" onclick="closeModal();if(typeof renderStudentHub===\'function\'){try{renderStudentHub();}catch{}}">Continue</button>');
+    const beginBtn = (nx && nx.reason === 'open' && typeof viewHubLessonNote === 'function') ? '<button class="btn btn-primary" onclick="closeModal();viewHubLessonNote(\'' + nx.lessonId + '\',\'' + String((lesson.courseId || '')).replace(/'/g, '') + '\');">Begin: ' + escapeHtml(nx.title) + '</button> ' : '';
+    showModal('Congratulations, ' + escapeHtml(name) + '!', '<div style="text-align:center;padding:12px;"><div style="font-size:52px;">🎉</div><h3 style="margin:8px 0;">Well done, ' + escapeHtml(name) + '!</h3><p style="font-size:14px;">You completed <b>' + escapeHtml(lesson.title) + '</b>' + (best !== null && best !== undefined ? ' with <b>' + best + '%</b>' : '') + '.</p>' + (hasVideo ? '<p style="font-size:14px;">Your lesson video is now open - watch it next.</p>' : '') + '<p style="font-size:14px;">' + nextTxt + '</p></div>',
+        beginBtn + (hasVideo ? '<button class="btn btn-primary" onclick="closeModal();viewStudentLesson(\'' + lesson.id + '\')">Watch Video</button> ' : '') + '<button class="btn btn-outline" onclick="closeModal();if(typeof renderStudentHub===\'function\'){try{renderStudentHub();}catch{}}">Continue</button>');
 }
 // Exams are course-level: open only when every drip lesson in the course is complete.
 async function dripExamOpen(sid, exam) {
@@ -13437,39 +13462,29 @@ async function dripExamOpen(sid, exam) {
         return { open: false, remaining: incomplete.length, next: incomplete[0] };
     } catch { return { open: true }; }
 }
-// Staff overrides (Manage Lesson → per learner).
+// Staff overrides (Manage Lesson - per learner). Server persists and re-sweeps.
 async function dripManualUnlock(sid, lessonId) {
     await loadDripMaps(sid);
-    let lesson = null;
-    try { lesson = await dbGet('lessons', lessonId); } catch {}
-    if (!lesson) return showToast('Lesson not found', { type: 'danger' });
-    await dripWriteUnlock(sid, lesson, 'manual');
-    showToast('Lesson unlocked for learner ✓');
+    const data = await dripApi({ action: 'manual', studentId: sid, lessonId: String(lessonId), op: 'unlock' });
+    if (dripApplyMaps(data)) showToast('Lesson unlocked for learner ok');
+    else showToast('Unlock failed - please retry', { type: 'danger' });
     try { manageLesson(lessonId); } catch {}
 }
 async function dripMarkComplete(sid, lessonId) {
     await loadDripMaps(sid);
-    let lesson = null;
-    try { lesson = await dbGet('lessons', lessonId); } catch {}
-    if (!lesson) return showToast('Lesson not found', { type: 'danger' });
-    let comp = _dripC[lessonId] || { id: dripId('LC', sid, lessonId), studentId: sid, lessonId, courseId: lesson.courseId, readSecs: 0 };
-    const now = new Date().toISOString();
-    comp.readDoneAt = comp.readDoneAt || now; comp.quizPassedAt = comp.quizPassedAt || now;
-    comp.completedAt = comp.completedAt || now; comp.congratsShown = true; comp.manualBy = 'staff';
-    try { await dbPut('lessonCompletions', comp); } catch {}
-    _dripC[lessonId] = comp;
-    await ensureDripUnlocks(sid, lesson.courseId);
-    showToast('Marked complete by staff ✓ — chain advanced');
+    const data = await dripApi({ action: 'manual', studentId: sid, lessonId: String(lessonId), op: 'complete' });
+    if (data && data.completion) _dripC[lessonId] = data.completion;
+    if (dripApplyMaps(data)) showToast('Marked complete by staff ok - chain advanced');
+    else showToast('Mark complete failed - please retry', { type: 'danger' });
     try { manageLesson(lessonId); } catch {}
 }
 async function dripResetProgress(sid, lessonId) {
     await loadDripMaps(sid);
-    try { if (typeof dbDelete === 'function' && _dripC[lessonId]) await dbDelete('lessonCompletions', _dripC[lessonId].id); } catch {}
-    try { if (typeof dbDelete === 'function' && _dripU[lessonId]) await dbDelete('lessonUnlocks', _dripU[lessonId].id); } catch {}
+    const data = await dripApi({ action: 'manual', studentId: sid, lessonId: String(lessonId), op: 'reset' });
     delete _dripC[lessonId]; delete _dripU[lessonId];
-    try { const rk = 'read-lessons-' + sid; const o = JSON.parse(localStorage.getItem(rk) || '{}'); delete o[lessonId]; localStorage.setItem(rk, JSON.stringify(o)); } catch {}
-    showToast('Learner progress reset for this lesson');
-    try { const lid = lessonId; manageLesson(lid); } catch {}
+    if (dripApplyMaps(data)) showToast('Learner progress reset for this lesson');
+    else showToast('Reset failed - please retry', { type: 'danger' });
+    try { manageLesson(lessonId); } catch {}
 }
 async function renderLessons() {
     const courses = await dbGetAll('courses');
@@ -13498,7 +13513,7 @@ async function renderLessons() {
         const scheduled = isLessonScheduled(l);
         const schedBadge = scheduled ? ' <span class="badge badge-info" style="font-size:9px;" title="Auto-publishes">⏳ ' + fmtPublishAt(l.publishAt) + '</span>' : '';
         const lmode = (l.releaseMode || (l.publishAt ? 'date' : 'immediate'));
-        const modeBadge = lmode === 'drip' ? ' <span class="badge" style="font-size:9px;background:#e0e7ff;color:#3730a3;" title="Drip: unlocks per learner after prev complete + 3.5 days + fees">🔗 DRIP</span>' : '';
+        const modeBadge = lmode === 'drip' ? ' <span class="badge" style="font-size:9px;background:#e0e7ff;color:#3730a3;" title="Sequenced: unlocks per learner after the previous lesson + course pacing + fees">🔗 SEQUENCED</span>' : '';
         return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No lessons yet. Click "+ Add Lesson" to create one.</td></tr>';
     courseSelect.addEventListener('change', renderLessons);
@@ -13519,16 +13534,16 @@ async function showLessonForm(lesson = null) {
     const isEdit = !!lesson;
     const isPublished = lesson ? lesson.published !== false : false;
     const relMode = lesson ? (lesson.releaseMode || (lesson.publishAt ? 'date' : 'immediate')) : 'immediate';
-    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
+    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select" onchange="updateLessonDripHint()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
 <div id="lesson-virtual-settings" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-input);">
     <div class="form-row"><div class="form-group"><label>Room Name / URL</label><input type="text" id="lesson-virtual-room" value="${lesson && lesson.virtualRoom ? lesson.virtualRoom : ''}" placeholder="e.g. netcohort or https://meet.jit.si/netcohort" style="width:100%;"></div><div class="form-group"><label>Password</label><input type="text" id="lesson-virtual-password" value="${lesson && lesson.virtualPassword ? lesson.virtualPassword : ''}"></div></div>
     <div class="form-group"><label>Trainer / Instructor</label><input type="text" id="lesson-virtual-trainer" value="${lesson && lesson.virtualTrainer ? lesson.virtualTrainer : ''}" placeholder="e.g. Pastor David" style="width:100%;"></div>
     <div class="form-row"><div class="form-group"><label>Scheduled Time</label><input type="datetime-local" id="lesson-virtual-scheduled" value="${lesson && lesson.virtualScheduled ? lesson.virtualScheduled.replace(' ', 'T').slice(0,16) : ''}"></div>    <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;"><input type="checkbox" id="lesson-virtual-recording" ${lesson && lesson.virtualRecording ? 'checked' : ''}> <label style="margin:0;font-size:13px;">Record session</label></div></div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Integrates with Jitsi Meet. Students see "Join Live Class" in the course.</div>
 </div>
-<div class="form-group"><label>🚦 Release mode</label><select id="lesson-release" onchange="toggleLessonRelease()" style="width:100%;"><option value="immediate">Immediate — visible at once</option><option value="date">Set date — auto-publish on the date below</option><option value="drip">Drip — unlocks per learner (prev complete + 3.5 days + fees)</option></select><div id="lesson-drip-hint" style="display:none;font-size:11px;color:var(--text-muted);margin-top:4px;">🔗 Drip: Lesson 1 opens once week-1 fees/waiver/agreement hold. Each next lesson unlocks 3.5 days after the previous is completed (timed reading + 50% quiz/exam) and fees stay current. Max 2 lessons/week.</div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Published — master switch (Draft hides under every mode)</label></div><div class="form-group" id="lesson-date-row"><label>⏳ Publish on (for Set-date mode)</label><input type="datetime-local" id="lesson-publishAt" value="${lesson && lesson.publishAt ? String(lesson.publishAt).replace(' ', 'T').slice(0,16) : ''}" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">A future date hides the lesson from students and auto-publishes it when the time arrives.</div></div>`;
+<div class="form-group"><label>🚦 Release mode</label><select id="lesson-release" onchange="toggleLessonRelease()" style="width:100%;"><option value="immediate">Immediate — visible at once</option><option value="date">Set date — auto-publish on the date below</option><option value="drip">Sequenced — unlocks per learner (prev complete + course pacing + fees)</option></select><div id="lesson-drip-hint" style="display:none;font-size:11px;color:var(--text-muted);margin-top:4px;"></div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Published — master switch (Draft hides under every mode)</label></div><div class="form-group" id="lesson-date-row"><label>⏳ Publish on (for Set-date mode)</label><input type="datetime-local" id="lesson-publishAt" value="${lesson && lesson.publishAt ? String(lesson.publishAt).replace(' ', 'T').slice(0,16) : ''}" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">A future date hides the lesson from students and auto-publishes it when the time arrives.</div></div>`;
     showModal(isEdit ? 'Edit Lesson' : 'Add Lesson', content, `<button class="btn btn-primary" onclick="saveLesson()">${isEdit ? 'Update' : 'Save'}</button>`);
-    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); const rs = document.getElementById('lesson-release'); if (rs) { rs.value = relMode; toggleLessonRelease(); } }, 100);
+    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); const rs = document.getElementById('lesson-release'); if (rs) { rs.value = relMode; toggleLessonRelease(); } updateLessonDripHint(); }, 100);
 }
 function toggleLessonRelease() {
     const v = document.getElementById('lesson-release') ? document.getElementById('lesson-release').value : 'immediate';
@@ -13536,8 +13551,23 @@ function toggleLessonRelease() {
     if (dr) dr.style.display = v === 'date' ? '' : 'none';
     const dh = document.getElementById('lesson-drip-hint');
     if (dh) dh.style.display = v === 'drip' ? '' : 'none';
+    if (v === 'drip') updateLessonDripHint();
     const pc = document.getElementById('lesson-published');
     if (pc && v === 'drip') pc.checked = true;
+}
+async function updateLessonDripHint() {
+    const sel = document.getElementById('lesson-course-select');
+    const hint = document.getElementById('lesson-drip-hint');
+    if (!hint || !sel) return;
+    let pace = null;
+    if (sel.value) {
+        try { const course = await dbGet('courses', sel.value); pace = course ? hubPaceText(course) : null; } catch {}
+    }
+    hint.innerHTML = '🔗 Sequenced: Lesson 1 opens once week-1 fees/waiver/agreement hold. Each next lesson unlocks when the previous is completed (timed reading + 50% quiz/exam) AND fees stay current. ' + (pace ? 'Pacing for this course: ' + pace + '.' : 'Pacing comes from the course page (days between lessons; 0 = instant).');
+}
+function hubPaceText(course) {
+    const days = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
+    return days === 0 ? 'instant — a lesson unlocks as soon as the previous one is done' : 'one new lesson every ' + days + ' day' + (days === 1 ? '' : 's');
 }
 function previewLessonVideo() {
     const url = document.getElementById('lesson-video').value.trim();
@@ -13575,7 +13605,7 @@ async function saveLesson() {
     };
     if (lesson.releaseMode === 'drip') lesson.published = true; // drip governs visibility per learner
     else if (lesson.releaseMode === 'date' && lesson.publishAt && new Date(lesson.publishAt).getTime() > Date.now()) lesson.published = true; // future date = scheduled
-    await dbPut('lessons', lesson); closeModal(); renderLessons(); invalidatePortalCache(); invalidateProgressCache(); showToast(lesson.releaseMode === 'drip' ? 'Drip mode 🔗 — unlocks per learner (prev complete + 3.5 days + fees)' : (isLessonScheduled(lesson) ? 'Lesson scheduled ⏳ — auto-publishes ' + fmtPublishAt(lesson.publishAt) : (editId ? 'Lesson updated!' : 'Lesson created!'))); logAudit(editId ? 'updated' : 'created', 'lesson', { id, courseId, title });
+    await dbPut('lessons', lesson); closeModal(); renderLessons(); invalidatePortalCache(); invalidateProgressCache(); showToast(lesson.releaseMode === 'drip' ? "Sequenced: unlocks per learner (prev complete + course pacing + fees)" : (isLessonScheduled(lesson) ? 'Lesson scheduled ⏳ — auto-publishes ' + fmtPublishAt(lesson.publishAt) : (editId ? 'Lesson updated!' : 'Lesson created!'))); logAudit(editId ? 'updated' : 'created', 'lesson', { id, courseId, title });
 }
 async function editLesson(id) {
     const lesson = await dbGet('lessons', id);
@@ -13618,7 +13648,7 @@ async function manageLesson(lessonId) {
             <button class="tab-btn" onclick="switchLessonTab('questions','${lessonId}')">❓ Questions (${(await dbGetAll('questionBank')).filter(q => q.lessonId === lessonId).length})</button>
             <button class="tab-btn" onclick="switchLessonTab('files','${lessonId}')">📁 Files (${(await dbGetAll('lessonFiles')).filter(f => f.lessonId === lessonId).length})</button>
             <button class="tab-btn" onclick="switchLessonTab('virtual','${lessonId}')">🎥 Virtual Classroom</button>
-            <button class="tab-btn" onclick="switchLessonTab('drip','${lessonId}')">🔗 Drip</button>
+            <button class="tab-btn" onclick="switchLessonTab('drip','${lessonId}')">🔗 Sequenced</button>
         </div>
         <div id="lesson-tab-content" style="margin-top:12px;"></div>
     `;
@@ -13721,7 +13751,7 @@ async function switchLessonTab(tab, lessonId) {
         const uMap = {}, cMap = {};
         try { (await dbGetAll('lessonUnlocks')).forEach(u => { if (String(u.lessonId) === String(lessonId)) uMap[u.studentId] = u; }); } catch {}
         try { (await dbGetAll('lessonCompletions')).forEach(c => { if (String(c.lessonId) === String(lessonId)) cMap[c.studentId] = c; }); } catch {}
-        let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Mode: <b>${lessonMode(lesson)}</b> · Rule: previous lesson complete + 3.5 days + fees current. Max 2/week.</div>`;
+        let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Mode: <b>${lessonMode(lesson) === 'drip' ? 'Sequenced' : lessonMode(lesson)}</b> · Rule: previous lesson complete + course pacing + fees current.</div>`;
         if (!enrollments.length) {
             html += '<p style="color:var(--text-muted);text-align:center;padding:20px;">No learners enrolled in this course.</p>';
         } else {
@@ -15190,7 +15220,7 @@ async function submitQuiz(quizId) {
                         try { await loadDripMaps(studentId, true); } catch {}
                         const after = (_dripC[lid] && _dripC[lid].completedAt) || null;
                         if (!before && after) {
-                            try { const cc = _dripC[lid]; cc.congratsShown = true; await dbPut('lessonCompletions', cc); } catch {}
+                            try { const cc = _dripC[lid]; if (cc) cc.congratsShown = true; } catch {}
                             setTimeout(() => { try { dripCongrats(studentId, lz, totalScore); } catch {} }, 11000);
                         }
                         try {
@@ -15735,7 +15765,7 @@ async function renderProgress() {
         document.getElementById('progress-content').innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">Select a student to view their progress</p>';
         return;
     }
-    renderProgressContent(hiddenInput.value, courseSelect.value, data);
+    await renderProgressContent(hiddenInput.value, courseSelect.value, data);
 }
 function filterProgressStudents(query) {
     const data = progressDataCache;
@@ -15773,9 +15803,33 @@ async function selectProgressStudent(studentId) {
     document.getElementById('progress-student-search').value = `${student.name} (${student.admissionNumber || student.id})`;
     document.getElementById('progress-student-dropdown').classList.remove('active');
     const courseVal = document.getElementById('progress-course').value;
-    renderProgressContent(studentId, courseVal, data);
+    await renderProgressContent(studentId, courseVal, data);
 }
-function renderProgressContent(studentId, selectedCourse, data) {
+function staffDripChain(sid, course, data) {
+    let list = (data.lessons || []).filter(l => String(l.courseId) === String(course.id) && lessonMode(l) === 'drip' && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (!list.length) return '';
+    let row = (l) => {
+        const u = _dripU[l.id], cc = _dripC[l.id];
+        const done = cc && cc.completedAt, open = u && u.unlockedAt;
+        const color = done ? 'var(--success)' : open ? 'var(--accent)' : 'var(--text-muted)';
+        const stateTxt = done ? 'Completed' : open ? 'Available' : 'Locked';
+        const when = done ? formatDate(cc.completedAt) : open ? formatDate(u.unlockedAt) : '—';
+        const acts = done
+            ? `<button class="btn btn-outline btn-sm" onclick="dripResetProgress('${sid}','${l.id}')">Reset</button>`
+            : open
+                ? `<button class="btn btn-success btn-sm" onclick="dripMarkComplete('${sid}','${l.id}')">Mark Complete</button> <button class="btn btn-outline btn-sm" onclick="dripResetProgress('${sid}','${l.id}')">Reset</button>`
+                : `<button class="btn btn-warning btn-sm" onclick="dripManualUnlock('${sid}','${l.id}')">Unlock</button>`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:12px;">
+            <span style="display:flex;align-items:center;gap:8px;min-width:0;"><span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(l.title)}</span></span>
+            <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;">${stateTxt} · ${when}</span>
+            ${acts}</div>`;
+    };
+    return `<div style="margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);">
+        <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--accent);">Lesson Sequence — ${list.length} step${list.length !== 1 ? 's' : ''}</div>
+        ${list.map(row).join('')}</div>`;
+}
+async function renderProgressContent(studentId, selectedCourse, data) {
+    try { if (typeof loadDripMaps === 'function') await loadDripMaps(studentId, true); } catch {}
     const student = data.students.find(s => s.id === studentId);
     if (!student) return;
     const studentEnrollments = data.enrollments.filter(e => e.studentId === studentId);
@@ -15840,6 +15894,7 @@ function renderProgressContent(studentId, selectedCourse, data) {
                 <h4 style="margin:0;color:var(--accent);">${cp.course.name} <span style="font-size:11px;color:var(--text-muted);">(${cp.course.code})</span></h4>
                 <span class="badge badge-${cp.avgScore !== null && cp.avgScore >= 70 ? 'success' : cp.avgScore !== null && cp.avgScore >= 50 ? 'warning' : 'danger'}">${cp.avgScore !== null ? cp.avgScore + '%' : 'No scores yet'}</span>
             </div>
+            ${staffDripChain(studentId, cp.course, data)}
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;">
                 <div>
                     <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Lessons</div>
