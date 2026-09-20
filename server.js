@@ -2365,8 +2365,11 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
 
                 // Country validation: main admin (role === 'admin') is GLOBAL and never needs a country.
                 // All other roles must select a valid country if countries are configured.
+                // countriesList holds entry OBJECTS {name,code,...} — compare against names.
+                // (Array.includes(country) against objects would reject every login.)
+                const countryNames = (Array.isArray(countriesList) ? countriesList : []).map(c => (typeof c === 'string' ? c : c && c.name)).filter(Boolean);
                 if (user.role !== 'admin') {
-                    if (countriesList.length > 0 && (!country || !Array.isArray(countriesList) || !countriesList.includes(country))) {
+                    if (countryNames.length > 0 && (!country || !countryNames.includes(country))) {
                         return json(res, 400, { error: 'Please select a valid country' });
                     }
                 }
