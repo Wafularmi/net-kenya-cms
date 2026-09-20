@@ -1018,6 +1018,10 @@ try { const n = stripStoredInlineBlobs(); if (n) console.log('stripStoredInlineB
 
 // Brute-force protection for /api/login
 const loginAttempts = new Map(); // ip -> { count, windowStart, blockedUntil }
+// Throttle for the public login-country smart-filter (per IP, per minute).
+// Lookups never count as login attempts and never create sessions.
+const loginCountryHits = new Map(); // ip -> { count, windowStart }
+const LOGIN_COUNTRY_MAX = parseInt(process.env.LOGIN_COUNTRY_MAX) || 60;
 const LOGIN_MAX_ATTEMPTS = parseInt(process.env.LOGIN_MAX_ATTEMPTS) || 10;
 const LOGIN_WINDOW_MS = (parseInt(process.env.LOGIN_WINDOW_MS) || 15) * 60 * 1000;
 const LOGIN_BLOCK_MS = (parseInt(process.env.LOGIN_BLOCK_MS) || 15) * 60 * 1000;
@@ -1956,6 +1960,48 @@ function handleAPI(req, res) {
             auditLog('deleted', 'country', { name }); saveDB();
         }
         return json(res, 200, { ok: true });
+    }
+
+    // GET /api/login-country?input=... — smart-filter helper for the login screen.
+    // Returns ONLY { country: <name> | null }: the configured country bound to this
+    // login identifier, if any. Unknown identifiers, unbound accounts and admin
+    // accounts are indistinguishable (all null), so it cannot enumerate accounts.
+    // Strictly read-only: never writes, never creates sessions, never audits.
+    if (parts.length === 2 && parts[1] === 'login-country' && req.method === 'GET') {
+        if (loginRateBlocked(req)) return json(res, 429, { error: 'Too many attempts. Please try again later.' });
+        const lip = clientIp(req);
+        const nowLc = Date.now();
+        let recLc = loginCountryHits.get(lip);
+        if (!recLc || nowLc - recLc.windowStart > 60000) recLc = { count: 0, windowStart: nowLc };
+        recLc.count++;
+        loginCountryHits.set(lip, recLc);
+        if (recLc.count > LOGIN_COUNTRY_MAX) return json(res, 429, { error: 'Too many attempts. Please try again later.' });
+        const q = (urlObj.searchParams.get('input') || '').trim();
+        let found = null;
+        if (q) {
+            const users = db.users || [];
+            const students = db.students || [];
+            const qLower = q.toLowerCase();
+            found = users.find(u => u.username === q) || users.find(u => String(u.username || '').toLowerCase() === qLower);
+            if (!found) found = users.find(u => u.studentId === q);
+            if (!found) {
+                const st = students.find(s => s.phone === q && s.status !== 'pending');
+                if (st) found = users.find(u => u.studentId === st.id || u.username === st.id || u.username === st.admissionNumber || u.username === st.phone || u.username === st.email);
+            }
+            if (!found) {
+                const st = students.find(s => (s.admissionNumber === q || s.id === q) && s.status !== 'pending');
+                if (st) found = users.find(u => u.studentId === st.id || u.username === st.id || u.username === st.admissionNumber || u.username === st.phone || u.username === st.email);
+            }
+            if (!found) {
+                const st = students.find(s => s.phone === q || s.admissionNumber === q || s.id === q);
+                if (st) found = users.find(u => u.role === 'student' && u.name && st.name && u.name.toLowerCase() === st.name.toLowerCase());
+            }
+        }
+        const csSetting = (db.settings || []).find(s => s.key === 'countries');
+        const csList = csSetting ? (csSetting.value || csSetting) : [];
+        const csNames = (Array.isArray(csList) ? csList : []).map(c => (typeof c === 'string' ? c : c && c.name)).filter(Boolean);
+        const bound = found && found.country ? String(found.country) : null;
+        return json(res, 200, { country: (bound && csNames.includes(bound)) ? bound : null });
     }
 
     // GET /api/maintenance-events — public SSE stream for maintenance on/off (no auth)

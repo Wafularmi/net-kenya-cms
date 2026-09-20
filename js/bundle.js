@@ -970,8 +970,52 @@ async function loadCountries() {
         sel.innerHTML = '<option value="">-- Select country --</option>' + data.countries.map(c => '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.brandName || c.name) + '</option>').join('');
     } catch {}
 }
+let _loginAutoCountry = null;
+let _loginFetchTimer = null;
+function scheduleLoginCountryFetch() {
+    try { clearTimeout(_loginFetchTimer); } catch {}
+    _loginFetchTimer = setTimeout(fetchLoginCountry, 300);
+}
+async function fetchLoginCountry() {
+    const userEl = document.getElementById('login-user');
+    const sel = document.getElementById('login-country');
+    if (!userEl || !sel) return;
+    const input = userEl.value.trim();
+    if (!input) return;
+    let country = null;
+    try {
+        const r = await fetch('/api/login-country?input=' + encodeURIComponent(input));
+        if (r.ok) { const d = await r.json(); country = d && d.country ? d.country : null; }
+    } catch {}
+    if (!country) return;
+    const cur = sel.value;
+    if (cur === '' || cur === _loginAutoCountry) {
+        const ok = Array.from(sel.options).some(o => o.value === country);
+        if (ok) {
+            sel.value = country;
+            _loginAutoCountry = country;
+            const hint = document.getElementById('login-country-hint');
+            if (hint) hint.textContent = 'Country detected — please confirm.';
+        }
+    }
+}
+(function initLoginSmartCountry() {
+    const userEl = document.getElementById('login-user');
+    const sel = document.getElementById('login-country');
+    if (!userEl || !sel) return;
+    userEl.addEventListener('input', () => { showLoginError(''); scheduleLoginCountryFetch(); });
+    const pass = document.getElementById('login-pass');
+    if (pass) pass.addEventListener('input', () => showLoginError(''));
+    sel.addEventListener('change', () => {
+        showLoginError('');
+        const hint = document.getElementById('login-country-hint');
+        if (hint && sel.value !== _loginAutoCountry) hint.textContent = '';
+    });
+})();
 async function login() {
     try {
+        const _lb = document.getElementById('login-btn');
+        if (_lb) _lb.disabled = true;
         const input = sanitizeInput(document.getElementById('login-user').value.trim());
         const password = document.getElementById('login-pass').value;
         const country = document.getElementById('login-country') ? document.getElementById('login-country').value : '';
@@ -988,7 +1032,15 @@ async function login() {
             if (res.status === 403) return showLoginError(data.error || 'Access denied');
             if (res.status === 503) return showLoginError(data.error || 'System under maintenance — only admins can log in right now.');
             if (res.status === 429) return showLoginError(data.error || 'Too many attempts — wait 15 minutes and retry.');
-            return showLoginError((data && data.error ? data.error + ' ' : '') + 'Login failed (server error ' + res.status + '). Please try again.');
+            if (res.status === 400 && data && data.error && data.error.toLowerCase().includes('country')) {
+                showLoginError('Please select your country, then sign in.');
+                console.warn('login: country required (server 400)');
+                const _lc = document.getElementById('login-country');
+                if (_lc) _lc.focus();
+                return;
+            }
+            console.warn('login failed:', res.status, data && data.error);
+            return showLoginError('Something went wrong. Please try again.');
         }
         const user = data.user;
         if (!user) return showLoginError('Login failed');
@@ -1025,6 +1077,8 @@ async function login() {
     } catch (err) {
         showLoginError('Login failed. Please try again.');
         console.error('Login error:', err);
+    } finally {
+        try { const _lb2 = document.getElementById('login-btn'); if (_lb2) _lb2.disabled = false; } catch {}
     }
 }
 window.login = login;

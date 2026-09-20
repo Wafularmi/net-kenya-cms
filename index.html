@@ -37,7 +37,7 @@
             <h1 id="login-school-name">{{SCHOOL_NAME}}</h1>
             <p class="login-subtitle">Sign in to continue</p>
             <div class="login-form">
-                <div class="form-group"><label>Country</label><select id="login-country" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:14px;"><option value="">-- Select country --</option></select></div>
+                <div class="form-group"><label>Country</label><select id="login-country" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:14px;"><option value="">-- Select country --</option></select><div id="login-country-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;min-height:14px;"></div></div>
                 <div class="form-group"><label>Username / Phone Number</label><input type="text" id="login-user" name="net-login-user" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Phone number (students) or username (staff)" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <div class="form-group" style="display:none;"><input type="text" name="fakeuser" autocomplete="off"></div>
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
