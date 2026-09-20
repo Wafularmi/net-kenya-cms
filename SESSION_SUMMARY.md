@@ -1,31 +1,8 @@
 # NET Kenya CMS — Session Summary
 
-**Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`)
-**HEAD:** `6546e3d` · **Assets:** `js/bundle.js?v=331` (preload + script tags), `js/student-hub.js?v=41`, `css/main.146.css?v=147`
-**Deploy = `railway up --detach -y`** (Railway CLI v5.23.3, Hobby plan, DOCKERFILE builder) · healthcheck `/api/health` · hard-refresh (`Ctrl+Shift+R`) after client deploys
-
-## Session 2026-09-19 — doc-freeze fix deployed & verified (railway up cutover)
-
-- **Doc-freeze root cause**: cert PDF bodies (base64, up to 2.4MB) lived inline in `server-data.json`; every save pretty-printed + re-read the whole ~23MB DB, freezing the event loop. Fix (`6546e3d`, server-only — client tags unchanged): `stripStoredInlineBlobs()` externalizes PDF bodies to `/data/docs` + sets `contentPath`, **gated on `volumeAvailable()`** (`server.js:251`; local dev keeps inline copies for easy testing); strips only PDF magic (`JVBERi0`/`%PDF-`, lines 258-259) so 7 HTML cert bodies stay inline by design; `safeWriteJSON` now writes compact without verify re-read (`server.js:357`) → fast, non-blocking saves; boot copies DB off the volume (`server.js:445`), restores `docs/` then strips inline (`server.js:965-998`). `DOC_STRIP_INLINE=1` env still opt-in extra.
-- **Data campaign (zero-loss migration seed)**: UI backup export is the strict **superset** (13 certs, 10 with bodies: 3 base64 PDFs + 7 HTML that the volume DB was MISSING) → export used as seed, not the volume file. `System backups\check-backup.cjs` validator; `rehearse-migrate.cjs` proved byte-for-byte round-trip (3 PDFs externalized + re-served identical, DB compact 22.86→20.50MB). Fresh export `server-data-backups\college_backup_2026-09-19.json` uploaded as `/data/server-data.json` on the volume.
-- **Cutover**: trial-expired block → user picked Railway **Hobby plan** (dashboard-only, no CLI cmd) → `railway up --detach` → deployment `b193c936-5742-437d-9320-38a6b36cb052` **SUCCESS**.
-- **Verified LIVE (via admin session token → `GET /api/backup`; volume CLI download caps ~18MiB so don't use it for the DB)**: `/api/health` 200; students 136 / users 123 / courses 13 / enrollments 660 / attendance 880 / payments 308; 13 certs → **0 inline PDF + 7 inline HTML + 3 `contentPath`** with `CERT-1788858350374.pdf` (796,029 B), `CERT-1789371321738.pdf` (796,020 B), `CERT-1789728605544.pdf` (260,228 B) on `/data/docs`; templates intact inline (diplomaPdfConfig 1,065,304 chars, completionPdfConfig 347,508). Validation snapshot: `System backups\livedb-verified.json`.
-- **Env vault `DEPLOY_ENV.md` (gitignored)**: live has NO `DATA_ENCRYPTION_KEY` / `MPESA_*` / `SMS_*` env vars — M-Pesa/SMS creds live PLAINTEXT in settings; needed vars = Azure + JaaS/JITSI only. `System backups\railway-vars.json` + `write-deploy-env.cjs`.
-- **Oracle migration shelved** (signup stuck at email/phone verify) → user chose paying Railway. SSH keypair `deploy-ssh\id_netcms.pub` + `MIGRATION_RUNBOOK.md` kept if resumed.
-- **Pending**: live UI test by user (Generate Diploma PDF modal); re-run **Compute Weighted** live so binary attendance + 20/20/50/10 apply on generated sets; optional: refresh local dev DB to live export (currently 77-student snapshot).
-
-## Session 2026-09-20 — "Drip" jargon removal, Finance balance filter, country infrastructure (Option A)
-
-- **Finance tab balance filter**: `renderBalances()` in `js/bundle.js` rewritten to show ALL students (removed `.filter(s => s.balance > 0)`). Added status computation (`statusOf`: balance/paid/sponsored), filter buttons (All/Balance/Fully Paid/Sponsored) with counts, `_balancesFilter` global + `setBalancesFilter()`, status badges, outstanding total, and a filter bar rendered into `#balances-list` (search-free filtering).
-- **"Drip" jargon removal** (across all files):
-  - `js/bundle.js`: "Drip Pacing"→"Lesson pacing", drip release option→"Sequenced — unlocks per learner (prev complete + course pacing + fees)", mode badge "DRIP"→"SEQUENCED", save toast "Drip mode"→"Sequenced", tab "🔗 Drip"→"🔗 Sequenced", staff "Drip Chain"→"Lesson Sequence", course form hint updated, added `updateLessonDripHint()` (async, fetches course pacing via `dbGet('courses', ...)`) + `hubPaceText()` helper, wired into lesson-course-select `onchange` and form-open timeout.
-  - `js/student-hub.js`: "Course Content Drip"→"Lesson Roadmap", lock toast made fully context-aware (computes exact reason: fee target / prev-lesson-not-complete / pacing gap with dynamic days), reason strings use `paceLabel` dynamically.
-  - `index.html`: `<option value="drip">Drip Only 🔗</option>`→`Sequenced Only 🔗`.
-- **Country infrastructure (Option A)**: Single instance with per-country data partitioning. `server.js` changes: `filterStoreForUser` now filters rows by `user.user.country` for all authenticated users (exempt: `users`, `counters`, `sessions`, `maintenanceBypassTokens`). Added `/api/countries` GET (public, returns `{countries:[]}`), POST (admin-only, adds `{name, code, brandName, initials}` to `db.settings` key `countries`), DELETE (admin-only, removes by name). Login endpoint validates `country` against the configured list and stores it on the user record (`if (!user.country) user.country = country`). `js/bundle.js`: added `loadCountries()` function, modified `login()` to read `#login-country` dropdown and send `{input, password, country}`. `index.html`: added `<select id="login-country">` dropdown and inline DOMContentLoaded script to populate it via `/api/countries` before bundle.js loads.
-- **Chicken-and-egg bug fix**: Login was rejecting all users when `countriesList.length === 0` (no countries configured yet). Fixed: `if (countriesList.length > 0 && (!country || !Array.isArray(countriesList) || !countriesList.includes(country)))` — validation skipped when no countries exist, allowing first-time admin login to add countries.
-- **Tags bumped**: bundle `?v=331`, student-hub `?v=41`; deployed via `railway up --detach --yes`.
-- **`node --check` passes** for `js/bundle.js`, `js/student-hub.js`, `server.js`.
-- **Verified LIVE**: `/api/countries` returns `{"countries":[]}` (empty = first-time setup); login with empty country now passes validation (was returning "Please select a valid country" — now returns "Login failed" due to wrong password, not the country gate).
+**Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`, Railway auto-deploy)
+**HEAD:** `9da39f2` · **Assets:** `js/bundle.js?v=327` (preload + script tags), `js/student-hub.js?v=39`, `css/main.146.css?v=147`
+**Deploy = `git push origin main`** (Railway auto-deploy, ~1–3 min) · hard-refresh (`Ctrl+Shift+R`) after every deploy
 
 ## Session 2026-09-09 (this conversation — start here)
 
@@ -231,4 +208,4 @@ The 20,000-char DB field cap was the recurring villain. It silently truncated:
 - `DOC_STRIP_INLINE=1` phase-2 still opt-in.
 
 ## Scratch files (do NOT commit)
-`DEPLOY_ENV.md`, `mirror-desktop.ps1`, `test-diploma-local.js`, `test-diploma-output.pdf`, `20260903-152731.pdf`, `COMPLETION CERTIFICATE.pdf`, `NET FOUNDATION SEAL2.png`, `NET LOGO0003.png`, `System backups/` (whole folder), `server-data-backups/` (whole folder), `deploy-ssh/` (whole folder), `docs/` — all covered by `.gitignore` (hardened this session: adds `/*.pdf`, `/*.png`, `System backups/`, `server-data-backups/`, `deploy-ssh/`, `DEPLOY_ENV.md`, `live-pw.txt`).
+`DEPLOY_ENV.md`, `mirror-desktop.ps1`, `test-diploma-local.js`, `test-diploma-output.pdf`, `20260903-152731.pdf`, `COMPLETION CERTIFICATE.pdf`, `NET FOUNDATION SEAL2.png`, `NET LOGO0003.png`

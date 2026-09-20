@@ -37,7 +37,6 @@
             <h1 id="login-school-name">{{SCHOOL_NAME}}</h1>
             <p class="login-subtitle">Sign in to continue</p>
             <div class="login-form">
-                <div class="form-group"><label>Country</label><select id="login-country" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:14px;"><option value="">-- Select country --</option></select></div>
                 <div class="form-group"><label>Username / Phone Number</label><input type="text" id="login-user" name="net-login-user" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Phone number (students) or username (staff)" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <div class="form-group" style="display:none;"><input type="text" name="fakeuser" autocomplete="off"></div>
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
@@ -510,7 +509,7 @@
             <section id="screen-lessons" class="screen">
                 <div class="screen-header"><h2>Lessons & Topics</h2><div class="screen-actions">
                     <select id="lesson-course" class="filter-select"><option value="">All Courses...</option></select>
-                    <select id="lesson-status-filter" class="filter-select"><option value="all">All Status</option><option value="published">Published Only</option><option value="draft">Draft Only</option><option value="scheduled">Scheduled ⏳</option><option value="drip">Sequenced Only 🔗</option></select>
+                    <select id="lesson-status-filter" class="filter-select"><option value="all">All Status</option><option value="published">Published Only</option><option value="draft">Draft Only</option><option value="scheduled">Scheduled ⏳</option><option value="drip">Drip Only 🔗</option></select>
                     <button class="btn btn-primary" onclick="showLessonForm()">+ Add Lesson</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>#</th><th>Title</th><th>Description</th><th>Notes</th><th>Questions</th><th>Files</th><th>Actions</th></tr></thead><tbody id="lessons-body"></tbody></table></div></div>
@@ -1330,8 +1329,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=331"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=41"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=327"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=39"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>
@@ -1354,8 +1353,6 @@
         };
         function showLoginError(m){var el=document.getElementById('login-error');if(m){el.textContent=m;el.style.display='block';}else{el.style.display='none';}}
     }
-    // Populate country dropdown before bundle.js loads
-    (function(){ try { fetch('/api/countries').then(function(r){return r.json();}).then(function(d){ var sel=document.getElementById('login-country'); if(!sel||!d.countries) return; sel.innerHTML='<option value="">-- Select country --</option>'+d.countries.map(function(c){return '<option value="'+c.name+'">'+c.brandName+'</option>';}).join(''); }).catch(function(){}); } catch(e){} })();
     </script>
 </body>
 </html>

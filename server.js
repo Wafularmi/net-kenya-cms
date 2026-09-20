@@ -8,7 +8,6 @@ const crypto = require('crypto');
 const zlib = require('zlib');
 const QRCode = require('qrcode');
 const WebSocket = require('ws');
-const dripEngine = require('./drip-engine');
 
 process.on('uncaughtException', e => { try { process.stderr.write('UNCAUGHT: ' + (e && e.stack || e) + '\n'); } catch {} });
 process.on('unhandledRejection', (reason) => { try { process.stderr.write('UNHANDLED: ' + (reason && reason.stack || reason) + '\n'); } catch {} });
@@ -880,63 +879,51 @@ function meetingVisibleTo(user, mtg) {
 // Restrict which rows of a store a user may see. Students only ever see their
 // own student record and their own login record (users store).
 function filterStoreForUser(user, store, rows) {
-    if (user && user.role === 'student') {
-        const su = user.user || {};
-        const uid = String(user.username || '').trim();
-        const sid = String(su.studentId || '').trim();
-        const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
-        const nameLower = String(su.name || user.username || '').trim().toLowerCase();
-        if (store === 'students') {
-            return rows.filter(r => {
-                if (!r) return false;
-                if (String(r.id) === sid || String(r.id) === uid || String(r.id) === 'STU-' + uid || String(r.id) === 'STU-' + sid) return true;
-                if (r.admissionNumber && (String(r.admissionNumber) === uid || String(r.admissionNumber) === sid)) return true;
-                if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
-                if (r.phone && String(r.phone) === uid) return true;
-                if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
-                if (r.email && sid && String(r.email).toLowerCase() === String(sid).toLowerCase()) return true;
-                if (nameLower && r.name && String(r.name).trim().toLowerCase() === nameLower) return true;
-                return false;
-            });
-        }
-        if (store === 'users') {
-            return rows.filter(r => r && String(r.username) === uid);
-        }
-        if (store === 'courseCompletions') {
-            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
-        }
-        if (store === 'feeAgreements') {
-            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
-        }
-        if (store === 'waivers') {
-            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
-        }
-        if (store === 'lessonUnlocks' || store === 'lessonCompletions') {
-            // Drip records are per-learner: a student may only ever see their own.
-            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
-        }
-        if (store === 'meetings') {
-            return rows.filter(r => r && meetingVisibleTo(user, r));
-        }
-        if (store === 'alumni') {
-            return rows.filter(r => {
-                if (!r) return false;
-                if (r.studentId && (String(r.studentId) === sid || String(r.studentId) === uid)) return true;
-                if (r.id && (String(r.id) === sid || String(r.id) === uid)) return true;
-                if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
-                if (r.phone && String(r.phone) === uid) return true;
-                if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
-                if (nameLower && r.name && String(r.name).trim().toLowerCase() === nameLower) return true;
-                return false;
-            });
-        }
+    if (!user || user.role !== 'student') return rows;
+    const su = user.user || {};
+    const uid = String(user.username || '').trim();
+    const sid = String(su.studentId || '').trim();
+    const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
+    const nameLower = String(su.name || user.username || '').trim().toLowerCase();
+    if (store === 'students') {
+        return rows.filter(r => {
+            if (!r) return false;
+            if (String(r.id) === sid || String(r.id) === uid || String(r.id) === 'STU-' + uid || String(r.id) === 'STU-' + sid) return true;
+            if (r.admissionNumber && (String(r.admissionNumber) === uid || String(r.admissionNumber) === sid)) return true;
+            if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
+            if (r.phone && String(r.phone) === uid) return true;
+            if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
+            if (r.email && sid && String(r.email).toLowerCase() === String(sid).toLowerCase()) return true;
+            if (nameLower && r.name && String(r.name).trim().toLowerCase() === nameLower) return true;
+            return false;
+        });
     }
-    // Country filtering for all authenticated users (except main admin).
-    // Main admin (role === 'admin') sees ALL countries - global administrator.
-    // Exempt stores that are global or identity-only.
-    const countryExemptStores = ['users', 'counters', 'sessions', 'maintenanceBypassTokens'];
-    if (user && user.user && user.user.country && user.user.role !== 'admin' && !countryExemptStores.includes(store)) {
-        rows = rows.filter(r => r && r.country === user.user.country);
+    if (store === 'users') {
+        return rows.filter(r => r && String(r.username) === uid);
+    }
+    if (store === 'courseCompletions') {
+        return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
+    if (store === 'feeAgreements') {
+        return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
+    if (store === 'waivers') {
+        return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+    }
+    if (store === 'meetings') {
+        return rows.filter(r => r && meetingVisibleTo(user, r));
+    }
+    if (store === 'alumni') {
+        return rows.filter(r => {
+            if (!r) return false;
+            if (r.studentId && (String(r.studentId) === sid || String(r.studentId) === uid)) return true;
+            if (r.id && (String(r.id) === sid || String(r.id) === uid)) return true;
+            if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
+            if (r.phone && String(r.phone) === uid) return true;
+            if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
+            if (nameLower && r.name && String(r.name).trim().toLowerCase() === nameLower) return true;
+            return false;
+        });
     }
     return rows;
 }
@@ -1333,13 +1320,11 @@ function sanitizeBodyFields(obj, maxLen, preserve) {
     for (const k of Object.keys(obj)) {
         const v = obj[k];
         if (typeof v === 'string') {
-            const clean = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
-            const isPreserved = !!(preserve && preserve.includes(k));
-            // Data URIs and raw base64 of images/PDFs (signature images, logos,
-            // templates) must never be length-capped at ANY nesting depth — a
-            // truncated blob silently breaks or hangs every document that embeds it.
-            const isBinaryBlob = clean.length > cap && (/^data:/i.test(clean) || /^(iVBORw0KGgo|JVBERi0|\/9j\/)/.test(clean));
-            obj[k] = (isPreserved || isBinaryBlob) ? clean : clean.slice(0, cap);
+            if (preserve && preserve.includes(k)) {
+                obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+            } else {
+                obj[k] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, cap);
+            }
         } else if (v && typeof v === 'object' && !Buffer.isBuffer(v)) {
             sanitizeBodyFields(v, cap, preserve);
         }
@@ -1905,55 +1890,6 @@ function handleAPI(req, res) {
         return json(res, 200, { active: isMaintenanceActive() });
     }
 
-    // GET /api/countries — public list of configured countries (no auth)
-    if (parts.length === 2 && parts[1] === 'countries' && req.method === 'GET') {
-        const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
-        const countries = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
-        return json(res, 200, { countries: Array.isArray(countries) ? countries : [] });
-    }
-
-    // POST /api/countries — add a country (admin only)
-    if (parts.length === 2 && parts[1] === 'countries' && req.method === 'POST') {
-        const user = getRequestUser(req);
-        if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
-        let body = '';
-        req.on('data', c => body += c);
-        req.on('end', () => {
-            try {
-                const { name, code, brandName, initials } = JSON.parse(body);
-                if (!name) return json(res, 400, { error: 'Country name required' });
-                const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
-                const countries = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
-                if (countries.find(c => c.name === name || c.code === code)) return json(res, 400, { error: 'Country already exists' });
-                const entry = { name, code: code || name.toUpperCase().replace(/\s+/g, '-'), brandName: brandName || name, initials: initials || name.substring(0, 2).toUpperCase() };
-                db.settings = db.settings || [];
-                if (!countriesSetting) {
-                    db.settings.push({ key: 'countries', value: [entry] });
-                } else {
-                    countriesSetting.value = [...countries, entry];
-                }
-                auditLog('created', 'country', { name }); saveDB();
-                json(res, 200, { ok: true, country: entry });
-            } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
-        });
-        return true;
-    }
-
-    // DELETE /api/countries/:name — remove a country (admin only)
-    if (parts.length >= 3 && parts[1] === 'countries' && req.method === 'DELETE') {
-        const user = getRequestUser(req);
-        if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
-        const name = decodeURIComponent(parts[2]);
-        const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
-        if (countriesSetting) {
-            const countries = countriesSetting.value || [];
-            if (!countries.find(c => c.name === name)) return json(res, 404, { error: 'Country not found' });
-            countriesSetting.value = countries.filter(c => c.name !== name);
-            auditLog('deleted', 'country', { name }); saveDB();
-        }
-        return json(res, 200, { ok: true });
-    }
-
     // GET /api/maintenance-events — public SSE stream for maintenance on/off (no auth)
     if (parts.length === 2 && parts[1] === 'maintenance-events' && req.method === 'GET') {
         res.writeHead(200, {
@@ -2298,11 +2234,8 @@ function handleAPI(req, res) {
                 if (loginRateBlocked(req)) {
                     return json(res, 429, { error: 'Too many failed attempts. Please try again in 15 minutes.' });
                 }
-const { input, password, country } = JSON.parse(body);
+                const { input, password } = JSON.parse(body);
                 if (!input || !password) return json(res, 400, { error: 'Enter username and password' });
-                const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
-                const countriesList = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
-                // Country validation is done AFTER user lookup so admin can bypass (see below)
 
                 const hash = pw => crypto.createHash('sha256').update(pw, 'utf8').digest('hex');
                 const users = db.users || [];
@@ -2359,20 +2292,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     return json(res, 503, { error: 'The system is currently under maintenance. Please check back later.' });
                 }
 
-                // Country validation: main admin (role === 'admin') is GLOBAL and never needs a country.
-                // All other roles must select a valid country if countries are configured.
-                if (user.role !== 'admin') {
-                    if (countriesList.length > 0 && (!country || !Array.isArray(countriesList) || !countriesList.includes(country))) {
-                        return json(res, 400, { error: 'Please select a valid country' });
-                    }
-                }
-
                 user.lastLogin = new Date().toISOString();
-                // Main admin stays global — never set/overwrite country. Others get country from login.
-                if (user.role !== 'admin' && country) {
-                    if (!user.country) user.country = country;
-                    if (user.country !== country) user.country = country;
-                }
                 saveDB(); // debounced, non-blocking — never hold up the login response with a 9MB rewrite
 
                 // Ensure studentId is present for student users
@@ -3013,126 +2933,6 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                 } catch (e) { json(res, 400, { error: 'Invalid request body: ' + e.message }); }
             });
         } catch (e) { json(res, 500, { error: e.message || e }); }
-        return true;
-    }
-
-    // Lesson drip engine â€” POST /api/drip/sync
-    // action state | read | evaluate | manual. Server-authoritative: recomputes
-    // completions (read seconds + linked-quiz best >= 50), enforces the drip chain
-    // with per-course pacing (course.dripDaysBetween; 0 = instant; default 3.5d)
-    // and the weekly fee gate, then persists the authoritive unlock/completion
-    // records. Students act on their own record only; staff may name any learner.
-    if (parts.length === 3 && parts[1] === 'drip' && parts[2] === 'sync' && req.method === 'POST') {
-        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
-        const user = getRequestUser(req);
-        if (!user) return json(res, 401, { error: 'Unauthorized' });
-        let raw = '';
-        req.on('data', c => raw += c);
-        req.on('end', () => {
-            try {
-                const parsed = JSON.parse(raw || '{}');
-                const action = parsed.action || 'state';
-                let sid = null;
-                if (user.role === 'student') {
-                    const su = user.user || {};
-                    const own = String(su.studentId || user.username || '');
-                    if (parsed.studentId && String(parsed.studentId) !== own) return json(res, 403, { error: 'Students may only manage their own drip state' });
-                    sid = own;
-                } else {
-                    if (!parsed.studentId) return json(res, 400, { error: 'studentId required for staff requests' });
-                    sid = String(parsed.studentId);
-                }
-                if (!sid) return json(res, 400, { error: 'Student not identified' });
-                db.lessonUnlocks = db.lessonUnlocks || [];
-                db.lessonCompletions = db.lessonCompletions || [];
-                const E = dripEngine;
-                const persist = (stores) => {
-                    (Array.isArray(stores) ? stores : [stores]).forEach(s => { try { broadcastEvent('db-change', { store: s }); } catch (e) {} });
-                    saveDB();
-                };
-                let result = { ok: true, action };
-                if (action === 'state') {
-                    const sweep = E.dripSweep(db, sid, parsed.courseId ? String(parsed.courseId) : null);
-                    if (sweep.changed) persist(['lessonUnlocks', 'lessonCompletions']);
-                    const maps = E.dripMapsFor(db, sid);
-                    result.unlocks = maps.unlocks;
-                    result.completions = maps.completions;
-                    result.fee = sweep.fee;
-                    if (parsed.courseId) result.next = E.dripNextInfo(db, sid, String(parsed.courseId), null);
-                } else if (action === 'read') {
-                    if (!parsed.lessonId) return json(res, 400, { error: 'lessonId required' });
-                    const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
-                    if (!lesson) return json(res, 404, { error: 'Lesson not found' });
-                    const add = Math.max(0, Math.min(86400, parseInt(parsed.readSecs, 10) || 0));
-                    const reqSecs = E.dripReadEstimateSecs(E.dripLessonContent(db, lesson));
-                    let comp = db.lessonCompletions.find(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id));
-                    if (!comp) {
-                        comp = { id: E.dripRecId('LC', sid, lesson.id), studentId: String(sid), lessonId: String(lesson.id), courseId: String(lesson.courseId || ''), readSecs: 0 };
-                        db.lessonCompletions.push(comp);
-                    }
-                    if (parsed.reset === true) {
-                        comp.readSecs = 0; comp.readDoneAt = null; comp.quizPassedAt = null; comp.quizBest = undefined; comp.completedAt = null;
-                    } else {
-                        comp.readSecs = Math.min((comp.readSecs || 0) + add, 86400);
-                    }
-                    comp.requiredSecs = reqSecs;
-                    persist('lessonCompletions');
-                    result.completion = comp;
-                } else if (action === 'evaluate') {
-                    if (!parsed.lessonId) return json(res, 400, { error: 'lessonId required' });
-                    const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
-                    if (!lesson) return json(res, 404, { error: 'Lesson not found' });
-                    const comp = E.dripEvalCompletion(db, sid, lesson);
-                    const sweep = E.dripSweep(db, sid, String(lesson.courseId || ''));
-                    if (sweep.changed) persist(['lessonUnlocks']);
-                    persist('lessonCompletions');
-                    result.completion = comp;
-                    result.justCompleted = !!comp.justCompleted;
-                    result.next = E.dripNextInfo(db, sid, String(lesson.courseId || ''), lesson.id);
-                    result.fee = sweep.fee;
-                    const maps = E.dripMapsFor(db, sid);
-                    result.unlocks = maps.unlocks;
-                    result.completions = maps.completions;
-                } else if (action === 'manual') {
-                    if (user.role === 'student') return json(res, 403, { error: 'Only staff can manage learner drip states' });
-                    if (!parsed.lessonId || !parsed.op) return json(res, 400, { error: 'lessonId and op required' });
-                    const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
-                    if (!lesson) return json(res, 404, { error: 'Lesson not found' });
-                    if (parsed.op === 'unlock') {
-                        if (!db.lessonUnlocks.some(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id))) {
-                            db.lessonUnlocks.push({ id: E.dripRecId('LU', sid, lesson.id), studentId: String(sid), lessonId: String(lesson.id), courseId: String(lesson.courseId || ''), unlockedAt: new Date().toISOString(), by: 'manual' });
-                        }
-                        persist('lessonUnlocks');
-                    } else if (parsed.op === 'complete') {
-                        const comp = E.dripEvalCompletion(db, sid, lesson);
-                        const now = new Date().toISOString();
-                        comp.readDoneAt = comp.readDoneAt || now; comp.quizPassedAt = comp.quizPassedAt || now; comp.completedAt = comp.completedAt || now; comp.manualBy = 'staff';
-                        const sweep = E.dripSweep(db, sid, String(lesson.courseId || ''));
-                        if (sweep.changed) persist(['lessonUnlocks', 'lessonCompletions']); else persist('lessonCompletions');
-                        result.completion = comp;
-                    } else if (parsed.op === 'repeat') {
-                        const comp = E.dripEvalCompletion(db, sid, lesson, { resetForRepeat: true });
-                        persist('lessonCompletions');
-                        result.completion = comp;
-                    } else if (parsed.op === 'reset') {
-                        db.lessonCompletions = db.lessonCompletions.filter(r => !(String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id)));
-                        db.lessonUnlocks = db.lessonUnlocks.filter(r => !(String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id)));
-                        persist(['lessonCompletions', 'lessonUnlocks']);
-                    } else {
-                        return json(res, 400, { error: 'Unknown op' });
-                    }
-                    const maps = E.dripMapsFor(db, sid);
-                    result.unlocks = maps.unlocks;
-                    result.completions = maps.completions;
-                } else {
-                    return json(res, 400, { error: 'Unknown action' });
-                }
-                json(res, 200, result);
-            } catch (e) {
-                console.error('drip sync error:', e && e.message);
-                json(res, 500, { error: e.message || 'Drip sync failed' });
-            }
-        });
         return true;
     }
 
