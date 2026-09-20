@@ -1026,6 +1026,11 @@
                         <div id="regions-list"></div>
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showRegionForm()">+ Add Region</button>
                     </div>
+                    <div class="card"><h3>Countries</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Countries appear on the login screen. Once at least one country exists, every non-admin login must select a valid country (main admin stays global). Coordinators only see records tagged to their own country; untagged records stay visible to all.</div>
+                        <div id="countries-list"></div>
+                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCountryForm()">+ Add Country</button>
+                    </div>
                     <div class="card"><h3>Admission Numbers</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Sequence number is continuous across months/years. Set the last sequence number to control where auto-generation continues. Lower this value to reuse a freed slot after a student is deleted.</div>
                         <div class="form-group"><label>Last Sequence Number Used</label><input type="number" id="settings-admission-last-seq" min="0" placeholder="e.g., 47" oninput="previewAdmissionNext()"></div>

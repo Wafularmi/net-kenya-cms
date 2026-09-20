@@ -1621,7 +1621,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
@@ -21216,6 +21216,47 @@ async function editRegion(id) {
 async function deleteRegion(id) {
     if (!await showConfirm('Confirm', 'Delete region? This will NOT delete its study centers or users.')) return;
     await dbDelete('regions', id); await renderRegions(); showToast('Region deleted'); logAudit('deleted', 'region', { id });
+}
+
+async function fetchCountries() {
+    const res = await fetch('/api/countries', { headers: (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) });
+    if (!res.ok) throw new Error('Failed to load countries: ' + res.status);
+    const data = await res.json();
+    return Array.isArray(data.countries) ? data.countries : [];
+}
+async function renderCountries() {
+    const box = document.getElementById('countries-list');
+    if (!box) return;
+    let countries = [];
+    try { countries = await fetchCountries(); }
+    catch (e) { box.innerHTML = '<div style="color:var(--danger);font-size:12px;">Unable to load countries.</div>'; return; }
+    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span></span><button class="btn btn-danger btn-sm" data-name="${escapeHtml(c.name)}" onclick="deleteCountry(this.dataset.name)">Del</button></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
+}
+function showCountryForm() {
+    const content = `<div class="form-group"><label>Country Name *</label><input type="text" id="country-name" placeholder="e.g., Kenya"></div>
+<div class="form-group"><label>Code (short, no spaces)</label><input type="text" id="country-code" placeholder="e.g., KE" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>
+<div class="form-row"><div class="form-group"><label>Brand Name</label><input type="text" id="country-brand" placeholder="Shown on login (defaults to name)"></div>
+<div class="form-group"><label>Initials</label><input type="text" id="country-initials" placeholder="e.g., KE" maxlength="4"></div></div>
+<div style="font-size:11px;color:var(--text-muted);">Appears on the login dropdown immediately. Non-admin logins will require it.</div>`;
+    showModal('Add Country', content, `<button class="btn btn-primary" onclick="saveCountry()">Save</button>`);
+}
+async function saveCountry() {
+    const name = document.getElementById('country-name').value.trim();
+    const code = document.getElementById('country-code').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    const brandName = document.getElementById('country-brand').value.trim();
+    const initials = document.getElementById('country-initials').value.trim().toUpperCase();
+    if (!name) return showToast('Country name required!');
+    const res = await fetch('/api/countries', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ name, code: code || undefined, brandName: brandName || undefined, initials: initials || undefined }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Failed to add country');
+    closeModal(); await renderCountries(); showToast('Country added!'); try { logAudit('created', 'country', { name }); } catch {}
+}
+async function deleteCountry(name) {
+    if (!await showConfirm('Confirm', 'Delete country "' + name + '"? Users tagged to it keep the value but it leaves the login list.')) return;
+    const res = await fetch('/api/countries/' + encodeURIComponent(name), { method: 'DELETE', headers: (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Failed to delete country');
+    await renderCountries(); showToast('Country deleted'); try { logAudit('deleted', 'country', { name }); } catch {}
 }
 
 async function showCoordinatorForm(regionId) {
