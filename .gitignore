@@ -49,3 +49,25 @@ seed-books-api.js
 jaasauth.key
 jaasauth.key.pub
 gen-jaas-key.js
+
+# Deploy credentials & live access (never commit or upload)
+DEPLOY_ENV.md
+
+# Runtime doc store (PDFs/templates/generated letters) - managed on the live volume
+docs/
+
+# Local dev artifacts
+mirror-desktop.ps1
+test-diploma-local.js
+test-diploma-output.pdf
+
+# Live backup snapshots & ad-hoc access creds (never commit/upload)
+live-pw.txt
+System backups/
+
+# Oracle VM SSH keys for migration (never commit/upload)
+deploy-ssh/
+
+# Word/design assets & exports at repo root (data, not code)
+/*.pdf
+/*.png

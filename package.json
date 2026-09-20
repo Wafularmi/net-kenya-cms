@@ -17,5 +17,21 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wafularmi/net-kenya-cms.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Wafularmi/net-kenya-cms/issues"
+  },
+  "homepage": "https://github.com/Wafularmi/net-kenya-cms#readme"
 }

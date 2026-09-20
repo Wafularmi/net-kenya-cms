@@ -424,6 +424,59 @@ function hubLessonVisibleById(lid, data) {
         return l.published !== false;
     } catch { return true; }
 }
+function _hubFeeSnapshotOk() {
+    try {
+        if (typeof _dripFee !== 'undefined' && _dripFee && typeof _dripFee.ok === 'boolean') return _dripFee.ok;
+        if (window._hubFeeLock) return !window._hubFeeLock.locked;
+    } catch {}
+    return true;
+}
+function hubDripPaceLabel(course) {
+    const raw = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
+    if (raw === 0) return 'instant';
+    return (raw % 1 === 0 ? raw : raw.toFixed(1)) + ' days';
+}
+function hubLessonDripState(l, dripIndex) {
+    if (typeof lessonMode !== 'function' || lessonMode(l) !== 'drip') return null;
+    const u = (typeof _dripU !== 'undefined' && _dripU) ? _dripU[l.id] : null;
+    const cc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[l.id] : null;
+    if (cc && cc.completedAt) return { state: 'done', reason: '' };
+    if (u && u.unlockedAt) return { state: 'open', reason: '' };
+    if (dripIndex === 0) return { state: 'locked', reason: _hubFeeSnapshotOk() === false ? 'fees' : 'pending' };
+    return { state: 'locked', reason: 'prev' };
+}
+function hubDripRoadmap(course, allLessons) {
+    if (typeof lessonMode !== 'function') return '';
+    const list = (allLessons || []).filter(l => String(l.courseId) === String(course.id) && lessonMode(l) === 'drip' && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (!list.length) return '';
+    let done = 0, open = 0, blocked = 0, blockedFirst = null, blockedState = null;
+    list.forEach((l, i) => { const st = hubLessonDripState(l, i); if (st.state === 'done') done++; else if (st.state === 'open') open++; else { blocked++; if (!blockedFirst) { blockedFirst = l; blockedState = st; } } });
+    const paceLabel = hubDripPaceLabel(course);
+    const chip = (l, i) => {
+        const st = hubLessonDripState(l, i);
+        const color = st.state === 'done' ? 'var(--success)' : st.state === 'open' ? 'var(--accent)' : 'var(--text-muted)';
+        const tip = st.state === 'done' ? 'Completed' : st.state === 'open' ? 'Open now - ready to start' : (st.reason === 'fees' ? 'Locked - weekly fee target pending' : st.reason === 'pending' ? 'Unlocking...' : 'Locked - finish the previous lesson first');
+        return '<div title="' + tip + '" style="width:22px;height:22px;border-radius:50%;background:' + color + ';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">' + (i + 1) + '</div>';
+    };
+    let nextHtml = '';
+    if (blockedFirst && blockedState) {
+        const reasonTxt = blockedState.reason === 'fees' ? 'Your weekly fee target is not met yet. Clear the target to unlock the next lesson.' : blockedState.reason === 'pending' ? 'Unlocks as soon as the system processes your enrolment.' : ('Complete the previous lesson to unlock this one.' + (paceLabel === 'instant' ? ' This course unlocks lessons instantly after the previous one is done.' : ' Pacing: one new lesson every ' + paceLabel + ' after the previous is done.'));
+        nextHtml = '<div style="margin-top:10px;padding:10px 12px;background:rgba(245,245,245,0.6);border-radius:8px;font-size:12px;">' +
+            '<b>Next up: ' + esc(blockedFirst.title) + '</b>' +
+            '<div style="margin-top:4px;opacity:.85;">' + reasonTxt + '</div></div>';
+    }
+    return '<div class="hub-drip-roadmap" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:var(--bg-card);">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">' +
+            '<div style="font-size:13px;font-weight:700;">Lesson Roadmap</div>' +
+            '<div style="font-size:12px;opacity:.8;">' + done + '/' + list.length + ' complete' + (blocked ? ' · ' + blocked + ' ahead' : '') + (list.length ? ' · pace: ' + paceLabel : '') + '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">' + list.map((l, i) => chip(l, i)).join('') + '</div>' +
+        '<div style="display:flex;gap:10px;margin-top:8px;font-size:11px;opacity:.8;flex-wrap:wrap;">' +
+            '<span><span style="color:var(--success);">●</span> Done</span>' +
+            '<span><span style="color:var(--accent);">●</span> Available now</span>' +
+            '<span><span style="color:var(--text-muted);">●</span> Locked</span>' +
+        '</div>' + nextHtml + '</div>';
+}
 function estimateReadTime(text) {
     if (!text) return 1;
     return Math.max(1, Math.ceil(text.split(/\s+/).filter(Boolean).length / 200));
@@ -1841,6 +1894,7 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                             </div>
                         </div>` : ''}
                     </div>
+                    ${hubDripRoadmap(course, data.lessons || [])}
                     ${courseLessons.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">${courseLessons.map(l => {
                         const lessonNote = courseNotes.find(n => n.lessonId === l.id);
                         const generalNotes = courseNotes.filter(n => !n.lessonId);
@@ -1933,7 +1987,24 @@ async function viewHubLessonNote(lessonId, courseId) {
             }
             const __visNow = (typeof lessonVisible === 'function' ? lessonVisible(lesson) : lesson.published !== false);
             if (!__visNow && __isStu) {
-                if (dripMode) return showToast('🔗 This lesson is still locked — complete the previous lesson, keep fees current, and allow 3½ days between lessons.', { type: 'warning', duration: 5000 });
+                if (dripMode) {
+                    let reason = '';
+                    try {
+                        const course = (data.courses || []).find(c => String(c.id) === String(lesson.courseId));
+                        const courseLessons = (data.lessons || []).filter(l => String(l.courseId) === String(lesson.courseId) && lessonMode(l) === 'drip' && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+                        const idx = courseLessons.findIndex(l => String(l.id) === String(lesson.id));
+                        const prevL = idx > 0 ? courseLessons[idx - 1] : null;
+                        const prevDone = prevL ? !!((typeof _dripC !== 'undefined' && _dripC && _dripC[prevL.id]) ? (_dripC[prevL.id].completedAt || '') : '') : true;
+                        const feeOk = (typeof _hubFeeSnapshotOk === 'function') ? _hubFeeSnapshotOk() !== false : true;
+                        if (!feeOk) reason = 'Your weekly fee target is not met yet. Clear the target to unlock this lesson.';
+                        else if (!prevDone) reason = prevL ? 'Complete "' + (prevL.title || 'the previous lesson') + '" first (timed reading + 50% quiz).' : 'Finish the previous lesson first (timed reading + 50% quiz).';
+                        else {
+                            const pace = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
+                            reason = pace === 0 ? 'Unlocks as soon as the previous lesson is completed.' : 'Allow ' + (pace % 1 === 0 ? pace : pace.toFixed(1)) + ' day' + (pace === 1 ? '' : 's') + ' between lessons — it unlocks after the previous lesson completes and the pacing gap passes.';
+                        }
+                    } catch (e) { reason = ''; }
+                    return showToast('🔗 This lesson is still locked. ' + (reason || 'Complete the previous lesson, keep fees current, and allow the course pacing gap.'), { type: 'warning', duration: 5000 });
+                }
                 return showToast('⏳ This lesson opens on ' + (typeof fmtPublishAt === 'function' ? fmtPublishAt(lesson.publishAt) : (lesson.publishAt || '')) + ' — please check back then.', { type: 'warning', duration: 5000 });
             }
         }
