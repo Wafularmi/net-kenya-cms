@@ -3033,6 +3033,11 @@ async function saveStaff() {
     if (password) pwHash = await hashPassword(password);
     if (!pwHash) return showToast('Password required to create the login account!');
     const sysRole = role === 'coordinator' ? 'coordinator' : staffRoleToSystemRole(role);
+    let _coordCountry = '';
+    if (role === 'coordinator') {
+        const _regId = document.getElementById('staff-region') ? document.getElementById('staff-region').value : '';
+        if (_regId) { try { const _reg = await dbGet('regions', _regId); _coordCountry = (_reg && _reg.country) || ''; } catch {} }
+    }
     const staffStatus = (document.getElementById('staff-status') ? document.getElementById('staff-status').value : 'active') || 'active';
     const user = {
         username,
@@ -3043,7 +3048,7 @@ async function saveStaff() {
         role: sysRole,
         status: staffStatus === 'inactive' ? 'inactive' : 'active',
         ...(role === 'coordinator' ? { regionId: document.getElementById('staff-region').value } : {}),
-        country: (() => { const el = document.getElementById('staff-country'); return (el && el.options.length > 1) ? el.value : (existingUser ? existingUser.country || '' : ''); })(),
+        country: (role === 'coordinator' && _coordCountry) ? _coordCountry : (() => { const el = document.getElementById('staff-country'); return (el && el.options.length > 1) ? el.value : (existingUser ? existingUser.country || '' : ''); })(),
         ...(existingUser ? { createdAt: existingUser.createdAt } : { createdAt: new Date().toISOString() })
     };
     // Admin override: if username changed, clean up orphaned old login so the new password/username is the only valid account
@@ -21488,11 +21493,42 @@ async function saveCoordinator() {
     const existing = await dbGet('users', username);
     if (existing) return showToast('Username already taken!');
     const pwHash = await hashPassword(password);
-    const user = { username, password: pwHash, name, role: 'coordinator', regionId, createdAt: new Date().toISOString() };
+    let regionCountry = '';
+    try { const reg = await dbGet('regions', regionId); regionCountry = (reg && reg.country) || ''; } catch {}
+    const user = { username, password: pwHash, name, role: 'coordinator', regionId, country: regionCountry, createdAt: new Date().toISOString() };
     await dbPut('users', user);
     closeModal(); await renderRegions(); await renderUsers();
-    showToast('Coordinator registered!', { type: 'success' });
+    showToast('Coordinator registered!' + (regionCountry ? ' (' + regionCountry + ')' : ''), { type: 'success' });
     logAudit('created', 'coordinator', { username, regionId });
+}
+function showCountryCoordinatorForm() {
+    const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="cc-name" placeholder="e.g., Jane Doe"></div>
+<div class="form-group"><label>Username *</label><input type="text" id="cc-username" placeholder="e.g., jdoe"></div>
+<div class="form-group"><label>Password *</label><input type="password" id="cc-password" placeholder="min 4 characters"></div>
+<div class="form-group"><label>Country *</label><select id="cc-country"><option value="">— Select country —</option></select></div>
+<div style="font-size:11px;color:var(--text-muted);">This account becomes an <b>administrator of the selected country</b>: full management powers fenced to that country's data. Global settings stay with the overall admin.</div>`;
+    showModal('Register Country Coordinator', content, `<button class="btn btn-primary" onclick="saveCountryCoordinator()">Register</button>`);
+    loadCountryDropdown('cc-country', '');
+}
+async function saveCountryCoordinator() {
+    const name = document.getElementById('cc-name').value.trim();
+    const username = document.getElementById('cc-username').value.trim();
+    const password = document.getElementById('cc-password').value;
+    const countryEl = document.getElementById('cc-country');
+    const country = countryEl ? countryEl.value : '';
+    if (!name || !username || !password) return showToast('All fields required!');
+    if (password.length < 4) return showToast('Password must be at least 4 characters!');
+    if (!country) return showToast('Select a country for this coordinator!');
+    const existing = await dbGet('users', username).catch(() => null);
+    if (existing) return showToast('Username already taken!');
+    const pwHash = await hashPassword(password);
+    const user = { username, password: pwHash, name, role: 'coordinator', country, createdAt: new Date().toISOString() };
+    await dbPut('users', user);
+    closeModal();
+    try { if (typeof renderUsers === 'function') await renderUsers(); } catch {}
+    try { if (typeof renderStaff === 'function') await renderStaff(); } catch {}
+    showToast('Country coordinator registered for ' + country + '!', { type: 'success' });
+    logAudit('created', 'country-coordinator', { username, country });
 }
 
 async function transferCoordinator(username) {
