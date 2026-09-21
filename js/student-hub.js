@@ -1065,25 +1065,50 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
     const myRetakeRequests = (data.retakeRequests || []).filter(r => myIds.has(String(r.studentId)));
     const myCourseIds = new Set(myCourses.map(c => String(c.id)));
     const myExamIds = new Set((data.exams || []).filter(e => myCourseIds.has(String(e.courseId)) && e.published !== false).map(e => String(e.id)));
-    const examLinkedSubs = mySubmissions.filter(s => (s.examId && myExamIds.has(String(s.examId))) || myExamIds.has(String(s.quizId)));
-    const examLinkedGrades = myGrades.filter(g => (g.examId && myExamIds.has(String(g.examId))) || myExamIds.has(String(g.quizId)));
+    const quizToExam = {};
+    (data.exams || []).forEach(e => { if (e.linkedQuizId) quizToExam[String(e.linkedQuizId)] = String(e.id); });
+    const resolveExam = (x) => {
+        if (!x) return null;
+        if (x.examId && myExamIds.has(String(x.examId))) return String(x.examId);
+        if (x.quizId && myExamIds.has(String(x.quizId))) return String(x.quizId);
+        if (x.quizId && quizToExam[String(x.quizId)] && myExamIds.has(quizToExam[String(x.quizId)])) return quizToExam[String(x.quizId)];
+        return null;
+    };
+    const examLinkedSubs = mySubmissions.filter(s => resolveExam(s));
+    const examLinkedGrades = myGrades.filter(g => resolveExam(g));
     const approvedSuppIds = new Set(myRetakeRequests.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => r.supplementaryExamId));
     const displayUpcomingReg = upcomingRegisteredExams.filter(e => !(e.type === 'supplementary' && approvedSuppIds.has(e.id)));
     const pendingReqExamIds = new Set(myRetakeRequests.filter(r => r.status === 'pending').map(r => r.examId));
     const allRegistered = [...upcomingRegisteredExams, ...pastRegisteredExams];
     const passedCount = allRegistered.filter(e => { const s = mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId)); return s && s.status === 'pass'; }).length;
     const scoredSubs = allRegistered.map(e => mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId))).filter(Boolean);
-    // Evidence beyond registrations: exam-linked submissions/grades (e.g. direct
-    // gradebook entries) count too, so admin-visible scores always surface here.
-    const seenScores = new Set(scoredSubs);
-    examLinkedSubs.forEach(s => { if (!seenScores.has(s)) { seenScores.add(s); scoredSubs.push(s); } });
-    examLinkedGrades.forEach(g => {
-        if (seenScores.has(g)) return;
-        const linkedSub = mySubmissions.find(x => String(x.quizId) === String(g.quizId) || (g.examId && String(x.examId) === String(g.examId)));
-        if (!linkedSub) { seenScores.add(g); scoredSubs.push({ score: (typeof g.score === 'number' ? g.score : 0) }); }
-    });
-    const extraPass = examLinkedSubs.filter(s => s.status === 'pass' && scoredSubs.indexOf(s) === -1).length
-        + examLinkedGrades.filter(g => (g.status === 'pass' || (typeof g.score === 'number' && g.score >= 50)) && !mySubmissions.some(x => String(x.quizId) === String(g.quizId))).length;
+    // Evidence beyond registrations: exam-linked submissions/grades (direct
+    // gradebook entries, or exams taken through a linked quiz) count too, so
+    // admin-visible scores always surface here. One value per exam assessment
+    // (a grade never double-counts its own submission).
+    const scoreKey = (x) => {
+        const eid = resolveExam(x);
+        if (!eid) return null;
+        const ex = (data.exams || []).find(e => String(e.id) === eid);
+        return eid + '|' + String(x.quizId || (ex && ex.linkedQuizId) || x.examId || '');
+    };
+    const seenKeys = new Set();
+    scoredSubs.forEach(s => { const k = scoreKey(s); if (k) seenKeys.add(k); });
+    let extraPass = 0;
+    const considerExtra = (x, isGrade) => {
+        const k = scoreKey(x);
+        if (!k || seenKeys.has(k)) return;
+        seenKeys.add(k);
+        if (isGrade) {
+            scoredSubs.push({ score: (typeof x.score === 'number' ? x.score : 0) });
+            if (x.status === 'pass' || (typeof x.score === 'number' && x.score >= 50)) extraPass++;
+        } else {
+            scoredSubs.push(x);
+            if (x.status === 'pass') extraPass++;
+        }
+    };
+    examLinkedSubs.forEach(s => considerExtra(s, false));
+    examLinkedGrades.forEach(g => considerExtra(g, true));
     const passedTotal = passedCount + extraPass;
     const avgScore = scoredSubs.length ? Math.round(scoredSubs.reduce((s, x) => s + (x.score || 0), 0) / scoredSubs.length) : 0;
     const activeFilter = window._hubExamFilter || 'all';
