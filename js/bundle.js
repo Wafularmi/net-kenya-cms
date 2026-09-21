@@ -389,8 +389,40 @@ function computeCGPA(grades, courses) {
 function getCachedStudentFee(student) {
     if (!student) return 0;
     const programFee = getCachedProgramFee(student.program);
-    if (programFee > 0) return programFee;
-    return student.feeAmount || 0;
+    const fee = programFee > 0 ? programFee : (student.feeAmount || 0);
+    const cap = feeRule('ceiling');
+    return cap > 0 ? Math.min(fee, cap) : fee;
+}
+// Fee rules (Settings → feeRules): tuition ceiling, graduation amount + ceiling,
+// max total waived per student. Cached in memory (sync reads, 60s refresh).
+let _feeRulesCache = null;
+let _feeRulesCacheAt = 0;
+async function loadFeeRules(force) {
+    if (!force && _feeRulesCache && Date.now() - _feeRulesCacheAt < 60000) return _feeRulesCache;
+    try {
+        const rec = await dbGet('settings', 'feeRules');
+        _feeRulesCache = (rec && rec.value) || {};
+    } catch { _feeRulesCache = _feeRulesCache || {}; }
+    _feeRulesCacheAt = Date.now();
+    return _feeRulesCache;
+}
+function feeRule(name) {
+    const v = _feeRulesCache ? Number(_feeRulesCache[name]) : 0;
+    return v > 0 ? v : 0;
+}
+function getGraduationFee(student) {
+    if (!student || student.gradSponsored) return 0;
+    const amt = feeRule('graduationFee');
+    if (!(amt > 0)) return 0;
+    const cap = feeRule('graduationCeiling');
+    return cap > 0 ? Math.min(amt, cap) : amt;
+}
+function isTuitionPayment(p) { return !p || !p.account || p.account === 'tuition'; }
+function tuitionPaid(payments, sid) {
+    return (payments || []).filter(p => String(p.studentId) === String(sid) && isTuitionPayment(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+}
+function gradPaid(payments, sid) {
+    return (payments || []).filter(p => String(p.studentId) === String(sid) && p.account === 'graduation').reduce((s, p) => s + (Number(p.amount) || 0), 0);
 }
 async function resolveStudentId(currentUser) {
     if (!currentUser || currentUser.role !== 'student') return null;
@@ -1729,7 +1761,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
@@ -2132,11 +2164,11 @@ async function renderDashboard() {
             pendingBanner.style.display = 'none';
         }
     }
-    const todayPayments = payments.filter(p => p.date === today);
+    const todayPayments = payments.filter(p => p.date === today && isTuitionPayment(p));
     const todayIncome = income.filter(i => i.date === today);
     const todayExpenses = expenses.filter(e => e.date === today);
     const todayTotal = todayPayments.reduce((s, p) => s + p.amount, 0) + todayIncome.reduce((s, i) => s + i.amount, 0);
-    const monthPayments = payments.filter(p => p.date >= today.substring(0, 7)).reduce((s, p) => s + p.amount, 0);
+    const monthPayments = payments.filter(p => p.date >= today.substring(0, 7) && isTuitionPayment(p)).reduce((s, p) => s + p.amount, 0);
     const monthIncome = income.filter(i => i.date >= today.substring(0, 7)).reduce((s, i) => s + i.amount, 0);
     const monthExpenses = expenses.filter(e => e.date >= today.substring(0, 7)).reduce((s, e) => s + e.amount, 0);
     const monthRevenue = monthPayments + monthIncome - monthExpenses;
@@ -2165,11 +2197,11 @@ async function renderDashboard() {
     document.getElementById('dash-today-schedule').innerHTML = isAdmin ? `<div style="text-align:center;color:var(--text-muted);padding:10px;"><p><b>Today's Schedule</b></p><p style="font-size:12px;margin-top:4px;">${courses.length} courses available</p></div>` : '';
     const upcomingEvents = events.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
     document.getElementById('dash-upcoming-events').innerHTML = upcomingEvents.length ? upcomingEvents.map(e => `<div class="event-item"><span><b>${escapeHtml(e.title)}</b></span><span style="color:var(--text-muted);font-size:12px;">${formatDate(e.date)}</span></div>`).join('') : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No upcoming events</div>';
-    const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+    const totalPaid = payments.filter(isTuitionPayment).reduce((s, p) => s + p.amount, 0);
     const totalOtherIncome = income.reduce((s, i) => s + i.amount, 0);
     const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
     const netBalance = totalPaid + totalOtherIncome - totalExpenses;
-    const studentsWithBalances = students.filter(s => { const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0); return getCachedStudentFee(s) - paid > 0; }).length;
+    const studentsWithBalances = students.filter(s => { const paid = tuitionPaid(payments, s.id); return getCachedStudentFee(s) - paid > 0; }).length;
     document.getElementById('dash-finance').innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;"><div><div style="font-size:11px;color:var(--text-muted);">Fee Income</div><div style="font-weight:700;color:var(--success);">${formatCurrency(totalPaid)}</div></div><div><div style="font-size:11px;color:var(--text-muted);">Other Income</div><div style="font-weight:700;color:var(--info);">${formatCurrency(totalOtherIncome)}</div></div><div><div style="font-size:11px;color:var(--text-muted);">Expenses</div><div style="font-weight:700;color:var(--danger);">${formatCurrency(totalExpenses)}</div></div><div><div style="font-size:11px;color:var(--text-muted);">Net Balance</div><div style="font-weight:700;color:${netBalance >= 0 ? 'var(--success)' : 'var(--danger)'};">${formatCurrency(netBalance)}</div></div><div><div style="font-size:11px;color:var(--text-muted);">With Balance</div><div style="font-weight:700;color:var(--warning);">${studentsWithBalances}</div></div></div>`;
     const attendanceAlerts = students.filter(s => {
         const studentAtt = attendance.filter(a => a.studentId === s.id);
@@ -2328,7 +2360,7 @@ document.getElementById('students-body').innerHTML = filtered.map(s => {
         const center = centers.find(c => c.id === s.studyCenterId);
         const statusClass = s.status === 'active' ? 'success' : s.status === 'inactive' ? 'secondary' : s.status === 'graduated' ? 'info' : s.status === 'suspended' ? 'warning' : 'danger';
         const phone = s.phone || '';
-        return `<tr><td><b>${s.admissionNumber || s.id}</b>${s.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || ''}</div></td><td>${center ? center.name : 'Main'}</td><td>${s.program || '--'}</td><td>Year ${s.year || 1}</td><td>${s.country ? `<span class="badge badge-info">${escapeHtml(s.country)}</span>` : '<span style="color:var(--text-muted);">—</span>'}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span></td><td style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:600;">${formatCurrency(balance)}</td><td><button class="btn btn-outline btn-sm" onclick="viewStudent('${s.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">Edit</button> <button class="btn btn-primary btn-sm" onclick="adminEnrollStudentInCourse('${s.id}')" title="Enroll in Course">📚</button> <button class="btn btn-warning btn-sm" onclick="adminRegisterStudentForExam('${s.id}')" title="Register for Exam">📝</button> <button class="btn btn-info btn-sm" onclick="adminEnrollStudentInQuiz('${s.id}')" title="Join Quiz">📋</button> <button class="btn btn-secondary btn-sm" onclick="adminChangeStudentProgram('${s.id}')" title="Change Program">🎓</button> ${phone ? `<div class="wa-dropdown" style="display:inline-block;position:relative;"><button class="btn btn-success btn-sm" onclick="toggleWADropdown(event, '${s.id}')">📱</button><div id="wa-drop-${s.id}" class="wa-drop-menu" style="display:none;position:absolute;right:0;top:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px;min-width:180px;z-index:50;box-shadow:var(--shadow-lg);"><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}')">💬 Custom Message</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-fee')">💰 Fee Reminder</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-attendance')">⚠️ Attendance Alert</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-welcome')">👋 Welcome</div></div></div>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')" title="Delete">🗑</button></td></tr>`;
+        return `<tr><td><b>${s.admissionNumber || s.id}</b>${s.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || ''}</div></td><td>${center ? center.name : 'Main'}</td><td>${s.program || '--'}</td><td>Year ${s.year || 1}</td><td>${s.country ? `<span class="badge badge-info">${escapeHtml(s.country)}</span>` : '<span style="color:var(--text-muted);">—</span>'}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span>${s.gradSponsored ? ' <span class="badge badge-success" title="Graduation fee sponsored">🎓S</span>' : ''}</td><td style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:600;">${formatCurrency(balance)}</td><td><button class="btn btn-outline btn-sm" onclick="viewStudent('${s.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">Edit</button> <button class="btn btn-primary btn-sm" onclick="adminEnrollStudentInCourse('${s.id}')" title="Enroll in Course">📚</button> <button class="btn btn-warning btn-sm" onclick="adminRegisterStudentForExam('${s.id}')" title="Register for Exam">📝</button> <button class="btn btn-info btn-sm" onclick="adminEnrollStudentInQuiz('${s.id}')" title="Join Quiz">📋</button> <button class="btn btn-secondary btn-sm" onclick="adminChangeStudentProgram('${s.id}')" title="Change Program">🎓</button> ${phone ? `<div class="wa-dropdown" style="display:inline-block;position:relative;"><button class="btn btn-success btn-sm" onclick="toggleWADropdown(event, '${s.id}')">📱</button><div id="wa-drop-${s.id}" class="wa-drop-menu" style="display:none;position:absolute;right:0;top:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px;min-width:180px;z-index:50;box-shadow:var(--shadow-lg);"><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}')">💬 Custom Message</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-fee')">💰 Fee Reminder</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-attendance')">⚠️ Attendance Alert</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-welcome')">👋 Welcome</div></div></div>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')" title="Delete">🗑</button></td></tr>`;
     }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No students found. Click "+ Add Student" to enroll.</td></tr>';
     try {
         if (typeof canManageStudents === 'function' && !canManageStudents()) {
@@ -2593,7 +2625,7 @@ async function showStudentForm(student = null) {
     const defaultMonth = now.getMonth() + 1;
     const defaultYear = String(now.getFullYear()).slice(-2);
     const programs = await getProgramsList();
-    const content = `<input type="hidden" id="student-edit-id" value="${student ? student.id : ''}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="student-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${student && student.photo ? `<img src="${student.photo}" style="width:100%;height:100%;object-fit:cover;">` : (student ? (student.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="student-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStudentPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="student-name" value="${student ? student.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="student-email" value="${student ? student.email || '' : ''}"></div><div class="form-group"><label>Phone</label><input type="text" id="student-phone" value="${student ? student.phone || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Date of Birth</label><input type="date" id="student-dob" value="${student ? student.dob || '' : ''}"></div><div class="form-group"><label>Gender</label><select id="student-gender"><option value="">Select</option><option value="male" ${student && student.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${student && student.gender === 'female' ? 'selected' : ''}>Female</option></select></div></div><div class="form-row"><div class="form-group"><label>Country</label><select id="student-country"><option value="">Unassigned (visible to all)</option></select></div></div><div class="form-group"><label>Study Center *</label><select id="student-center" onchange="onStudentCenterChange()"><option value="">Select Study Center...</option>${centers.map(c => `<option value="${c.id}" ${student && student.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div style="padding:12px;background:var(--bg-input);border-radius:var(--radius);margin-bottom:12px;"><div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Admission Number</div><div class="form-row"><div class="form-group"><label>Generation Mode</label><select id="adm-mode" onchange="toggleAdmissionMode()"><option value="auto" ${student && student.admMode === 'manual' ? '' : 'selected'}>Auto-Generate</option><option value="manual" ${student && student.admMode === 'manual' ? 'selected' : ''}>Manual Entry</option></select></div><div class="form-group"><label>Registration Date</label><input type="date" id="adm-date" value="${student ? student.enrollDate || new Date().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}" onchange="updateAdmissionPreview()"></div></div><div id="adm-auto-section"><div style="font-size:13px;margin-top:4px;">Format: <b>${initials}</b> / <span id="adm-preview-center">XXXX</span> / <span id="adm-preview-month">${defaultMonth}</span> - <span id="adm-preview-year">${defaultYear}</span> / <span id="adm-preview-seq">001</span></div><div style="font-size:18px;font-weight:700;color:var(--accent);margin-top:8px;" id="adm-full-preview">${initials}/XXXX/${defaultMonth}-${defaultYear}/001</div></div><div id="adm-manual-section" style="display:none;"><div class="form-group"><label>Manual Admission Number</label><input type="text" id="adm-manual-input" value="${student ? student.admissionNumber || '' : ''}" placeholder="Enter custom admission number"></div></div></div><div class="form-row"><div class="form-group"><label>Program</label><select id="student-program" onchange="onStudentProgramChange(this)"><option value="">Select Program...</option>${programs.map(p => `<option value="${p}" ${student && student.program === p ? 'selected' : ''}>${p}</option>`).join('')}${student && student.program && !programs.includes(student.program) ? `<option value="${student.program}" selected>${student.program}</option>` : ''}</select></div><div class="form-row"><div class="form-group"><label>Year</label><input type="number" id="student-year" value="${student ? student.year || 1 : 1}" min="1" max="3" oninput="var a=document.getElementById('student-year-auto');if(a)a.checked=false;"></div><div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="student-year-auto" ${student && student.yearAuto !== false ? 'checked' : ''}> Auto-calculate from registration date (max Year 3)</label></div></div><div class="form-row"><div class="form-group"><label>Fee Amount</label><input type="number" id="student-fee" value="${student ? getCachedStudentFee(student) : 0}"></div><div class="form-group"><label>Installment Plan</label><select id="student-installment"><option value="">None</option><option value="2" ${student && student.installments == 2 ? 'selected' : ''}>2 Payments</option><option value="3" ${student && student.installments == 3 ? 'selected' : ''}>3 Payments</option><option value="4" ${student && student.installments == 4 ? 'selected' : ''}>4 Payments</option></select></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="student-status"><option value="active" ${student && student.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${student && student.status === 'inactive' ? 'selected' : ''}>Inactive</option><option value="graduated" ${student && student.status === 'graduated' ? 'selected' : ''}>Graduated</option><option value="suspended" ${student && student.status === 'suspended' ? 'selected' : ''}>Suspended</option><option value="dropped" ${student && student.status === 'dropped' ? 'selected' : ''}>Dropped</option></select></div></div><div class="form-group" style="margin-top:4px;"><label class="checkbox-label"><input type="checkbox" id="student-test-account" onchange="onTestAccountToggle()" ${student && student.testAccount ? 'checked' : ''}> 🧪 This is a <b>Test Account</b> (no real admission number, no login created)</label></div><div class="form-group"><label>Address</label><textarea id="student-address">${student ? student.address || '' : ''}</textarea></div><div class="form-group"><label>Emergency Contact</label><input type="text" id="student-emergency" value="${student ? student.emergency || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="student-notes">${student ? student.notes || '' : ''}</textarea></div>`;
+    const content = `<input type="hidden" id="student-edit-id" value="${student ? student.id : ''}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="student-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${student && student.photo ? `<img src="${student.photo}" style="width:100%;height:100%;object-fit:cover;">` : (student ? (student.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="student-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStudentPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="student-name" value="${student ? student.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="student-email" value="${student ? student.email || '' : ''}"></div><div class="form-group"><label>Phone</label><input type="text" id="student-phone" value="${student ? student.phone || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Date of Birth</label><input type="date" id="student-dob" value="${student ? student.dob || '' : ''}"></div><div class="form-group"><label>Gender</label><select id="student-gender"><option value="">Select</option><option value="male" ${student && student.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${student && student.gender === 'female' ? 'selected' : ''}>Female</option></select></div></div><div class="form-row"><div class="form-group"><label>Country</label><select id="student-country"><option value="">Unassigned (visible to all)</option></select></div></div><div class="form-group"><label><input type="checkbox" id="student-gradsponsored" ${student && student.gradSponsored ? 'checked' : ''} style="margin-right:6px;">Graduation fee sponsored (owes no graduation fee)</label></div><div class="form-group"><label>Study Center *</label><select id="student-center" onchange="onStudentCenterChange()"><option value="">Select Study Center...</option>${centers.map(c => `<option value="${c.id}" ${student && student.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div style="padding:12px;background:var(--bg-input);border-radius:var(--radius);margin-bottom:12px;"><div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Admission Number</div><div class="form-row"><div class="form-group"><label>Generation Mode</label><select id="adm-mode" onchange="toggleAdmissionMode()"><option value="auto" ${student && student.admMode === 'manual' ? '' : 'selected'}>Auto-Generate</option><option value="manual" ${student && student.admMode === 'manual' ? 'selected' : ''}>Manual Entry</option></select></div><div class="form-group"><label>Registration Date</label><input type="date" id="adm-date" value="${student ? student.enrollDate || new Date().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}" onchange="updateAdmissionPreview()"></div></div><div id="adm-auto-section"><div style="font-size:13px;margin-top:4px;">Format: <b>${initials}</b> / <span id="adm-preview-center">XXXX</span> / <span id="adm-preview-month">${defaultMonth}</span> - <span id="adm-preview-year">${defaultYear}</span> / <span id="adm-preview-seq">001</span></div><div style="font-size:18px;font-weight:700;color:var(--accent);margin-top:8px;" id="adm-full-preview">${initials}/XXXX/${defaultMonth}-${defaultYear}/001</div></div><div id="adm-manual-section" style="display:none;"><div class="form-group"><label>Manual Admission Number</label><input type="text" id="adm-manual-input" value="${student ? student.admissionNumber || '' : ''}" placeholder="Enter custom admission number"></div></div></div><div class="form-row"><div class="form-group"><label>Program</label><select id="student-program" onchange="onStudentProgramChange(this)"><option value="">Select Program...</option>${programs.map(p => `<option value="${p}" ${student && student.program === p ? 'selected' : ''}>${p}</option>`).join('')}${student && student.program && !programs.includes(student.program) ? `<option value="${student.program}" selected>${student.program}</option>` : ''}</select></div><div class="form-row"><div class="form-group"><label>Year</label><input type="number" id="student-year" value="${student ? student.year || 1 : 1}" min="1" max="3" oninput="var a=document.getElementById('student-year-auto');if(a)a.checked=false;"></div><div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="student-year-auto" ${student && student.yearAuto !== false ? 'checked' : ''}> Auto-calculate from registration date (max Year 3)</label></div></div><div class="form-row"><div class="form-group"><label>Fee Amount</label><input type="number" id="student-fee" value="${student ? getCachedStudentFee(student) : 0}"></div><div class="form-group"><label>Installment Plan</label><select id="student-installment"><option value="">None</option><option value="2" ${student && student.installments == 2 ? 'selected' : ''}>2 Payments</option><option value="3" ${student && student.installments == 3 ? 'selected' : ''}>3 Payments</option><option value="4" ${student && student.installments == 4 ? 'selected' : ''}>4 Payments</option></select></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="student-status"><option value="active" ${student && student.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${student && student.status === 'inactive' ? 'selected' : ''}>Inactive</option><option value="graduated" ${student && student.status === 'graduated' ? 'selected' : ''}>Graduated</option><option value="suspended" ${student && student.status === 'suspended' ? 'selected' : ''}>Suspended</option><option value="dropped" ${student && student.status === 'dropped' ? 'selected' : ''}>Dropped</option></select></div></div><div class="form-group" style="margin-top:4px;"><label class="checkbox-label"><input type="checkbox" id="student-test-account" onchange="onTestAccountToggle()" ${student && student.testAccount ? 'checked' : ''}> 🧪 This is a <b>Test Account</b> (no real admission number, no login created)</label></div><div class="form-group"><label>Address</label><textarea id="student-address">${student ? student.address || '' : ''}</textarea></div><div class="form-group"><label>Emergency Contact</label><input type="text" id="student-emergency" value="${student ? student.emergency || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="student-notes">${student ? student.notes || '' : ''}</textarea></div>`;
     showModal(isEdit ? 'Edit Student' : 'Add New Student', content, `<button class="btn btn-primary" onclick="saveStudent()">${isEdit ? 'Update' : 'Enroll'}</button>`);
     onStudentCenterChange();
     updateAdmissionPreview();
@@ -2772,6 +2804,7 @@ async function saveStudent() {
         feeAmount,
         status: document.getElementById('student-status').value,
         testAccount: isTest,
+        gradSponsored: document.getElementById('student-gradsponsored')?.checked === true,
         installments: installmentPlan,
         address: document.getElementById('student-address').value.trim(),
         emergency: document.getElementById('student-emergency').value.trim(),
@@ -2846,7 +2879,7 @@ async function viewStudent(id) {
     const grades = (await dbGetAll('grades')).filter(g => g.studentId === id);
     const courses = await dbGetAll('courses');
     const center = student.studyCenterId ? await dbGet('studyCenters', student.studyCenterId) : null;
-    const paid = payments.reduce((s, p) => s + p.amount, 0);
+    const paid = tuitionPaid(payments, id);
     const studentFee = getCachedStudentFee(student);
     const balance = studentFee - paid;
     const photoHtml = student.photo ? `<div style="text-align:center;margin-bottom:16px;"><img src="${student.photo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--accent);"></div>` : '';
@@ -4742,7 +4775,7 @@ async function notifyExamStudent(examId, studentId) {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     const payments = await dbGetAll('payments');
-    const paid = payments.filter(p => p.studentId === student.id).reduce((sum, p) => sum + p.amount, 0);
+    const paid = tuitionPaid(payments, student.id);
     const balance = getCachedStudentFee(student) - paid;
     await seedWhatsAppTemplates();
     const templates = await dbGetAll('whatsappTemplates');
@@ -4980,7 +5013,7 @@ async function sendExamNotify(examId) {
         const student = students.find(s => s.id === reg.studentId);
         if (!student || !student.phone) { failed++; continue; }
         const payments = await dbGetAll('payments');
-        const paid = payments.filter(p => p.studentId === student.id).reduce((sum, p) => sum + p.amount, 0);
+        const paid = tuitionPaid(payments, student.id);
         const balance = getCachedStudentFee(student) - paid;
         let personalized = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
         if (exam) {
@@ -5012,7 +5045,7 @@ async function renderFinance() {
     const allStudents = batch.students;
     const students = await filterByRegion(allStudents, s => s.studyCenterId);
     const regionalStudentIds = new Set(students.map(s => s.id));
-    const payments = batch.payments.filter(p => regionalStudentIds.has(p.studentId));
+    const payments = batch.payments.filter(p => regionalStudentIds.has(p.studentId) && isTuitionPayment(p));
     const income = batch.income, expenses = batch.expenses;
     const today = new Date().toISOString().split('T')[0];
     const month = today.substring(0, 7);
@@ -5028,6 +5061,9 @@ async function renderFinance() {
     const monthNet = (monthPaid + monthOtherIncome) - monthExpenses;
     const totalFees = students.reduce((s, st) => s + getCachedStudentFee(st), 0);
     const outstanding = totalFees - totalPaid;
+    const gradCollected = batch.payments.filter(p => p.account === 'graduation' && regionalStudentIds.has(p.studentId)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const gradDue = students.reduce((s, st) => s + getGraduationFee(st), 0);
+    const gradOut = Math.max(0, gradDue - gradCollected);
     document.getElementById('finance-stats').innerHTML = `
         <div class="stat-card"><div class="stat-label">Today</div><div class="stat-value" style="color:var(--accent)">${formatCurrency(todayPaid)}</div></div>
         <div class="stat-card"><div class="stat-label">Month Net</div><div class="stat-value" style="color:${monthNet >= 0 ? 'var(--success)' : 'var(--danger)'}">${formatCurrency(monthNet)}</div></div>
@@ -5036,6 +5072,8 @@ async function renderFinance() {
         <div class="stat-card"><div class="stat-label">Expenses</div><div class="stat-value" style="color:var(--danger)">${formatCurrency(totalExpenses)}</div></div>
         <div class="stat-card"><div class="stat-label">Net Balance</div><div class="stat-value" style="color:${netBalance >= 0 ? 'var(--success)' : 'var(--danger)'}">${formatCurrency(netBalance)}</div></div>
         <div class="stat-card"><div class="stat-label">Outstanding Fees</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(outstanding)}</div></div>
+        <div class="stat-card"><div class="stat-label">Graduation Collected</div><div class="stat-value" style="color:var(--success)">${formatCurrency(gradCollected)}</div></div>
+        <div class="stat-card"><div class="stat-label">Graduation Outstanding</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(gradOut)}</div></div>
     `;
     const financeActions = document.querySelector('#screen-finance .screen-actions');
     const canManageFinance = hasFinanceManage();
@@ -5095,10 +5133,12 @@ async function renderBalances() {
     const today = new Date().toISOString().split('T')[0];
     const activeAgr = (sid) => agreements.find(a => String(a.studentId) === String(sid) && a.status === 'approved' && String(a.dueDate || '') >= today);
     const rows = students.map(s => {
-        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const paid = tuitionPaid(payments, s.id);
         const waived = waiverTotalFor(s.id, waivers);
         const fee = getCachedStudentFee(s);
-        return { ...s, paid, waived, fee, balance: fee - paid - waived, agr: activeAgr(s.id) };
+        const gradFee = getGraduationFee(s);
+        const gradPaidV = gradPaid(payments, s.id);
+        return { ...s, paid, waived, fee, balance: fee - paid - waived, gradFee, gradPaidV, gradBal: gradFee - gradPaidV, agr: activeAgr(s.id) };
     });
     const statusOf = r => r.fee > 0 ? (r.balance > 0 ? 'balance' : 'paid') : 'sponsored';
     const counts = { all: rows.length, balance: 0, paid: 0, sponsored: 0 };
@@ -5111,7 +5151,7 @@ async function renderBalances() {
     };
     const filterBtn = (key, label) => `<button class="btn btn-sm ${_balancesFilter === key ? 'btn-primary' : 'btn-outline'}" onclick="setBalancesFilter('${key}')">${label} (${counts[key]})</button>`;
     const outstanding = rows.reduce((t, r) => t + (r.balance > 0 ? r.balance : 0), 0);
-    const listHtml = shown.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span> ${badgeHtml(s)}${s.status && s.status !== 'active' ? `<br><span style="font-size:10px;color:var(--text-muted);">Status: ${escapeHtml(s.status)}</span>` : ''}<br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)}${s.waived ? ` + Waived: ${formatCurrency(s.waived)}` : ''} / ${formatCurrency(s.fee)}</span>${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:${s.balance > 0 ? 'var(--warning)' : 'var(--success)'};">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button> <button class="btn btn-warning btn-sm" style="margin-top:4px;" onclick="showWaiverForm('${s.id}')">Waiver</button></div></div>`).join('');
+    const listHtml = shown.map(s => `<div class="event-item"><div><b>${s.name}</b> <span style="font-size:11px;color:var(--text-muted);">(${s.id})</span> ${badgeHtml(s)}${s.status && s.status !== 'active' ? `<br><span style="font-size:10px;color:var(--text-muted);">Status: ${escapeHtml(s.status)}</span>` : ''}<br><span style="font-size:11px;">Paid: ${formatCurrency(s.paid)}${s.waived ? ` + Waived: ${formatCurrency(s.waived)}` : ''} / ${formatCurrency(s.fee)}</span>${(s.gradFee > 0 || s.gradPaidV > 0) ? `<br><span style="font-size:11px;">🎓 Grad: ${formatCurrency(s.gradPaidV)} / ${formatCurrency(s.gradFee)}${s.gradBal > 0 ? ` (bal ${formatCurrency(s.gradBal)})` : ' ✓'}</span>` : ''}${s.agr ? `<br><span class="badge badge-info" style="font-size:10px;">Agreement till ${escapeHtml(s.agr.dueDate)}</span>` : ''}</div><div style="text-align:right;"><span style="font-weight:700;color:${s.balance > 0 ? 'var(--warning)' : 'var(--success)'};">${formatCurrency(s.balance)}</span><br><button class="btn btn-primary btn-sm" style="margin-top:4px;" onclick="showPaymentForStudent('${s.id}')">Pay</button> <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="showAgreementForm('${s.id}')">Agreement</button> <button class="btn btn-warning btn-sm" style="margin-top:4px;" onclick="showWaiverForm('${s.id}')">Waiver</button></div></div>`).join('');
     document.getElementById('balances-list').innerHTML = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-input);"><div style="display:flex;gap:6px;flex-wrap:wrap;">${filterBtn('all', 'All')}${filterBtn('balance', 'Balance')}${filterBtn('paid', 'Fully Paid')}${filterBtn('sponsored', 'Sponsored')}</div><div style="flex:1;text-align:right;font-size:12px;color:var(--text-muted);">Students: <b>${counts.all}</b> | Outstanding: <b style="color:var(--warning);">${formatCurrency(outstanding)}</b></div></div>` + (shown.length ? listHtml : '<div style="text-align:center;color:var(--text-muted);padding:20px;">No students match this filter</div>');
 }
 let _balancesFilter = 'all';
@@ -5136,7 +5176,7 @@ async function showWaiverForm(studentId) {
     if (!s) return showToast('Student not found', { type: 'danger' });
     const payments = await dbGetAll('payments');
     const waivers = await dbGetAll('waivers').catch(() => []);
-    const paid = payments.filter(p => p.studentId === studentId).reduce((x, p) => x + p.amount, 0);
+    const paid = tuitionPaid(payments, studentId);
     const alreadyWaived = waiverTotalFor(studentId, waivers);
     const bal = Math.max(0, getCachedStudentFee(s) - paid - alreadyWaived);
     const staff = await dbGetAll('staff').catch(() => []);
@@ -5161,6 +5201,12 @@ async function saveWaiver(studentId) {
     const staff = await dbGetAll('staff').catch(() => []);
     const st = staff.find(x => x.id === byId);
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    await loadFeeRules();
+    const wmax = feeRule('waiverMax');
+    if (wmax > 0) {
+        const curWaived = (await dbGetAll('waivers').catch(() => [])).filter(w => String(w.studentId) === String(studentId)).reduce((s, w) => s + (Number(w.amount) || 0), 0);
+        if (curWaived + amount > wmax) return showToast(`Waiver limit is ${formatCurrency(wmax)} per student (settings). Already waived ${formatCurrency(curWaived)}.`);
+    }
     await dbPut('waivers', { id: 'WVR-' + Date.now(), studentId, amount, reason, waivedBy: byId, waivedByName: st ? st.name : byId, createdBy: u.username || '', at: new Date().toISOString() });
     closeModal(); renderBalances(); showToast('Waiver granted: ' + formatCurrency(amount)); logAudit('created', 'waiver', { studentId, amount, reason, waivedBy: byId });
 }
@@ -5259,7 +5305,7 @@ function requireFinanceRole() {
 function showPaymentForm() {
     if (!requireFinanceRole()) return;
     dbGetAll('students').then(students => {
-        const content = `<div class="form-group"><label>Student</label><select id="pay-student"><option value="">Select student...</option>${students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('')}</select></div><div class="form-group"><label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}"></div><div class="form-row"><div class="form-group"><label>Amount *</label><input type="number" id="pay-amount" required></div><div class="form-group"><label>Method</label><select id="pay-method"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="scholarship">Scholarship</option></select></div></div><div class="form-group"><label>Reference</label><input type="text" id="pay-ref"></div><div class="form-group"><label>Notes</label><textarea id="pay-notes"></textarea></div>`;
+        const content = `<div class="form-group"><label>Student</label><select id="pay-student"><option value="">Select student...</option>${students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('')}</select></div><div class="form-group"><label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}"></div><div class="form-row"><div class="form-group"><label>Amount *</label><input type="number" id="pay-amount" required></div><div class="form-group"><label>Method</label><select id="pay-method"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="scholarship">Scholarship</option></select></div><div class="form-group"><label>Account</label><select id="pay-account"><option value="tuition">Tuition Fees</option><option value="graduation">Graduation Fee</option></select></div></div><div class="form-group"><label>Reference</label><input type="text" id="pay-ref"></div><div class="form-group"><label>Notes</label><textarea id="pay-notes"></textarea></div>`;
         showModal('Record Payment', content, `<button class="btn btn-primary" onclick="savePayment()">Record</button>`);
         calculateStudentBalances();
     });
@@ -5269,7 +5315,7 @@ async function calculateStudentBalances() {
     const select = document.getElementById('pay-student');
     for (const option of select.options) {
         if (!option.value) continue;
-        const paid = payments.filter(p => p.studentId === option.value).reduce((s, p) => s + p.amount, 0);
+        const paid = tuitionPaid(payments, option.value);
         const student = await dbGet('students', option.value);
         if (student) option.textContent = `${student.name} (${student.id}) - Balance: ${formatCurrency(getCachedStudentFee(student) - paid)}`;
     }
@@ -5277,10 +5323,10 @@ async function calculateStudentBalances() {
 function showPaymentForStudent(studentId) {
     if (!requireFinanceRole()) return;
     dbGetAll('students').then(async students => {
-        const content = `<div class="form-group"><label>Student</label><select id="pay-student"><option value="">Select student...</option>${students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('')}</select></div><div class="form-group"><label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}"></div><div class="form-row"><div class="form-group"><label>Amount *</label><input type="number" id="pay-amount" required></div><div class="form-group"><label>Method</label><select id="pay-method"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="scholarship">Scholarship</option></select></div></div><div class="form-group"><label>Reference</label><input type="text" id="pay-ref"></div><div class="form-group"><label>Notes</label><textarea id="pay-notes"></textarea></div>`;
+        const content = `<div class="form-group"><label>Student</label><select id="pay-student"><option value="">Select student...</option>${students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('')}</select></div><div class="form-group"><label>Date</label><input type="date" id="pay-date" value="${new Date().toISOString().split('T')[0]}"></div><div class="form-row"><div class="form-group"><label>Amount *</label><input type="number" id="pay-amount" required></div><div class="form-group"><label>Method</label><select id="pay-method"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="scholarship">Scholarship</option></select></div><div class="form-group"><label>Account</label><select id="pay-account"><option value="tuition">Tuition Fees</option><option value="graduation">Graduation Fee</option></select></div></div><div class="form-group"><label>Reference</label><input type="text" id="pay-ref"></div><div class="form-group"><label>Notes</label><textarea id="pay-notes"></textarea></div>`;
         showModal('Record Payment', content, `<button class="btn btn-primary" onclick="savePayment()">Record</button>`);
         const payments = await dbGetAll('payments');
-        const paid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
+        const paid = tuitionPaid(payments, studentId);
         const student = await dbGet('students', studentId);
         const balance = getCachedStudentFee(student) - paid;
         document.getElementById('pay-amount').value = balance > 0 ? balance : 0;
@@ -5295,16 +5341,31 @@ async function savePayment() {
         if (!studentId || !amount) return showToast('Student and amount required!');
         if (isNaN(amount) || amount <= 0) return showToast('Invalid payment amount!');
         const payDate = document.getElementById('pay-date').value || new Date().toISOString().split('T')[0];
-        const existingPayments = (await dbGetAll('payments')).filter(p => p.studentId === studentId && p.date === payDate && p.amount === amount);
+        const account = document.getElementById('pay-account') ? document.getElementById('pay-account').value : 'tuition';
+        await loadFeeRules();
+        const payStudent = await dbGet('students', studentId);
+        if (!payStudent) return showToast('Student not found!');
+        const allPayRecords = await dbGetAll('payments');
+        let dueAmt = 0;
+        if (account === 'graduation') {
+            dueAmt = getGraduationFee(payStudent) - gradPaid(allPayRecords, studentId);
+        } else {
+            const allWaivers = await dbGetAll('waivers').catch(() => []);
+            dueAmt = getCachedStudentFee(payStudent) - tuitionPaid(allPayRecords, studentId) - waiverTotalFor(studentId, allWaivers);
+        }
+        dueAmt = Math.round(dueAmt);
+        if (dueAmt <= 0) return showToast(`${payStudent.name} has already cleared the fee`, { type: 'warning', duration: 5000 });
+        if (amount > dueAmt) return showToast(`Payment of ${formatCurrency(amount)} exceeds ${payStudent.name}'s outstanding balance of ${formatCurrency(dueAmt)}.`, { type: 'warning', duration: 6000 });
+        const existingPayments = allPayRecords.filter(p => p.studentId === studentId && (p.account || 'tuition') === account && p.date === payDate && p.amount === amount);
         if (existingPayments.length > 0) {
             const confirmed = await showConfirm('Confirm', `This student already has a payment of ${formatCurrency(amount)} recorded today (${existingPayments.length} found). Record anyway?`);
             if (!confirmed) return;
         }
         const receiptNo = await generateReceiptNo(payDate);
-    const payment = { id: generateId('PMT'), studentId, amount, method: document.getElementById('pay-method').value, reference: sanitizeInput(document.getElementById('pay-ref').value.trim()), notes: sanitizeInput(document.getElementById('pay-notes').value.trim()), receiptNo, date: payDate, createdAt: new Date().toISOString() };
+    const payment = { id: generateId('PMT'), studentId, amount, account, method: document.getElementById('pay-method').value, reference: sanitizeInput(document.getElementById('pay-ref').value.trim()), notes: sanitizeInput(document.getElementById('pay-notes').value.trim()), receiptNo, date: payDate, createdAt: new Date().toISOString() };
     await dbPut('payments', payment);
     const installments = (await dbGetAll('installments')).filter(i => i.studentId === studentId && i.status !== 'paid').sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-    let remaining = amount;
+    let remaining = account === 'graduation' ? 0 : amount;
     for (const inst of installments) {
         if (remaining <= 0) break;
         const owed = inst.amount - (inst.paidAmount || 0);
@@ -5605,10 +5666,10 @@ async function renderPayroll() {
     const categories = await dbGetAll('expenseCategories');
     const today = new Date().toISOString().split('T')[0];
     const month = today.substring(0, 7);
-    const feeIncome = payments.reduce((s, p) => s + p.amount, 0);
+    const feeIncome = payments.filter(isTuitionPayment).reduce((s, p) => s + p.amount, 0);
     const extraIncome = otherIncome.reduce((s, i) => s + i.amount, 0);
     const totalIncome = feeIncome + extraIncome;
-    const monthFeeIncome = payments.filter(p => p.date >= month).reduce((s, p) => s + p.amount, 0);
+    const monthFeeIncome = payments.filter(p => p.date >= month && isTuitionPayment(p)).reduce((s, p) => s + p.amount, 0);
     const monthExtraIncome = otherIncome.filter(i => i.date >= month).reduce((s, i) => s + i.amount, 0);
     const monthIncome = monthFeeIncome + monthExtraIncome;
     const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
@@ -7096,14 +7157,21 @@ async function renderStudentFinance(currentUser) {
         const payments = await dbGetAll('payments');
         const me = findStudentForCurrentUser(students, currentUser);
         if (!me) return;
-        const totalPaid = myPayments.reduce((s, p) => s + p.amount, 0);
+        const myPayments = payments.filter(p => String(p.studentId) === String(me.id));
+        const myTuition = myPayments.filter(isTuitionPayment);
+        const totalPaid = myTuition.reduce((s, p) => s + (Number(p.amount) || 0), 0);
         const fee = getCachedStudentFee(me);
-        const balance = fee - totalPaid;
+        const waived = waiverTotalFor(me.id, await dbGetAll('waivers').catch(() => []));
+        const balance = fee - totalPaid - waived;
+        const gradFee = getGraduationFee(me);
+        const gradPaidV = gradPaid(myPayments, me.id);
+        const gradBal = gradFee - gradPaidV;
         document.getElementById('finance-stats').innerHTML = `
             <div class="stat-card"><div class="stat-label">My Fees</div><div class="stat-value" style="color:var(--accent)">${formatCurrency(fee)}</div></div>
             <div class="stat-card"><div class="stat-label">Total Paid</div><div class="stat-value" style="color:var(--success)">${formatCurrency(totalPaid)}</div></div>
             <div class="stat-card"><div class="stat-label">Balance</div><div class="stat-value" style="color:${balance <= 0 ? 'var(--success)' : 'var(--danger)'}">${formatCurrency(balance)}</div></div>
             <div class="stat-card"><div class="stat-label">Payments</div><div class="stat-value">${myPayments.length}</div></div>
+            ${(gradFee > 0 || gradPaidV > 0) ? `<div class="stat-card"><div class="stat-label">🎓 Graduation</div><div class="stat-value" style="color:${gradBal <= 0 ? 'var(--success)' : 'var(--warning)'}">${formatCurrency(gradPaidV)} / ${formatCurrency(gradFee)}</div></div>` : ''}
         `;
         const tabsRow = document.querySelector('#screen-finance .tabs') || document.querySelector('#screen-finance .tab-header');
         if (tabsRow) tabsRow.style.display = 'none';
@@ -7118,8 +7186,8 @@ async function renderStudentFinance(currentUser) {
             tabContent.appendChild(container);
         }
         container.innerHTML = myPayments.length ? `<h4 style="color:var(--accent);margin-bottom:8px;">Payment History</h4>
-            <div class="table-container"><table class="data-table"><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody>
-            ${myPayments.map(p => `<tr><td>${formatDate(p.date)}</td><td>${formatCurrency(p.amount)}</td><td>${p.method || '--'}</td><td>${p.reference || '--'}</td></tr>`).join('')}
+            <div class="table-container"><table class="data-table"><thead><tr><th>Date</th><th>Amount</th><th>Account</th><th>Method</th><th>Reference</th></tr></thead><tbody>
+            ${myPayments.map(p => `<tr><td>${formatDate(p.date)}</td><td>${formatCurrency(p.amount)}</td><td>${p.account === 'graduation' ? '🎓 Graduation' : 'Tuition'}</td><td>${p.method || '--'}</td><td>${p.reference || '--'}</td></tr>`).join('')}
             </tbody></table></div>
             <div style="margin-top:12px;"><button class="btn btn-primary" onclick="viewPortalFeeStatement('${me.id}')">📄 Download Fee Statement</button></div>`
             : '<div style="text-align:center;padding:40px;color:var(--text-muted);">No payment records found.</div>';
@@ -7218,7 +7286,7 @@ function gradIssuesFor(s, m) {
     const studentAttendance = m.attendance.filter(a => a.studentId === s.id);
     const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
     const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
-    const totalPaid = m.payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+    const totalPaid = tuitionPaid(m.payments, s.id);
     const feeBalance = getCachedStudentFee(s) - totalPaid;
     const seq = sortCoursesBySequence(m.courses);
     let coveragePct = 100;
@@ -7296,7 +7364,7 @@ async function checkGraduation() {
         const studentAttendance = attendance.filter(a => a.studentId === s.id);
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
-        const totalPaid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const totalPaid = tuitionPaid(payments, s.id);
         const feeBalance = getCachedStudentFee(s) - totalPaid;
         const feesClear = feeBalance <= 0;
         const programReqs = requirements.filter(r => r.program === s.program);
@@ -7444,7 +7512,7 @@ async function graduateEligibleStudents() {
         const studentAttendance = attendance.filter(a => a.studentId === s.id);
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
         const attendancePct = studentAttendance.length > 0 ? Math.round((attendedClasses / studentAttendance.length) * 100) : 0;
-        const totalPaid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const totalPaid = tuitionPaid(payments, s.id);
         const feeBalance = getCachedStudentFee(s) - totalPaid;
         const programReqs = requirements.filter(r => r.program === s.program);
         let issues = [];
@@ -7621,7 +7689,7 @@ async function generateTranscript() {
     const accentColor = branding ? branding.accentColor : '#f59e0b';
     const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;
     const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
-    const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
+    const totalPaid = tuitionPaid(payments, studentId);
     const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
     const studentAttendance = attendance.filter(a => a.studentId === studentId);
     const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
@@ -8539,7 +8607,7 @@ async function generateFinalTranscript() {
     }
     const cgpa = totalCredits > 0 ? totalGPAPoints / totalCredits : 0;
     const classification = getClassification(cgpa);
-    const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
+    const totalPaid = tuitionPaid(payments, studentId);
     const feeBalance = getCachedStudentFee(student) - totalPaid;
     const docId = 'FTR-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
     const vCode = generateVerificationCode();
@@ -11609,7 +11677,7 @@ async function generateCertificate() {
         const [gradesAll, courses, payments, chapel, attendance, centers, academic] = await Promise.all([dbGetAll('grades'), dbGetAll('courses'), dbGetAll('payments'), dbGetAll('chapel'), dbGetAll('attendance'), getCenters(), dbGet('settings', 'academic')]);
         const grades = gradesAll.filter(g => g.studentId === studentId);
         const allGrades = grades;
-        const totalPaid = payments.filter(p => p.studentId === studentId).reduce((s, p) => s + p.amount, 0);
+        const totalPaid = tuitionPaid(payments, studentId);
         const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
         const studentAttendance = attendance.filter(a => a.studentId === studentId);
         const attendedClasses = studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
@@ -11625,7 +11693,7 @@ async function generateCertificate() {
         })}</div>`;
     } else if (type === 'fee-statement') {
         docTitle = 'Fee Statement';
-        const payments = (await dbGetAll('payments')).filter(p => p.studentId === studentId);
+        const payments = (await dbGetAll('payments')).filter(p => p.studentId === studentId && isTuitionPayment(p));
         const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
         const studentFee = getCachedStudentFee(student);
         const balance = studentFee - totalPaid;
@@ -12331,7 +12399,7 @@ async function previewQSMessage() {
         const s = await dbGet('students', studentId);
         if (s) {
             const payments = await dbGetAll('payments');
-            const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+            const paid = tuitionPaid(payments, s.id);
             const balance = getCachedStudentFee(s) - paid;
             preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);
         }
@@ -12362,7 +12430,7 @@ async function startQSQueue(templateId) {
         if (student && student.phone) targets = [student];
     } else if (recipients === 'with-balance') {
         const payments = await dbGetAll('payments');
-        targets = (await dbGetAll('students')).filter(s => s.phone && s.status === 'active' && getCachedStudentFee(s) - payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0) > 0);
+        targets = (await dbGetAll('students')).filter(s => s.phone && s.status === 'active' && getCachedStudentFee(s) - tuitionPaid(payments, s.id) > 0);
     } else {
         const filter = recipients === 'all-active' ? 'active' : '';
         targets = (await dbGetAll('students')).filter(s => s.phone && (!filter || s.status === filter));
@@ -12393,7 +12461,7 @@ async function showBroadcastPanel() {
     }
     const s = current.student;
     const payments = await dbGetAll('payments');
-    const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+    const paid = tuitionPaid(payments, s.id);
     const balance = getCachedStudentFee(s) - paid;
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
@@ -12485,7 +12553,7 @@ async function copyBroadcastMessage() {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const payments = await dbGetAll('payments');
-    const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+    const paid = tuitionPaid(payments, s.id);
     const balance = getCachedStudentFee(s) - paid;
     const msg = applyTemplateVars(current.message, s, schoolName, balance, s.admissionNumber, s.phone);
     try {
@@ -12520,7 +12588,7 @@ function sendNextWhatsApp() {
     dbGet('settings', 'branding').then(async (branding) => {
         const schoolName = branding ? branding.schoolName : 'College Management System';
         const payments = await dbGetAll('payments');
-        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const paid = tuitionPaid(payments, s.id);
         const balance = getCachedStudentFee(s) - paid;
         const msg = applyTemplateVars(current.message, s, schoolName, balance, s.admissionNumber, s.phone);
         sendWhatsApp(s.phone, msg);
@@ -12585,7 +12653,7 @@ async function quickWhatsAppStudent(studentId, templateId) {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const payments = await dbGetAll('payments');
-    const paid = payments.filter(p => p.studentId === student.id).reduce((sum, p) => sum + p.amount, 0);
+    const paid = tuitionPaid(payments, student.id);
     const balance = getCachedStudentFee(student) - paid;
     const resolvedMsg = applyTemplateVars(message, student, schoolName, balance, student.admissionNumber, student.phone);
     sendWhatsApp(student.phone, resolvedMsg);
@@ -12732,7 +12800,7 @@ async function startBulkBroadcast(target) {
     } else if (recipients === 'with-balance') {
         const payments = await dbGetAll('payments');
         const students = await dbGetAll('students');
-        targets = students.filter(s => { const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0); return getCachedStudentFee(s) - paid > 0; });
+        targets = students.filter(s => { const paid = tuitionPaid(payments, s.id); return getCachedStudentFee(s) - paid > 0; });
     } else if (recipients === 'all-students') {
         targets = await dbGetAll('students');
     } else {
@@ -12872,7 +12940,7 @@ async function applyCommFilters() {
     const tbody = document.getElementById('comm-student-body');
     tbody.innerHTML = students.map(s => {
         const center = centers.find(c => c.id === s.studyCenterId);
-        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const paid = tuitionPaid(payments, s.id);
         const balance = getCachedStudentFee(s) - paid;
         return `<tr data-id="${s.id}">
             <td><input type="checkbox" class="comm-row-check" value="${s.id}"></td>
@@ -12924,7 +12992,7 @@ async function previewCommMessage() {
     if (checked.length) {
         const s = students.find(st => st.id === checked[0]);
         if (s) {
-            const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+            const paid = tuitionPaid(payments, s.id);
             const balance = getCachedStudentFee(s) - paid;
             preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);
         }
@@ -12961,7 +13029,7 @@ async function sendCommSingle(studentId) {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     const payments = await dbGetAll('payments');
-    const paid = payments.filter(p => p.studentId === student.id).reduce((sum, p) => sum + p.amount, 0);
+    const paid = tuitionPaid(payments, student.id);
     const balance = getCachedStudentFee(student) - paid;
     const resolved = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
     sendWhatsApp(student.phone, resolved);
@@ -16476,7 +16544,7 @@ function renderPortalContent(studentId, data, isStudentUser) {
             }
         }
     }
-    const studentPayments = data.payments.filter(p => p.studentId === studentId);
+    const studentPayments = data.payments.filter(p => p.studentId === studentId && isTuitionPayment(p));
     const studentGrades = data.grades.filter(g => g.studentId === studentId);
     const studentAttendance = data.attendance.filter(a => a.studentId === studentId);
     const studentSubmissions = data.submissions.filter(s => s.studentId === studentId);
@@ -17776,7 +17844,7 @@ async function checkFeeOverdue() {
     const alerts = [];
     for (const s of students) {
         if (s.status !== 'active') continue;
-        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const paid = tuitionPaid(payments, s.id);
         const sFee = getCachedStudentFee(s);
         const balance = sFee - paid;
         if (balance > 0 && sFee > 0) {
@@ -18610,6 +18678,7 @@ async function initSettings() {
     });
     await loadSignatures();
     await loadMpesaSettings();
+    loadFeeRules().catch(() => {});
     await loadAdmissionLastSeqSetting();
 }
 initSettings();
@@ -19826,7 +19895,7 @@ async function exportStudentsCSV() {
     const centers = await getCenters();
     let csv = 'Admission #,Name,Email,Phone,Program,Year,Study Center,Status,Fee Amount,Paid,Balance,Enroll Date\n';
     students.forEach(s => {
-        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + p.amount, 0);
+        const paid = tuitionPaid(payments, s.id);
         const sFee = getCachedStudentFee(s);
         const balance = sFee - paid;
         const center = centers.find(c => c.id === s.studyCenterId);
@@ -20165,7 +20234,7 @@ async function generateFeeStatement(studentId, fromDate, toDate) {
         const student = await dbGet('students', studentId);
         if (!student) return showToast('Student not found');
         const allPayments = await dbGetAll('payments');
-        const payments = allPayments.filter(p => p.studentId === studentId && p.date >= fromDate && p.date <= toDate).sort((a, b) => a.date.localeCompare(b.date));
+        const payments = allPayments.filter(p => p.studentId === studentId && isTuitionPayment(p) && p.date >= fromDate && p.date <= toDate).sort((a, b) => a.date.localeCompare(b.date));
         const studentFee = getCachedStudentFee(student);
         const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
         const balance = studentFee - totalPaid;
@@ -20227,7 +20296,7 @@ async function generateFeeStatement(studentId, fromDate, toDate) {
 }
 async function generateIncomeStatement(fromDate, toDate) {
     try {
-        const feePayments = await dbGetAll('payments');
+        const feePayments = (await dbGetAll('payments')).filter(isTuitionPayment);
         const otherIncome = await dbGetAll('income');
         const incomeCategories = await dbGetAll('incomeCategories');
         const refNo = generateRefNumber('INC');
@@ -20355,7 +20424,7 @@ async function generateExpenseStatement(fromDate, toDate) {
 }
 async function generateSummaryStatement(fromDate, toDate) {
     try {
-    const feePayments = await dbGetAll('payments');
+    const feePayments = (await dbGetAll('payments')).filter(isTuitionPayment);
     const otherIncome = await dbGetAll('income');
     const expenses = await dbGetAll('expenses');
     const expCategories = await dbGetAll('expenseCategories');
@@ -21037,7 +21106,7 @@ async function generateCashBookStatement(fromDate, toDate) {
         const periodPayments = payments.filter(p => p.date >= fromDate && p.date <= toDate);
         const periodIncome = income.filter(i => i.date >= fromDate && i.date <= toDate);
         const periodExpenses = expenses.filter(e => e.date >= fromDate && e.date <= toDate);
-        const totalFeeIncome = periodPayments.reduce((s, p) => s + p.amount, 0);
+        const totalFeeIncome = periodPayments.filter(isTuitionPayment).reduce((s, p) => s + p.amount, 0);
         const totalOtherIncome = periodIncome.reduce((s, i) => s + i.amount, 0);
         const totalIncome = totalFeeIncome + totalOtherIncome;
         const totalExpenses = periodExpenses.reduce((s, e) => s + e.amount, 0);
@@ -21143,7 +21212,7 @@ async function generateLedgerStatement(fromDate, toDate) {
         const studentTxns = periodPayments.map(p => {
             studentTotal += p.amount;
             const s = students.find(st => st.id === p.studentId);
-            return `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:4px 6px;font-size:9px;">${formatDate(p.date)}</td><td style="padding:4px 6px;font-size:9px;">${escapeHtml(p.receiptNo || p.id)}</td><td style="padding:4px 6px;font-size:9px;">${escapeHtml(s ? s.name : p.studentId)}</td><td style="padding:4px 6px;font-size:9px;">${escapeHtml(p.method)}</td><td style="padding:4px 6px;text-align:right;font-size:9px;">${formatCurrency(p.amount)}</td><td style="padding:4px 6px;text-align:right;font-size:9px;font-weight:600;">${formatCurrency(studentTotal)}</td></tr>`;
+            return `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:4px 6px;font-size:9px;">${formatDate(p.date)}</td><td style="padding:4px 6px;font-size:9px;">${escapeHtml(p.receiptNo || p.id)}</td><td style="padding:4px 6px;font-size:9px;">${escapeHtml(s ? s.name : p.studentId)}</td><td style="padding:4px 6px;font-size:9px;">${escapeHtml(p.method)}${p.account === 'graduation' ? ' 🎓' : ''}</td><td style="padding:4px 6px;text-align:right;font-size:9px;">${formatCurrency(p.amount)}</td><td style="padding:4px 6px;text-align:right;font-size:9px;font-weight:600;">${formatCurrency(studentTotal)}</td></tr>`;
         }).join('');
         html += `<div style="margin-top:16px;page-break-inside:avoid;">
             <div style="font-size:11px;font-weight:700;background:#f1f5f9;padding:8px;border:1px solid #e2e8f0;">STUDENT FEES LEDGER</div>
@@ -21186,7 +21255,7 @@ async function generateLedgerStatement(fromDate, toDate) {
                 </table>
             </div>`;
         }
-        const totalFeeIncome = periodPayments.reduce((s, p) => s + p.amount, 0);
+        const totalFeeIncome = periodPayments.filter(isTuitionPayment).reduce((s, p) => s + p.amount, 0);
         const totalOtherIncome = income.filter(i => i.date >= fromDate && i.date <= toDate).reduce((s, i) => s + i.amount, 0);
         const totalExpenses = expenses.filter(e => e.date >= fromDate && e.date <= toDate).reduce((s, e) => s + e.amount, 0);
         html += `<div style="margin-top:24px;page-break-inside:avoid;">
@@ -21243,8 +21312,8 @@ async function showRegionDetail(regionId) {
     html += `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
         <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Centers</div><div class="stat-value" style="color:var(--accent)">${regionCenters.length}</div></div>
         <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Students</div><div class="stat-value">${allStudents.length}</div></div>
-        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Outstanding Fees</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(allStudents.reduce((s, st) => s + (getCachedStudentFee(st) - payments.filter(p => p.studentId === st.id).reduce((a, p) => a + p.amount, 0)), 0))}</div></div>
-        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Problem Learners</div><div class="stat-value" style="color:var(--danger)">${allStudents.filter(s => s.status !== 'active' || (getCachedStudentFee(s) - payments.filter(p => p.studentId === s.id).reduce((a, p) => a + p.amount, 0)) > 0).length}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Outstanding Fees</div><div class="stat-value" style="color:var(--warning)">${formatCurrency(allStudents.reduce((s, st) => s + (getCachedStudentFee(st) - tuitionPaid(payments, st.id)), 0))}</div></div>
+        <div class="stat-card" style="flex:1;min-width:120px;"><div class="stat-label">Problem Learners</div><div class="stat-value" style="color:var(--danger)">${allStudents.filter(s => s.status !== 'active' || (getCachedStudentFee(s) - tuitionPaid(payments, s.id)) > 0).length}</div></div>
     </div>`;
     if (!regionCenters.length) {
         html += '<div style="color:var(--text-muted);font-size:12px;padding:10px;">No study centers assigned to this region yet. Edit the region to add centers.</div>';
@@ -21254,8 +21323,8 @@ async function showRegionDetail(regionId) {
             const active = cStudents.filter(s => s.status === 'active');
             const rates = cStudents.map(s => _attendanceRate(attendance, s.id)).filter(r => r !== null);
             const avgAtt = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : null;
-            const outstanding = cStudents.reduce((s, st) => s + (getCachedStudentFee(st) - payments.filter(p => p.studentId === st.id).reduce((a, p) => a + p.amount, 0)), 0);
-            const problems = cStudents.filter(s => s.status !== 'active' || (getCachedStudentFee(s) - payments.filter(p => p.studentId === s.id).reduce((a, p) => a + p.amount, 0)) > 0).length;
+            const outstanding = cStudents.reduce((s, st) => s + (getCachedStudentFee(st) - tuitionPaid(payments, st.id)), 0);
+            const problems = cStudents.filter(s => s.status !== 'active' || (getCachedStudentFee(s) - tuitionPaid(payments, s.id)) > 0).length;
             const lowAtt = cStudents.filter(s => { const r = _attendanceRate(attendance, s.id); return r !== null && r < 70; }).length;
             return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:6px;">
                 <div style="display:flex;justify-content:space-between;width:100%;align-items:center;"><span><b>${escapeHtml(c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code)}</span></span><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();showCenterDetail('${c.id}')">🔍 Open</button></div>
@@ -21520,6 +21589,22 @@ async function applyBulkCountry() {
     if (store === 'users' && typeof renderUsers === 'function') await renderUsers();
     await renderCountries();
     showToast('Tagged ' + res.ok + ' record(s) as ' + country + '!' + (cascadeMsg ? ' Moved with them:' + cascadeMsg + '.' : ''), { type: 'success' });
+}
+async function loadFeeRulesUI() {
+    await loadFeeRules(true);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v > 0 ? v : ''; };
+    set('settings-fee-ceiling', feeRule('ceiling'));
+    set('settings-waiver-max', feeRule('waiverMax'));
+    set('settings-grad-fee', feeRule('graduationFee'));
+    set('settings-grad-ceiling', feeRule('graduationCeiling'));
+}
+async function saveFeeRules() {
+    const num = (id) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : 0; return (isNaN(v) || v < 0) ? 0 : Math.round(v); };
+    const value = { ceiling: num('settings-fee-ceiling'), waiverMax: num('settings-waiver-max'), graduationFee: num('settings-grad-fee'), graduationCeiling: num('settings-grad-ceiling') };
+    await dbPut('settings', { key: 'feeRules', value });
+    _feeRulesCache = value; _feeRulesCacheAt = Date.now();
+    showToast('Fee rules saved!', { type: 'success' });
+    try { logAudit('updated', 'fee-rules', value); } catch {}
 }
 function previewCountry() {
     try { return sessionStorage.getItem('previewCountry') || ''; } catch { return ''; }

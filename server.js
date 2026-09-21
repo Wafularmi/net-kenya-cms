@@ -2831,6 +2831,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                 const amount = Math.round(Number(data.amount));
                 if (!amount || amount < 1) return json(res, 400, { error: 'Enter an amount of at least KES 1.' });
                 if (amount > 500000) return json(res, 400, { error: 'Amount too large for a single STK push.' });
+                const payAccount = data.account === 'graduation' ? 'graduation' : 'tuition';
                 let studentId = String(data.studentId || '');
                 if (stkUser.role === 'student') {
                     const ownId = String((stkUser.user || {}).studentId || stkUser.username || '');
@@ -2838,21 +2839,35 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     studentId = stu ? stu.id : ownId;
                 }
                 if (!studentId) return json(res, 400, { error: 'Missing student.' });
-                // Cap at remaining program fee (same total for all, unless student record sets its own feeAmount)
+                // Cap at the remaining balance for the selected account. Tuition
+                // honors the fee ceiling + waivers; graduation honors its own
+                // amount/ceiling and never waivers. Rejects overpaying pushes.
                 try {
-                    const stuRec = (db.students || []).find(x => String(x.id) === String(studentId)) || null;
-                    let courseFee = Number(stuRec && stuRec.feeAmount) || 0;
-                    if (!(courseFee > 0) && stuRec && stuRec.program) {
-                        const acad = (db.settings || []).find(s => s.key === 'academic');
-                        const av = acad ? (acad.value || acad) : null;
-                        if (av && av.programFees && Number(av.programFees[stuRec.program]) > 0) courseFee = Number(av.programFees[stuRec.program]);
-                    }
-                    if (courseFee > 0) {
-                        const paidSoFar = (db.payments || []).filter(p => String(p.studentId) === String(studentId)).reduce((s, p) => s + (Number(p.amount) || 0), 0)
-                            + (db.waivers || []).filter(w => String(w.studentId) === String(studentId)).reduce((s, w) => s + (Number(w.amount) || 0), 0);
-                        const remaining = Math.max(0, courseFee - paidSoFar);
-                        if (remaining <= 0) return json(res, 400, { error: 'Program fee fully paid. Nothing due.' });
-                        if (amount > remaining) return json(res, 400, { error: 'Amount exceeds your remaining program balance of KES ' + Math.round(remaining) + '.' });
+                    const rules = (() => { try { const r = (db.settings || []).find(s => s.key === 'feeRules'); return (r && r.value) || {}; } catch { return {}; } })();
+                    const num = (v) => { const n = Number(v); return n > 0 ? n : 0; };
+                    if (payAccount === 'graduation') {
+                        const stuG = (db.students || []).find(x => String(x.id) === String(studentId)) || null;
+                        const gf = (stuG && stuG.gradSponsored) ? 0 : (num(rules.graduationCeiling) > 0 ? Math.min(num(rules.graduationFee), num(rules.graduationCeiling)) : num(rules.graduationFee));
+                        const gpaid = (db.payments || []).filter(p => String(p.studentId) === String(studentId) && p.account === 'graduation').reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                        const grem = Math.max(0, gf - gpaid);
+                        if (grem <= 0) return json(res, 400, { error: 'Graduation fee fully paid. Nothing due.' });
+                        if (amount > grem) return json(res, 400, { error: 'Amount exceeds the remaining graduation balance of KES ' + Math.round(grem) + '.' });
+                    } else {
+                        const stuRec = (db.students || []).find(x => String(x.id) === String(studentId)) || null;
+                        let courseFee = Number(stuRec && stuRec.feeAmount) || 0;
+                        if (!(courseFee > 0) && stuRec && stuRec.program) {
+                            const acad = (db.settings || []).find(s => s.key === 'academic');
+                            const av = acad ? (acad.value || acad) : null;
+                            if (av && av.programFees && Number(av.programFees[stuRec.program]) > 0) courseFee = Number(av.programFees[stuRec.program]);
+                        }
+                        if (num(rules.ceiling) > 0) courseFee = Math.min(courseFee, num(rules.ceiling));
+                        if (courseFee > 0) {
+                            const paidSoFar = (db.payments || []).filter(p => String(p.studentId) === String(studentId) && (!p.account || p.account === 'tuition')).reduce((s, p) => s + (Number(p.amount) || 0), 0)
+                                + (db.waivers || []).filter(w => String(w.studentId) === String(studentId)).reduce((s, w) => s + (Number(w.amount) || 0), 0);
+                            const remaining = Math.max(0, courseFee - paidSoFar);
+                            if (remaining <= 0) return json(res, 400, { error: 'Program fee fully paid. Nothing due.' });
+                            if (amount > remaining) return json(res, 400, { error: 'Amount exceeds your remaining program balance of KES ' + Math.round(remaining) + '.' });
+                        }
                     }
                 } catch (capErr) { console.error('mpesa cap check failed:', capErr); }
                 const ts = timestamp();
@@ -2877,7 +2892,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                 const result = await mpesaRequest('/mpesa/stkpush/v1/processrequest', payload, s.environment, s.consumerKey, s.consumerSecret);
                 if (result && result.CheckoutRequestID) {
                     if (!Array.isArray(db.mpesaTransactions)) db.mpesaTransactions = [];
-                    db.mpesaTransactions.push({ id: 'STK-' + Date.now(), checkoutRequestId: result.CheckoutRequestID, merchantRequestId: result.MerchantRequestID || '', studentId, amount, phone: digits, status: 'pending', initiatedBy: stkUser.username, createdAt: new Date().toISOString() });
+                    db.mpesaTransactions.push({ id: 'STK-' + Date.now(), checkoutRequestId: result.CheckoutRequestID, merchantRequestId: result.MerchantRequestID || '', studentId, amount, phone: digits, status: 'pending', account: payAccount, initiatedBy: stkUser.username, createdAt: new Date().toISOString() });
                     saveDB();
                     broadcastEvent('db-change', { store: 'mpesaTransactions' });
                 }
@@ -2915,7 +2930,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                             const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
                             const receiptNo = prefix + String(seq).padStart(4, '0');
                             if (!Array.isArray(db.payments)) db.payments = [];
-                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, method: 'M-Pesa STK', reference: mpesaReceipt, mpesaCheckout: checkoutId, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, account: (txn && txn.account) || 'tuition', method: 'M-Pesa STK', reference: mpesaReceipt, mpesaCheckout: checkoutId, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
                             broadcastEvent('db-change', { store: 'payments' });
                         }
                     }
@@ -2969,7 +2984,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                             const prefix = 'RCT-' + ym + '-';
                             const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
                             if (!Array.isArray(db.payments)) db.payments = [];
-                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId: txn.studentId, amount: txn.amount, method: 'M-Pesa STK', reference: txn.mpesaReceipt || cid, mpesaCheckout: cid, notes: 'Paid via ' + (txn.phone || '') + ' (confirmed by query)', receiptNo: prefix + String(seq).padStart(4, '0'), date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId: txn.studentId, amount: txn.amount, account: txn.account || 'tuition', method: 'M-Pesa STK', reference: txn.mpesaReceipt || cid, mpesaCheckout: cid, notes: 'Paid via ' + (txn.phone || '') + ' (confirmed by query)', receiptNo: prefix + String(seq).padStart(4, '0'), date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
                             txn.status = 'complete';
                             txn.completedAt = d.toISOString();
                             txn.completedVia = 'query';

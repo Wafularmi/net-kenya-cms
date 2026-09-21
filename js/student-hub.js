@@ -171,7 +171,8 @@ async function hubFeeLockInfo(me, data) {
     const anchor = hubStudentAnchor(me);
     const weeksElapsed = Math.max(1, Math.floor((Date.now() - anchor.getTime()) / (7 * 86400000)) + 1);
     const cumulativeTarget = weeksElapsed * target;
-    const mine = (data.payments || []).filter(p => p.studentId === me.id);
+    const _isTuit = (typeof isTuitionPayment === 'function') ? isTuitionPayment : (() => true);
+    const mine = (data.payments || []).filter(p => p.studentId === me.id && _isTuit(p));
     const totalPaid = mine.reduce((s, p) => s + (Number(p.amount) || 0), 0) + hubWaivedTotal(me.id, data);
     const { start, iso } = hubWeekStart();
     const weekPaid = mine.filter(p => String(p.date || '') >= iso).reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -686,7 +687,8 @@ async function switchHubTab(tab, btn) {
 
 function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data, todoItems) {
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
-    const myPayments = (data.payments || []).filter(p => p.studentId === me.id);
+    const _isTuit2 = (typeof isTuitionPayment === 'function') ? isTuitionPayment : (() => true);
+    const myPayments = (data.payments || []).filter(p => p.studentId === me.id && _isTuit2(p));
     const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0) + hubWaivedTotal(me.id, data);
     const myAttendance = (data.attendance || []).filter(a => a.studentId === me.id);
     const attended = myAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
@@ -817,20 +819,48 @@ async function showMpesaPayModal(studentId) {
     const me = _hubGetMe();
     const sid = studentId || (me && me.id) || '';
     const stu = (data.students || []).find(s => s.id === sid) || me || {};
-    const myPayments = (data.payments || []).filter(p => p.studentId === sid);
+    const _isTuit3 = (typeof isTuitionPayment === 'function') ? isTuitionPayment : (() => true);
+    const _allMine = (data.payments || []).filter(p => p.studentId === sid);
+    const myPayments = _allMine.filter(_isTuit3);
     const totalPaid = myPayments.reduce((s, p) => s + (p.amount || 0), 0) + hubWaivedTotal(sid, data);
     const balance = hubFeeBalance(stu, myPayments.reduce((s, p) => s + (p.amount || 0), 0));
     let totalFee = 0;
     try { totalFee = (typeof getCachedStudentFee === 'function') ? (getCachedStudentFee(stu) || 0) : (stu.feeAmount || 0); } catch { totalFee = stu.feeAmount || 0; }
     const maxPay = totalFee > 0 ? Math.max(0, totalFee - totalPaid) : 500000;
+    try { if (typeof loadFeeRules === 'function') await loadFeeRules(); } catch {}
+    const gFee = (typeof getGraduationFee === 'function') ? (getGraduationFee(stu) || 0) : 0;
+    const gPaid = (typeof gradPaid === 'function') ? gradPaid(_allMine, sid) : 0;
+    const gBal = Math.max(0, gFee - gPaid);
+    const showGrad = (gFee > 0 || gPaid > 0);
+    const fmt = (typeof formatCurrency === 'function') ? formatCurrency : ((v) => v);
     const content = `
-        <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + (typeof formatCurrency === 'function' ? formatCurrency(balance) : balance) + '</span>' : ''}${totalFee > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">· you can pay up to ' + (typeof formatCurrency === 'function' ? formatCurrency(maxPay) : maxPay) + ' (total fee ' + (typeof formatCurrency === 'function' ? formatCurrency(totalFee) : totalFee) + ')</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="${Math.max(1, Math.round(maxPay))}" value="${balance > 0 ? Math.min(balance, maxPay) : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
+        ${showGrad ? `<div class="form-group"><label>Account</label><select id="mpesa-account" onchange="updateMpesaAccount()" style="width:100%;"><option value="tuition">Tuition Fees${balance > 0 ? ' (bal ' + fmt(balance) + ')' : ' (cleared)'}</option><option value="graduation">🎓 Graduation Fee${gBal > 0 ? ' (bal ' + fmt(gBal) + ')' : ' (cleared)'}</option></select></div>` : ''}
+        <div class="form-group"><label>Amount (KES)${balance > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">Balance: ' + fmt(balance) + '</span>' : ''}${totalFee > 0 ? ' <span style="font-size:11px;color:var(--text-muted);">· you can pay up to ' + fmt(maxPay) + ' (total fee ' + fmt(totalFee) + ')</span>' : ''}</label><input type="number" id="mpesa-amount" min="1" max="${Math.max(1, Math.round(maxPay))}" value="${balance > 0 ? Math.min(balance, maxPay) : ''}" placeholder="e.g. 1000" style="width:100%;"></div>
         <input type="hidden" id="mpesa-max" value="${Math.round(maxPay)}">
         <input type="hidden" id="mpesa-balance" value="${balance > 0 ? balance : 0}">
+        <input type="hidden" id="mpesa-tbal" value="${balance > 0 ? balance : 0}">
+        <input type="hidden" id="mpesa-tmax" value="${Math.round(maxPay)}">
+        <input type="hidden" id="mpesa-gbal" value="${gBal}">
+        <input type="hidden" id="mpesa-gmax" value="${Math.round(gBal)}">
         <div class="form-group"><label>M-Pesa Number to Prompt</label><input type="tel" id="mpesa-phone" value="${esc(stu.phone || '')}" placeholder="0712 345 678" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Enter the M-Pesa number to prompt — can differ from your registered number.</div></div>
         <div id="mpesa-status" style="font-size:12px;margin-top:4px;"></div>`;
     showModal('💰 Pay Fees via M-Pesa', content, `<button class="btn btn-success" onclick="submitMpesaStk('${sid}')">Send Prompt</button>`);
     setTimeout(() => { try { document.getElementById('mpesa-amount')?.focus(); } catch {} }, 100);
+}
+function updateMpesaAccount() {
+    try {
+        const modalRoot = document.getElementById('modal-content') || document;
+        const acc = (modalRoot.querySelector('#mpesa-account') || {}).value || 'tuition';
+        const pre = acc === 'graduation' ? 'g' : 't';
+        const bal = parseFloat(((modalRoot.querySelector('#mpesa-' + pre + 'bal') || {}).value) || '0');
+        const max = parseFloat(((modalRoot.querySelector('#mpesa-' + pre + 'max') || {}).value) || '0');
+        const balEl = modalRoot.querySelector('#mpesa-balance') || document.getElementById('mpesa-balance');
+        const maxEl = modalRoot.querySelector('#mpesa-max') || document.getElementById('mpesa-max');
+        const amtEl = modalRoot.querySelector('#mpesa-amount') || document.getElementById('mpesa-amount');
+        if (balEl) balEl.value = bal;
+        if (maxEl) maxEl.value = max;
+        if (amtEl) { amtEl.value = bal > 0 ? Math.min(bal, max) : ''; amtEl.max = Math.max(1, Math.round(max)); }
+    } catch {}
 }
 async function submitMpesaStk(studentId) {
     const modalRoot = document.getElementById('modal-content') || document;
@@ -849,7 +879,9 @@ async function submitMpesaStk(studentId) {
     if (!phone) { if (status) { status.textContent = 'Enter a valid Safaricom number (e.g. 0712 345 678).'; status.style.color = 'var(--danger)'; } return; }
     if (status) { status.textContent = 'Sending M-Pesa prompt to ' + phone + '...'; status.style.color = 'var(--accent)'; }
     try {
-        const res = await fetch('/api/mpesa/stkpush', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ studentId, amount: Math.round(amount), phone, reference: studentId, description: 'Fee Payment' }) });
+        const accEl = modalRoot.querySelector('#mpesa-account') || document.getElementById('mpesa-account');
+        const account = (accEl && accEl.value === 'graduation') ? 'graduation' : 'tuition';
+        const res = await fetch('/api/mpesa/stkpush', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ studentId, amount: Math.round(amount), phone, reference: studentId, description: account === 'graduation' ? 'Graduation Fee' : 'Fee Payment', account }) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'STK push failed');
         if (!data.CheckoutRequestID) throw new Error(data.ResponseDescription || data.errorMessage || 'STK push rejected');

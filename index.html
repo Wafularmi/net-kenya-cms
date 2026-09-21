@@ -1041,6 +1041,17 @@
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showBulkCountryForm()">Bulk Assign</button>
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCountryCoordinatorForm()">＋ Register Country Coordinator</button>
                     </div>
+                    <div class="card"><h3>Fee Rules & Graduation</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Tuition ceiling caps every fee owed (0 = off). Graduation is a separate ledger: set its amount and its own ceiling. Waivers apply to tuition only, capped per student in total. Empty = disabled.</div>
+                        <div class="form-row"><div class="form-group"><label>Tuition Ceiling (KES)</label><input type="number" id="settings-fee-ceiling" min="0" placeholder="e.g., 50000"></div>
+                        <div class="form-group"><label>Max Waiver Total / Student (KES)</label><input type="number" id="settings-waiver-max" min="0" placeholder="e.g., 10000"></div></div>
+                        <div class="form-row"><div class="form-group"><label>Graduation Fee (KES)</label><input type="number" id="settings-grad-fee" min="0" placeholder="e.g., 5000"></div>
+                        <div class="form-group"><label>Graduation Ceiling (KES)</label><input type="number" id="settings-grad-ceiling" min="0" placeholder="e.g., 8000"></div></div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <button class="btn btn-primary btn-sm" onclick="saveFeeRules()">Save Fee Rules</button>
+                            <button class="btn btn-outline btn-sm" onclick="loadFeeRulesUI()">↻ Refresh</button>
+                        </div>
+                    </div>
                     <div class="card"><h3>Admission Numbers</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Sequence number is continuous across months/years. Set the last sequence number to control where auto-generation continues. Lower this value to reuse a freed slot after a student is deleted.</div>
                         <div class="form-group"><label>Last Sequence Number Used</label><input type="number" id="settings-admission-last-seq" min="0" placeholder="e.g., 47" oninput="previewAdmissionNext()"></div>
