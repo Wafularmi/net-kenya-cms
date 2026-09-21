@@ -487,9 +487,19 @@ async function getRegionCenterIds(regionId) {
 async function getCenters() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const all = window._allCentersCache || await dbGetAll('studyCenters');
-    if (u.role !== 'coordinator' || !u.regionId) return all;
-    const cidSet = new Set(await getRegionCenterIds(u.regionId));
-    return all.filter(c => cidSet.has(c.id));
+    if (u.role !== 'coordinator') return all;
+    if (u.regionId) {
+        const cidSet = new Set(await getRegionCenterIds(u.regionId));
+        return all.filter(c => cidSet.has(c.id));
+    }
+    if (u.country) {
+        let regions = [];
+        try { regions = await dbGetAll('regions'); } catch {}
+        const regionCountry = {};
+        regions.forEach(r => { regionCountry[r.id] = r.country || ''; });
+        return all.filter(c => (c.country && c.country === u.country) || (c.regionId && regionCountry[c.regionId] === u.country));
+    }
+    return all;
 }
 async function getRegionalStudentIdSet() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -19429,7 +19439,7 @@ async function renderStudyCenters() {
     (await dbGetAll('regions').catch(() => [])).forEach(r => regionMap[r.id] = r.name);
     document.getElementById('campuses-list').innerHTML = centers.length ? centers.map(c => {
         const admPreview = `${initials}/${c.code}/${month}-${year}/001`;
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span>${c.regionId && regionMap[c.regionId] ? `<span class="badge badge-warning">${regionMap[c.regionId]}</span>` : ''}</span><button class="btn btn-primary btn-sm" onclick="showCenterDetail('${c.id}')">🔍 Open</button> <button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span>${c.country ? `<span class="badge badge-info">${escapeHtml(c.country)}</span>` : ''}${c.regionId && regionMap[c.regionId] ? `<span class="badge badge-warning">${regionMap[c.regionId]}</span>` : ''}</span><button class="btn btn-primary btn-sm" onclick="showCenterDetail('${c.id}')">🔍 Open</button> <button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);font-size:12px;">No study centers added</div>';
 }
 async function showStudyCenterForm(center = null) {
@@ -19439,6 +19449,7 @@ async function showStudyCenterForm(center = null) {
 <div class="form-group"><label>Center Code * (short, used in admission numbers)</label><input type="text" id="sc-code" value="${center ? center.code : ''}" placeholder="e.g., KNSC" maxlength="8" style="text-transform:uppercase;font-weight:600;letter-spacing:1px;" oninput="updateSCAdmissionPreview()"><div id="sc-code-suggestion" style="margin-top:4px;font-size:11px;color:var(--text-muted);"></div><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">ⓘ This <b>short code</b> (not the full name) is what appears in admission numbers like <b>EMA/KNSC/1-26/001</b>. Maximum 8 characters.</div></div>
 <div class="form-group"><label>Address</label><input type="text" id="sc-address" value="${center ? center.address || '' : ''}"></div>
 <div class="form-group"><label>Region</label><select id="sc-region"><option value="">No region</option></select></div>
+<div class="form-group"><label>Country</label><select id="sc-country"><option value="">Unassigned (visible to all)</option></select></div>
 <div class="form-group"><label>Admission Number Preview</label><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">Format: <b>SCHOOL-INITIALS / [CENTER CODE] / MONTH-YEAR / SEQ</b></div><div id="sc-adm-preview" style="padding:12px;background:var(--bg-input);border-radius:var(--radius);font-weight:700;color:var(--accent);font-size:18px;text-align:center;letter-spacing:0.5px;"></div><div id="sc-adm-preview-detail" style="font-size:10px;color:var(--text-muted);margin-top:4px;text-align:center;"></div></div>`;
     showModal(isEdit ? 'Edit Study Center' : 'Add Study Center', content, `<button class="btn btn-primary" onclick="saveStudyCenter()">${isEdit ? 'Update' : 'Save'}</button>`);
     (async () => {
@@ -19447,6 +19458,7 @@ async function showStudyCenterForm(center = null) {
         if (sel) {
             sel.innerHTML = '<option value="">No region</option>' + window._regionsCache.map(r => `<option value="${r.id}" ${center && center.regionId === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
         }
+        loadCountryDropdown('sc-country', center ? (center.country || '') : '');
     })();
     const nameEl = document.getElementById('sc-name');
     if (nameEl) {
@@ -19521,7 +19533,10 @@ async function saveStudyCenter() {
     }
     const editId = document.getElementById('sc-edit-id').value;
     const id = editId || 'SC-' + code;
-    const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), regionId: document.getElementById('sc-region').value || '', createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
+    const _ccEl = document.getElementById('sc-country');
+    const _ccLoaded = !!(_ccEl && _ccEl.options.length > 1);
+    const _ccExisting = editId ? (((await dbGet('studyCenters', id)) || {}).country || '') : '';
+    const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), regionId: document.getElementById('sc-region').value || '', country: _ccLoaded ? _ccEl.value : _ccExisting, createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
     await dbPut('studyCenters', center); closeModal(); renderStudyCenters(); showToast(editId ? 'Study Center updated!' : 'Study Center added!'); logAudit(editId ? 'updated' : 'created', 'study-center', center);
 }
 async function editStudyCenter(id) { const c = await dbGet('studyCenters', id); if (!c) return; showStudyCenterForm(c); }
@@ -21254,22 +21269,30 @@ async function renderRegions() {
     const centers = await getCenters();
     const users = await dbGetAll('users');
     const students = await dbGetAll('students');
-    document.getElementById('regions-overview').innerHTML = regions.length ? regions.map(r => {
+    let countryNames = [];
+    try { countryNames = (await fetchCountries()).map(c => c && c.name).filter(Boolean); } catch {}
+    const groups = {};
+    regions.forEach(r => { const k = r.country || ''; (groups[k] = groups[k] || []).push(r); });
+    const orderedKeys = [...countryNames.filter(n => groups[n]), ...Object.keys(groups).filter(k => k && !countryNames.includes(k)).sort(), ...(groups[''] ? [''] : [])];
+    const groupHead = k => k ? `<div style="font-size:12px;font-weight:800;color:var(--accent);margin:10px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(k)}</div>` : (orderedKeys.length > 1 ? `<div style="font-size:12px;font-weight:800;color:var(--text-muted);margin:10px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Unassigned</div>` : '');
+    document.getElementById('regions-overview').innerHTML = regions.length ? orderedKeys.map(k => groupHead(k) + groups[k].map(r => {
         const regionCenters = centers.filter(c => c.regionId === r.id);
         const coordinators = users.filter(u => u.role === 'coordinator' && u.regionId === r.id);
         const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => (s.studyCenterId || s.campus) === c.id));
         return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:11px;color:var(--accent);margin-top:2px;">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 2px 0;">${esc(u.name || u.username)}<button class="btn btn-outline btn-sm" style="padding:0 5px;font-size:9px;margin-left:2px;" onclick="transferCoordinator('${u.username}')">🔄 Transfer</button></span>`).join('')}</div>` : ''}<div style="margin-top:4px;"><button class="btn btn-success btn-sm" onclick="showCoordinatorForm('${r.id}')">➕ Register Coordinator</button></div></div>`;
-    }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
+    }).join('')).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
     const settingsList = document.getElementById('regions-list');
-    if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
+    if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> ${r.country ? `<span class="badge badge-info">${escapeHtml(r.country)}</span>` : ''} <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
 }
 
 async function showRegionForm(region = null) {
     const isEdit = !!region;
     const content = `<input type="hidden" id="region-edit-id" value="${region ? region.id : ''}">
 <div class="form-group"><label>Region Name *</label><input type="text" id="region-name" value="${region ? region.name : ''}" placeholder="e.g., Coast Region"></div>
-<div class="form-group"><label>Region ID * (short code, no spaces)</label><input type="text" id="region-code" value="${region ? region.id.replace('REG-', '') : ''}" placeholder="e.g., COAST" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>`;
+<div class="form-group"><label>Region ID * (short code, no spaces)</label><input type="text" id="region-code" value="${region ? region.id.replace('REG-', '') : ''}" placeholder="e.g., COAST" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>
+<div class="form-group"><label>Country</label><select id="region-country"><option value="">Unassigned (visible to all)</option></select></div>`;
     showModal(isEdit ? 'Edit Region' : 'Add Region', content, `<button class="btn btn-primary" onclick="saveRegion()">${isEdit ? 'Update' : 'Save'}</button>`);
+    loadCountryDropdown('region-country', region ? (region.country || '') : '');
 }
 
 async function saveRegion() {
@@ -21279,7 +21302,10 @@ async function saveRegion() {
     if (!code) return showToast('Region code required!');
     const editId = document.getElementById('region-edit-id').value;
     const id = editId || 'REG-' + code;
-    const region = { id, name, createdAt: editId ? (await dbGet('regions', id)).createdAt : new Date().toISOString() };
+    const _rgEl = document.getElementById('region-country');
+    const _rgLoaded = !!(_rgEl && _rgEl.options.length > 1);
+    const _rgExisting = editId ? (((await dbGet('regions', id)) || {}).country || '') : '';
+    const region = { id, name, country: _rgLoaded ? _rgEl.value : _rgExisting, createdAt: editId ? (await dbGet('regions', id)).createdAt : new Date().toISOString() };
     await dbPut('regions', region); closeModal(); await renderRegions(); showToast(editId ? 'Region updated!' : 'Region added!'); logAudit(editId ? 'updated' : 'created', 'region', region);
 }
 
@@ -21343,7 +21369,8 @@ async function loadCountryDropdown(selectId, selected) {
     if (selected) sel.value = selected;
 }
 function showBulkCountryForm() {
-    const content = `<div class="form-group"><label>Apply To</label><select id="bulk-country-store"><option value="students">Students (records)</option><option value="staff">Staff (records)</option><option value="users">User Accounts (logins)</option></select></div>
+    const content = `<div class="form-group"><label>Apply To</label><select id="bulk-country-store" onchange="toggleBulkCascade()"><option value="students">Students (records)</option><option value="staff">Staff (records)</option><option value="users">User Accounts (logins)</option></select></div>
+<div class="form-group" id="bulk-cascade-row" style="display:none;"><label><input type="checkbox" id="bulk-country-cascade" checked style="margin-right:6px;">Also tag their study centers and regions (only untagged ones move)</label></div>
 <div class="form-row"><div class="form-group"><label>Scope</label><select id="bulk-country-scope"><option value="untagged">Untagged only</option><option value="all">All records</option></select></div>
 <div class="form-group"><label>Role (user accounts only)</label><select id="bulk-country-role"><option value="">All roles</option><option value="student">Students</option><option value="coordinator">Coordinators</option><option value="lecturer">Lecturers</option><option value="registrar">Registrars</option><option value="finance">Finance</option><option value="assistant">Assistants</option><option value="admin">Admins</option></select></div></div>
 <div class="form-group"><label>Country *</label><select id="bulk-country-value"><option value="">— Select country —</option></select></div>
@@ -21364,14 +21391,43 @@ async function collectBulkCountryTargets() {
         return true;
     });
 }
+function toggleBulkCascade() {
+    const row = document.getElementById('bulk-cascade-row');
+    const store = document.getElementById('bulk-country-store').value;
+    if (row) row.style.display = store === 'students' ? '' : 'none';
+    previewBulkCountry();
+}
+async function collectBulkCascade(country) {
+    const out = { centers: [], regions: [] };
+    try {
+        const targets = await collectBulkCountryTargets();
+        const centerIds = [...new Set(targets.map(t => t.studyCenterId).filter(Boolean))];
+        if (!centerIds.length) return out;
+        const centers = await dbGetAll('studyCenters');
+        out.centers = centers.filter(c => centerIds.includes(c.id) && !c.country).map(c => Object.assign({}, c, { country, updatedAt: new Date().toISOString() }));
+        const regionIds = [...new Set(out.centers.map(c => c.regionId).filter(Boolean))];
+        if (!regionIds.length) return out;
+        const regions = await dbGetAll('regions');
+        out.regions = regions.filter(r => regionIds.includes(r.id) && !r.country).map(r => Object.assign({}, r, { country, updatedAt: new Date().toISOString() }));
+    } catch {}
+    return out;
+}
 async function previewBulkCountry() {
     const country = document.getElementById('bulk-country-value').value;
     const box = document.getElementById('bulk-country-preview');
+    if (!box) return;
     if (!country) { box.textContent = 'Choose a country to preview.'; return; }
     let targets = [];
     try { targets = await collectBulkCountryTargets(); }
     catch (e) { box.textContent = 'Unable to load records.'; return; }
-    box.textContent = targets.length + ' record(s) will be tagged "' + country + '".';
+    let txt = targets.length + ' record(s) will be tagged "' + country + '".';
+    const store = document.getElementById('bulk-country-store').value;
+    const cascade = document.getElementById('bulk-country-cascade');
+    if (store === 'students' && cascade && cascade.checked) {
+        const extra = await collectBulkCascade(country);
+        if (extra.centers.length || extra.regions.length) txt += ' Plus ' + extra.centers.length + ' center(s) and ' + extra.regions.length + ' region(s) moving under ' + country + '.';
+    }
+    box.textContent = txt;
 }
 async function applyBulkCountry() {
     const store = document.getElementById('bulk-country-store').value;
@@ -21384,13 +21440,30 @@ async function applyBulkCountry() {
     if (!await showConfirm('Confirm Bulk Assign', 'Tag ' + targets.length + ' ' + store + ' record(s) as "' + country + '"?')) return;
     const updated = targets.map(r => Object.assign({}, r, { country, updatedAt: new Date().toISOString() }));
     const res = await dbPutBatch(store, updated);
-    try { logAudit('bulk-assigned', 'country', { store, country, count: res.ok }); } catch {}
+    let cascadeMsg = '';
+    const cascade = document.getElementById('bulk-country-cascade');
+    if (store === 'students' && cascade && cascade.checked) {
+        const extra = await collectBulkCascade(country);
+        if (extra.centers.length) {
+            const rc = await dbPutBatch('studyCenters', extra.centers);
+            cascadeMsg += ' ' + rc.ok + ' center(s)';
+        }
+        if (extra.regions.length) {
+            const rr = await dbPutBatch('regions', extra.regions);
+            cascadeMsg += ' ' + rr.ok + ' region(s)';
+        }
+        if (cascadeMsg !== '') {
+            try { if (typeof renderStudyCenters === 'function') await renderStudyCenters(); } catch {}
+            try { if (typeof renderRegions === 'function') await renderRegions(); } catch {}
+        }
+    }
+    try { logAudit('bulk-assigned', 'country', { store, country, count: res.ok, cascade: cascadeMsg.trim() }); } catch {}
     closeModal();
     if (store === 'students' && typeof renderStudents === 'function') await renderStudents();
     if (store === 'staff' && typeof renderStaff === 'function') await renderStaff();
     if (store === 'users' && typeof renderUsers === 'function') await renderUsers();
     await renderCountries();
-    showToast('Tagged ' + res.ok + ' record(s) as ' + country + '!', { type: 'success' });
+    showToast('Tagged ' + res.ok + ' record(s) as ' + country + '!' + (cascadeMsg ? ' Moved with them:' + cascadeMsg + '.' : ''), { type: 'success' });
 }
 
 async function showCoordinatorForm(regionId) {
