@@ -533,6 +533,22 @@ function isCountryAdminUI() {
         return u.role === 'coordinator' && !!u.country && !u.regionId;
     } catch { return false; }
 }
+// Effective viewing scope: the signed-in user's own scope, or — when the
+// overall admin is previewing — the previewed country's coordinator scope.
+// The users store is exempt from server scoping (identity must resolve), so
+// staff/coordinator *visibility* is fenced here, at presentation.
+function viewerScope() {
+    let role = '', country = '', regionId = '', previewing = false;
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        role = u.role || ''; country = u.country || ''; regionId = u.regionId || '';
+    } catch {}
+    try {
+        const pv = (typeof previewCountry === 'function' ? previewCountry() : '');
+        if (pv) { previewing = true; country = pv; regionId = ''; }
+    } catch {}
+    return { role, country, regionId, previewing, isCoord: role === 'coordinator' };
+}
 function canManageStudents() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -1909,16 +1925,26 @@ async function renderOnlineUsers() {
             const regionalNames = new Set(regionalStudents.map(s => s.name?.toLowerCase()));
             filteredUsers = data.users.filter(u2 => u2.role !== 'student' || regionalNames.has(u2.name?.toLowerCase()));
             filteredCount = filteredUsers.length;
-        } else if (isCoordinator && u.country) {
-            const batch = await dbGetBatch(['students']);
-            const scopedNames = new Set(batch.students.filter(s => !s.country || s.country === u.country).map(s => s.name?.toLowerCase()));
-            filteredUsers = data.users.filter(u2 => u2.role !== 'student' || scopedNames.has(u2.name?.toLowerCase()));
-            filteredCount = filteredUsers.length;
+        } else {
+            const vscope = viewerScope();
+            const viewCountry = vscope.country;
+            const scopedView = viewCountry && (vscope.isCoord || (vscope.role === 'admin' && vscope.previewing));
+            if (scopedView) {
+                const batch = await dbGetBatch(['students']);
+                const scopedNames = new Set(batch.students.filter(s => !s.country || s.country === viewCountry).map(s => s.name?.toLowerCase()));
+                filteredUsers = data.users.filter(u2 => {
+                    if (u2.role === 'student') return scopedNames.has(u2.name?.toLowerCase());
+                    const uc = u2.country || '';
+                    return !uc || uc === viewCountry;
+                });
+                filteredCount = filteredUsers.length;
+            }
         }
         const students = filteredUsers.filter(u2 => u2.role === 'student');
         const staff = filteredUsers.filter(u2 => u2.role !== 'student');
         let regionBreakdown = '';
-        if (isAdmin && window.__regionMap && window._allCentersCache) {
+        const _pvOff = (typeof previewCountry === 'function' ? previewCountry() : '');
+        if (isAdmin && !_pvOff && window.__regionMap && window._allCentersCache) {
             const batch = await dbGetBatch(['students']);
             const regions = Object.entries(window.__regionMap);
             const centers = window._allCentersCache;
@@ -3014,7 +3040,11 @@ async function renderStaff() {
         status: 'active',
         _user: u
     }));
-    const allStaff = [...staff, ...coordinators];
+    const _vs = viewerScope();
+    const visibleCoords = (_vs.country && (_vs.isCoord || (_vs.role === 'admin' && _vs.previewing)))
+        ? coordinators.filter(c => { const cc = (c._user && c._user.country) || ''; return !cc || cc === _vs.country; })
+        : coordinators;
+    const allStaff = [...staff, ...visibleCoords];
     const search = document.getElementById('staff-search').value.toLowerCase();
     const filtered = allStaff.filter(s => {
         const nameMatch = s.name && s.name.toLowerCase().includes(search);
