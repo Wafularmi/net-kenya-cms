@@ -427,9 +427,15 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-function getRolePermissions(role) {
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'];
+function getRolePermissions(role, user) {
+    if (role === 'coordinator' && user && user.country && !user.regionId) {
+        const tabs = ADMIN_TABS.filter(t => t !== 'settings');
+        ['coordinator-manual', 'fee-gate'].forEach(t => { if (!tabs.includes(t)) tabs.push(t); });
+        return tabs;
+    }
     const perms = {
-        admin: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'],
+        admin: ADMIN_TABS,
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions','meetings'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
@@ -464,10 +470,17 @@ function isCoordinator() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     return u.role === 'coordinator';
 }
+function isCountryAdminUI() {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        return u.role === 'coordinator' && !!u.country && !u.regionId;
+    } catch { return false; }
+}
 function canManageStudents() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (u.role === 'admin') return true;
+        if (typeof isCountryAdminUI === 'function' && isCountryAdminUI()) return true;
         if (u.role === 'assistant') {
             if (typeof _assistantAccessCache !== 'undefined' && _assistantAccessCache && _assistantAccessCache['students'] === false) return false;
             return true;
@@ -1291,7 +1304,7 @@ function logout() {
     location.reload();
 }
 function buildNavigation(user) {
-    const perms = getRolePermissions(user.role);
+    const perms = getRolePermissions(user.role, user);
     const nav = document.getElementById('main-nav');
     const isStudent = user.role === 'student';
     const sections = [
@@ -1320,7 +1333,8 @@ async function updatePendingBadge() {
     try {
         const badge = document.getElementById('pending-badge');
         if (!badge) return;
-        const perms = getRolePermissions(JSON.parse(sessionStorage.getItem('currentUser') || '{}').role);
+        const _pu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const perms = getRolePermissions(_pu.role, _pu);
         if (!perms.includes('pending')) { badge.style.display = 'none'; return; }
         const students = await dbGetAll('students');
         const count = students.filter(s => s.status === 'pending').length;
@@ -1633,7 +1647,7 @@ function toggleSidebar() {
 }
 function showScreen(id) {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const perms = getRolePermissions(user.role);
+    const perms = getRolePermissions(user.role, user);
     if (!perms.includes(id)) return showToast('Access denied: You do not have permission to view this section.');
     // Drip: keep the learner's unlock maps warm on every navigation (cached 120s, cheap).
     if (user.role === 'student' && typeof loadDripMaps === 'function') { try { loadDripMaps(user.studentId || user.username); } catch {} }
@@ -1831,6 +1845,11 @@ async function renderOnlineUsers() {
             const regionalStudents = await filterByRegion(batch.students, s => s.studyCenterId);
             const regionalNames = new Set(regionalStudents.map(s => s.name?.toLowerCase()));
             filteredUsers = data.users.filter(u2 => u2.role !== 'student' || regionalNames.has(u2.name?.toLowerCase()));
+            filteredCount = filteredUsers.length;
+        } else if (isCoordinator && u.country) {
+            const batch = await dbGetBatch(['students']);
+            const scopedNames = new Set(batch.students.filter(s => !s.country || s.country === u.country).map(s => s.name?.toLowerCase()));
+            filteredUsers = data.users.filter(u2 => u2.role !== 'student' || scopedNames.has(u2.name?.toLowerCase()));
             filteredCount = filteredUsers.length;
         }
         const students = filteredUsers.filter(u2 => u2.role === 'student');
@@ -2060,10 +2079,11 @@ async function renderDashboard() {
         const batch = _dashKeys.reduce((acc, k, i) => { acc[k] = _dashVals[i]; return acc; }, {});
         const students = await filterByRegion(batch.students, s => s.studyCenterId);
         const isAdmin = currentUser.role === 'admin';
+        const isCtryAdmin = isCountryAdminUI();
         const regionalStudentIds = new Set(students.map(s => s.id));
-        const payments = isAdmin ? batch.payments : batch.payments.filter(p => regionalStudentIds.has(p.studentId));
-        const income = isAdmin ? batch.income : [];
-        const expenses = isAdmin ? batch.expenses : [];
+        const payments = (isAdmin || isCtryAdmin) ? batch.payments : batch.payments.filter(p => regionalStudentIds.has(p.studentId));
+        const income = (isAdmin || isCtryAdmin) ? batch.income : [];
+        const expenses = (isAdmin || isCtryAdmin) ? batch.expenses : [];
         const courses = batch.courses, events = batch.events, staff = batch.staff, attendance = batch.attendance, inventory = batch.inventory, alumniList = batch.alumni;
     const today = new Date().toISOString().split('T')[0];
     const settings = await dbGet('settings', 'academic');
@@ -2915,7 +2935,7 @@ document.getElementById('student-filter-country').addEventListener('change', ren
 async function renderStaff() {
     const [batchResult, users] = await Promise.all([
         dbGetBatch(['staff', 'campuses']),
-        dbGetAll('users')
+        dbGetAll('users').catch(() => [])
     ]);
     const staff = batchResult.staff || [];
     const campuses = batchResult.campuses || [];
@@ -22218,7 +22238,7 @@ window.switchLessonTab = async function (tab, lessonId) {
             var lesson = await dbGet('lessons', lessonId);
             if (!lesson) { document.getElementById('lesson-tab-content').innerHTML = '<p>Lesson not found</p>'; return; }
             var user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-            var perms = getRolePermissions(user.role || 'student');
+            var perms = getRolePermissions(user.role || 'student', user);
             await renderVirtualClassroomTab(lesson, lessonId, perms.indexOf('courses') !== -1);
         } catch (err) {
             console.error('VC tab error:', err);

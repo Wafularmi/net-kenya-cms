@@ -736,6 +736,30 @@ function getRequestUser(req) {
     return null;
 }
 
+// Country-scoped administrator: a coordinator bound to a country (and NOT to a
+// region — regional coordinators keep their existing narrower behavior).
+// Returns the country name, or null. Role from the session, scope from the record.
+function countryScopeOf(user) {
+    if (!user || !user.user) return null;
+    if (user.role !== 'coordinator') return null;
+    const rec = user.user;
+    if (!rec.country || rec.regionId) return null;
+    return rec.country;
+}
+// Write fence for country administrators: creations get stamped with their
+// country; touching another country's tagged records is rejected. Everyone
+// else (admins, regionals, students, others) passes through untouched.
+function scopeWrite(user, store, rec, existing) {
+    const scope = countryScopeOf(user);
+    if (!scope) return null;
+    if (['users', 'counters', 'settings', 'sessions', 'maintenanceBypassTokens', 'regions'].includes(store)) return 'Not permitted';
+    const tagged = rec && rec.country ? String(rec.country) : '';
+    const cur = existing && existing.country ? String(existing.country) : '';
+    if (tagged && tagged !== scope) return 'Outside your country scope';
+    if (cur && cur !== scope) return 'Outside your country scope';
+    if (rec && !rec.country) rec.country = scope;
+    return null;
+}
 // Check if user can access a store
 function canAccessStore(user, store, method) {
     // Sensitive internal stores - admin only, never via API
@@ -747,7 +771,7 @@ function canAccessStore(user, store, method) {
     if (!user) return false;
     // Students store: only admin and assistant (if enabled) may create/update/delete
     if (store === 'students' && method !== 'GET') {
-        if (user.role === 'admin') return true;
+        if (user.role === 'admin' || countryScopeOf(user)) return true;
         if (user.role === 'assistant') {
             const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
             const access = rec ? (rec.value || rec) : null;
@@ -759,7 +783,7 @@ function canAccessStore(user, store, method) {
     // Fee agreements + waivers: reads for staff, writes admin/finance/registrar/assistant(with Finance tab)
     if (store === 'feeAgreements' || store === 'waivers') {
         if (method === 'GET') return true;
-        if (user.role === 'admin' || user.role === 'finance' || user.role === 'registrar') return true;
+        if (user.role === 'admin' || user.role === 'finance' || user.role === 'registrar' || countryScopeOf(user)) return true;
         if (user.role === 'assistant') {
             const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
             const access = rec ? (rec.value || rec) : null;
@@ -777,6 +801,14 @@ function canAccessStore(user, store, method) {
         return true;
     }
 
+    // Country administrator: coordinator bound to a country (no region).
+    // Admin-grade data powers; reads AND writes are fenced to that country by
+    // filterStoreForUser + scopeWrite. Global-only stores stay restricted.
+    if (countryScopeOf(user)) {
+        if (store === 'users' || store === 'counters' || store === 'sessions' || store === 'maintenanceBypassTokens') return false;
+        if (store === 'settings' || store === 'regions') return method === 'GET';
+        return true;
+    }
     // Coordinator: sub-admin scoped to their region
     if (user.role === 'coordinator') {
         if (['settings','regions','users','counters'].includes(store)) return false;
@@ -3373,6 +3405,9 @@ return json(res, 200, result);
                     sanitizeBodyFields(r, 20000, isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(rec) : null));
                     const pk = r[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
+                    const _exB = db[store].find(x => x[keyPath] === pk) || null;
+                    const _scB = scopeWrite(user, store, r, _exB);
+                    if (_scB) { result.errors.push({ error: _scB }); continue; }
                     const idx = db[store].findIndex(x => x[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = r;
                     else db[store].push(r);
@@ -3483,7 +3518,7 @@ return json(res, 200, result);
         // GET /api/db/:store/:key  â€” return single record or null
         if (req.method === 'GET' && key) {
             let item = db[store].find(r => String(r[keyPath]) === key) || null;
-            if (item && user && user.role === 'student') {
+            if (item && user && user.role !== 'admin') {
                 const filtered = filterStoreForUser(user, store, [item]);
                 item = filtered.length ? filtered[0] : null;
             }
@@ -3538,6 +3573,9 @@ const parsed = JSON.parse(body);
                         console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(toStore));
                         return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     }
+                    const _exPut = db[store].find(r => r[keyPath] === pk) || null;
+                    const _scPut = scopeWrite(user, store, toStore, _exPut);
+                    if (_scPut) return json(res, 403, { error: _scPut });
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);
@@ -3593,6 +3631,8 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     if (pk === undefined || pk === null) return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     const exists = db[store].some(r => r[keyPath] === pk);
                     if (exists) return json(res, 409, { error: `Record with ${keyPath}="${pk}" already exists` });
+                    const _scAdd = scopeWrite(user, store, toStore, null);
+                    if (_scAdd) return json(res, 403, { error: _scAdd });
                     db[store].push(toStore);
                     mutate(toStore);
                     if (store === 'settings' && toStore.key === 'maintenance') {
@@ -3606,6 +3646,7 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
 
         // DELETE /api/db/:store  â€” clear entire store
         if (req.method === 'DELETE' && !key) {
+            if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
             const before = db[store].length;
             db[store] = [];
             mutate({ _cleared: true });
@@ -3617,6 +3658,8 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
         if (req.method === 'DELETE' && key) {
             const idx = db[store].findIndex(r => String(r[keyPath]) === key);
             const doomed = idx >= 0 ? db[store][idx] : null;
+            const _scDel = scopeWrite(user, store, doomed, doomed);
+            if (_scDel) return json(res, 403, { error: _scDel });
             if (idx >= 0) db[store].splice(idx, 1);
             // Remove orphaned doc files for deleted certificates/idCards (docs + volume).
             if (doomed && (store === 'certificates' || store === 'idCards' || store === 'idcards')) {
