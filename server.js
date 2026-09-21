@@ -426,20 +426,49 @@ function loadDB() {
         const seedPath = path.join(DATA_ROOT, 'server-data.seed.json');
         if (fs.existsSync(seedPath)) sources.push({ file: seedPath, label: 'seed' });
     } catch {}
-    // Try each source
+    // Main file first, with retries: transient locks (AV scanners briefly hold
+    // the file on Windows) are the most common cause of a first-read failure
+    // on a healthy file. A flaky read must never trigger a fallback overwrite.
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const main = readJSON(DB_FILE);
+        if (main && typeof main === 'object' && !Array.isArray(main)) {
+            if (attempt > 0) process.stderr.write('DB_MAIN_RECOVERED_AFTER_RETRY attempt=' + attempt + '\n');
+            return main;
+        }
+        if (attempt < 3) { const s = Date.now(); while (Date.now() - s < 150) {} }
+    }
+    // Main is missing or unreadable after retries: walk the remaining fallbacks
+    // (volume, backup, timestamped, seed). A fallback becomes the new main ONLY
+    // if there is no main file to protect or it is genuinely newer — a stale
+    // backup must never silently overwrite a newer main file. Otherwise boot
+    // from it in memory and shout, preserving the file for forensics.
     for (const { file, label } of sources) {
+        if (label === 'main') continue;
         const data = readJSON(file);
         if (data && typeof data === 'object' && !Array.isArray(data)) {
-            if (label !== 'main') {
-                console.log('DB loaded from fallback: ' + label);
-                // Immediately write the recovered data as the new main file
+            console.log('DB loaded from fallback: ' + label);
+            if (shouldAdoptFallback(DB_FILE, file, label)) {
                 safeWriteJSON(data);
+            } else {
+                process.stderr.write('DB_FALLBACK_NOT_ADOPTED: kept existing main file; running from ' + label + ' in memory. INVESTIGATE before next restart.\n');
             }
             return data;
         }
     }
     console.error('All data sources corrupted! Starting with empty DB.');
     return { mpesaSettings: {}, mpesaTransactions: [] };
+}
+// Adopt a fallback as the new main file ONLY when it cannot destroy newer
+// data: main missing, or fallback genuinely newer. Seed templates (empty by
+// design) never overwrite an existing main file.
+function shouldAdoptFallback(mainFile, fallbackFile, label) {
+    try {
+        if (!fs.existsSync(mainFile)) return true;
+        if (label === 'seed') return false;
+        const mainStat = fs.statSync(mainFile);
+        const fbStat = fs.statSync(fallbackFile);
+        return fbStat.mtimeMs > mainStat.mtimeMs;
+    } catch { return false; }
 }
 
 // Copy database from volume before first load
