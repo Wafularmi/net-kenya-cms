@@ -1059,14 +1059,32 @@ function _hubExamStatus(exam) {
 function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, data) {
     let myCourses = (data.courses || []);
     if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
-    const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
-    const myRetakeRequests = (data.retakeRequests || []).filter(r => r.studentId === me.id);
+    const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
+    const mySubmissions = (data.submissions || []).filter(s => myIds.has(String(s.studentId)));
+    const myGrades = (data.grades || []).filter(g => myIds.has(String(g.studentId)));
+    const myRetakeRequests = (data.retakeRequests || []).filter(r => myIds.has(String(r.studentId)));
+    const myCourseIds = new Set(myCourses.map(c => String(c.id)));
+    const myExamIds = new Set((data.exams || []).filter(e => myCourseIds.has(String(e.courseId)) && e.published !== false).map(e => String(e.id)));
+    const examLinkedSubs = mySubmissions.filter(s => (s.examId && myExamIds.has(String(s.examId))) || myExamIds.has(String(s.quizId)));
+    const examLinkedGrades = myGrades.filter(g => (g.examId && myExamIds.has(String(g.examId))) || myExamIds.has(String(g.quizId)));
     const approvedSuppIds = new Set(myRetakeRequests.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => r.supplementaryExamId));
     const displayUpcomingReg = upcomingRegisteredExams.filter(e => !(e.type === 'supplementary' && approvedSuppIds.has(e.id)));
     const pendingReqExamIds = new Set(myRetakeRequests.filter(r => r.status === 'pending').map(r => r.examId));
     const allRegistered = [...upcomingRegisteredExams, ...pastRegisteredExams];
     const passedCount = allRegistered.filter(e => { const s = mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId)); return s && s.status === 'pass'; }).length;
     const scoredSubs = allRegistered.map(e => mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId))).filter(Boolean);
+    // Evidence beyond registrations: exam-linked submissions/grades (e.g. direct
+    // gradebook entries) count too, so admin-visible scores always surface here.
+    const seenScores = new Set(scoredSubs);
+    examLinkedSubs.forEach(s => { if (!seenScores.has(s)) { seenScores.add(s); scoredSubs.push(s); } });
+    examLinkedGrades.forEach(g => {
+        if (seenScores.has(g)) return;
+        const linkedSub = mySubmissions.find(x => String(x.quizId) === String(g.quizId) || (g.examId && String(x.examId) === String(g.examId)));
+        if (!linkedSub) { seenScores.add(g); scoredSubs.push({ score: (typeof g.score === 'number' ? g.score : 0) }); }
+    });
+    const extraPass = examLinkedSubs.filter(s => s.status === 'pass' && scoredSubs.indexOf(s) === -1).length
+        + examLinkedGrades.filter(g => (g.status === 'pass' || (typeof g.score === 'number' && g.score >= 50)) && !mySubmissions.some(x => String(x.quizId) === String(g.quizId))).length;
+    const passedTotal = passedCount + extraPass;
     const avgScore = scoredSubs.length ? Math.round(scoredSubs.reduce((s, x) => s + (x.score || 0), 0) / scoredSubs.length) : 0;
     const activeFilter = window._hubExamFilter || 'all';
 
@@ -1189,7 +1207,7 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
                 <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Registered</div>
             </div>
             <div class="card" style="text-align:center;padding:10px;border-top:3px solid var(--success);">
-                <div style="font-size:20px;font-weight:800;color:var(--success);">${passedCount}</div>
+                <div style="font-size:20px;font-weight:800;color:var(--success);">${passedTotal}</div>
                 <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Passed</div>
             </div>
             <div class="card" style="text-align:center;padding:10px;border-top:3px solid var(--info);">
