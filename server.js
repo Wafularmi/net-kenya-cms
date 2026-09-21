@@ -3358,6 +3358,11 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
             if (!db[name]) db[name] = [];
             if (!canAccessStore(user, name, 'GET')) { result[name] = []; continue; }
             let rows = filterStoreForUser(user, name, db[name]);
+            const previewB = (user && user.role === 'admin') ? (urlObj.searchParams.get('preview') || '') : '';
+            if (previewB) {
+                try { console.log('[preview] admin ' + user.username + ' viewing as ' + previewB + ' store=' + name); } catch {}
+                rows = filterStoreForUser({ role: 'coordinator', username: user.username, user: { role: 'coordinator', country: previewB } }, name, rows);
+            }
             if (name === 'settings' && (!user || user.role !== 'admin')) {
                 rows = rows.filter(r => r && r.key !== 'smsSettings');
             }
@@ -3487,6 +3492,14 @@ return json(res, 200, result);
 
             // Students only see their own student/user records
             results = filterStoreForUser(user, store, results);
+            // Overall-admin deep dive: ?preview=<country> re-scopes this read
+            // exactly as that country's coordinator sees it. Admin only, read-only,
+            // console-logged; it can only narrow, never widen.
+            const previewA = (user && user.role === 'admin') ? (urlObj.searchParams.get('preview') || '') : '';
+            if (previewA) {
+                try { console.log('[preview] admin ' + user.username + ' viewing as ' + previewA + ' store=' + store); } catch {}
+                results = filterStoreForUser({ role: 'coordinator', username: user.username, user: { role: 'coordinator', country: previewA } }, store, results);
+            }
 
             // Non-admins must not read credential-bearing settings records
             if (store === 'settings' && (!user || user.role !== 'admin')) {
@@ -3518,8 +3531,11 @@ return json(res, 200, result);
         // GET /api/db/:store/:key  â€” return single record or null
         if (req.method === 'GET' && key) {
             let item = db[store].find(r => String(r[keyPath]) === key) || null;
-            if (item && user && user.role !== 'admin') {
-                const filtered = filterStoreForUser(user, store, [item]);
+            const previewC = (user && user.role === 'admin') ? (urlObj.searchParams.get('preview') || '') : '';
+            if (previewC) { try { console.log('[preview] admin ' + user.username + ' viewing as ' + previewC + ' store=' + store); } catch {} }
+            if (item && ((user && user.role !== 'admin') || previewC)) {
+                const effUser = previewC ? { role: 'coordinator', username: user.username, user: { role: 'coordinator', country: previewC } } : user;
+                const filtered = filterStoreForUser(effUser, store, [item]);
                 item = filtered.length ? filtered[0] : null;
             }
             if (item && store === 'settings' && key === 'smsSettings' && (!user || user.role !== 'admin')) {

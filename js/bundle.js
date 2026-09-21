@@ -17,7 +17,8 @@ async function openDB() {
     }
 }
 async function dbGetAll(store) {
-    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}`, { headers: getAuthHeaders() });
+    const pv = (typeof previewCountry === 'function' ? previewCountry() : '');
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}${pv ? '?preview=' + encodeURIComponent(pv) : ''}`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error(`dbGetAll ${store} failed: ${res.status}`);
     return res.json();
 }
@@ -25,7 +26,8 @@ async function dbGetBatch(stores) {
     let lastErr;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            const res = await fetch(`${API_BASE}/batch?stores=${stores.map(encodeURIComponent).join(',')}`, { headers: getAuthHeaders() });
+            const pvB = (typeof previewCountry === 'function' ? previewCountry() : '');
+            const res = await fetch(`${API_BASE}/batch?stores=${stores.map(encodeURIComponent).join(',')}${pvB ? '&preview=' + encodeURIComponent(pvB) : ''}`, { headers: getAuthHeaders() });
             if (!res.ok) throw new Error('dbGetBatch failed: ' + res.status);
             return res.json();
         } catch (e) {
@@ -36,7 +38,8 @@ async function dbGetBatch(stores) {
     throw lastErr || new Error('dbGetBatch failed');
 }
 async function dbGet(store, key) {
-    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}`, { headers: getAuthHeaders() });
+    const pvOne = (typeof previewCountry === 'function' ? previewCountry() : '');
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}${pvOne ? '?preview=' + encodeURIComponent(pvOne) : ''}`, { headers: getAuthHeaders() });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`dbGet ${store}:${key} failed: ${res.status}`);
     return res.json();
@@ -427,10 +430,10 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
-        const tabs = ADMIN_TABS.filter(t => t !== 'settings');
+        const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
         ['coordinator-manual', 'fee-gate'].forEach(t => { if (!tabs.includes(t)) tabs.push(t); });
         return tabs;
     }
@@ -1311,7 +1314,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1327,6 +1330,7 @@ function buildNavigation(user) {
     nav.querySelectorAll('.nav-tab').forEach(tab => {
         tab.addEventListener('click', (e) => { e.preventDefault(); showScreen(tab.dataset.screen); });
     });
+    try { if (typeof renderPreviewBanner === 'function') renderPreviewBanner(); } catch {}
     updatePendingBadge();
 }
 async function updatePendingBadge() {
@@ -1703,6 +1707,7 @@ function showScreen(id) {
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
+        case 'compare': renderCompare(); break;
     }
 }
 function initTabs() {
@@ -18657,7 +18662,7 @@ function updateCoordAccessLabel(key) {
         status.style.color = on ? 'var(--success)' : 'var(--danger)';
     }
 }
-const ASSISTANT_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'];
+const ASSISTANT_TABS = ['dashboard','compare','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'];
 function renderAssistantAccessToggles() {
     const container = document.getElementById('assistant-access-toggles');
     if (!container) return;
@@ -21357,7 +21362,7 @@ async function renderCountries() {
     let countries = [];
     try { countries = await fetchCountries(); }
     catch (e) { box.innerHTML = '<div style="color:var(--danger);font-size:12px;">Unable to load countries.</div>'; return; }
-    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span></span><button class="btn btn-danger btn-sm" data-name="${escapeHtml(c.name)}" onclick="deleteCountry(this.dataset.name)">Del</button></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
+    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span></span><button class="btn btn-danger btn-sm" data-name="${encodeURIComponent(c.name)}" onclick="deleteCountry(decodeURIComponent(this.dataset.name))">Del</button></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
 }
 function showCountryForm() {
     const content = `<div class="form-group"><label>Country Name *</label><input type="text" id="country-name" placeholder="e.g., Kenya"></div>
@@ -21489,6 +21494,60 @@ async function applyBulkCountry() {
     if (store === 'users' && typeof renderUsers === 'function') await renderUsers();
     await renderCountries();
     showToast('Tagged ' + res.ok + ' record(s) as ' + country + '!' + (cascadeMsg ? ' Moved with them:' + cascadeMsg + '.' : ''), { type: 'success' });
+}
+function previewCountry() {
+    try { return sessionStorage.getItem('previewCountry') || ''; } catch { return ''; }
+}
+function previewAsCountry(name) {
+    try { sessionStorage.setItem('previewCountry', name); } catch {}
+    renderPreviewBanner();
+    try { showScreen('dashboard'); } catch {}
+}
+function exitPreview() {
+    try { sessionStorage.removeItem('previewCountry'); } catch {}
+    renderPreviewBanner();
+    try { location.reload(); } catch {}
+}
+function renderPreviewBanner() {
+    let bar = document.getElementById('preview-banner');
+    const pc = previewCountry();
+    if (!pc) { if (bar) bar.remove(); return; }
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'preview-banner';
+        try { document.body.prepend(bar); } catch { return; }
+    }
+    bar.innerHTML = `<div style="background:#7c3aed;color:#fff;padding:8px 16px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;"><span>👁 Previewing as <b>${escapeHtml(pc)}</b> coordinator — reads are scoped exactly as theirs. Writes and tabs stay yours.</span><button class="btn btn-sm" style="background:#fff;color:#7c3aed;font-weight:700;" onclick="exitPreview()">Exit preview</button></div>`;
+}
+async function renderCompare() {
+    const box = document.getElementById('compare-content');
+    if (!box) return;
+    box.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;">Loading country comparison…</div>';
+    let countries = [];
+    try { countries = await fetchCountries(); } catch {}
+    let d = {};
+    try { d = await dbGetBatch(['students', 'staff', 'users', 'studyCenters', 'regions', 'payments', 'grades', 'exams']); }
+    catch (e) { box.innerHTML = '<div style="color:var(--danger);text-align:center;padding:20px;">Unable to load data.</div>'; return; }
+    const stat = (label, val) => `<div style="background:var(--bg-input);border-radius:8px;padding:8px;text-align:center;"><div style="font-size:17px;font-weight:800;">${val}</div><div style="font-size:10px;color:var(--text-muted);">${label}</div></div>`;
+    const stuById = {};
+    (d.students || []).forEach(s => { stuById[s.id] = s; });
+    const cards = countries.map(c => {
+        const n = c.name;
+        const students = (d.students || []).filter(s => s.country === n);
+        const staff = (d.staff || []).filter(s => s.country === n);
+        const coords = (d.users || []).filter(u => u.role === 'coordinator' && u.country === n);
+        const centers = (d.studyCenters || []).filter(x => x.country === n);
+        const regions = (d.regions || []).filter(x => x.country === n);
+        const exams = (d.exams || []).filter(x => x.country === n);
+        const fees = (d.payments || []).filter(p => { const s = stuById[p.studentId]; return s && s.country === n; }).reduce((t, p) => t + (Number(p.amount) || 0), 0);
+        const scores = (d.grades || []).filter(g => { const s = stuById[g.studentId]; return s && s.country === n && typeof g.score === 'number'; }).map(g => g.score);
+        const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) + '%' : '—';
+        return `<div class="card" style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><h3 style="margin:0;">${escapeHtml(c.brandName || n)}</h3><button class="btn btn-outline btn-sm" data-name="${encodeURIComponent(n)}" onclick="previewAsCountry(decodeURIComponent(this.dataset.name))">👁 View as coordinator</button></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-top:10px;">${stat('Students', students.length)}${stat('Staff', staff.length)}${stat('Coordinators', coords.length)}${stat('Centers', centers.length)}${stat('Regions', regions.length)}${stat('Exams', exams.length)}${stat('Fees', (typeof formatCurrency === 'function' ? formatCurrency(fees) : fees))}${stat('Avg grade', avg)}</div></div>`;
+    }).join('');
+    const un = (arr) => (arr || []).filter(r => r && !r.country).length;
+    const unCard = `<div class="card" style="margin-bottom:12px;border-style:dashed;"><h4 style="margin:0 0 4px;">Unassigned (visible to all)</h4><div style="font-size:12px;color:var(--text-muted);">Students: ${un(d.students)} · Staff: ${un(d.staff)} · Centers: ${un(d.studyCenters)} · Regions: ${un(d.regions)}</div></div>`;
+    box.innerHTML = (countries.length ? '' : '<div style="color:var(--text-muted);text-align:center;padding:12px;">No countries configured yet — add them in Settings → Countries.</div>') + cards + unCard;
 }
 
 async function showCoordinatorForm(regionId) {
