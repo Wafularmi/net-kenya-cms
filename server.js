@@ -1942,6 +1942,16 @@ function handleAPI(req, res) {
         return json(res, 200, { status: 'ok', uptime: process.uptime(), mpesaConfigured });
     }
 
+    // GET /api/session — session health: who the server thinks you are.
+    // 200 { authenticated, user } or 401. Lets the client detect dead sessions
+    // (restart/expired) and force a clean re-login instead of failing writes.
+    // Returns only the caller's own identity. Strictly read-only.
+    if (parts.length === 2 && parts[1] === 'session' && req.method === 'GET') {
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        return json(res, 200, { authenticated: true, user: { username: su.username, role: su.role, country: (su.user && su.user.country) || '' } });
+    }
+
     // GET /api/events â€” SSE stream for real-time updates (authenticated only)
     if (parts.length === 2 && parts[1] === 'events' && req.method === 'GET') {
         const qUser = sessionUserForToken(urlObj.searchParams.get('token'));

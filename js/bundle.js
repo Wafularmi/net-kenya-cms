@@ -6,6 +6,28 @@ function getAuthHeaders() {
     if (user.session_token) headers['Authorization'] = 'Bearer ' + user.session_token;
     return headers;
 }
+function storedToken() {
+    try { const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); return u.session_token || ''; } catch { return ''; }
+}
+async function verifySession() {
+    try {
+        const res = await fetch('/api/session', { headers: getAuthHeaders() });
+        if (!res.ok) return null;
+        const d = await res.json();
+        return (d && d.authenticated && d.user) ? d.user : null;
+    } catch { return null; }
+}
+function handleDeadSession() {
+    if (window._deadSessionRedirect) return;
+    window._deadSessionRedirect = true;
+    try { sessionStorage.removeItem('currentUser'); } catch {}
+    try { sessionStorage.removeItem('lastScreen'); } catch {}
+    try { sessionStorage.setItem('loginNotice', 'Session expired — please sign in again.'); } catch {}
+    try { location.reload(); } catch {}
+}
+function noteAuthFailure(res) {
+    try { if (res && res.status === 401 && storedToken()) handleDeadSession(); } catch {}
+}
 async function openDB() {
     try {
         const res = await fetch('/api/health');
@@ -19,7 +41,7 @@ async function openDB() {
 async function dbGetAll(store) {
     const pv = (typeof previewCountry === 'function' ? previewCountry() : '');
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}${pv ? '?preview=' + encodeURIComponent(pv) : ''}`, { headers: getAuthHeaders() });
-    if (!res.ok) throw new Error(`dbGetAll ${store} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbGetAll ${store} failed: ${res.status}`); }
     return res.json();
 }
 async function dbGetBatch(stores) {
@@ -28,7 +50,7 @@ async function dbGetBatch(stores) {
         try {
             const pvB = (typeof previewCountry === 'function' ? previewCountry() : '');
             const res = await fetch(`${API_BASE}/batch?stores=${stores.map(encodeURIComponent).join(',')}${pvB ? '&preview=' + encodeURIComponent(pvB) : ''}`, { headers: getAuthHeaders() });
-            if (!res.ok) throw new Error('dbGetBatch failed: ' + res.status);
+            if (!res.ok) { noteAuthFailure(res); throw new Error('dbGetBatch failed: ' + res.status); }
             return res.json();
         } catch (e) {
             lastErr = e;
@@ -41,7 +63,7 @@ async function dbGet(store, key) {
     const pvOne = (typeof previewCountry === 'function' ? previewCountry() : '');
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}${pvOne ? '?preview=' + encodeURIComponent(pvOne) : ''}`, { headers: getAuthHeaders() });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`dbGet ${store}:${key} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbGet ${store}:${key} failed: ${res.status}`); }
     return res.json();
 }
 async function dbPut(store, data) {
@@ -51,7 +73,7 @@ async function dbPut(store, data) {
         headers: getAuthHeaders(),
         body: JSON.stringify({ value: data })
     });
-    if (!res.ok) throw new Error(`dbPut ${store} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbPut ${store} failed: ${res.status}`); }
     return res.json();
 }
 async function dbAdd(store, data) {
@@ -60,7 +82,7 @@ async function dbAdd(store, data) {
         headers: getAuthHeaders(),
         body: JSON.stringify({ value: data })
     });
-    if (!res.ok) throw new Error(`dbAdd ${store} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbAdd ${store} failed: ${res.status}`); }
     return res.json();
 }
 async function dbPutBatch(store, records) {
@@ -70,7 +92,7 @@ async function dbPutBatch(store, records) {
         headers: getAuthHeaders(),
         body: JSON.stringify({ store, records })
     });
-    if (!res.ok) throw new Error(`dbPutBatch ${store} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbPutBatch ${store} failed: ${res.status}`); }
     return res.json();
 }
 async function dbDelete(store, key) {
@@ -78,14 +100,14 @@ async function dbDelete(store, key) {
         method: 'DELETE',
         headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error(`dbDelete ${store}:${key} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbDelete ${store}:${key} failed: ${res.status}`); }
 }
 async function dbClear(store) {
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}`, {
         method: 'DELETE',
         headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error(`dbClear ${store} failed: ${res.status}`);
+    if (!res.ok) { noteAuthFailure(res); throw new Error(`dbClear ${store} failed: ${res.status}`); }
 }
 async function dbSet(store, key, value) {
     return dbPut(store, { key, value });
@@ -1037,6 +1059,10 @@ async function fetchLoginCountry() {
         const hint = document.getElementById('login-country-hint');
         if (hint && sel.value !== _loginAutoCountry) hint.textContent = '';
     });
+    try {
+        const notice = sessionStorage.getItem('loginNotice');
+        if (notice) { sessionStorage.removeItem('loginNotice'); showLoginError(notice); }
+    } catch {}
 })();
 async function login() {
     try {
