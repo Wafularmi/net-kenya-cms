@@ -339,8 +339,10 @@ function generateBarcode() {
     return bars;
 }
 async function getProgramsList() {
-    const settings = await dbGet('settings', 'academic');
-    if (settings && settings.programs) return settings.programs.split(',').map(p => p.trim()).filter(p => p);
+    try {
+        const settings = await dbGet('settings', 'academic');
+        if (settings && settings.programs) return settings.programs.split(',').map(p => p.trim()).filter(p => p);
+    } catch (e) { console.warn('getProgramsList failed, continuing with empty list:', e); }
     return [];
 }
 let _academicCache = null;
@@ -488,6 +490,7 @@ const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','gra
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
+        if (!tabs.includes('my-country')) tabs.push('my-country');
         ['coordinator-manual', 'fee-gate'].forEach(t => { if (!tabs.includes(t)) tabs.push(t); });
         return tabs;
     }
@@ -1388,7 +1391,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1477,20 +1480,43 @@ async function checkAllAccountActivity() {
 }
 function signupFilterCenters() {
     const region = document.getElementById('signup-region').value;
+    const country = document.getElementById('signup-country') ? document.getElementById('signup-country').value : '';
     document.querySelectorAll('#signup-center option').forEach(opt => {
         if (!opt.value) return;
-        opt.style.display = region && opt.dataset.region !== region ? 'none' : '';
+        const okRegion = !region || opt.dataset.region === region;
+        const okCountry = !country || (opt.dataset.country && opt.dataset.country === country);
+        opt.style.display = okRegion && okCountry ? '' : 'none';
     });
-    document.getElementById('signup-center').value = '';
+    if (region) {
+        const regOpt = document.querySelector('#signup-region option[value="' + region + '"]');
+        const countrySel = document.getElementById('signup-country');
+        if (countrySel && regOpt && regOpt.dataset.country && !countrySel.value) {
+            countrySel.value = regOpt.dataset.country;
+            signupFilterByCountry();
+        }
+    }
+    const centerSel = document.getElementById('signup-center');
+    if (centerSel) centerSel.value = '';
+}
+function signupFilterByCountry() {
+    const country = document.getElementById('signup-country') ? document.getElementById('signup-country').value : '';
+    document.querySelectorAll('#signup-region option').forEach(opt => {
+        if (!opt.value) return;
+        const under = country && opt.dataset.country && opt.dataset.country === country;
+        opt.style.display = country ? (under ? '' : 'none') : '';
+    });
+    document.getElementById('signup-region').value = '';
+    signupFilterCenters();
 }
 async function showSignupForm() {
     try {
-        const [centers, programs, regions] = await Promise.all([
+        const [centers, programs, regions, countries] = await Promise.all([
             getCenters().catch(() => []),
             getProgramsList().catch(() => []),
-            dbGetAll('regions').catch(() => [])
+            dbGetAll('regions').catch(() => []),
+            fetchCountries().catch(() => [])
         ]);
-        const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Region</label><select id="signup-region" onchange="signupFilterCenters()"><option value="">Select region...</option>${regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}" data-region="${c.regionId || ''}">${c.name} (${c.code})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
+        const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Country *</label><select id="signup-country" onchange="signupFilterByCountry()"><option value="">Select country...</option>${countries.map(c => `<option value="${escapeHtml(c && c.name || '')}">${escapeHtml(c && (c.brandName || c.name) || '')}</option>`).join('')}</select></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Region</label><select id="signup-region" onchange="signupFilterCenters()"><option value="">Select region...</option>${regions.map(r => `<option value="${r.id}" data-country="${escapeHtml(r.country || '')}">${escapeHtml(r.name)}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}" data-region="${c.regionId || ''}" data-country="${escapeHtml(c.country || '')}">${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
         showModal('Request Registration', content, `<button class="btn btn-primary" onclick="registerStudent()">Submit Request</button>`);
     } catch (e) {
         console.error('showSignupForm error:', e);
@@ -1503,16 +1529,18 @@ async function registerStudent() {
         const email = document.getElementById('signup-email').value.trim();
         const phone = sanitizeInput(document.getElementById('signup-phone').value.trim());
         const program = document.getElementById('signup-program').value;
+        const country = document.getElementById('signup-country').value;
         const centerId = document.getElementById('signup-center').value;
         const regionId = document.getElementById('signup-region').value;
         if (!name) return showToast('Full name required!');
         if (!phone) return showToast('Phone number required!');
         if (!program) return showToast('Program required!');
+        if (!country) return showToast('Country required!');
         if (email && !validateEmail(email)) return showToast('Invalid email format!');
         const res = await fetch('/api/signup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, phone, program, studyCenterId: centerId || '', regionId: regionId || '' })
+            body: JSON.stringify({ name, email, phone, program, country, studyCenterId: centerId || '', regionId: regionId || '' })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -1782,6 +1810,7 @@ function showScreen(id) {
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
         case 'compare': renderCompare(); break;
+        case 'my-country': renderMyCountry(); break;
     }
 }
 function initTabs() {
@@ -2306,10 +2335,12 @@ async function quickEnrollStudent() {
         const centerId = document.getElementById('quick-center').value;
         const center = centerId ? await dbGet('studyCenters', centerId) : null;
         const branding = await dbGet('settings', 'branding');
+        const instituteCode = admissionInstituteCode(branding);
         const seq = await getNextAdmissionSeq();
         const seqStr = String(seq).padStart(3, '0');
         const centerCode = center ? center.code : 'MAIN';
-        let admissionNumber = `${initials}/${centerCode}/${month}-${year}/${seqStr}`;
+        const my = admissionMonthYear();
+        let admissionNumber = `${instituteCode}/${centerCode}/${my.month}-${my.year}/${seqStr}`;
         await setAdmissionLastSeq(seq);
         const program = sanitizeInput(document.getElementById('quick-program').value.trim());
         const yearVal = parseInt(document.getElementById('quick-year').value) || 1;
@@ -2709,18 +2740,17 @@ async function onTestAccountToggle() {
 }
 async function updateAdmissionPreview() {
     const branding = await dbGet('settings', 'branding');
-    const initials = (branding && branding.initials) ? branding.initials : 'XX';
+    const instituteCode = admissionInstituteCode(branding);
     const centerId = document.getElementById('student-center') ? document.getElementById('student-center').value : '';
     const center = centerId ? await dbGet('studyCenters', centerId) : null;
     const code = center ? center.code : 'XXXX';
     const dateInput = document.getElementById('adm-date');
     const date = dateInput ? new Date(dateInput.value) : new Date();
-    const month = date.getMonth() + 1;
-    const year = String(date.getFullYear()).slice(-2);
+    const my = admissionMonthYear(date);
     const monthEl = document.getElementById('adm-preview-month');
     const yearEl = document.getElementById('adm-preview-year');
-    if (monthEl) monthEl.textContent = month;
-    if (yearEl) yearEl.textContent = year;
+    if (monthEl) monthEl.textContent = my.month;
+    if (yearEl) yearEl.textContent = my.year;
     let seq = '001';
     if (centerId && document.getElementById('adm-mode').value === 'auto') {
         const nextNum = await peekNextAdmissionSeq();
@@ -2729,7 +2759,7 @@ async function updateAdmissionPreview() {
     const seqEl = document.getElementById('adm-preview-seq');
     if (seqEl) seqEl.textContent = seq;
     const fullEl = document.getElementById('adm-full-preview');
-    if (fullEl) fullEl.textContent = `${initials}/${code}/${month}-${year}/${seq}`;
+    if (fullEl) fullEl.textContent = `${instituteCode}/${code}/${my.month}-${my.year}/${seq}`;
 }
 async function onStudentProgramChange(sel) {
     const fee = await getProgramFee(sel.value);
@@ -2783,14 +2813,13 @@ async function saveStudent() {
         if (!admissionNumber) {
             const center = await dbGet('studyCenters', centerId);
             const branding = await dbGet('settings', 'branding');
-            const initials = (branding && branding.initials) ? branding.initials : 'XX';
+            const instituteCode = admissionInstituteCode(branding);
             const dateInput = document.getElementById('adm-date');
             const date = dateInput ? new Date(dateInput.value) : new Date();
-            const month = date.getMonth() + 1;
-            const year = String(date.getFullYear()).slice(-2);
+            const my = admissionMonthYear(date);
             const seq = await getNextAdmissionSeq();
             const seqStr = String(seq).padStart(3, '0');
-            admissionNumber = `${initials}/${center.code}/${month}-${year}/${seqStr}`;
+            admissionNumber = `${instituteCode}/${center.code}/${my.month}-${my.year}/${seqStr}`;
             await setAdmissionLastSeq(seq);
         }
     }
@@ -3068,7 +3097,7 @@ async function showStaffForm(staff = null) {
     const isCoordEdit = isEdit && staff.id && staff.id.startsWith('__coord__');
     if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
     const regionOpts = window._regionsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
-    const content = `<input type="hidden" id="staff-edit-id" value="${isCoordEdit ? staff.id : (staff ? staff.id : '')}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="staff-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${staff && staff.photo ? `<img src="${staff.photo}" style="width:100%;height:100%;object-fit:cover;">` : (staff ? (staff.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="staff-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStaffPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="staff-name" value="${staff ? staff.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="staff-email" value="${staff ? staff.email || '' : ''}"></div><div class="form-group"><label>Phone / Username (login)*</label><input type="text" id="staff-phone" value="${staff ? (isCoordEdit ? staff.phone : (staff.phone || '')) : ''}"></div></div><div class="form-row"><div class="form-group"><label>Role</label><select id="staff-role" onchange="toggleStaffRoleFields()"><option value="lecturer">Lecturer</option><option value="professor">Professor</option><option value="dean">Dean</option><option value="admin">Admin</option><option value="assistant">Assistant Admin</option><option value="support">Support Staff</option><option value="coordinator">Coordinator</option></select></div><div class="form-group" id="staff-dept-group"><label>Department</label><input type="text" id="staff-department" value="${staff && !isCoordEdit ? (staff.department || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Country</label><select id="staff-country"><option value="">Unassigned (visible to all)</option></select></div></div><div id="staff-coord-fields" style="display:${isCoordEdit ? 'block' : 'none'};"><div class="form-group"><label>Region *</label><select id="staff-region"><option value="">— Select region —</option>${regionOpts}</select></div></div><div id="staff-login-fields"><div class="form-group"><label>Password (for login) ${isEdit ? '(leave blank to keep current)' : '*'}</label><input type="password" id="staff-password"></div></div><div id="staff-regular-fields"><div class="form-row"><div class="form-group"><label>Campus</label><select id="staff-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Qualification</label><input type="text" id="staff-qualification" value="${staff && !isCoordEdit ? (staff.qualification || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="staff-status"><option value="active">Active</option><option value="on-leave">On Leave</option><option value="inactive">Inactive</option></select></div><div class="form-group"><label>Specialization</label><input type="text" id="staff-specialization" value="${staff && !isCoordEdit ? (staff.specialization || '') : ''}"></div></div><div class="form-group"><label>WhatsApp</label><input type="text" id="staff-whatsapp" value="${staff && !isCoordEdit ? (staff.whatsapp || '') : ''}"></div></div>`;
+    const content = `<input type="hidden" id="staff-edit-id" value="${isCoordEdit ? staff.id : (staff ? staff.id : '')}"><div class="form-group"><label>Photo</label><div style="display:flex;align-items:center;gap:12px;"><div id="staff-photo-preview" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg-input);font-size:24px;color:var(--text-muted);flex-shrink:0;">${staff && staff.photo ? `<img src="${staff.photo}" style="width:100%;height:100%;object-fit:cover;">` : (staff ? (staff.name || '?').charAt(0).toUpperCase() : '📷')}</div><div><input type="file" id="staff-photo-input" accept="image/*" style="font-size:12px;" onchange="previewStaffPhoto(event)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Max 500KB. JPEG or PNG.</div></div></div></div><div class="form-group"><label>Full Name *</label><input type="text" id="staff-name" value="${staff ? staff.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="staff-email" value="${staff ? staff.email || '' : ''}"></div><div class="form-group"><label>Phone / Username (login)*</label><input type="text" id="staff-phone" value="${staff ? (isCoordEdit ? staff.phone : (staff.phone || '')) : ''}"></div></div><div class="form-row"><div class="form-group"><label>Role</label><select id="staff-role" onchange="toggleStaffRoleFields()"><option value="lecturer">Lecturer</option><option value="professor">Professor</option><option value="dean">Dean</option><option value="admin">Admin</option><option value="assistant">Assistant Admin</option><option value="support">Support Staff</option><option value="coordinator">Coordinator</option></select></div><div class="form-group" id="staff-dept-group"><label>Department</label><input type="text" id="staff-department" value="${staff && !isCoordEdit ? (staff.department || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Country</label><select id="staff-country"><option value="">Unassigned (visible to all)</option></select></div></div><div id="staff-coord-fields" style="display:${isCoordEdit ? 'block' : 'none'};"><div class="form-group"><label>Region</label><select id="staff-region"><option value="">— Select region — (leave blank for country coordinator)</option>${regionOpts}</select></div></div><div id="staff-login-fields"><div class="form-group"><label>Password (for login) ${isEdit ? '(leave blank to keep current)' : '*'}</label><input type="password" id="staff-password"></div></div><div id="staff-regular-fields"><div class="form-row"><div class="form-group"><label>Campus</label><select id="staff-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Qualification</label><input type="text" id="staff-qualification" value="${staff && !isCoordEdit ? (staff.qualification || '') : ''}"></div></div><div class="form-row"><div class="form-group"><label>Status</label><select id="staff-status"><option value="active">Active</option><option value="on-leave">On Leave</option><option value="inactive">Inactive</option></select></div><div class="form-group"><label>Specialization</label><input type="text" id="staff-specialization" value="${staff && !isCoordEdit ? (staff.specialization || '') : ''}"></div></div><div class="form-group"><label>WhatsApp</label><input type="text" id="staff-whatsapp" value="${staff && !isCoordEdit ? (staff.whatsapp || '') : ''}"></div></div>`;
     showModal(isEdit ? 'Edit Staff' : 'Add New Staff', content, `<button class="btn btn-primary" onclick="saveStaff()">${isEdit ? 'Update' : 'Add'}</button>`);
     loadStaffCampusDropdown();
     if (staff) {
@@ -3146,25 +3175,21 @@ async function saveStaff() {
     let pwHash = existingUser ? existingUser.password : '';
     if (password) pwHash = await hashPassword(password);
     if (!pwHash) return showToast('Password required to create the login account!');
-    const sysRole = role === 'coordinator' ? 'coordinator' : staffRoleToSystemRole(role);
-    let _coordCountry = '';
-    if (role === 'coordinator') {
-        const _regId = document.getElementById('staff-region') ? document.getElementById('staff-region').value : '';
-        if (_regId) { try { const _reg = await dbGet('regions', _regId); _coordCountry = (_reg && _reg.country) || ''; } catch {} }
-    }
-    const staffStatus = (document.getElementById('staff-status') ? document.getElementById('staff-status').value : 'active') || 'active';
-    const user = {
-        username,
-        password: pwHash,
-        name,
-        email: document.getElementById('staff-email').value.trim(),
-        phone: username,
-        role: sysRole,
-        status: staffStatus === 'inactive' ? 'inactive' : 'active',
-        ...(role === 'coordinator' ? { regionId: document.getElementById('staff-region').value } : {}),
-        country: (role === 'coordinator' && _coordCountry) ? _coordCountry : (() => { const el = document.getElementById('staff-country'); return (el && el.options.length > 1) ? el.value : (existingUser ? existingUser.country || '' : ''); })(),
-        ...(existingUser ? { createdAt: existingUser.createdAt } : { createdAt: new Date().toISOString() })
-    };
+     const sysRole = role === 'coordinator' ? 'coordinator' : staffRoleToSystemRole(role);
+     const staffStatus = (document.getElementById('staff-status') ? document.getElementById('staff-status').value : 'active') || 'active';
+     const coordRegionVal = role === 'coordinator' ? document.getElementById('staff-region').value : '';
+     const user = {
+         username,
+         password: pwHash,
+         name,
+         email: document.getElementById('staff-email').value.trim(),
+         phone: username,
+         role: sysRole,
+         status: staffStatus === 'inactive' ? 'inactive' : 'active',
+         ...(coordRegionVal ? { regionId: coordRegionVal } : {}),
+         country: role === 'coordinator' ? ((coordRegionVal && document.getElementById('staff-country').value) ? document.getElementById('staff-country').value : (() => { const el = document.getElementById('staff-country'); return (el && el.options.length > 1) ? el.value : ''; })()) : '',
+         ...(existingUser ? { createdAt: existingUser.createdAt } : { createdAt: new Date().toISOString() })
+     };
     // Admin override: if username changed, clean up orphaned old login so the new password/username is the only valid account
     if (existingUser && String(existingUser.username).toLowerCase() !== String(username).toLowerCase()) {
         try { await dbDelete('users', existingUser.username); } catch {}
@@ -17128,16 +17153,27 @@ async function getNextAdmissionSeq() {
     return next;
 }
 async function setAdmissionLastSeq(seq) {
-    await dbPut('settings', { key: 'admissionLastSeq', value: seq });
+    try { await dbPut('settings', { key: 'admissionLastSeq', value: seq }); } catch (e) { /* country coordinators cannot write settings */ }
+}
+// Unified admission-number pieces:
+//   - instituteCode is ALWAYS the global Net Foundation code ("NF"), even for
+//     countries whose brand initials differ (Togo="TG"); the country identity
+//     lives in the study-center code segment (e.g. "UNSC").
+//   - monthYear pads the month to two digits (09) per the NF/C/MM-YY/SEQ rule.
+function admissionInstituteCode(branding) {
+    return (branding && (branding.instituteCode || branding.initials)) || 'NF';
+}
+function admissionMonthYear(d) {
+    const dt = d ? new Date(d) : new Date();
+    return { month: String(dt.getMonth() + 1).padStart(2, '0'), year: String(dt.getFullYear()).slice(-2) };
 }
 function generateAdmissionNumber(student, branding, centers, seq) {
     const center = centers.find(c => c.id === student.studyCenterId);
     const centerCode = center ? center.code : 'GEN';
-    const schoolInitials = branding && branding.initials ? branding.initials : 'INST';
-    const year = new Date().getFullYear().toString().slice(-2);
-    const month = String(new Date().getMonth() + 1);
+    const instituteCode = admissionInstituteCode(branding);
+    const my = admissionMonthYear();
     const seqStr = String(seq).padStart(3, '0');
-    return `${schoolInitials}/${centerCode}/${month}-${year}/${seqStr}`;
+    return `${instituteCode}/${centerCode}/${my.month}-${my.year}/${seqStr}`;
 }
 async function regenerateAdmission() {
     const studentId = _approvalState.studentId;
@@ -19249,15 +19285,14 @@ async function loadMpesaSettings() {
 async function getAdmissionPreviewContext() {
     const branding = await dbGet('settings', 'branding');
     const centers = await getCenters();
-    const initials = (branding && branding.initials) ? branding.initials : 'XX';
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = String(now.getFullYear()).slice(-2);
-    return { initials, centers, month, year };
+    const instituteCode = admissionInstituteCode(branding);
+    const my = admissionMonthYear();
+    return { instituteCode, centers, month: my.month, year: my.year };
 }
 function formatAdmissionPreview(initials, code, month, year, seq) {
     const seqStr = String(seq).padStart(3, '0');
-    return `${initials}/${code}/${month}-${year}/${seqStr}`;
+    const m = String(month).padStart(2, '0');
+    return `${initials}/${code}/${m}-${year}/${seqStr}`;
 }
 async function loadAdmissionLastSeqSetting() {
     const input = document.getElementById('settings-admission-last-seq');
@@ -19581,10 +19616,8 @@ async function migrateIndexedDB() {
 async function renderStudyCenters() {
     const centers = await getCenters();
     const branding = await dbGet('settings', 'branding');
-    const initials = (branding && branding.initials) ? branding.initials : 'XX';
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = String(now.getFullYear()).slice(-2);
+    const instituteCode = admissionInstituteCode(branding);
+    const my = admissionMonthYear();
     const filter = document.getElementById('student-filter-campus');
     const hostelFilter = document.getElementById('hostel-filter');
     const options = centers.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
@@ -19593,12 +19626,14 @@ async function renderStudyCenters() {
     const regionMap = {};
     (await dbGetAll('regions').catch(() => [])).forEach(r => regionMap[r.id] = r.name);
     document.getElementById('campuses-list').innerHTML = centers.length ? centers.map(c => {
-        const admPreview = `${initials}/${c.code}/${month}-${year}/001`;
+        const admPreview = `${instituteCode}/${c.code}/${my.month}-${my.year}/001`;
         return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span>${c.country ? `<span class="badge badge-info">${escapeHtml(c.country)}</span>` : ''}${c.regionId && regionMap[c.regionId] ? `<span class="badge badge-warning">${regionMap[c.regionId]}</span>` : ''}</span><button class="btn btn-primary btn-sm" onclick="showCenterDetail('${c.id}')">🔍 Open</button> <button class="btn btn-outline btn-sm" onclick="editStudyCenter('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteStudyCenter('${c.id}')">Del</button></div><span style="font-size:11px;color:var(--text-muted);">${c.address || '--'}</span><span style="font-size:11px;color:var(--accent);">Admission format: ${admPreview}</span></div>`;
     }).join('') : '<div style="color:var(--text-muted);font-size:12px;">No study centers added</div>';
 }
 async function showStudyCenterForm(center = null) {
     const isEdit = !!center;
+    const scope = viewerScope();
+    const scopeCountry = (scope && scope.country) || '';
     const content = `<input type="hidden" id="sc-edit-id" value="${center ? center.id : ''}">
 <div class="form-group"><label>Center Name *</label><input type="text" id="sc-name" value="${center ? center.name : ''}" placeholder="e.g., Kitale Net Study Center" oninput="suggestSCCode()"></div>
 <div class="form-group"><label>Center Code * (short, used in admission numbers)</label><input type="text" id="sc-code" value="${center ? center.code : ''}" placeholder="e.g., KNSC" maxlength="8" style="text-transform:uppercase;font-weight:600;letter-spacing:1px;" oninput="updateSCAdmissionPreview()"><div id="sc-code-suggestion" style="margin-top:4px;font-size:11px;color:var(--text-muted);"></div><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">ⓘ This <b>short code</b> (not the full name) is what appears in admission numbers like <b>EMA/KNSC/1-26/001</b>. Maximum 8 characters.</div></div>
@@ -19609,11 +19644,20 @@ async function showStudyCenterForm(center = null) {
     showModal(isEdit ? 'Edit Study Center' : 'Add Study Center', content, `<button class="btn btn-primary" onclick="saveStudyCenter()">${isEdit ? 'Update' : 'Save'}</button>`);
     (async () => {
         if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
+        const regionOpts = window._regionsCache.filter(r => !scopeCountry || (r.country || '') === scopeCountry);
         const sel = document.getElementById('sc-region');
         if (sel) {
-            sel.innerHTML = '<option value="">No region</option>' + window._regionsCache.map(r => `<option value="${r.id}" ${center && center.regionId === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
+            sel.innerHTML = '<option value="">No region</option>' + regionOpts.map(r => `<option value="${r.id}" ${center && center.regionId === r.id ? 'selected' : ''}>${r.name}</option>`).join('');
         }
-        loadCountryDropdown('sc-country', center ? (center.country || '') : '');
+        const cSel = document.getElementById('sc-country');
+        if (scopeCountry) {
+            if (cSel) {
+                cSel.innerHTML = `<option value="${escapeHtml(scopeCountry)}" selected>${escapeHtml(scopeCountry)}</option>`;
+                cSel.disabled = true;
+            }
+        } else {
+            loadCountryDropdown('sc-country', center ? (center.country || '') : '');
+        }
     })();
     const nameEl = document.getElementById('sc-name');
     if (nameEl) {
@@ -19651,16 +19695,14 @@ function suggestSCCode() {
 }
 async function updateSCAdmissionPreview() {
     const branding = await dbGet('settings', 'branding');
-    const initials = (branding && branding.initials) ? branding.initials : 'XX';
+    const instituteCode = admissionInstituteCode(branding);
     const codeInput = document.getElementById('sc-code');
     const code = codeInput ? (codeInput.value || 'XXXX').toUpperCase() : 'XXXX';
     const nameInput = document.getElementById('sc-name');
     const name = nameInput ? nameInput.value : '';
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = String(now.getFullYear()).slice(-2);
+    const my = admissionMonthYear();
     const el = document.getElementById('sc-adm-preview');
-    if (el) el.textContent = `${initials}/${code}/${month}-${year}/001`;
+    if (el) el.textContent = `${instituteCode}/${code}/${my.month}-${my.year}/001`;
     const detail = document.getElementById('sc-adm-preview-detail');
     if (detail) {
         const codeIsValid = code && code !== 'XXXX' && code.length <= 8;
@@ -19672,7 +19714,7 @@ async function updateSCAdmissionPreview() {
             const _me = await getMaxExistingAdmissionSeq();
             const _seq = Math.max(_sv, _me) + 1;
             const seqStr = String(_seq).padStart(3, '0');
-            detail.innerHTML = `Next: <b>${initials}/${code}/${month}-${year}/${seqStr}</b> — center: <i>${name || '(unnamed)'}</i>`;
+            detail.innerHTML = `Next: <b>${instituteCode}/${code}/${my.month}-${my.year}/${seqStr}</b> — center: <i>${name || '(unnamed)'}</i>`;
         }
     }
 }
@@ -19680,6 +19722,13 @@ async function saveStudyCenter() {
     const name = document.getElementById('sc-name').value.trim();
     let code = document.getElementById('sc-code').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!name) return showToast('Name required!');
+    const scope = viewerScope();
+    const scopeCountry = (scope && scope.country) || '';
+    if (!code && scopeCountry) {
+        const allCenters = await dbGetAll('studyCenters').catch(() => []);
+        code = generateCenterCode(scopeCountry, allCenters);
+        if (document.getElementById('sc-code')) document.getElementById('sc-code').value = code;
+    }
     if (!code) return showToast('Code required! Use a short alphanumeric code (max 8 chars).');
     if (code.length > 8) return showToast('Code too long! Maximum 8 characters. Use a short code, not the full center name.');
     if (code.length < 2) return showToast('Code too short! Use at least 2 characters.');
@@ -19691,8 +19740,17 @@ async function saveStudyCenter() {
     const _ccEl = document.getElementById('sc-country');
     const _ccLoaded = !!(_ccEl && _ccEl.options.length > 1);
     const _ccExisting = editId ? (((await dbGet('studyCenters', id)) || {}).country || '') : '';
-    const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), regionId: document.getElementById('sc-region').value || '', country: _ccLoaded ? _ccEl.value : _ccExisting, createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
+    const country = scopeCountry || (_ccLoaded ? _ccEl.value : _ccExisting);
+    const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), regionId: document.getElementById('sc-region').value || '', country, createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
     await dbPut('studyCenters', center); closeModal(); renderStudyCenters(); showToast(editId ? 'Study Center updated!' : 'Study Center added!'); logAudit(editId ? 'updated' : 'created', 'study-center', center);
+}
+function generateCenterCode(country, existingCenters) {
+    const letters = (country ? String(country).replace(/[^A-Za-z]/g, '') : '').toUpperCase().slice(0, 4) || 'NF';
+    const used = new Set((existingCenters || []).map(c => c.code).filter(Boolean));
+    let n = 1;
+    let code = letters + 'C' + n;
+    while (used.has(code) && n < 9999) { n++; code = letters + 'C' + n; }
+    return code;
 }
 async function editStudyCenter(id) { const c = await dbGet('studyCenters', id); if (!c) return; showStudyCenterForm(c); }
 async function deleteStudyCenter(id) { if (!await showConfirm('Confirm', 'Delete study center?')) return; await dbDelete('studyCenters', id); renderStudyCenters(); showToast('Study center deleted'); logAudit('deleted', 'study-center', { id }); }
@@ -19752,7 +19810,7 @@ async function showUserForm() {
     const studentOpts = students.filter(s => s.status === 'active').map(s => `<option value="${s.id}">${s.name} (${s.admissionNumber || s.id})${s.program ? ' — ' + s.program : ''}</option>`).join('');
     if (!window._regionsCache) window._regionsCache = await dbGetAll('regions').catch(() => []);
     const regionOpts = window._regionsCache.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
-    const content = `<div class="form-group"><label>Full Name</label><input type="text" id="user-fullname"></div><div class="form-group"><label>Username *</label><input type="text" id="user-username"></div><div class="form-group"><label>Password *</label><input type="password" id="user-password"></div><div class="form-group"><label>Role</label><select id="user-role" onchange="toggleUserStudentSelect()"><option value="lecturer">Lecturer</option><option value="registrar">Registrar</option><option value="finance">Finance Officer</option><option value="admin">Admin</option><option value="assistant">Assistant Admin</option><option value="coordinator">Coordinator</option><option value="student">Student</option></select></div><div id="user-student-section" style="display:none;" class="form-group"><label>Link to Student</label><select id="user-student-id"><option value="">— Select student record —</option>${studentOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Link this user account to an existing student record for course enrollment access.</div></div><div id="user-region-section" style="display:none;" class="form-group"><label>Region</label><select id="user-region"><option value="">— Select region —</option>${regionOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Assign this coordinator to a region. Required for coordinator role.</div></div><div class="form-group"><label>Country</label><select id="user-country"><option value="">Unassigned (visible to all)</option></select></div>`;
+    const content = `<div class="form-group"><label>Full Name</label><input type="text" id="user-fullname"></div><div class="form-group"><label>Username *</label><input type="text" id="user-username"></div><div class="form-group"><label>Password *</label><input type="password" id="user-password"></div><div class="form-group"><label>Role</label><select id="user-role" onchange="toggleUserStudentSelect()"><option value="lecturer">Lecturer</option><option value="registrar">Registrar</option><option value="finance">Finance Officer</option><option value="admin">Admin</option><option value="assistant">Assistant Admin</option><option value="coordinator">Coordinator</option><option value="student">Student</option></select></div><div id="user-student-section" style="display:none;" class="form-group"><label>Link to Student</label><select id="user-student-id"><option value="">— Select student record —</option>${studentOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Link this user account to an existing student record for course enrollment access.</div></div><div id="user-region-section" style="display:none;" class="form-group"><label>Region</label><select id="user-region"><option value="">— Select region — (leave blank for country coordinator)</option>${regionOpts}</select><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Leave blank for a country coordinator, or select a region for a regional coordinator.</div></div><div class="form-group"><label>Country</label><select id="user-country"><option value="">Unassigned (visible to all)</option></select></div>`;
     showModal('Add User', content, `<button class="btn btn-primary" onclick="saveUser()">Save</button>`);
     toggleUserStudentSelect();
     loadCountryDropdown('user-country', '');
@@ -19777,9 +19835,10 @@ async function saveUser() {
     const allUsers = await dbGetAll('users').catch(() => []);
     const clash = (allUsers || []).find(u => String(u.username || '').toLowerCase() === username.toLowerCase());
     if (clash) return showToast(`Username "${username}" too closely matches existing account "${clash.username}"! Pick another.`, { type: 'danger' });
-    const pwHash = await hashPassword(password);
-    if (role === 'coordinator' && !document.getElementById('user-region').value) return showToast('Please select a region for this coordinator!');
-    const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim() || username, role, status: 'active', studentId: studentId || undefined, regionId: role === 'coordinator' ? document.getElementById('user-region').value : undefined, country: document.getElementById('user-country') ? document.getElementById('user-country').value : '', createdAt: new Date().toISOString() };
+     const pwHash = await hashPassword(password);
+     if (role === 'coordinator' && !document.getElementById('user-region').value && !document.getElementById('user-country').value) return showToast('Please select a country or region for this coordinator!');
+     const regVal = role === 'coordinator' ? document.getElementById('user-region').value : undefined;
+     const user = { username, password: pwHash, name: document.getElementById('user-fullname').value.trim() || username, role, status: 'active', studentId: studentId || undefined, regionId: regVal || undefined, country: document.getElementById('user-country') ? document.getElementById('user-country').value : '', createdAt: new Date().toISOString() };
     await dbPut('users', user); closeModal(); renderUsers(); showToast(`User created! ${role === 'assistant' ? 'They can log in with username "' + username + '".' : ''}`, { type: 'success' }); logAudit('created', 'user', { username, role });
 }
 async function resetUserPassword(username) {
@@ -21422,19 +21481,20 @@ async function showCenterDetail(centerId) {
 async function renderRegions() {
     const regions = await dbGetAll('regions');
     const centers = await getCenters();
-    const users = await dbGetAll('users');
+    const users = await dbGetAll('users').catch(() => []);
     const students = await dbGetAll('students');
     let countryNames = [];
     try { countryNames = (await fetchCountries()).map(c => c && c.name).filter(Boolean); } catch {}
     const groups = {};
     regions.forEach(r => { const k = r.country || ''; (groups[k] = groups[k] || []).push(r); });
+    const canManageUsers = !viewerScope().isCoord;
     const orderedKeys = [...countryNames.filter(n => groups[n]), ...Object.keys(groups).filter(k => k && !countryNames.includes(k)).sort(), ...(groups[''] ? [''] : [])];
     const groupHead = k => k ? `<div style="font-size:12px;font-weight:800;color:var(--accent);margin:10px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(k)}</div>` : (orderedKeys.length > 1 ? `<div style="font-size:12px;font-weight:800;color:var(--text-muted);margin:10px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Unassigned</div>` : '');
     document.getElementById('regions-overview').innerHTML = regions.length ? orderedKeys.map(k => groupHead(k) + groups[k].map(r => {
         const regionCenters = centers.filter(c => c.regionId === r.id);
         const coordinators = users.filter(u => u.role === 'coordinator' && u.regionId === r.id);
         const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => (s.studyCenterId || s.campus) === c.id));
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length ? `<div style="font-size:11px;color:var(--accent);margin-top:2px;">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 2px 0;">${esc(u.name || u.username)}<button class="btn btn-outline btn-sm" style="padding:0 5px;font-size:9px;margin-left:2px;" onclick="transferCoordinator('${u.username}')">🔄 Transfer</button></span>`).join('')}</div>` : ''}<div style="margin-top:4px;"><button class="btn btn-success btn-sm" onclick="showCoordinatorForm('${r.id}')">➕ Register Coordinator</button></div></div>`;
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length && canManageUsers ? `<div style="font-size:11px;color:var(--accent);margin-top:2px;">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 2px 0;">${esc(u.name || u.username)}<button class="btn btn-outline btn-sm" style="padding:0 5px;font-size:9px;margin-left:2px;" onclick="transferCoordinator('${u.username}')">🔄 Transfer</button></span>`).join('')}</div>` : ''}${canManageUsers ? `<div style="margin-top:4px;"><button class="btn btn-success btn-sm" onclick="showCoordinatorForm('${r.id}')">➕ Register Coordinator</button></div>` : ''}</div>`;
     }).join('')).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
     const settingsList = document.getElementById('regions-list');
     if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> ${r.country ? `<span class="badge badge-info">${escapeHtml(r.country)}</span>` : ''} <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
@@ -21442,12 +21502,22 @@ async function renderRegions() {
 
 async function showRegionForm(region = null) {
     const isEdit = !!region;
+    const scope = viewerScope();
+    const scopeCountry = (scope && scope.country) || '';
     const content = `<input type="hidden" id="region-edit-id" value="${region ? region.id : ''}">
 <div class="form-group"><label>Region Name *</label><input type="text" id="region-name" value="${region ? region.name : ''}" placeholder="e.g., Coast Region"></div>
 <div class="form-group"><label>Region ID * (short code, no spaces)</label><input type="text" id="region-code" value="${region ? region.id.replace('REG-', '') : ''}" placeholder="e.g., COAST" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>
 <div class="form-group"><label>Country</label><select id="region-country"><option value="">Unassigned (visible to all)</option></select></div>`;
     showModal(isEdit ? 'Edit Region' : 'Add Region', content, `<button class="btn btn-primary" onclick="saveRegion()">${isEdit ? 'Update' : 'Save'}</button>`);
-    loadCountryDropdown('region-country', region ? (region.country || '') : '');
+    const rgEl = document.getElementById('region-country');
+    if (scopeCountry) {
+        if (rgEl) {
+            rgEl.innerHTML = `<option value="${escapeHtml(scopeCountry)}" selected>${escapeHtml(scopeCountry)}</option>`;
+            rgEl.disabled = true;
+        }
+    } else {
+        loadCountryDropdown('region-country', region ? (region.country || '') : '');
+    }
 }
 
 async function saveRegion() {
@@ -21457,10 +21527,12 @@ async function saveRegion() {
     if (!code) return showToast('Region code required!');
     const editId = document.getElementById('region-edit-id').value;
     const id = editId || 'REG-' + code;
+    const scope = viewerScope();
+    const scopeCountry = (scope && scope.country) || '';
     const _rgEl = document.getElementById('region-country');
     const _rgLoaded = !!(_rgEl && _rgEl.options.length > 1);
     const _rgExisting = editId ? (((await dbGet('regions', id)) || {}).country || '') : '';
-    const region = { id, name, country: _rgLoaded ? _rgEl.value : _rgExisting, createdAt: editId ? (await dbGet('regions', id)).createdAt : new Date().toISOString() };
+    const region = { id, name, country: scopeCountry || (_rgLoaded ? _rgEl.value : _rgExisting), createdAt: editId ? (await dbGet('regions', id)).createdAt : new Date().toISOString() };
     await dbPut('regions', region); closeModal(); await renderRegions(); showToast(editId ? 'Region updated!' : 'Region added!'); logAudit(editId ? 'updated' : 'created', 'region', region);
 }
 
@@ -21487,14 +21559,54 @@ async function renderCountries() {
     let countries = [];
     try { countries = await fetchCountries(); }
     catch (e) { box.innerHTML = '<div style="color:var(--danger);font-size:12px;">Unable to load countries.</div>'; return; }
-    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span></span><button class="btn btn-danger btn-sm" data-name="${encodeURIComponent(c.name)}" onclick="deleteCountry(decodeURIComponent(this.dataset.name))">Del</button></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
+    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span>${c.phone ? ` <small style="color:var(--text-muted);">${escapeHtml(c.phone)}</small>` : ''}${c.postalAddress ? `<br><small style="color:var(--text-muted);">${escapeHtml(c.postalAddress)}</small>` : ''}</span><button class="btn btn-danger btn-sm" data-name="${encodeURIComponent(c.name)}" onclick="deleteCountry(decodeURIComponent(this.dataset.name))">Del</button></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
+}
+
+// Country self-service screen for country coordinators: shows the country's
+// brand identity and lets the coordinator set/update the postal address and
+// contact phone used on that country's documents. Writes funnel through
+// /api/country/:name/self which is strictly scoped to their own country.
+async function renderMyCountry() {
+    const box = document.getElementById('my-country-content');
+    if (!box) return;
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const country = u.country || '';
+        if (!country) { box.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;">Your account is not bound to a country.</div>'; return; }
+        const branding = await dbGet('settings', 'branding').catch(() => null);
+        const brandName = (branding && branding.country && branding.schoolName) ? branding.schoolName : country;
+        const initials = (branding && branding.country && branding.initials) ? branding.initials : (country ? country.substring(0, 2).toUpperCase() : '');
+        box.innerHTML = `<div style="display:grid;gap:12px;max-width:640px;">
+<div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:18px;border-radius:12px;"><div style="font-size:13px;opacity:.85;">WORKS IN YOUR COUNTRY</div><h3 style="margin:6px 0 2px;">${escapeHtml(brandName)}</h3><div style="font-size:12px;opacity:.9;">${escapeHtml(initials)} · ${escapeHtml(country)}</div></div>
+<div class="form-group"><label>Contact Phone <small style="opacity:.7">(shows on this country's documents)</small></label><input type="text" id="my-country-phone" value="${escapeHtml((branding && branding.phone) || '')}" placeholder="e.g. +254 7XX XXX XXX"></div>
+<div class="form-group"><label>Postal Address <small style="opacity:.7">(shows on this country's documents)</small></label><input type="text" id="my-country-postal" value="${escapeHtml((branding && branding.postalAddress) || '')}" placeholder="e.g. P.O. Box 12345, Nairobi"></div>
+<button class="btn btn-primary" onclick="saveMyCountrySelf()">💾 Save</button>
+<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">These appear on certificates, receipts, transcripts and letters generated in your country. The institution name and logo come from the overall branding.</p>
+</div>`;
+    } catch (e) { box.innerHTML = '<div style="color:var(--danger);text-align:center;padding:20px;">Unable to load your country.</div>'; }
+}
+async function saveMyCountrySelf() {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const country = u.country || '';
+        if (!country) return showToast('Your account is not bound to a country', { type: 'danger' });
+        const body = { postalAddress: document.getElementById('my-country-postal').value.trim() || '', phone: document.getElementById('my-country-phone').value.trim() || '' };
+        if (!body.postalAddress && !body.phone) return showToast('Nothing to save');
+        const res = await fetch('/api/country/' + encodeURIComponent(country) + '/self', { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || 'Could not save', { type: 'danger' });
+        showToast('Country details saved — they now appear on your documents', { type: 'success' });
+        renderMyCountry();
+    } catch (e) { showToast('Save failed: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
 }
 function showCountryForm() {
     const content = `<div class="form-group"><label>Country Name *</label><input type="text" id="country-name" placeholder="e.g., Kenya"></div>
 <div class="form-group"><label>Code (short, no spaces)</label><input type="text" id="country-code" placeholder="e.g., KE" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>
 <div class="form-row"><div class="form-group"><label>Brand Name</label><input type="text" id="country-brand" placeholder="Shown on login (defaults to name)"></div>
 <div class="form-group"><label>Initials</label><input type="text" id="country-initials" placeholder="e.g., KE" maxlength="4"></div></div>
-<div style="font-size:11px;color:var(--text-muted);">Appears on the login dropdown immediately. Non-admin logins will require it.</div>`;
+<div class="form-row"><div class="form-group"><label>Contact Phone</label><input type="text" id="country-phone" placeholder="e.g., +254 7XX XXX XXX"></div>
+<div class="form-group"><label>Postal Address</label><input type="text" id="country-postal" placeholder="e.g., P.O. Box 12345, Nairobi"></div></div>
+<div style="font-size:11px;color:var(--text-muted);">Appears on the login dropdown immediately, and as the closing identity on documents generated in this country. Country coordinators can update the postal address and phone from their dashboard.</div>`;
     showModal('Add Country', content, `<button class="btn btn-primary" onclick="saveCountry()">Save</button>`);
 }
 async function saveCountry() {
@@ -21502,8 +21614,10 @@ async function saveCountry() {
     const code = document.getElementById('country-code').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
     const brandName = document.getElementById('country-brand').value.trim();
     const initials = document.getElementById('country-initials').value.trim().toUpperCase();
+    const phone = document.getElementById('country-phone').value.trim();
+    const postalAddress = document.getElementById('country-postal').value.trim();
     if (!name) return showToast('Country name required!');
-    const res = await fetch('/api/countries', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ name, code: code || undefined, brandName: brandName || undefined, initials: initials || undefined }) });
+    const res = await fetch('/api/countries', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ name, code: code || undefined, brandName: brandName || undefined, initials: initials || undefined, phone: phone || undefined, postalAddress: postalAddress || undefined }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || 'Failed to add country');
     closeModal(); await renderCountries(); showToast('Country added!'); try { logAudit('created', 'country', { name }); } catch {}
@@ -21664,6 +21778,8 @@ async function renderCompare() {
     const box = document.getElementById('compare-content');
     if (!box) return;
     box.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px;">Loading country comparison…</div>';
+    let isNetAdminInCompare = false;
+    try { const _cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); isNetAdminInCompare = _cu.role === 'admin'; } catch {}
     let countries = [];
     try { countries = await fetchCountries(); } catch {}
     let d = {};
@@ -21683,12 +21799,106 @@ async function renderCompare() {
         const fees = (d.payments || []).filter(p => { const s = stuById[p.studentId]; return s && s.country === n; }).reduce((t, p) => t + (Number(p.amount) || 0), 0);
         const scores = (d.grades || []).filter(g => { const s = stuById[g.studentId]; return s && s.country === n && typeof g.score === 'number'; }).map(g => g.score);
         const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) + '%' : '—';
-        return `<div class="card" style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><h3 style="margin:0;">${escapeHtml(c.brandName || n)}</h3><button class="btn btn-outline btn-sm" data-name="${encodeURIComponent(n)}" onclick="previewAsCountry(decodeURIComponent(this.dataset.name))">👁 View as coordinator</button></div>
+        return `<div class="card" style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><h3 style="margin:0;">${escapeHtml(c.brandName || n)}</h3><div style="display:flex;gap:8px;flex-wrap:wrap;">${isNetAdminInCompare ? `<button class="btn btn-primary btn-sm" data-name="${encodeURIComponent(n)}" onclick="compareDrill(decodeURIComponent(this.dataset.name))">🔍 Deep dive</button>` : ''}<button class="btn btn-outline btn-sm" data-name="${encodeURIComponent(n)}" onclick="previewAsCountry(decodeURIComponent(this.dataset.name))">👁 View as coordinator</button></div></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-top:10px;">${stat('Students', students.length)}${stat('Staff', staff.length)}${stat('Coordinators', coords.length)}${stat('Centers', centers.length)}${stat('Regions', regions.length)}${stat('Exams', exams.length)}${stat('Fees', (typeof formatCurrency === 'function' ? formatCurrency(fees) : fees))}${stat('Avg grade', avg)}</div></div>`;
     }).join('');
     const un = (arr) => (arr || []).filter(r => r && !r.country).length;
     const unCard = `<div class="card" style="margin-bottom:12px;border-style:dashed;"><h4 style="margin:0 0 4px;">Unassigned (visible to all)</h4><div style="font-size:12px;color:var(--text-muted);">Students: ${un(d.students)} · Staff: ${un(d.staff)} · Centers: ${un(d.studyCenters)} · Regions: ${un(d.regions)}</div></div>`;
     box.innerHTML = (countries.length ? '' : '<div style="color:var(--text-muted);text-align:center;padding:12px;">No countries configured yet — add them in Settings → Countries.</div>') + cards + unCard;
+}
+
+// Deep dive for the overall admin: country → regions → study centers → students.
+// Uses the data already loaded by renderCompare() (students/staff/users/centers/
+// regions/payments/grades/exams) so this is pure presentation, no extra reads.
+async function compareDrill(country) {
+    const d = {};
+    try { d['batch'] = await dbGetBatch(['students', 'staff', 'users', 'studyCenters', 'regions', 'payments', 'grades', 'exams']); }
+    catch (e) { return showToast('Unable to load drill-down data', { type: 'danger' }); }
+    const B = d.batch;
+    const students = (B.students || []).filter(s => s.country === country);
+    const staff = (B.staff || []).filter(s => s.country === country);
+    const coords = (B.users || []).filter(u => u.role === 'coordinator' && u.country === country);
+    const centers = (B.studyCenters || []).filter(x => x.country === country);
+    const regions = (B.regions || []).filter(x => x.country === country);
+    const centerById = {};
+    centers.forEach(c => { centerById[c.id] = c; });
+    const studentRows = students.map(s => {
+        const center = centerById[s.studyCenterId] ? centerById[s.studyCenterId].name : '—';
+        const fees = (B.payments || []).filter(p => String(p.studentId) === String(s.id)).reduce((t, p) => t + (Number(p.amount) || 0), 0);
+        return `<tr><td style="font-size:12px;"><b>${escapeHtml(s.name)}</b>${s.admissionNumber ? `<br><small style="opacity:.7;">${escapeHtml(s.admissionNumber)}</small>` : ''}</td><td style="font-size:11px;">${escapeHtml(s.program || '—')}</td><td style="font-size:11px;">${escapeHtml(center)}</td><td style="font-size:11px;">${s.phone ? `<a href="tel:${escapeHtml(s.phone)}" style="color:var(--accent);">${escapeHtml(s.phone)}</a>` : '—'}</td><td style="font-size:11px;">${escapeHtml(s.status || '—')}</td><td style="font-size:11px;">${formatCurrency(fees)}</td><td><button class="btn btn-outline btn-sm" onclick="showStudentDetail('${country.replace(/'/g, "\\'")}','${String(s.id).replace(/'/g, "\\'")}')">👁</button></td></tr>`;
+    }).join('');
+    const regionRows = regions.map(r => {
+        const cIds = centers.filter(c => c.regionId === r.id).map(c => c.id);
+        const sCount = students.filter(s => cIds.includes(s.studyCenterId)).length;
+        return `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;cursor:pointer;" onclick="compareDrillRegion('${country.replace(/'/g, "\\'")}','${r.id.replace(/'/g, "\\'")}')"><span><b>${escapeHtml(r.name)}</b> <span class="badge badge-info">${sCount} students</span> <span class="badge badge-light">${cIds.length} centers</span></span><span style="color:var(--accent);font-size:12px;">Centers →</span></div>`;
+    }).join('');
+    const summary = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:10px 0;">${[
+        ['Students', students.length], ['Staff', staff.length], ['Coordinators', coords.length], ['Centers', centers.length], ['Regions', regions.length]
+    ].map(([l, v]) => `<div style="background:var(--bg-input);border-radius:8px;padding:8px;text-align:center;"><div style="font-size:17px;font-weight:800;">${v}</div><div style="font-size:10px;color:var(--text-muted);">${l}</div></div>`).join('')}</div>`;
+    let html = summary;
+    if (!regions.length && !centers.length) {
+        html += `<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">No regions or centers configured for ${escapeHtml(country)} — the overall admin can add them in Settings → Countries.</div>`;
+    } else if (regions.length) {
+        html += `<div style="font-weight:700;font-size:12px;margin:8px 0 4px;color:var(--accent);">Regions (click to drill into study centers)</div>${regionRows}`;
+    } else {
+        html += `<div style="font-weight:700;font-size:12px;margin:8px 0 4px;color:var(--accent);">Study Centers (${centers.length})</div><div style="font-size:11px;color:var(--text-muted);padding:4px 0 8px;">No regions yet — centers have no region binding.</div>${centers.map(c => `<div class="event-item" style="cursor:pointer;" onclick="compareDrillCenter('${country.replace(/'/g, "\\'")}','${String(c.id).replace(/'/g, "\\'")}')"><span><b>${escapeHtml(c.name)}</b></span><span style="color:var(--accent);font-size:11px;">${students.filter(s => String(s.studyCenterId) === String(c.id)).length} students →</span></div>`).join('')}`;
+    }
+    html += `<div style="border-top:1px solid var(--border);margin-top:12px;padding-top:10px;"><div style="font-weight:700;font-size:12px;margin-bottom:4px;color:var(--accent);">Students in ${escapeHtml(country)} (${students.length})</div>
+    <div style="max-height:320px;overflow:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid var(--border);text-align:left;"><th style="padding:6px;font-size:11px;">Student</th><th style="padding:6px;font-size:11px;">Program</th><th style="padding:6px;font-size:11px;">Study Center</th><th style="padding:6px;font-size:11px;">Phone</th><th style="padding:6px;font-size:11px;">Status</th><th style="padding:6px;font-size:11px;">Fees Paid</th><th style="padding:6px;font-size:11px;"></th></tr></thead><tbody>${studentRows || '<tr><td colspan="7" style="text-align:center;padding:16px;font-size:11px;color:var(--text-muted);">No students registered in this country.</td></tr>'}</tbody></table></div></div>`;
+    showModal('📊 Deep Dive — ' + escapeHtml(country), html);
+}
+async function compareDrillRegion(country, regionId) {
+    const d = {};
+    try { d.batch = await dbGetBatch(['students', 'studyCenters', 'regions', 'payments']); }
+    catch (e) { return showToast('Unable to load region data', { type: 'danger' }); }
+    const B = d.batch;
+    const region = (B.regions || []).find(r => r.id === regionId) || { id: regionId, name: regionId };
+    const centers = (B.studyCenters || []).filter(c => c.country === country && c.regionId === regionId);
+    const students = (B.students || []).filter(s => s.country === country);
+    const html = `<div style="font-weight:700;font-size:13px;margin-bottom:10px;">🏛 ${escapeHtml(country)} → ${escapeHtml(region.name)}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">${centers.length} study centers · ${students.filter(s => centers.some(c => String(c.id) === String(s.studyCenterId))).length} students</div>
+    <button class="btn btn-outline btn-sm" onclick="compareDrill('${country.replace(/'/g, "\\'")}')">← Back</button>
+    <div style="margin-top:10px;">${centers.length ? centers.map(c => {
+        const sCount = students.filter(s => String(s.studyCenterId) === String(c.id)).length;
+        const fees = students.filter(s => String(s.studyCenterId) === String(c.id)).reduce((t, s) => t + (B.payments || []).filter(p => String(p.studentId) === String(s.id)).reduce((x, p) => x + (Number(p.amount) || 0), 0), 0);
+        return `<div class="event-item" style="cursor:pointer;" onclick="compareDrillCenter('${country.replace(/'/g, "\\'")}','${String(c.id).replace(/'/g, "\\'")}')"><span><b>${escapeHtml(c.name)}</b> <span class="badge badge-info">${sCount} students</span></span><span style="font-size:11px;color:var(--text-muted);">${formatCurrency(fees)} paid →</span></div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:12px;padding:10px;">No study centers in this region.</div>'}</div>`;
+    showModal('Study Centers — ' + escapeHtml(region.name), html);
+}
+async function compareDrillCenter(country, centerId) {
+    const d = {};
+    try { d.batch = await dbGetBatch(['students', 'studyCenters', 'regions', 'payments', 'grades']); }
+    catch (e) { return showToast('Unable to load center data', { type: 'danger' }); }
+    const B = d.batch;
+    const center = (B.studyCenters || []).find(c => String(c.id) === String(centerId)) || { id: centerId, name: centerId };
+    const students = (B.students || []).filter(s => s.country === country && String(s.studyCenterId) === String(centerId));
+    const rows = students.map(s => {
+        const fees = (B.payments || []).filter(p => String(p.studentId) === String(s.id)).reduce((t, p) => t + (Number(p.amount) || 0), 0);
+        return `<tr><td style="font-size:12px;"><b>${escapeHtml(s.name)}</b>${s.admissionNumber ? `<br><small style="opacity:.7;">${escapeHtml(s.admissionNumber)}</small>` : ''}</td><td style="font-size:11px;">${s.phone ? `<a href="tel:${escapeHtml(s.phone)}" style="color:var(--accent);">${escapeHtml(s.phone)}</a>` : '—'}</td><td style="font-size:11px;">${escapeHtml(s.program || '—')}</td><td style="font-size:11px;">${formatCurrency(fees)}</td><td><button class="btn btn-outline btn-sm" onclick="showStudentDetail('${country.replace(/'/g, "\\'")}','${String(s.id).replace(/'/g, "\\'")}')">👁</button></td></tr>`;
+    }).join('');
+    const html = `<div style="font-weight:700;font-size:13px;margin-bottom:10px;">🏫 ${escapeHtml(country)} → ${escapeHtml(center.name)}</div>
+    <button class="btn btn-outline btn-sm" onclick="compareDrill('${country.replace(/'/g, "\\'")}')">← Back</button>
+    <div style="max-height:380px;overflow:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid var(--border);text-align:left;"><th style="padding:6px;font-size:11px;">Student</th><th style="padding:6px;font-size:11px;">Phone</th><th style="padding:6px;font-size:11px;">Program</th><th style="padding:6px;font-size:11px;">Fees Paid</th><th style="padding:6px;font-size:11px;"></th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:16px;font-size:11px;color:var(--text-muted);">No students at this center.</td></tr>'}</tbody></table></div>`;
+    showModal('Students — ' + escapeHtml(center.name), html);
+}
+async function showStudentDetail(country, studentId) {
+    const d = {};
+    try { d.batch = await dbGetBatch(['students', 'studyCenters', 'payments', 'grades', 'attendance', 'exams']); }
+    catch (e) { return showToast('Unable to load student detail', { type: 'danger' }); }
+    const B = d.batch;
+    const s = (B.students || []).find(st => String(st.id) === String(studentId));
+    if (!s) return showToast('Student not found', { type: 'danger' });
+    const center = (B.studyCenters || []).find(c => String(c.id) === String(s.studyCenterId));
+    const payments = (B.payments || []).filter(p => String(p.studentId) === String(s.id));
+    const fees = payments.reduce((t, p) => t + (Number(p.amount) || 0), 0);
+    const grades = (B.grades || []).filter(g => String(g.studentId) === String(s.id));
+    const paidCount = (B.attendance || []).filter(a => String(a.studentId) === String(s.id) && (a.status === 'present' || a.status === 'late')).length;
+    const examsTaken = (B.exams || []).filter(e => String(e.studentId) === String(s.id));
+    const kv = (l, v) => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dotted var(--border);"><span style="font-size:12px;color:var(--text-muted);">${l}</span><span style="font-size:12px;font-weight:600;">${v}</span></div>`;
+    const html = `<div style="font-weight:700;font-size:13px;margin-bottom:10px;">🎓 ${escapeHtml(s.name)}</div>
+    <div style="font-size:12px;background:var(--bg-input);border-radius:10px;padding:12px;margin-bottom:12px;">${kv('Admission No.', escapeHtml(s.admissionNumber || '—'))}${kv('Program', escapeHtml(s.program || '—'))}${kv('Status', escapeHtml(s.status || '—'))}${kv('Study Center', escapeHtml(center ? center.name : '—'))}${kv('Country', escapeHtml(s.country || country))}${kv('Phone', s.phone ? escapeHtml(s.phone) : '—')}${s.email ? kv('Email', escapeHtml(s.email)) : ''}${s.address ? kv('Address', escapeHtml(s.address)) : ''}${kv('Total Fees Paid', formatCurrency(fees))}${kv('Attendance Count', paidCount)}${kv('Grades Recorded', grades.length)}${kv('Exams Taken', examsTaken.length)}</div>
+    <button class="btn btn-outline btn-sm" onclick="compareDrillCenter('${country.replace(/'/g, "\\'")}','${center ? String(center.id).replace(/'/g, "\\'") : ''}')">← Back to center</button>`;
+    showModal('Student Detail — ' + escapeHtml(country), html);
 }
 
 async function showCoordinatorForm(regionId) {
@@ -21726,6 +21936,7 @@ function showCountryCoordinatorForm() {
 <div class="form-group"><label>Username *</label><input type="text" id="cc-username" placeholder="e.g., jdoe"></div>
 <div class="form-group"><label>Password *</label><input type="password" id="cc-password" placeholder="min 4 characters"></div>
 <div class="form-group"><label>Country *</label><select id="cc-country"><option value="">— Select country —</option></select></div>
+<div class="form-group"><label>Contact Phone</label><input type="text" id="cc-phone" placeholder="e.g., +254 7XX XXX XXX"><small style="display:block;opacity:.7;">Appears as the contact phone on documents this coordinator generates.</small></div>
 <div style="font-size:11px;color:var(--text-muted);">This account becomes an <b>administrator of the selected country</b>: full management powers fenced to that country's data. Global settings stay with the overall admin.</div>`;
     showModal('Register Country Coordinator', content, `<button class="btn btn-primary" onclick="saveCountryCoordinator()">Register</button>`);
     loadCountryDropdown('cc-country', '');
@@ -21742,7 +21953,7 @@ async function saveCountryCoordinator() {
     const existing = await dbGet('users', username).catch(() => null);
     if (existing) return showToast('Username already taken!');
     const pwHash = await hashPassword(password);
-    const user = { username, password: pwHash, name, role: 'coordinator', country, createdAt: new Date().toISOString() };
+    const user = { username, password: pwHash, name, role: 'coordinator', country, phone: (document.getElementById('cc-phone') ? document.getElementById('cc-phone').value.trim() : '') || name.replace(/^[^+0-9]*/, '') || '', createdAt: new Date().toISOString() };
     await dbPut('users', user);
     closeModal();
     try { if (typeof renderUsers === 'function') await renderUsers(); } catch {}
