@@ -1,7 +1,7 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`)
-**HEAD:** `836d0af` · **Assets:** `js/bundle.js?v=338` (preload + script tags), `js/student-hub.js?v=44`, `css/main.146.css?v=147`
+**HEAD:** `a13f15c` · **Assets:** `js/bundle.js?v=338` (preload + script tags), `js/student-hub.js?v=44`, `css/main.146.css?v=147`
 **Deploy = `railway up --detach -y`** (Railway CLI v5.23.3, Hobby plan, DOCKERFILE builder) · healthcheck `/api/health` · hard-refresh (`Ctrl+Shift+R`) after client deploys
 
 ## Session 2026-09-21/22 — country coordinator regions & study centers, unified admission numbers, signup country (bundle v=338)
