@@ -1,9 +1,16 @@
 # NET Kenya CMS — Session Summary
 
 **Live site:** https://netfoundation.ke · **Repo:** Wafularmi/net-kenya-cms (`main`)
-**HEAD:** `a13f15c` · **Assets:** `js/bundle.js?v=338` (preload + script tags), `js/student-hub.js?v=44`, `css/main.146.css?v=147`
+**HEAD:** releasing now (drip same-unit instant unlock) · **Assets:** `js/bundle.js?v=338` (preload + script tags), `js/student-hub.js?v=45`, `css/main.146.css?v=147`
 **Deploy = `railway up --detach -y`** (Railway CLI v5.23.3, Hobby plan, DOCKERFILE builder) · healthcheck `/api/health` · hard-refresh (`Ctrl+Shift+R`) after client deploys
 
+## Session 2026-09-23 — drip: same-lesson units unlock instantly, pace only between lessons (student-hub v=45)
+
+- **Root cause:** in courses like **GOD'S CALL TO MINISTRY**, each video is its own lesson record. The drip engine gated EVERY consecutive step by the course pace (default 3.5 days), so VIDEO 1/2/3 each waited ~3.5 days after the previous part.
+- **Change (`drip-engine.js`):** new `dripGroupOfLesson(l)` parses title prefix `^Lesson\s+(\d+)` -> group key L1; titles without a prefix stay their own unit (T{id} - unchanged). `dripSweep` + `dripNextInfo` now use gapMs=0 within a unit (`dripSameLessonUnit(prev,l)`): Notes -> VIDEO 1 -> VIDEO 2 unlock instantly AND one at a time (sequential). The 3.5-day pace applies BETWEEN lesson units only. Fee gate, weekly target, quiz gating, pace=0 unchanged.
+- **Client copy (`js/student-hub.js?v=45`):** mirror helpers `hubDripGroupKey`/`hubDripSameUnit`; roadmap + locked-toast say a same-unit next part unlocks instantly once the previous part is done. Server authoritative.
+- **Tests (`test-drip-engine.cjs`):** 10 new engine cases - grouping, instant within-unit unlock (sweep + dripNextInfo), cross-unit pace still enforced, pace-0 flow. PASS=38 FAIL=0; `node --check` clean on server.js, js/bundle.js, js/student-hub.js, drip-engine.js. Deployed (railway up --detach): served bundle.js?v=338 + student-hub.js?v=45 confirmed live; maintenance OFF.
+- **Note:** live end-to-end drip can't be verified headlessly (needs a real student reading timer on the live site); engine unit tests are authoritative. NOT yet committed - awaiting user go-ahead for git add/commit/push.
 ## Session 2026-09-21/22 — country coordinator regions & study centers, unified admission numbers, signup country (bundle v=338)
 
 - **Regions & study centers for country coordinators** (all live-verified as JAMES/TOGO): region form locks the Country select to the coordinator's own country (disabled), and `saveRegion` stamps it even when left blank; study-center form filters the Region dropdown to that country, locks Country, and when the Code field is left blank **auto-generates** a country-carrying code (`{COUNTRY-LETTERS}C{index}`, e.g. `TOGOC1` → `UNSC`-style typed codes still allowed). Both forms set `country` explicitly (`bundle.js showRegionForm/saveRegion/showStudyCenterForm/saveStudyCenter/generateCenterCode`).

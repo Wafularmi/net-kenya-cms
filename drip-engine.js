@@ -49,6 +49,22 @@ function dripPaceMs(course) {
     return Math.round(d * 86400000);
 }
 
+// Lesson parts are grouped into UNITS by the leading "Lesson N" prefix of the
+// title (e.g. "Lesson 1 ...", "Lesson 1 VIDEO 1" all belong to "Lesson 1").
+// Within a unit the chain advances INSTANTLY (Notes -> VIDEO 1 -> VIDEO 2...);
+// the course pace gap only applies between UNITS (Lesson 1 -> Lesson 2).
+// Lessons without a "Lesson N" prefix are each their own unit (unchanged).
+function dripGroupOfLesson(l) {
+    try {
+        const m = /^Lesson\s+(\d+)/i.exec(String((l && l.title) || '').trim());
+        if (m) return 'L' + parseInt(m[1], 10);
+    } catch (e) {}
+    return 'T' + String((l && l.id) || '');
+}
+function dripSameLessonUnit(a, b) {
+    return dripGroupOfLesson(a) === dripGroupOfLesson(b);
+}
+
 function dripStartOfWeek(d) {
     const dt = d ? new Date(d) : new Date();
     if (isNaN(dt.getTime())) { const n = new Date(); n.setHours(0, 0, 0, 0); n.setDate(n.getDate() - ((n.getDay() + 6) % 7)); return n; }
@@ -189,7 +205,10 @@ function dripSweep(db, sid, courseIdOnly) {
             if (!pc || !pc.completedAt) break;
             const pu = myU.find(r => String(r.lessonId) === String(prev.id));
             const anchor = Math.max(pu ? (+new Date(pu.unlockedAt) || 0) : 0, +new Date(pc.completedAt) || 0);
-            if (paceMs > 0 && Date.now() - anchor < paceMs) break;
+            // No gap between parts of the SAME lesson unit (Notes -> VIDEO 1 ->
+            // VIDEO 2 -> ...); the course pace only applies between units.
+            const gapMs = dripSameLessonUnit(prev, l) ? 0 : paceMs;
+            if (gapMs > 0 && Date.now() - anchor < gapMs) break;
             db.lessonUnlocks.push({ id: dripRecId('LU', sid, l.id), studentId: String(sid), lessonId: String(l.id), courseId: String(l.courseId || ''), unlockedAt: new Date().toISOString(), by: 'drip' });
             changed = true;
         }
@@ -223,9 +242,10 @@ function dripNextInfo(db, sid, courseId, afterLessonId) {
     const paceMs = dripPaceMs(course);
     const pu = myU.find(r => String(r.lessonId) === String(prev.id));
     const anchor = Math.max(pu ? (+new Date(pu.unlockedAt) || 0) : 0, +new Date(pc.completedAt) || 0);
-    if (paceMs > 0 && Date.now() - anchor < paceMs) {
+    const gapMs = dripSameLessonUnit(prev, nx) ? 0 : paceMs;
+    if (gapMs > 0 && Date.now() - anchor < gapMs) {
         const paceDays = (course && course.dripDaysBetween != null && course.dripDaysBetween !== '' && !isNaN(parseFloat(course.dripDaysBetween))) ? parseFloat(course.dripDaysBetween) : DRIP_DEFAULT_PACE_DAYS;
-        return { lessonId: nx.id, title: nx.title, reason: 'pace', paceDays, opensAtMs: anchor + paceMs };
+        return { lessonId: nx.id, title: nx.title, reason: 'pace', paceDays, opensAtMs: anchor + gapMs };
     }
     return { lessonId: nx.id, title: nx.title, reason: 'open' };
 }
@@ -233,6 +253,7 @@ function dripNextInfo(db, sid, courseId, afterLessonId) {
 module.exports = {
     DRIP_PASS, DRIP_DEFAULT_PACE_DAYS,
     dripRecId, dripModeOfLesson, dripReadEstimateSecs, dripLessonContent, dripPaceMs,
+    dripGroupOfLesson, dripSameLessonUnit,
     dripStartOfWeek, dripFeeOk, dripQuizBestForLesson, dripEvalCompletion, dripSweep,
     dripMapsFor, dripNextInfo
 };

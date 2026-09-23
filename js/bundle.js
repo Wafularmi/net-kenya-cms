@@ -11522,16 +11522,108 @@ async function renderAlumni() {
 }
 async function showAlumniForm(alumni = null) {
     const isEdit = !!alumni;
-    const content = `<input type="hidden" id="alumni-edit-id" value="${alumni ? alumni.id : ''}"><div class="form-group"><label>Full Name *</label><input type="text" id="alumni-name" value="${alumni ? alumni.name : ''}" required></div><div class="form-row"><div class="form-group"><label>Program</label><input type="text" id="alumni-program" value="${alumni ? alumni.program || '' : ''}"></div><div class="form-group"><label>Graduation Year</label><input type="number" id="alumni-year" value="${alumni ? alumni.gradYear || new Date().getFullYear() : new Date().getFullYear()}"></div></div><div class="form-row"><div class="form-group"><label>Phone</label><input type="text" id="alumni-phone" value="${alumni ? alumni.phone || '' : ''}"></div><div class="form-group"><label>Email</label><input type="email" id="alumni-email" value="${alumni ? alumni.email || '' : ''}"></div></div><div class="form-group"><label>Current Ministry/Work</label><input type="text" id="alumni-ministry" value="${alumni ? alumni.ministry || '' : ''}"></div><div class="form-group"><label>Location</label><input type="text" id="alumni-location" value="${alumni ? alumni.location || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="alumni-notes">${alumni ? alumni.notes || '' : ''}</textarea></div>`;
+    const content = `<input type="hidden" id="alumni-edit-id" value="${alumni ? alumni.id : ''}">${alumni ? `<div class="form-group"><label>Full Name *</label><input type="text" id="alumni-name" value="${alumni.name}" required></div>` : `<div class="form-group"><label>Add by Student *</label><input type="hidden" id="alumni-student-id" value=""><input type="hidden" id="alumni-name" value=""><div class="form-group" style="margin-bottom:8px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;"><input type="checkbox" id="alumni-bulk" onchange="toggleAlumniBulk()"> Bulk add multiple students</label></div><div id="alumni-student-wrap"><select id="alumni-student" class="form-control" onchange="onAlumniStudentSelect(this)"><option value="">Select student...</option></select></div><div id="alumni-bulk-list" style="display:none;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:10px;"></div></div>`}<div class="form-row"><div class="form-group"><label>Program</label><input type="text" id="alumni-program" value="${alumni ? alumni.program || '' : ''}"></div><div class="form-group"><label>Graduation Year</label><input type="number" id="alumni-year" value="${alumni ? alumni.gradYear || new Date().getFullYear() : new Date().getFullYear()}"></div></div><div class="form-row"><div class="form-group"><label>Phone</label><input type="text" id="alumni-phone" value="${alumni ? alumni.phone || '' : ''}"></div><div class="form-group"><label>Email</label><input type="email" id="alumni-email" value="${alumni ? alumni.email || '' : ''}"></div></div><div class="form-group"><label>Current Ministry/Work</label><input type="text" id="alumni-ministry" value="${alumni ? alumni.ministry || '' : ''}"></div><div class="form-group"><label>Location</label><input type="text" id="alumni-location" value="${alumni ? alumni.location || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="alumni-notes">${alumni ? alumni.notes || '' : ''}</textarea></div>`;
     showModal(isEdit ? 'Edit Alumni' : 'Add Alumni', content, `<button class="btn btn-primary" onclick="saveAlumni()">${isEdit ? 'Update' : 'Add'}</button>`);
+    if (!isEdit) loadAlumniStudentPool();
+}
+async function getAlumniCandidateStudents() {
+    let students = await dbGetAll('students');
+    students = students.filter(s => s.status === 'active' || s.status === 'graduated');
+    const centers = await getCenters();
+    const cidSet = new Set(centers.map(c => c.id));
+    return students.filter(s => cidSet.has(s.studyCenterId));
+}
+async function loadAlumniStudentPicker() {
+    const students = await getAlumniCandidateStudents();
+    const sel = document.getElementById('alumni-student');
+    const bulkBox = document.getElementById('alumni-bulk-list');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select student...</option>' + students.map(s => `<option value="${s.id}">${escapeHtml(s.name)}${s.program ? ' — ' + escapeHtml(s.program) : ''}</option>`).join('');
+    if (bulkBox) {
+        bulkBox.innerHTML = students.map(s => `<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer;font-weight:normal;"><input type="checkbox" class="alumni-bulk-cb" value="${s.id}" style="width:auto;flex:none;"><span>${escapeHtml(s.name)}${s.program ? ' — ' + escapeHtml(s.program) : ''}</span></label>`).join('') || '<div style="color:var(--muted);padding:8px;">No students available.</div>';
+    }
+}
+function toggleAlumniBulk() {
+    const bulk = document.getElementById('alumni-bulk').checked;
+    const wrap = document.getElementById('alumni-student-wrap');
+    const list = document.getElementById('alumni-bulk-list');
+    if (wrap) wrap.style.display = bulk ? 'none' : '';
+    if (list) list.style.display = bulk ? '' : 'none';
+}
+async function onAlumniStudentSelect(sel) {
+    const sid = sel.value;
+    const idField = document.getElementById('alumni-student-id');
+    const nameField = document.getElementById('alumni-name');
+    if (idField) idField.value = sid;
+    if (nameField) nameField.value = '';
+    if (!sid) return;
+    const st = await dbGet('students', sid);
+    if (!st) return;
+    if (nameField) nameField.value = st.name || '';
+    const program = document.getElementById('alumni-program'); if (program) program.value = st.program || '';
+    const phone = document.getElementById('alumni-phone'); if (phone) phone.value = st.phone || '';
+    const email = document.getElementById('alumni-email'); if (email) email.value = st.email || '';
+    const year = document.getElementById('alumni-year'); if (year && st.gradYear) year.value = st.gradYear;
+}
+async function loadAlumniStudentPool() {
+    const students = await getAlumniCandidateStudents();
+    const sel = document.getElementById('alumni-student');
+    const bulkList = document.getElementById('alumni-bulk-list');
+    if (sel) {
+        sel.innerHTML = '<option value="">Select student...</option>' + students.map(s => `<option value="${s.id}">${escapeHtml(s.name)}${s.program ? ' — ' + escapeHtml(s.program) : ''}</option>`).join('');
+    }
+    if (bulkList) {
+        bulkList.innerHTML = students.map(s => `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;"><input type="checkbox" class="alumni-bulk-cb" value="${s.id}" style="width:auto;flex:none;"> <span>${escapeHtml(s.name)}${s.program ? ' — ' + escapeHtml(s.program) : ''}</span></label>`).join('') || '<div style="color:var(--text-muted);padding:8px;">No candidate students found.</div>';
+    }
 }
 async function saveAlumni() {
-    const name = document.getElementById('alumni-name').value.trim();
-    if (!name) return showToast('Name required!');
     const editId = document.getElementById('alumni-edit-id').value;
-    const id = editId || 'ALU-' + Date.now().toString(36).toUpperCase();
-    const alumni = { id, name, program: document.getElementById('alumni-program').value.trim(), gradYear: parseInt(document.getElementById('alumni-year').value) || new Date().getFullYear(), phone: document.getElementById('alumni-phone').value.trim(), email: document.getElementById('alumni-email').value.trim(), ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim(), createdAt: editId ? (await dbGet('alumni', id)).createdAt : new Date().toISOString() };
-    await dbPut('alumni', alumni); closeModal(); renderAlumni(); showToast(editId ? 'Alumni updated!' : 'Alumni added!'); logAudit(editId ? 'updated' : 'created', 'alumni', alumni);
+    const isBulk = !editId && document.getElementById('alumni-bulk') && document.getElementById('alumni-bulk').checked;
+    const year = parseInt(document.getElementById('alumni-year').value) || new Date().getFullYear();
+    const existing = await dbGetAll('alumni');
+    const existsByStudent = new Set(existing.map(a => a.studentId).filter(Boolean));
+    const existsByName = new Set(existing.map(a => (a.name || '').toLowerCase()));
+    let addedCount = 0, skippedCount = 0;
+    const built = [];
+    const finalize = async (student, extra) => {
+        const id = 'ALU-' + Date.now().toString(36).toUpperCase() + (built.length ? '-' + built.length : '');
+        const rec = Object.assign({ id, name: (student && student.name) || extra.name, program: (student && student.program) || (extra.program || ''), gradYear: year, phone: (student && student.phone) || (extra.phone || ''), email: (student && student.email) || (extra.email || ''), ministry: extra.ministry || '', location: extra.location || '', notes: extra.notes || '', studentId: student ? student.id : undefined, createdAt: new Date().toISOString() }, extra.template || {});
+        await dbPut('alumni', rec);
+        built.push(rec);
+        addedCount++;
+    };
+    const skipIfExists = async (studentOrName) => {
+        const nm = typeof studentOrName === 'string' ? studentOrName.toLowerCase() : (studentOrName.name || '').toLowerCase();
+        if (existsByName.has(nm)) return true;
+        if (typeof studentOrName !== 'string' && studentOrName.id && existsByStudent.has(studentOrName.id)) return true;
+        return false;
+    };
+    if (editId) {
+        const st = await dbGet('students', document.getElementById('alumni-student-id') ? document.getElementById('alumni-student-id').value : '');
+        await finalize(st, { name: document.getElementById('alumni-name').value.trim(), program: document.getElementById('alumni-program').value.trim(), phone: document.getElementById('alumni-phone').value.trim(), email: document.getElementById('alumni-email').value.trim(), ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim(), template: { id: editId, createdAt: (await dbGet('alumni', editId)).createdAt, studentId: (await dbGet('alumni', editId)).studentId } });
+    } else if (isBulk) {
+        const ids = Array.from(document.querySelectorAll('#alumni-bulk-list .alumni-bulk-cb:checked')).map(c => c.value);
+        if (!ids.length) return showToast('Select at least one student!');
+        const students = await getAlumniCandidateStudents();
+        const byId = {}; students.forEach(s => { byId[s.id] = s; });
+        for (const sid of ids) {
+            const st = byId[sid] || await dbGet('students', sid);
+            if (!st) continue;
+            if (await skipIfExists(st)) { skippedCount++; continue; }
+            await finalize(st, { ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim() });
+        }
+    } else {
+        const sid = document.getElementById('alumni-student-id') ? document.getElementById('alumni-student-id').value : '';
+        const st = sid ? (await dbGet('students', sid)) : null;
+        if (!st) return showToast('Select a student!');
+        if (await skipIfExists(st)) return showToast('Student already in alumni!');
+        await finalize(st, { ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim() });
+    }
+    if (editId) { if (built.length) { await dbDelete('alumni', editId); } }
+    closeModal(); renderAlumni();
+    const msg = isBulk ? `Added ${addedCount} alumni${skippedCount ? `, skipped ${skippedCount} existing` : ''}!` : (editId ? 'Alumni updated!' : 'Alumni added!');
+    showToast(msg);
+    built.forEach(r => logAudit(editId ? 'updated' : 'created', 'alumni', r));
 }
 async function editAlumni(id) {
     const alumni = await dbGet('alumni', id); if (!alumni) return; showAlumniForm(alumni);

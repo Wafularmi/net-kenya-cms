@@ -437,6 +437,18 @@ function hubDripPaceLabel(course) {
     if (raw === 0) return 'instant';
     return (raw % 1 === 0 ? raw : raw.toFixed(1)) + ' days';
 }
+// Parts of the SAME lesson unit (title prefix "Lesson N") unlock back-to-back
+// instantly; the pause sits BETWEEN lesson units only.
+function hubDripGroupKey(l) {
+    try {
+        const m = /^Lesson\s+(\d+)/i.exec(String((l && l.title) || '').trim());
+        if (m) return 'L' + parseInt(m[1], 10);
+    } catch (e) {}
+    return 'T' + String((l && l.id) || '');
+}
+function hubDripSameUnit(a, b) {
+    return hubDripGroupKey(a) === hubDripGroupKey(b);
+}
 function hubLessonDripState(l, dripIndex) {
     if (typeof lessonMode !== 'function' || lessonMode(l) !== 'drip') return null;
     const u = (typeof _dripU !== 'undefined' && _dripU) ? _dripU[l.id] : null;
@@ -461,7 +473,13 @@ function hubDripRoadmap(course, allLessons) {
     };
     let nextHtml = '';
     if (blockedFirst && blockedState) {
-        const reasonTxt = blockedState.reason === 'fees' ? 'Your weekly fee target is not met yet. Clear the target to unlock the next lesson.' : blockedState.reason === 'pending' ? 'Unlocks as soon as the system processes your enrolment.' : ('Complete the previous lesson to unlock this one.' + (paceLabel === 'instant' ? ' This course unlocks lessons instantly after the previous one is done.' : ' Pacing: one new lesson every ' + paceLabel + ' after the previous is done.'));
+        let sameUnitText = false;
+        if (blockedState.reason === 'prev') {
+            const bi = list.findIndex(x => x.id === blockedFirst.id);
+            const prevAr = bi > 0 ? list[bi - 1] : null;
+            sameUnitText = !!prevAr && hubDripSameUnit(prevAr, blockedFirst);
+        }
+        const reasonTxt = blockedState.reason === 'fees' ? 'Your weekly fee target is not met yet. Clear the target to unlock the next lesson.' : blockedState.reason === 'pending' ? 'Unlocks as soon as the system processes your enrolment.' : (sameUnitText ? 'Finish the previous part of this lesson (notes or video) and the next one unlocks instantly — only a pause between different lessons.' : ('Complete the previous lesson to unlock this one.' + (paceLabel === 'instant' ? ' This course unlocks lessons instantly after the previous one is done.' : ' Pacing: one new lesson every ' + paceLabel + ' after the previous is done.')));
         nextHtml = '<div style="margin-top:10px;padding:10px 12px;background:rgba(245,245,245,0.6);border-radius:8px;font-size:12px;">' +
             '<b>Next up: ' + esc(blockedFirst.title) + '</b>' +
             '<div style="margin-top:4px;opacity:.85;">' + reasonTxt + '</div></div>';
@@ -2071,11 +2089,12 @@ async function viewHubLessonNote(lessonId, courseId) {
                         const prevL = idx > 0 ? courseLessons[idx - 1] : null;
                         const prevDone = prevL ? !!((typeof _dripC !== 'undefined' && _dripC && _dripC[prevL.id]) ? (_dripC[prevL.id].completedAt || '') : '') : true;
                         const feeOk = (typeof _hubFeeSnapshotOk === 'function') ? _hubFeeSnapshotOk() !== false : true;
+                        const sameUnit = prevL ? hubDripSameUnit(prevL, lesson) : false;
                         if (!feeOk) reason = 'Your weekly fee target is not met yet. Clear the target to unlock this lesson.';
-                        else if (!prevDone) reason = prevL ? 'Complete "' + (prevL.title || 'the previous lesson') + '" first (timed reading + 50% quiz).' : 'Finish the previous lesson first (timed reading + 50% quiz).';
+                        else if (!prevDone) reason = prevL ? 'Complete "' + (prevL.title || 'the previous part') + '" first' + (sameUnit ? ' — the next part unlocks instantly, no waiting.' : ' (timed reading + 50% quiz).') : 'Finish the previous lesson first (timed reading + 50% quiz).';
                         else {
                             const pace = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
-                            reason = pace === 0 ? 'Unlocks as soon as the previous lesson is completed.' : 'Allow ' + (pace % 1 === 0 ? pace : pace.toFixed(1)) + ' day' + (pace === 1 ? '' : 's') + ' between lessons — it unlocks after the previous lesson completes and the pacing gap passes.';
+                            reason = sameUnit ? 'This is the next part of the same lesson — it unlocks instantly once the previous part is done.' : pace === 0 ? 'Unlocks as soon as the previous lesson is completed.' : 'Allow ' + (pace % 1 === 0 ? pace : pace.toFixed(1)) + ' day' + (pace === 1 ? '' : 's') + ' between lessons — it unlocks after the previous lesson completes and the pacing gap passes.';
                         }
                     } catch (e) { reason = ''; }
                     return showToast('🔗 This lesson is still locked. ' + (reason || 'Complete the previous lesson, keep fees current, and allow the course pacing gap.'), { type: 'warning', duration: 5000 });
