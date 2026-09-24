@@ -561,6 +561,16 @@ function canManageStudents() {
             if (typeof _assistantAccessCache !== 'undefined' && _assistantAccessCache && _assistantAccessCache['students'] === false) return false;
             return true;
         }
+        if (u.role === 'coordinator') {
+            const sc = typeof viewerScope === 'function' ? viewerScope() : null;
+            if (sc && (sc.scopeCountry || sc.country)) return true;
+            return false;
+        }
+        if (u.role === 'coordinator') {
+            const sc = viewerScope ? viewerScope() : null;
+            if (sc && (sc.country || sc.regionId)) return true;
+            return false;
+        }
     } catch {}
     return false;
 }
