@@ -3040,7 +3040,8 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                             const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
                             const receiptNo = prefix + String(seq).padStart(4, '0');
                             if (!Array.isArray(db.payments)) db.payments = [];
-                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, account: (txn && txn.account) || 'tuition', method: 'M-Pesa STK', reference: mpesaReceipt, mpesaCheckout: checkoutId, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            const _pStu = (db.students || []).find(x => String(x.id) === String(studentId));
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId, amount: amountPaid, account: (txn && txn.account) || 'tuition', method: 'M-Pesa STK', reference: mpesaReceipt, mpesaCheckout: checkoutId, notes: 'Paid via ' + payerPhone, receiptNo, date: d.toISOString().split('T')[0], createdAt: d.toISOString(), country: (_pStu && _pStu.country) || '' });
                             broadcastEvent('db-change', { store: 'payments' });
                         }
                     }
@@ -3094,7 +3095,8 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                             const prefix = 'RCT-' + ym + '-';
                             const seq = (db.payments || []).filter(p => p.receiptNo && String(p.receiptNo).startsWith(prefix)).length + 1;
                             if (!Array.isArray(db.payments)) db.payments = [];
-                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId: txn.studentId, amount: txn.amount, account: txn.account || 'tuition', method: 'M-Pesa STK', reference: txn.mpesaReceipt || cid, mpesaCheckout: cid, notes: 'Paid via ' + (txn.phone || '') + ' (confirmed by query)', receiptNo: prefix + String(seq).padStart(4, '0'), date: d.toISOString().split('T')[0], createdAt: d.toISOString() });
+                            const _pStu2 = (db.students || []).find(x => String(x.id) === String(txn.studentId));
+                            db.payments.push({ id: 'PMT-' + Date.now().toString(36).toUpperCase(), studentId: txn.studentId, amount: txn.amount, account: txn.account || 'tuition', method: 'M-Pesa STK', reference: txn.mpesaReceipt || cid, mpesaCheckout: cid, notes: 'Paid via ' + (txn.phone || '') + ' (confirmed by query)', receiptNo: prefix + String(seq).padStart(4, '0'), date: d.toISOString().split('T')[0], createdAt: d.toISOString(), country: (_pStu2 && _pStu2.country) || '' });
                             txn.status = 'complete';
                             txn.completedAt = d.toISOString();
                             txn.completedVia = 'query';

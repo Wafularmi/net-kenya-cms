@@ -5108,9 +5108,24 @@ async function renderFinance() {
     if (currentUser.role === 'student') return renderStudentFinance(currentUser);
         const batch = await dbGetBatch(['payments','students','income','expenses']);
     const allStudents = batch.students;
-    const students = await filterByRegion(allStudents, s => s.studyCenterId);
+    const scopeV = viewerScope();
+    let students = allStudents;
+    if (scopeV.role === 'coordinator') {
+        if (scopeV.regionId) {
+            students = await filterByRegion(allStudents, s => s.studyCenterId);
+        } else if (scopeV.country) {
+            students = allStudents.filter(s => !s.country || s.country === scopeV.country);
+        }
+    }
     const regionalStudentIds = new Set(students.map(s => s.id));
-    const payments = batch.payments.filter(p => regionalStudentIds.has(p.studentId) && isTuitionPayment(p));
+    const scopeCountry = scopeV.country || '';
+    const payments = batch.payments.filter(p => {
+        if (!isTuitionPayment(p)) return false;
+        if (regionalStudentIds.has(p.studentId)) return true;
+        if (scopeCountry && p.country && p.country === scopeCountry) return true;
+        if (!scopeCountry && !p.country) return true;
+        return false;
+    });
     const income = batch.income, expenses = batch.expenses;
     const today = new Date().toISOString().split('T')[0];
     const month = today.substring(0, 7);
@@ -5427,7 +5442,7 @@ async function savePayment() {
             if (!confirmed) return;
         }
         const receiptNo = await generateReceiptNo(payDate);
-    const payment = { id: generateId('PMT'), studentId, amount, account, method: document.getElementById('pay-method').value, reference: sanitizeInput(document.getElementById('pay-ref').value.trim()), notes: sanitizeInput(document.getElementById('pay-notes').value.trim()), receiptNo, date: payDate, createdAt: new Date().toISOString() };
+    const payment = { id: generateId('PMT'), studentId, amount, account, method: document.getElementById('pay-method').value, reference: sanitizeInput(document.getElementById('pay-ref').value.trim()), notes: sanitizeInput(document.getElementById('pay-notes').value.trim()), receiptNo, date: payDate, createdAt: new Date().toISOString(), country: payStudent.country || '' };
     await dbPut('payments', payment);
     const installments = (await dbGetAll('installments')).filter(i => i.studentId === studentId && i.status !== 'paid').sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     let remaining = account === 'graduation' ? 0 : amount;
