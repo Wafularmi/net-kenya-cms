@@ -2473,7 +2473,7 @@ document.getElementById('students-body').innerHTML = filtered.map(s => {
         const center = centers.find(c => c.id === s.studyCenterId);
         const statusClass = s.status === 'active' ? 'success' : s.status === 'inactive' ? 'secondary' : s.status === 'graduated' ? 'info' : s.status === 'suspended' ? 'warning' : 'danger';
         const phone = s.phone || '';
-        return `<tr><td><b>${s.admissionNumber || s.id}</b>${s.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || ''}</div></td><td>${center ? center.name : 'Main'}</td><td>${s.program || '--'}</td><td>Year ${s.year || 1}</td><td>${s.country ? `<span class="badge badge-info">${escapeHtml(s.country)}</span>` : '<span style="color:var(--text-muted);">—</span>'}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span>${s.gradSponsored ? ' <span class="badge badge-success" title="Graduation fee sponsored">🎓S</span>' : ''}</td><td style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:600;">${formatCurrency(balance)}</td><td><button class="btn btn-outline btn-sm" onclick="viewStudent('${s.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">Edit</button> <button class="btn btn-primary btn-sm" onclick="adminEnrollStudentInCourse('${s.id}')" title="Enroll in Course">📚</button> <button class="btn btn-warning btn-sm" onclick="adminRegisterStudentForExam('${s.id}')" title="Register for Exam">📝</button> <button class="btn btn-info btn-sm" onclick="adminEnrollStudentInQuiz('${s.id}')" title="Join Quiz">📋</button> <button class="btn btn-secondary btn-sm" onclick="adminChangeStudentProgram('${s.id}')" title="Change Program">🎓</button> ${phone ? `<div class="wa-dropdown" style="display:inline-block;position:relative;"><button class="btn btn-success btn-sm" onclick="toggleWADropdown(event, '${s.id}')">📱</button><div id="wa-drop-${s.id}" class="wa-drop-menu" style="display:none;position:absolute;right:0;top:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px;min-width:180px;z-index:50;box-shadow:var(--shadow-lg);"><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}')">💬 Custom Message</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-fee')">💰 Fee Reminder</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-attendance')">⚠️ Attendance Alert</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-welcome')">👋 Welcome</div></div></div>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')" title="Delete">🗑</button></td></tr>`;
+        return `<tr><td><b>${s.admissionNumber || s.id}</b>${s.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</td><td><div><b>${s.name}</b></div><div style="font-size:11px;color:var(--text-muted);">${s.email || ''}</div></td><td>${center ? center.name : 'Main'}</td><td>${s.program || '--'}</td><td>Year ${s.year || 1}</td><td>${s.country ? `<span class="badge badge-info">${escapeHtml(s.country)}</span>` : `<span style="color:var(--text-muted);">—</span>${(typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') ? ` <button class="btn btn-outline btn-sm" onclick="adoptStudentModal('${s.id}')" title="Adopt into a country (regenerates admission number)">Adopt</button>` : ''}`}</td><td><span class="badge badge-${statusClass}">${s.status || 'active'}</span>${s.gradSponsored ? ' <span class="badge badge-success" title="Graduation fee sponsored">🎓S</span>' : ''}</td><td style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:600;">${formatCurrency(balance)}</td><td><button class="btn btn-outline btn-sm" onclick="viewStudent('${s.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">Edit</button> <button class="btn btn-primary btn-sm" onclick="adminEnrollStudentInCourse('${s.id}')" title="Enroll in Course">📚</button> <button class="btn btn-warning btn-sm" onclick="adminRegisterStudentForExam('${s.id}')" title="Register for Exam">📝</button> <button class="btn btn-info btn-sm" onclick="adminEnrollStudentInQuiz('${s.id}')" title="Join Quiz">📋</button> <button class="btn btn-secondary btn-sm" onclick="adminChangeStudentProgram('${s.id}')" title="Change Program">🎓</button> ${phone ? `<div class="wa-dropdown" style="display:inline-block;position:relative;"><button class="btn btn-success btn-sm" onclick="toggleWADropdown(event, '${s.id}')">📱</button><div id="wa-drop-${s.id}" class="wa-drop-menu" style="display:none;position:absolute;right:0;top:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px;min-width:180px;z-index:50;box-shadow:var(--shadow-lg);"><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}')">💬 Custom Message</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-fee')">💰 Fee Reminder</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-attendance')">⚠️ Attendance Alert</div><div class="wa-drop-item" onclick="quickWhatsAppStudent('${s.id}','tpl-welcome')">👋 Welcome</div></div></div>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')" title="Delete">🗑</button></td></tr>`;
     }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No students found. Click "+ Add Student" to enroll.</td></tr>';
     try {
         if (typeof canManageStudents === 'function' && !canManageStudents()) {
@@ -2483,6 +2483,67 @@ document.getElementById('students-body').innerHTML = filtered.map(s => {
             document.querySelectorAll('#screen-students [onclick="showStudentForm()"]').forEach(b => b.style.display = '');
         }
     } catch {}
+}
+async function adoptStudentModal(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student not found');
+    if (student.country) return showToast('This student is already assigned to ' + student.country);
+    let countries = [];
+    let centers = [];
+    let regions = [];
+    try { countries = await fetchCountries(); } catch {}
+    try { centers = await dbGetAll('studyCenters'); } catch {}
+    try { regions = await dbGetAll('regions'); } catch {}
+    const regionCountry = {};
+    regions.forEach(r => { if (r && r.id) regionCountry[r.id] = r.country || ''; });
+    const centerCountry = {};
+    centers.forEach(c => { if (c) centerCountry[c.id] = c.country || ((c.regionId && regionCountry[c.regionId]) || ''); });
+    const countryOptions = countries.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.brandName || c.name)}</option>`).join('');
+    const content = `<div style="margin-bottom:8px;"><b>${escapeHtml(student.name)}</b> — ${escapeHtml(student.admissionNumber || student.id)}</div>
+<div class="form-group"><label>Adopt Into Country *</label><select id="adopt-country" onchange="refreshAdoptCenters('${escapeHtml(student.id)}')"><option value="">Select country...</option>${countryOptions}</select></div>
+<div class="form-group"><label>Study Center (in that country)</label><select id="adopt-center"><option value="">— auto-pick a center in this country —</option></select></div>
+<div id="adopt-preview" style="font-size:12px;color:var(--text-muted);margin:8px 0;">Choosing a country will assign the student, its region and its study center, and regenerate the admission number in that country's format (NF/CENTERCODE/MM-YY/SEQ).</div>`;
+    window._adoptStudentId = studentId;
+    showModal('Adopt Student Into Country', content, `<button class="btn btn-outline" onclick="closeModal()">Cancel</button> <button class="btn btn-primary" onclick="confirmAdoptStudent()">Adopt Student</button>`);
+}
+function refreshAdoptCenters(studentId) {
+    const country = document.getElementById('adopt-country') ? document.getElementById('adopt-country').value : '';
+    const centerSel = document.getElementById('adopt-center');
+    const preview = document.getElementById('adopt-preview');
+    if (!centerSel) return;
+    if (!country) { centerSel.innerHTML = '<option value="">— auto-pick a center in this country —</option>'; if (preview) preview.textContent = 'Select a country to continue.'; return; }
+    centerSel.innerHTML = '<option value="">— auto-pick a center in this country —</option>';
+    Promise.all([dbGetAll('studyCenters'), dbGetAll('regions')]).then(function(rs) {
+        const centers = rs[0] || [];
+        const regions = rs[1] || [];
+        const regionCountry = {};
+        regions.forEach(r => { if (r && r.id) regionCountry[r.id] = r.country || ''; });
+        const cId = (c) => c.country || ((c.regionId && regionCountry[c.regionId]) || '');
+        const matches = centers.filter(c => c && cId(c) === country);
+        matches.forEach(c => { const opt = document.createElement('option'); opt.value = c.id; opt.textContent = c.name + ' (' + c.code + ')'; centerSel.appendChild(opt); });
+        if (preview) preview.textContent = matches.length ? matches.length + ' study center(s) found for ' + country + '.' : 'No study centers in ' + country + ' yet — a GENERIC center code will be used until one is created.';
+    }).catch(function() { if (preview) preview.textContent = 'Unable to load centers.'; });
+}
+async function confirmAdoptStudent() {
+    const studentId = window._adoptStudentId;
+    const country = document.getElementById('adopt-country') ? document.getElementById('adopt-country').value : '';
+    const centerId = document.getElementById('adopt-center') ? document.getElementById('adopt-center').value : '';
+    if (!studentId || !country) return showToast('Select a country!');
+    if (!await showConfirm('Adopt Student', 'Assign this student to ' + country + ' and regenerate their admission number in that country\'s format?')) return;
+    try {
+        const res = await fetch('/api/adopt', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})),
+            body: JSON.stringify({ store: 'students', id: studentId, country, studyCenterId: centerId || undefined })
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.error || 'Adoption failed', { type: 'danger' });
+        closeModal();
+        if (typeof renderStudents === 'function') await renderStudents();
+        try { if (typeof renderDashboard === 'function') await renderDashboard(); } catch {}
+        showToast('Student adopted into ' + country + ' — Adm#: ' + data.admissionNumber, { type: 'success' });
+        try { logAudit('adopted', 'student', { id: studentId, country, admissionNumber: data.admissionNumber }); } catch {}
+    } catch (e) { showToast('Adoption failed: ' + e.message, { type: 'danger' }); }
 }
 async function adminEnrollStudentInCourse(studentId) {
     const student = await dbGet('students', studentId);
@@ -21797,7 +21858,7 @@ async function loadCountryDropdown(selectId, selected) {
     if (!sel) return;
     let countries = [];
     try { countries = await fetchCountries(); } catch {}
-    sel.innerHTML = '<option value="">Unassigned (visible to all)</option>' + countries.map(c => `<option value="${escapeHtml(c.name)}"${String(c.name) === String(selected || '') ? ' selected' : ''}>${escapeHtml(c.brandName || c.name)}</option>`).join('');
+    sel.innerHTML = '<option value="">Unassigned (admin-only until adopted)</option>' + countries.map(c => `<option value="${escapeHtml(c.name)}"${String(c.name) === String(selected || '') ? ' selected' : ''}>${escapeHtml(c.brandName || c.name)}</option>`).join('');
     if (selected) sel.value = selected;
 }
 function showBulkCountryForm() {

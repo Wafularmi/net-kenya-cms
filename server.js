@@ -781,6 +781,32 @@ const STUDENT_WRITE_STORES = new Set([
     'retakeRequests', 'seating', 'borrows', 'tickets', 'enrollments'
 ]);
 
+// Stores with NO country identity by design — institution-wide shared content
+// that every country coordinator legitimately needs in full: the unified
+// curriculum/catalog (one academy runs the same courses/exams/quizzes in every
+// country), reference lists, templates/manuals, communication content, and
+// the settings keys coordinators may read (branding, academic). These stay
+// visible to all countries. EVERY other store is strictly scoped: a record
+// must resolve — via its own country, its student, its study center or its
+// region — to exactly the viewer's country, or it is hidden (admin-only)
+// until adopted into a country.
+const GLOBAL_SHARED_STORES = new Set([
+    // Curriculum / catalog
+    'courses', 'lessons', 'lessonFiles', 'exams', 'quizzes', 'questionBank',
+    'programs', 'feeStructure', 'gradRequirements', 'campuses',
+    // Templates / manuals / logs
+    'manuals', 'whatsappTemplates', 'smsTemplates', 'whatsappLog', 'smsLog',
+    // Reference lists
+    'expenseCategories', 'incomeCategories', 'deductionAccounts',
+    // Staff payroll definitions and deliverables
+    'salaryDeductions', 'payslips', 'deductionDisbursements',
+    // Communication / assets
+    'events', 'alerts', 'messages', 'notes', 'meetings',
+    'books', 'hostels', 'inventory',
+    // Settings (read exemptions live at the route level; must flow unfiltered)
+    'settings'
+]);
+
 // Extract the authenticated user from the request (server-verified).
 // Legacy X-User-Id / X-User-Role headers are NO LONGER trusted — a caller must
 // present a valid session token (Authorization: Bearer <token> or the `session`
@@ -807,6 +833,82 @@ function countryScopeOf(user) {
     const rec = user.user;
     if (!rec.country || rec.regionId) return null;
     return rec.country;
+}
+
+// -------- Derived country resolution --------
+// Legacy/global records (payments, income, expenses, installments, fee
+// agreements, waivers, alumni, students) frequently carry NO explicit country
+// field — records created before country tagging or never refreshed. Their
+// true country is resolved through their linked student, and a student's
+// country through its study center and that center's region. Only the overall
+// admin sees truly unresolvable/global rows.
+//
+// The resolution chain is fully generic: any record resolves via its explicit
+// `country`, its `studentId`/`studentPhone`/`phone`, its `studyCenterId`, or
+// its `regionId`. There is NO "untagged = visible to every country" fallback
+// anymore — a row that resolves to no country is visible to the overall admin
+// only, until it is explicitly adopted into a country.
+function buildCountryIndex() {
+    if (db.__countryIndex) return db.__countryIndex;
+    const regionCountry = {};
+    (db.regions || []).forEach(r => { if (r && r.id) regionCountry[r.id] = r.country || ''; });
+    const centerCountry = {};
+    (db.studyCenters || []).forEach(c => {
+        if (!c) return;
+        centerCountry[c.id] = c.country || ((c.regionId && regionCountry[c.regionId]) || '');
+    });
+    const byStudentId = new Map();
+    const byPhone = new Map();
+    (db.students || []).forEach(s => {
+        if (!s || !s.id) return;
+        const c = s.country || ((s.studyCenterId && centerCountry[s.studyCenterId]) || '');
+        byStudentId.set(String(s.id), c);
+        if (s.phone) byPhone.set(String(s.phone), c);
+        if (s.admissionNumber) byStudentId.set(String(s.admissionNumber), c);
+        if (s.email) byPhone.set(String(s.email), c);
+    });
+    db.__countryIndex = { regionCountry, centerCountry, byStudentId, byPhone };
+    return db.__countryIndex;
+}
+function recordCountryOf(store, rec) {
+    if (!rec) return '';
+    if (rec.country) return String(rec.country);
+    const idx = buildCountryIndex();
+    if (store === 'students') {
+        return rec.country || (idx.centerCountry[rec.studyCenterId] || '');
+    }
+    if (store === 'studyCenters') {
+        return rec.country || (rec.regionId && idx.regionCountry[rec.regionId]) || '';
+    }
+    if (store === 'staff') {
+        if (rec && rec._user && rec._user.country) return String(rec._user.country);
+        if (rec && rec.userId) {
+            const u = (db.users || []).find(x => x && String(x.username) === String(rec.userId)) || (db.users || []).find(x => x && String(x.id) === String(rec.userId));
+            if (u && u.country) return String(u.country);
+        }
+        if (rec && rec.loginUsername) {
+            const u2 = (db.users || []).find(x => x && String(x.username) === String(rec.loginUsername));
+            if (u2 && u2.country) return String(u2.country);
+        }
+        if (rec && rec.phone) {
+            const u3 = (db.users || []).find(x => x && String(x.username) === String(rec.phone));
+            if (u3 && u3.country) return String(u3.country);
+        }
+        if (rec && rec.studyCenterId && idx.centerCountry[rec.studyCenterId]) return idx.centerCountry[rec.studyCenterId];
+        return '';
+    }
+    if (store === 'regions') return rec.country || '';
+    // Generic chain: student-linked records (finance, attendance, grades,
+    // enrollments, tickets, seating, borrows, mpesa...) then center/region.
+    const sid = rec.studentId != null ? String(rec.studentId) : '';
+    if (sid && idx.byStudentId.has(sid)) return idx.byStudentId.get(sid);
+    // webhook/payment records that only carry the payer's phone
+    const ph = rec.studentPhone || rec.phone || '';
+    if (ph && idx.byPhone.has(String(ph))) return idx.byPhone.get(String(ph));
+    if (sid && idx.byPhone.has(sid)) return idx.byPhone.get(sid);
+    if (rec.studyCenterId && idx.centerCountry[rec.studyCenterId]) return idx.centerCountry[rec.studyCenterId];
+    if (rec.regionId && idx.regionCountry[rec.regionId]) return idx.regionCountry[rec.regionId];
+    return '';
 }
 // Write fence for country administrators: creations get stamped with their
 // country; touching another country's tagged records is rejected. Everyone
@@ -1045,13 +1147,23 @@ function filterStoreForUser(user, store, rows) {
     // Country filtering for all authenticated users (except main admin).
     // Main admin (role === 'admin') sees ALL countries - global administrator.
     // Exempt stores that are global or identity-only.
-    // Legacy/unassigned rows (no country field) stay visible to everyone:
-    // only rows explicitly tagged to ANOTHER country are hidden. This keeps
-    // pre-country data (grades, exams, submissions) visible while scoping
-    // still applies to country-tagged records. In-memory O(n), no I/O.
+    //
+    // NO "generic/untagged" fallback exists anymore. Every record a country
+    // coordinator sees must resolve — via its own `country` field, its linked
+    // student, its study center, or its region — to EXACTLY the coordinator's
+    // scope country. Rows that resolve to NO country (or a different country)
+    // are hidden from every coordinator and are visible to the overall admin
+    // only, until they are adopted into a country. Stores in
+    // GLOBAL_SHARED_STORES are deliberate institution-wide content (shared
+    // curriculum, templates, manuals) that has no country identity by design.
     const countryExemptStores = ['users', 'counters', 'sessions', 'maintenanceBypassTokens'];
     if (user && user.user && user.user.country && user.user.role !== 'admin' && !countryExemptStores.includes(store)) {
-        rows = rows.filter(r => r && (r.country === user.user.country || !r.country));
+        const scope = user.user.country;
+        if (GLOBAL_SHARED_STORES.has(store)) {
+            // Deliberately-shared institution content: no country filtering.
+        } else {
+            rows = rows.filter(r => r && recordCountryOf(store, r) === scope);
+        }
     }
     return rows;
 }
@@ -2138,6 +2250,103 @@ function handleAPI(req, res) {
             auditLog('deleted', 'country', { name }); saveDB();
         }
         return json(res, 200, { ok: true });
+    }
+
+    // POST /api/adopt — adopt an otherwise-unresolvable record into a country.
+    // Admin only. Every student must fit in a country, region and study center;
+    // untagged rows are hidden from every country coordinator until adopted.
+    // For STUDENTS the adoption picks the country's study center (a supplied
+    // studyCenterId wins, else the first center whose country resolves to the
+    // target), stamps country+regionId+studyCenterId, and REGENERATES the
+    // admission number in that country's format: NF/{CENTERCODE}/{MM}-{YY}/{SEQ}
+    // using the country-wide roll so the new number never collides. For any
+    // other store it simply stamps `country` on the record so it resolves.
+    if (parts.length === 2 && parts[1] === 'adopt' && req.method === 'POST') {
+        const user = getRequestUser(req);
+        if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const { store, id, country, studyCenterId } = JSON.parse(body);
+                if (!store || !id) return json(res, 400, { error: 'store and id required' });
+                if (!country) return json(res, 400, { error: 'country required' });
+                if (!Array.isArray(db[store])) return json(res, 404, { error: 'Unknown store' });
+                const countryExists = ((db.settings || []).find(s => s.key === 'countries') || { value: [] }).value || [];
+                if (!(Array.isArray(countryExists) ? countryExists : []).some(c => c && c.name === country)) {
+                    return json(res, 400, { error: 'Country not configured: ' + country });
+                }
+                const rec = db[store].find(r => r && String(r.id) === String(id));
+                if (!rec) return json(res, 404, { error: 'Record not found' });
+                const idx = db[store].findIndex(r => r && String(r.id) === String(id));
+                if (store === 'students') {
+                    // Pick the study center for the target country.
+                    let center = null;
+                    if (studyCenterId) center = (db.studyCenters || []).find(c => c && String(c.id) === String(studyCenterId)) || null;
+                    if (center && (center.country || ((center.regionId && (db.regions || []).find(r2 => r2.id === center.regionId) || {}).country)) !== country) center = null;
+                    if (!center) {
+                        const idx2 = buildCountryIndex();
+                        center = (db.studyCenters || []).find(c => c && String(idx2.centerCountry[c.id] || c.country || '') === country) || null;
+                    }
+                    const centerCode = center ? (center.code || 'GEN') : 'GEN';
+                    const branding = (db.settings || []).find(s => s.key === 'branding');
+                    const instituteCode = branding && branding.initials ? branding.initials : 'NF';
+                    const prevCountry = rec.country || (rec.studyCenterId && buildCountryIndex().centerCountry[rec.studyCenterId]) || '';
+                    // Country-wide sequence, mirrors the public signup path.
+                    const counterKey = 'admissionLastSeqByCountry';
+                    let counterRec = (db.settings || []).find(s => s.key === counterKey);
+                    const cObj = counterRec && counterRec.value && typeof counterRec.value === 'object' ? counterRec.value : {};
+                    let admSeq = typeof cObj[country] === 'number' ? cObj[country] : 0;
+                    let maxSeq = 0;
+                    (db.students || []).forEach(s => {
+                        if (!s) return;
+                        const sc = s.studyCenterId ? (db.studyCenters || []).find(c2 => c2 && String(c2.id) === String(s.studyCenterId)) : null;
+                        const sCountry = s.country || (sc && sc.country) || '';
+                        if (sCountry !== country) return;
+                        if (s.admissionNumber && typeof s.admissionNumber === 'string') {
+                            const segs = s.admissionNumber.split('/');
+                            const n = parseInt(segs[segs.length - 1], 10);
+                            if (!isNaN(n) && n > maxSeq) maxSeq = n;
+                        }
+                    });
+                    const nextSeq = Math.max(admSeq, maxSeq) + 1;
+                    cObj[country] = nextSeq;
+                    if (!counterRec) {
+                        db.settings = db.settings || [];
+                        db.settings.push({ key: counterKey, value: cObj });
+                    } else {
+                        counterRec.value = cObj;
+                    }
+                    const year = new Date().getFullYear().toString().slice(-2);
+                    const month = String(new Date().getMonth() + 1).padStart(2, '0');
+                    const seqStr = String(nextSeq).padStart(3, '0');
+                    const admissionNumber = `${instituteCode}/${centerCode}/${month}-${year}/${seqStr}`;
+                    const updated = Object.assign({}, rec, {
+                        country,
+                        studyCenterId: center ? center.id : (rec.studyCenterId || ''),
+                        regionId: center && center.regionId ? center.regionId : (rec.regionId || ''),
+                        admissionNumber,
+                        updatedAt: new Date().toISOString()
+                    });
+                    db[store][idx] = updated;
+                    auditLog('adopted', 'student', { id, country, studyCenterId: updated.studyCenterId, admissionNumber, prevCountry });
+                    delete db.__countryIndex;
+                    saveDB();
+                    broadcastEvent('db-change', { store });
+                    return json(res, 200, { ok: true, admissionNumber, studyCenterId: updated.studyCenterId, country });
+                }
+                // Generic non-student adoption: just stamp the country so the
+                // record resolves into that country's scope.
+                const updated = Object.assign({}, rec, { country, updatedAt: new Date().toISOString() });
+                db[store][idx] = updated;
+                auditLog('adopted', store, { id, country });
+                delete db.__countryIndex;
+                saveDB();
+                broadcastEvent('db-change', { store });
+                return json(res, 200, { ok: true, country });
+            } catch (e) { json(res, 400, { error: 'Invalid request: ' + (e && e.message) }); }
+        });
+        return true;
     }
 
     // GET /api/login-country?input=... — smart-filter helper for the login screen.
@@ -3681,7 +3890,14 @@ return json(res, 200, result);
         if (!db[store]) db[store] = [];
 
         // Helper to save DB after mutations â€” broadcast FIRST so clients get instant notification
-        function mutate(record) { broadcastEvent('db-change', { store }); saveDB(); }
+        function mutate(record) {
+            // Invalidate derived-country index whenever its inputs change so
+            // new students/centers/regions are resolvable immediately.
+            if (store === 'students' || store === 'studyCenters' || store === 'regions') {
+                try { delete db.__countryIndex; } catch {}
+            }
+            broadcastEvent('db-change', { store }); saveDB();
+        }
 
         // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)
         if (req.method === 'GET' && !key) {
@@ -3813,6 +4029,20 @@ const parsed = JSON.parse(body);
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
                         if (_dupCode) return json(res, 400, { error: 'Center code already in use: ' + _dupCode });
+                    }
+                    // Every student must fit in a country, region and study
+                    // center. When a student is written with a study center that
+                    // resolves to a country, stamp that country + its region onto
+                    // the record even when the caller omitted them — a student
+                    // may NEVER silently remain in the untagged/admin-only pool.
+                    if (store === 'students') {
+                        const idxC = buildCountryIndex();
+                        const centerC = toStore.studyCenterId ? (db.studyCenters || []).find(c2 => c2 && String(c2.id) === String(toStore.studyCenterId)) : null;
+                        const countryC = (centerC && idxC.centerCountry[centerC.id]) || '';
+                        if (countryC) {
+                            if (!toStore.country) toStore.country = countryC;
+                            if (!toStore.regionId && centerC && centerC.regionId) toStore.regionId = centerC.regionId;
+                        }
                     }
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = toStore;
