@@ -54,7 +54,7 @@
         <header id="main-header">
             <div class="header-main-row">
                 <div class="header-left">
-                    <button id="menu-toggle" class="btn-icon menu-toggle" onclick="toggleSidebar()" title="Menu">â˜°</button>
+                    <button id="menu-toggle" class="btn-icon menu-toggle" onclick="toggleSidebar()" title="Menu" style="padding:7px 12px;font-size:12px;font-weight:800;">Menu</button>
                     <div id="school-logo" class="logo-container">
                         <img id="header-logo-img" src="" alt="Logo" style="display:none;">
                         <div id="header-logo-placeholder" class="logo-placeholder">{{INITIALS}}</div>
@@ -70,10 +70,10 @@
                         <div id="smart-search-results" class="smart-search-results"></div>
                     </div>
                     <div class="header-date" id="header-date"></div>
-                    <button class="btn-icon" id="notif-bell" title="Notifications" style="position:relative;">ðŸ””<span id="notif-badge" class="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;">0</span></button>
-                    <button class="btn-icon" onclick="showScreen('messages')" title="Internal Messages" style="position:relative;">ðŸ’¬<span id="msg-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;"></span></button>
-                    <button class="btn-icon" id="btn-help" title="Help Mode â€” click to learn about any feature" style="font-weight:800;font-size:16px;">â“</button>
-                    <button id="header-close-btn" class="btn btn-danger" onclick="logout()" title="Close / Exit â€” Log out" style="margin-left:6px; padding:7px 16px; font-weight:800; border-radius:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(220,38,38,0.25); font-size:13px; letter-spacing:0.3px;">âœ• Exit</button>
+                    <button class="btn-icon" id="notif-bell" title="Notifications" style="position:relative;"><span id="notif-badge" class="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;">0</span></button>
+                    <button class="btn-icon" onclick="showScreen('messages')" title="Internal Messages" style="position:relative;"><span id="msg-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;"></span></button>
+                    <button class="btn-icon" id="btn-help" title="Help Mode - click to learn about any feature" style="font-weight:800;font-size:16px;">Help</button>
+                    <button id="header-close-btn" class="btn btn-danger" onclick="logout()" title="Close / Exit - Log out" style="margin-left:6px; padding:7px 16px; font-weight:800; border-radius:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(220,38,38,0.25); font-size:13px; letter-spacing:0.3px;">Exit</button>
                 </div>
             </div>
             <div class="header-credit">Developed by Eternal Ministries Africa</div>
