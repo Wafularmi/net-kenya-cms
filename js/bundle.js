@@ -22095,7 +22095,8 @@ async function manageRegionCenters(regionId) {
     const regionCenters = allCenters.filter(c => c.regionId === regionId);
     const unassigned = allCenters.filter(c => !c.regionId);
     const otherRegionCenters = allCenters.filter(c => c.regionId && c.regionId !== regionId);
-    let html = `<div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">Assign or unassign centers to <b>${region.name}</b></div>`;
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><div style="font-size:12px;color:var(--text-muted);">Assign or unassign centers to <b>${region.name}</b></div><button class="btn btn-primary btn-sm" onclick="showStudyCenterForm()">➕ Add Study Center</button></div>`;
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">ⓘ Don\'t see your center? <a href="javascript:void(0)" onclick="closeModal();openTab(\'settings\');showStudyCenterForm()" style="color:var(--accent);">Create a new Study Center here →</a> or assign one from Unassigned below.</div>';
     if (regionCenters.length) {
         html += `<div style="font-weight:700;font-size:11px;margin-bottom:4px;color:var(--accent);">Assigned (${regionCenters.length})</div>`;
         html += regionCenters.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;"><span><b>${c.name}</b> <span class="badge badge-info">${c.code}</span></span><button class="btn btn-danger btn-sm" onclick="unassignCenterFromRegion('${c.id}','${regionId}')">Remove</button></div>`).join('');
