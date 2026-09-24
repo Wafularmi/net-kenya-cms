@@ -1409,7 +1409,7 @@ function buildNavigation(user) {
         const visible = section.items.filter(item => perms.includes(item.id));
         if (!visible.length) return;
         html += `<div class="nav-section"><div class="nav-label">${section.label}</div>${visible.map(item => {
-            const badge = item.id === 'tickets' ? '<span class="nav-badge" id="ticket-badge" style="display:none;">0</span>' : item.id === 'pending' ? '<span class="nav-badge" id="pending-badge" style="display:none;background:var(--warning);color:#fff;">0</span>' : '';
+            const badge = item.id === 'tickets' ? '<span class="nav-badge" id="ticket-badge" style="display:none;">0</span>' : item.id === 'pending' ? '<span class="nav-badge" id="pending-badge" style="display:none;background:var(--warning);color:#fff;">0</span>' : item.id === 'messages' ? '<span class="nav-badge" id="messages-nav-badge" style="display:none;background:var(--accent);color:#fff;">0</span>' : '';
             return `<a href="#" class="nav-tab" data-screen="${item.id}"><span class="nav-text">${item.text}${badge}</span></a>`;
         }).join('')}</div>`;
     });
@@ -1733,9 +1733,9 @@ async function refreshMessagesBadge() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (!user.username) return;
     const unread = messages.filter(m => m && !m.read && m.recipient === user.username);
+    const n = unread.length;
     const badge = document.getElementById('msg-badge');
     if (badge) {
-        const n = unread.length;
         if (n > 0) {
             badge.style.display = 'flex';
             badge.textContent = n > 99 ? '99+' : n;
@@ -1744,6 +1744,52 @@ async function refreshMessagesBadge() {
             badge.textContent = '';
         }
     }
+    const navBadge = document.getElementById('messages-nav-badge');
+    if (navBadge) {
+        if (n > 0) {
+            navBadge.style.display = 'inline-flex';
+            navBadge.textContent = n > 99 ? '99+' : n;
+        } else {
+            navBadge.style.display = 'none';
+            navBadge.textContent = '';
+        }
+    }
+}
+async function handleNewMessage() {
+    try {
+        const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (!user.username) return;
+        const messages = await dbGetAll('messages').catch(() => []);
+        const mine = messages.filter(m => m && !m.read && m.recipient === user.username && m.sender !== user.username);
+        if (!mine.length) return;
+        const latest = mine.reduce((a, b) => (a.timestamp > b.timestamp ? a : b));
+        if (!window._msgToastBaseline) {
+            window._msgToastBaseline = latest.timestamp;
+            window._toastedMessages = window._toastedMessages || {};
+            mine.forEach(m => { if (m.id) window._toastedMessages[m.id] = 1; });
+            return;
+        }
+        window._toastedMessages = window._toastedMessages || {};
+        const newOnes = mine.filter(m => m.id && !window._toastedMessages[m.id] && m.timestamp > window._msgToastBaseline);
+        if (!newOnes.length) return;
+        window._msgToastBaseline = Math.max(window._msgToastBaseline, latest.timestamp);
+        const recent = newOnes.sort((a, b) => b.timestamp - a.timestamp).slice(0, 1);
+        for (const m of recent) {
+            window._toastedMessages[m.id] = 1;
+            const senderName = esc(m.sender || 'Someone');
+            const preview = esc(String(m.body || m.message || '').slice(0, 90));
+            const fnId = '_msgview_' + Date.now();
+            window[fnId] = () => { showScreen('messages'); try { openConversation(m.sender); } catch (e) {} };
+            showToast(preview || 'You have a new message', {
+                type: 'success',
+                title: 'New message from ' + senderName,
+                duration: 7000,
+                action: 'View',
+                actionFn: window[fnId]
+            });
+        }
+        refreshMessagesBadge();
+    } catch (e) {}
 }
 async function refreshTicketsBadge() {
     const tickets = await dbGetAll('tickets').catch(() => []);
@@ -2083,7 +2129,7 @@ const _refreshMap = {
     payslips: () => { if (isScreenActive('finance')) renderPayrollList(); },
     salaryDeductions: () => { if (isScreenActive('finance')) renderDeductionsSummary(); },
     mpesaTransactions: () => { if (isScreenActive('finance')) renderMpesaTransactions(); },
-    messages: () => { refreshMessagesBadge(); if (isScreenActive('messages')) renderMessages(); },
+    messages: (r) => { handleNewMessage(r); refreshMessagesBadge(); if (isScreenActive('messages')) renderMessages(); },
 };
 function onDBChange(store, record) {
     const fn = _refreshMap[store];
@@ -5442,7 +5488,7 @@ async function savePayment() {
             if (!confirmed) return;
         }
         const receiptNo = await generateReceiptNo(payDate);
-    const payment = { id: generateId('PMT'), studentId, amount, account, method: document.getElementById('pay-method').value, reference: sanitizeInput(document.getElementById('pay-ref').value.trim()), notes: sanitizeInput(document.getElementById('pay-notes').value.trim()), receiptNo, date: payDate, createdAt: new Date().toISOString(), country: payStudent.country || '' };
+    const payment = { id: generateId('PMT'), studentId, amount, account, method: document.getElementById('pay-method').value, reference: sanitizeInput(document.getElementById('pay-ref').value.trim()), notes: sanitizeInput(document.getElementById('pay-notes').value.trim()), receiptNo, date: payDate, createdAt: new Date().toISOString() };
     await dbPut('payments', payment);
     const installments = (await dbGetAll('installments')).filter(i => i.studentId === studentId && i.status !== 'paid').sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     let remaining = account === 'graduation' ? 0 : amount;
