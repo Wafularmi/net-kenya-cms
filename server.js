@@ -433,6 +433,15 @@ function safeWriteJSON(data) {
 }
 
 // Load DB with multi-level fallback
+// Strip runtime-only keys from a freshly loaded DB object. Always-on safety:
+// if a previous process ever persisted db.__countryIndex (Maps flattened to {}),
+// discard it so buildCountryIndex() rebuilds valid Maps instead of returning
+// the stale corrupt object and throwing mid-request.
+function purgeRuntimeCaches(obj) {
+    if (obj && typeof obj === 'object') {
+        try { delete obj.__countryIndex; } catch {}
+    }
+}
 function loadDB() {
     const sources = [
         { file: DB_VOLUME_PATH, label: 'volume' },
@@ -466,6 +475,7 @@ function loadDB() {
         const main = readJSON(DB_FILE);
         if (main && typeof main === 'object' && !Array.isArray(main)) {
             if (attempt > 0) process.stderr.write('DB_MAIN_RECOVERED_AFTER_RETRY attempt=' + attempt + '\n');
+            purgeRuntimeCaches(main);
             return main;
         }
         if (attempt < 3) { const s = Date.now(); while (Date.now() - s < 150) {} }
@@ -480,6 +490,7 @@ function loadDB() {
         const data = readJSON(file);
         if (data && typeof data === 'object' && !Array.isArray(data)) {
             console.log('DB loaded from fallback: ' + label);
+            purgeRuntimeCaches(data);
             if (shouldAdoptFallback(DB_FILE, file, label)) {
                 safeWriteJSON(data);
             } else {
@@ -848,8 +859,17 @@ function countryScopeOf(user) {
 // its `regionId`. There is NO "untagged = visible to every country" fallback
 // anymore — a row that resolves to no country is visible to the overall admin
 // only, until it is explicitly adopted into a country.
+let _countryIndexCache = null;
 function buildCountryIndex() {
-    if (db.__countryIndex) return db.__countryIndex;
+    // Never persist the index into server-data.json: it holds Maps/sets that
+    // JSON.stringify flattens to {}, and once such a corrupt object is cached
+    // back into the in-memory DB every recordCountryOf() throws mid-request
+    // (idx.byStudentId.has is not a function) — the response is never sent and
+    // the client hangs until timeout. The cache lives OUTSIDE db entirely.
+    if (_countryIndexCache && _countryIndexCache.byStudentId instanceof Map && _countryIndexCache.byPhone instanceof Map) {
+        return _countryIndexCache;
+    }
+    _countryIndexCache = null;
     const regionCountry = {};
     (db.regions || []).forEach(r => { if (r && r.id) regionCountry[r.id] = r.country || ''; });
     const centerCountry = {};
@@ -867,9 +887,10 @@ function buildCountryIndex() {
         if (s.admissionNumber) byStudentId.set(String(s.admissionNumber), c);
         if (s.email) byPhone.set(String(s.email), c);
     });
-    db.__countryIndex = { regionCountry, centerCountry, byStudentId, byPhone };
-    return db.__countryIndex;
+    _countryIndexCache = { regionCountry, centerCountry, byStudentId, byPhone };
+    return _countryIndexCache;
 }
+function invalidateCountryIndex() { _countryIndexCache = null; }
 function recordCountryOf(store, rec) {
     if (!rec) return '';
     if (rec.country) return String(rec.country);
@@ -2330,7 +2351,7 @@ function handleAPI(req, res) {
                     });
                     db[store][idx] = updated;
                     auditLog('adopted', 'student', { id, country, studyCenterId: updated.studyCenterId, admissionNumber, prevCountry });
-                    delete db.__countryIndex;
+                    invalidateCountryIndex();
                     saveDB();
                     broadcastEvent('db-change', { store });
                     return json(res, 200, { ok: true, admissionNumber, studyCenterId: updated.studyCenterId, country });
@@ -2340,7 +2361,7 @@ function handleAPI(req, res) {
                 const updated = Object.assign({}, rec, { country, updatedAt: new Date().toISOString() });
                 db[store][idx] = updated;
                 auditLog('adopted', store, { id, country });
-                delete db.__countryIndex;
+                invalidateCountryIndex();
                 saveDB();
                 broadcastEvent('db-change', { store });
                 return json(res, 200, { ok: true, country });
@@ -2565,8 +2586,10 @@ function handleAPI(req, res) {
             try {
                 const data = JSON.parse(body);
                 if (!data || typeof data !== 'object') return json(res, 400, { error: 'Invalid backup file' });
+                purgeRuntimeCaches(data);
                 const count = Object.keys(data).length;
                 db = data;
+                invalidateCountryIndex();
                 saveDB();
                 auditLog('restore', 'database', { stores: count }, authUser.username);
                 console.log('Database restored â€”', count, 'stores');
@@ -3923,7 +3946,7 @@ return json(res, 200, result);
             // Invalidate derived-country index whenever its inputs change so
             // new students/centers/regions are resolvable immediately.
             if (store === 'students' || store === 'studyCenters' || store === 'regions') {
-                try { delete db.__countryIndex; } catch {}
+                invalidateCountryIndex();
             }
             broadcastEvent('db-change', { store }); saveDB();
         }
