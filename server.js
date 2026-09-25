@@ -846,6 +846,27 @@ function countryScopeOf(user) {
     return rec.country;
 }
 
+// Per-country Generate Diploma / Generate Completion toggles. Stored in the
+// settings key `documentGenFlags` as a value object shaped like:
+//   { diploma: { KENYA: true, TOGO: false }, completion: { KENYA: true, TOGO: true } }
+// A type is ON for a country unless the flags record explicitly sets it to
+// false for that country. Only country-scoped coordinators are ever gated —
+// admins, assistants, regional coordinators and other staff keep full access.
+const DOC_GEN_TYPES = ['diploma', 'completion'];
+function docGenFlagsRecord() {
+    const rec = (db.settings || []).find(s => s && s.key === 'documentGenFlags');
+    return rec ? ((rec.value && typeof rec.value === 'object') ? rec.value : rec) : null;
+}
+function docTypeEnabledFor(user, type) {
+    if (!user) return true;
+    if (user.role === 'admin') return true;
+    const country = countryScopeOf(user);
+    if (!country) return true;
+    const flags = docGenFlagsRecord();
+    const perCountry = flags && flags[type] && typeof flags[type] === 'object' ? flags[type] : {};
+    return perCountry[country] !== false;
+}
+
 // -------- Derived country resolution --------
 // Legacy/global records (payments, income, expenses, installments, fee
 // agreements, waivers, alumni, students) frequently carry NO explicit country
@@ -3741,6 +3762,10 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         if (!SETTINGS_BLOBS[key]) return json(res, 404, { error: 'Unknown template' });
         const user = getRequestUser(req);
         if (!canAccessStore(user, 'certificates', 'GET')) return json(res, 403, { error: 'Forbidden' });
+        const tplType = key === 'completionPdfConfig' ? 'completion' : key === 'diplomaPdfConfig' ? 'diploma' : null;
+        if (tplType && !docTypeEnabledFor(user, tplType)) {
+            return json(res, 403, { error: 'Generate ' + tplType + ' is disabled for your country by the administrator' });
+        }
         const file = settingsBlobPath(key);
         if (!fs.existsSync(file)) return json(res, 404, { error: 'No template stored. Upload a PDF template in Settings.' });
         try {
@@ -3866,6 +3891,10 @@ return json(res, 200, result);
                     if (isDocStore) {
                         r = archiveHtmlContent(externalizeCertificate(rec).record);
                     }
+                    if (isDocStore && (r.type === 'diploma' || r.type === 'completion') && !docTypeEnabledFor(user, r.type)) {
+                        result.errors.push({ error: 'Generate ' + r.type + ' is disabled for your country by the administrator' });
+                        continue;
+                    }
                     sanitizeBodyFields(r, 20000, isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(rec) : null));
                     const pk = r[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
@@ -3923,7 +3952,15 @@ return json(res, 200, result);
         // The academic key (program names + fees) is likewise read-only operational
         // config that coordinators need to open the Add Student / Quick Enroll
         // forms (program feeds + fee auto-fill); it is never granted for writes.
-        const settingsReadExempt = req.method === 'GET' && store === 'settings' && (key === 'branding' || key === 'academic');
+        // The PDF generator configs (diploma/completion template + field layout) and
+        // the per-country documentGenFlags toggles are readable by anyone who can
+        // access the certificates store (coordinators generate these documents
+        // themselves). Per-country OFF flags are enforced server-side on writes.
+        const certCapableRead = !!user && canAccessStore(user, 'certificates', 'GET');
+        const settingsReadExempt = req.method === 'GET' && store === 'settings' && (
+            key === 'branding' || key === 'academic' ||
+            (certCapableRead && (key === 'completionPdfConfig' || key === 'diplomaPdfConfig' || key === 'documentGenFlags'))
+        );
         if (!studentSelfTerms && !settingsReadExempt && !canAccessStore(user, store, req.method)) {
             return json(res, 403, { error: 'Insufficient permissions for this resource' });
         }
@@ -4062,6 +4099,9 @@ const parsed = JSON.parse(body);
                     if (isDocStore) {
                         toStore = archiveHtmlContent(externalizeCertificate(value).record);
                     }
+                    if (isDocStore && (toStore.type === 'diploma' || toStore.type === 'completion') && !docTypeEnabledFor(user, toStore.type)) {
+                        return json(res, 403, { error: 'Generate ' + toStore.type + ' is disabled for your country by the administrator' });
+                    }
                     const preserveFields = isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(value) : null);
                     sanitizeBodyFields(toStore, 20000, preserveFields);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
@@ -4122,13 +4162,15 @@ if (store === 'settings') {
                         const extErr = externalizeSettingsRecord(value);
                         if (extErr) return json(res, 400, { error: extErr });
                     }
-                    const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
+const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
                     let toStore = value;
                     if (isDocStore) {
                         toStore = archiveHtmlContent(externalizeCertificate(value).record);
                     }
+                    if (isDocStore && (toStore.type === 'diploma' || toStore.type === 'completion') && !docTypeEnabledFor(user, toStore.type)) {
+                        return json(res, 403, { error: 'Generate ' + toStore.type + ' is disabled for your country by the administrator' });
+                    }
                     const preserveFields = isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(value) : null);
-                    sanitizeBodyFields(toStore, 20000, preserveFields);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }

@@ -1829,12 +1829,12 @@ function showScreen(id) {
         case 'staff': renderStaff(); break;
         case 'finance': renderFinance(); renderPayroll(); onStatementTypeChange(); renderMpesaTab(); break;
         case 'chapel': document.getElementById('chapel-date').value = new Date().toISOString().split('T')[0]; break;
-        case 'graduation': populateGraduationFilters(); break;
+        case 'graduation': populateGraduationFilters(); refreshDocGenButtons(); break;
         case 'hostel': renderHostels(); break;
         case 'library': renderLibrary(); break;
         case 'inventory': renderInventory(); break;
         case 'alumni': renderAlumni(); break;
-        case 'certificates': renderDocumentHistory(); break;
+        case 'certificates': renderDocumentHistory(); refreshDocGenButtons(); break;
         case 'events': renderEvents(); break;
         case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); break;
         case 'sms': renderSMSTemplates(); renderSMSLog(); break;
@@ -1854,7 +1854,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
@@ -10738,6 +10738,10 @@ let _completionGenUsed = [];
 function _completionSavedRestored() { try { return JSON.parse(localStorage.getItem('completion_restored_ids') || '[]'); } catch { return []; } }
 function _completionPersistRestored() { try { localStorage.setItem('completion_restored_ids', JSON.stringify(_completionGenRestored)); } catch {} }
 async function showCompletionPdfGenerator() {
+    await ensureDocGenFlags();
+    if (!docGenEnabledFor('completion')) {
+        return showToast('Generate Completion is turned OFF for your country by the administrator.', { type: 'warning' });
+    }
     const rec = await dbGet('settings', 'completionPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
     const students = await dbGetAll('students');
@@ -11143,6 +11147,10 @@ function _diplomaSavedRestored() { try { return JSON.parse(localStorage.getItem(
 function _diplomaPersistRestored() { try { localStorage.setItem('diploma_restored_ids', JSON.stringify(_diplomaGenRestored)); } catch {} }
 
 async function showDiplomaPdfGenerator() {
+    await ensureDocGenFlags();
+    if (!docGenEnabledFor('diploma')) {
+        return showToast('Generate Diploma is turned OFF for your country by the administrator.', { type: 'warning' });
+    }
     const rec = await dbGet('settings', 'diplomaPdfConfig');
     const config = (rec && rec.value) ? rec.value : rec;
     const students = await dbGetAll('students');
@@ -19038,6 +19046,79 @@ async function saveCoordinatorAccess() {
     await dbPut('settings', s);
     _coordinatorAccessCache = s;
     showToast('Coordinator access settings saved!'); logAudit('updated', 'coordinator-access', s);
+}
+let _docGenFlagsCache = null;
+async function loadDocGenFlags() {
+    const rec = await dbGet('settings', 'documentGenFlags').catch(() => null);
+    _docGenFlagsCache = (rec && rec.value && typeof rec.value === 'object') ? rec.value : (rec && typeof rec === 'object' ? rec : null);
+    const countries = await fetchCountries().catch(() => []);
+    const container = document.getElementById('docgen-flags-container');
+    if (!container) return;
+    if (!countries.length) {
+        container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No countries configured yet. Add countries first to control document generation per country.</div>';
+        return;
+    }
+    const flags = _docGenFlagsCache || {};
+    container.innerHTML = countries.map(c => {
+        const name = c.name;
+        const diplomaOn = !(flags.diploma && flags.diploma[name] === false);
+        const completionOn = !(flags.completion && flags.completion[name] === false);
+        const row = (id, label, on) => `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;">
+            <span style="font-size:13px;">${label}</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                    <input type="checkbox" id="${id}" ${on ? 'checked' : ''} style="opacity:0;width:0;height:0;">
+                    <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                </label>
+                <span id="${id}-status" style="font-size:12px;font-weight:700;min-width:34px;color:${on ? 'var(--success)' : 'var(--danger)'};">${on ? 'ON' : 'OFF'}</span>
+            </div>
+        </div>`;
+        return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;">
+            <b style="font-size:12.5px;">${escapeHtml(c.brandName || c.name)} <span class="badge badge-info">${escapeHtml(c.code || '')}</span></b>
+            ${row('docgen-diploma-' + name, 'Diploma', diplomaOn)}
+            ${row('docgen-completion-' + name, 'Completion', completionOn)}
+        </div>`;
+    }).join('');
+    document.querySelectorAll('#docgen-flags-container input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const st = document.getElementById(cb.id + '-status');
+            if (st) { st.textContent = cb.checked ? 'ON' : 'OFF'; st.style.color = cb.checked ? 'var(--success)' : 'var(--danger)'; }
+        });
+    });
+}
+async function saveDocGenFlags() {
+    const countries = await fetchCountries().catch(() => []);
+    if (!countries.length) return showToast('No countries configured yet', { type: 'warning' });
+    const diploma = {}; const completion = {};
+    countries.forEach(c => {
+        const d = document.getElementById('docgen-diploma-' + c.name);
+        const co = document.getElementById('docgen-completion-' + c.name);
+        if (d) diploma[c.name] = !!(d.checked);
+        if (co) completion[c.name] = !!(co.checked);
+    });
+    const s = { key: 'documentGenFlags', diploma, completion };
+    await dbPut('settings', s);
+    _docGenFlagsCache = s;
+    showToast('Document generation settings saved!'); logAudit('updated', 'docgen-flags', s);
+}
+function docGenEnabledFor(type) {
+    if (_docGenFlagsCache === null) return true;
+    const sc = (typeof viewerScope === 'function') ? viewerScope() : null;
+    if (sc && sc.role === 'admin') return true;
+    const country = (sc && sc.country) ? sc.country : '';
+    if (!country) return true;
+    const perCountry = _docGenFlagsCache[type];
+    return !(perCountry && typeof perCountry === 'object' && perCountry[country] === false);
+}
+async function refreshDocGenButtons() {
+    if (_docGenFlagsCache === null) { try { await loadDocGenFlags(); } catch {} }
+    const diplomaBtns = document.querySelectorAll('[data-docgen="diploma"]');
+    const completionBtns = document.querySelectorAll('[data-docgen="completion"]');
+    diplomaBtns.forEach(b => { b.style.display = docGenEnabledFor('diploma') ? '' : 'none'; });
+    completionBtns.forEach(b => { b.style.display = docGenEnabledFor('completion') ? '' : 'none'; });
+}
+async function ensureDocGenFlags() {
+    if (_docGenFlagsCache === null) { try { await loadDocGenFlags(); } catch {} }
 }
 async function loadCoordinatorAccess() {
     const s = await dbGet('settings', 'coordinatorAccess');

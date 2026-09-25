@@ -332,8 +332,8 @@
                     <button class="btn btn-outline" onclick="showGraduationRequirements()">Manage Requirements</button>
                     <button class="btn btn-outline" onclick="showBrochureDesigner()">📰 Brochure</button>
                     <button class="btn btn-outline" onclick="showInvitationDesigner()">💌 Invitation</button>
-                    <button class="btn btn-success" onclick="showDiplomaPdfGenerator()">🎓 Generate Diploma</button>
-                    <button class="btn btn-success" onclick="showCompletionPdfGenerator()">📜 Generate Completion</button>
+                    <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()">🎓 Generate Diploma</button>
+                    <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()">📜 Generate Completion</button>
                     <button class="btn btn-outline" onclick="generateGraduationSeating()">🪑 Seating</button>
                 </div></div>
                 <div class="card"><div id="graduation-list"></div></div>
@@ -380,8 +380,8 @@
 
             <section id="screen-certificates" class="screen">
                 <div class="screen-header"><h2>Certificates & Documents</h2><div class="screen-actions">
-                    <button class="btn btn-success" onclick="showDiplomaPdfGenerator()" title="Generate PDF Diploma from template">🎓 Generate Diploma</button>
-                    <button class="btn btn-success" onclick="showCompletionPdfGenerator()" title="Generate PDF Completion Certificate from template">📜 Generate Completion</button>
+                    <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()" title="Generate PDF Diploma from template">🎓 Generate Diploma</button>
+                    <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()" title="Generate PDF Completion Certificate from template">📜 Generate Completion</button>
                     <button class="btn btn-primary" onclick="showCertificateForm()">+ Generate Document</button>
                 </div></div>
                 <div class="card"><div id="duplicate-doc-alerts" style="margin-bottom:16px;"></div><div id="certificates-list"><p style="color:var(--text-muted);text-align:center;padding:40px;">No documents generated yet</p></div></div>
@@ -1168,6 +1168,12 @@
                             </div>
                         </div>
                         <button class="btn btn-primary" onclick="saveCoordinatorAccess()">Save Coordinator Access</button>
+                    </div>
+                    <div class="card"><h3>Document Generation (per country)</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Turn the Generate Diploma and Generate Completion features ON or OFF per country. When OFF for a country, staff there cannot generate those documents (the buttons are hidden and the server blocks them). Admins can always generate.</div>
+                        <div id="docgen-flags-container" style="display:grid;gap:6px;"></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin:8px 0 8px;">No country toggled = ON (default).</div>
+                        <button class="btn btn-primary" onclick="saveDocGenFlags()">Save Document Generation</button>
                     </div>
                     <div class="card" id="assistant-access-card" style="display:none;"><h3>Assistant Admin Access</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Toggle every admin sidebar tab for the Assistant Admin role. When OFF, the tab is hidden and the screen is blocked. Only admins can change this. Default is ON for all.</div>
