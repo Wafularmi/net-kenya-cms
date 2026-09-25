@@ -3039,18 +3039,22 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     }
                 } catch {}
                 let studyCenter = '';
+                let studyCountry = '';
                 try {
                     const cid = stu ? (stu.studyCenterId || '') : '';
                     if (cid) {
                         const center = (db.studyCenters || []).find(c => String(c.id) === String(cid));
                         studyCenter = center ? (center.name || '') : String(cid);
+                        studyCountry = center ? String(center.country || '') : '';
                     }
                 } catch {}
+                const country = String(stu && stu.country ? stu.country : (studyCountry || record.country || ''));
                 return json(res, 200, { ok: true, isTranscript,
                     studentName: (stu && stu.name) || record.studentName || record.name || '',
                     admission: (stu && (stu.admissionNumber || stu.id)) || record.admission || record.admissionNumber || '',
                     program: (stu && stu.program) || record.program || '',
                     studyCenter,
+                    country,
                     docId: record.docId || did,
                     docTitle: record.docTitle || (isTranscript ? 'Official Transcript' : (record.type ? ({ diploma: 'Diploma Certificate', completion: 'Completion Certificate', transcript: 'Official Transcript', admission: 'Admission Letter', enrollment: 'Enrollment Letter', recommendation: 'Recommendation Letter', 'fee-statement': 'Fee Statement' }[record.type] || (String(record.type)[0].toUpperCase() + String(record.type).slice(1))) : 'Certificate')),
                     generatedAt: record.generatedAt || record.createdAt || '',

@@ -1272,6 +1272,7 @@ async function verifyDocumentPublic() {
                     <div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Student Name</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.studentName || '—')}</div></div>
                     <div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Admission No</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.admission || '—')}</div></div>
                     ${data.studyCenter ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Studied at</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.studyCenter)}</div></div>` : ''}
+                    ${data.country ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Country studied in</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.country)}</div></div>` : ''}
                     ${data.program ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Program</div><div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(data.program)}</div></div>` : ''}
                     ${data.docTitle ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document</div><div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(data.docTitle)}</div></div>` : ''}
                     <div style="margin:0;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document ID</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.docId || '')}</div></div>
@@ -13528,6 +13529,22 @@ async function verifyDocument() {
         }
         const generatedDate = record.generatedAt ? (isNaN(new Date(record.generatedAt)) ? record.generatedAt : new Date(record.generatedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})) : '';
         const isRevoked = (record.docStatus === 'revoked');
+        let verifyCountry = '';
+        let verifyCenterName = '';
+        try {
+            if (record.studentId) {
+                const vpStudent = await dbGet('students', record.studentId);
+                if (vpStudent) {
+                    verifyCountry = vpStudent.country || '';
+                    if (vpStudent.studyCenterId) {
+                        const vpCenter = await dbGet('studyCenters', vpStudent.studyCenterId);
+                        verifyCenterName = vpCenter ? (vpCenter.name || '') : '';
+                        if (!verifyCountry) verifyCountry = vpCenter ? (vpCenter.country || '') : '';
+                    }
+                }
+            }
+        } catch {}
+        if (!verifyCountry) verifyCountry = record.country || '';
         resultDiv.innerHTML = `
             <div style="${isRevoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px 24px;border-radius:8px;">
                 ${isRevoked
@@ -13537,6 +13554,8 @@ async function verifyDocument() {
                     <p><strong>Document:</strong> ${escapeHtml(certificateTypeLabel(record, isTranscript))}</p>
                     <p><strong>Student Name:</strong> ${escapeHtml(record.studentName || record.name || '—')}</p>
                     <p><strong>Admission No:</strong> ${escapeHtml(record.admission || record.admissionNumber || '—')}</p>
+                    ${verifyCenterName ? `<p><strong>Studied at:</strong> ${escapeHtml(verifyCenterName)}</p>` : ''}
+                    ${verifyCountry ? `<p><strong>Country studied in:</strong> ${escapeHtml(verifyCountry)}</p>` : ''}
                     ${record.program ? `<p><strong>Program:</strong> ${escapeHtml(record.program)}</p>` : ''}
                     <p><strong>Document ID:</strong> ${escapeHtml(record.docId || docId)}</p>
                     <p><strong>Verification Code:</strong> <span style="font-family:'Courier New',monospace;color:#b8860b;font-weight:700;">${escapeHtml(record.vCode)}</span></p>
