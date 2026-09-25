@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=147">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=345" as="script">
+    <link rel="preload" href="js/bundle.js?v=346" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -45,7 +45,7 @@
                 <p id="login-error" class="login-error" style="display:none;"></p>
                 <p id="login-admin-phone" style="display:none;text-align:center;margin-top:10px;font-size:13px;"></p>
                 <p class="login-hint" style="margin-top:12px;font-size:11px;color:var(--text-muted);">Don't have an account? <a href="#" onclick="showSignupForm(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">Request Registration</a></p>
-                <p class="login-hint" style="margin-top:8px;font-size:11px;color:var(--text-muted);">Have a certificate? <a href="#" onclick="showPublicVerifyModal(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">🔍 Verify a document</a></p>
+                <p class="login-hint" style="margin-top:8px;font-size:11px;color:var(--text-muted);">Have a certificate? <a href="#" onclick="showPublicVerifyModal(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">?? Verify a document</a></p>
             </div>
         </div>
     </div>
@@ -66,7 +66,7 @@
                 </div>
                 <div class="header-right">
                     <div id="smart-search-container" class="smart-search-container">
-                        <input type="text" id="smart-search" class="smart-search-input" placeholder="🔍 Search anything... (Ctrl+K)" autocomplete="off">
+                        <input type="text" id="smart-search" class="smart-search-input" placeholder="?? Search anything... (Ctrl+K)" autocomplete="off">
                         <div id="smart-search-results" class="smart-search-results"></div>
                     </div>
                     <div class="header-date" id="header-date"></div>
@@ -85,7 +85,7 @@
             <section id="screen-dashboard" class="screen active">
                 <div class="screen-header"><h2>Dashboard</h2><div class="screen-actions admin-only">
                     <button id="btn-quick-enroll" class="btn btn-primary" onclick="showQuickEnroll()">+ Quick Enroll</button>
-                    <button class="btn btn-outline" onclick="sendBulkWhatsApp()">📱 WhatsApp Blast</button>
+                    <button class="btn btn-outline" onclick="sendBulkWhatsApp()">?? WhatsApp Blast</button>
                 </div></div>
                 <div class="dashboard-grid">
                     <div id="dash-pending-banner" style="display:none;"></div>
@@ -114,9 +114,9 @@
                     <select id="student-filter-campus" class="filter-select"><option value="">All Centers</option></select>
                     <select id="student-filter-program" class="filter-select"><option value="">All Programs</option></select>
                     <select id="student-filter-country" class="filter-select"><option value="">All Countries</option></select>
-                    <button class="btn btn-outline" onclick="showProgramAssignment()">📋 Enroll in Program</button>
+                    <button class="btn btn-outline" onclick="showProgramAssignment()">?? Enroll in Program</button>
                     <button class="btn btn-primary" onclick="showStudentForm()">+ Add Student</button>
-                    <button class="btn btn-outline" onclick="showStudentDirectory()">🖨 Print Directory</button>
+                    <button class="btn btn-outline" onclick="showStudentDirectory()">?? Print Directory</button>
                     <button class="btn btn-outline" onclick="exportStudentsCSV()">Export CSV</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Admission #</th><th>Student</th><th>Study Center</th><th>Program</th><th>Year</th><th>Country</th><th>Status</th><th>Balance</th><th>Actions</th></tr></thead><tbody id="students-body"></tbody></table></div></div>
@@ -140,7 +140,7 @@
                     <select id="attendance-center" class="filter-select"><option value="">All Centers</option></select>
                     <select id="attendance-course" class="filter-select"><option value="">Select Course/Service...</option></select>
                     <button class="btn btn-primary" onclick="loadAttendance()">Load Attendance</button>
-                    <button class="btn btn-outline" onclick="printAttendance()" id="btn-print-att" style="display:none">🖨 Print</button>
+                    <button class="btn btn-outline" onclick="printAttendance()" id="btn-print-att" style="display:none">?? Print</button>
                 </div></div>
                 <div class="card"><div id="attendance-sheet" class="attendance-sheet"></div></div>
             </section>
@@ -163,14 +163,14 @@
                     <button class="btn btn-primary" onclick="showExamForm()">+ Schedule Exam</button>
                     <button class="btn btn-outline" onclick="showSeatingPlan()">Seating Plan</button>
                     <button class="btn btn-outline" onclick="showModerationReport()">Moderation Report</button>
-                    <button class="btn btn-success" onclick="showExamNotifyForm()">📱 Notify</button>
+                    <button class="btn btn-success" onclick="showExamNotifyForm()">?? Notify</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Date</th><th>Time</th><th>Venue</th><th>Students</th><th>Invigilator</th><th>Status</th><th>Actions</th></tr></thead><tbody id="exams-body"></tbody></table></div></div>
             </section>
 
             <section id="screen-manuals" class="screen">
                 <div class="screen-header"><h2>Student Manuals</h2><div class="screen-actions">
-                    <a href="/coordinator-manual.html" target="_blank" class="btn btn-outline" style="text-decoration:none;">📘 Coordinator Manual</a>
+                    <a href="/coordinator-manual.html" target="_blank" class="btn btn-outline" style="text-decoration:none;">?? Coordinator Manual</a>
                 </div></div>
             </section>
 
@@ -187,7 +187,7 @@
                     <button class="btn btn-outline" onclick="showInstallmentForm()">Payment Plans</button>
                     <button class="btn btn-outline" onclick="showFeeStructureForm()">Fee Structure</button>
                     <button class="btn btn-outline" onclick="exportFinanceCSV()">Export CSV</button>
-                    <span id="printer-status" class="badge badge-secondary" style="font-size:10px;cursor:default;">🖨️ Disconnected</span>
+                    <span id="printer-status" class="badge badge-secondary" style="font-size:10px;cursor:default;">??? Disconnected</span>
                     <button class="btn btn-outline btn-sm" id="connect-printer-btn" onclick="connectBluetoothPrinter()">Connect Printer</button>
                 </div></div>
                 <div class="dashboard-grid">
@@ -226,9 +226,9 @@
                     <div id="tab-finance-payroll-new" class="tab-content">
                         <div class="card" style="margin-bottom:12px;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                                <h3 style="margin:0;">💰 Payroll Management</h3>
+                                <h3 style="margin:0;">?? Payroll Management</h3>
                                 <div style="display:flex;gap:8px;">
-                                    <button class="btn btn-outline btn-sm" onclick="showDeductionForm()">⚙️ Deductions</button>
+                                    <button class="btn btn-outline btn-sm" onclick="showDeductionForm()">?? Deductions</button>
                                     <button class="btn btn-primary btn-sm" onclick="showPayrollRunForm()">+ Run Payroll</button>
                                 </div>
                             </div>
@@ -241,14 +241,14 @@
                         </div>
                         <div class="card" style="margin-bottom:12px;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                                <h4 style="margin:0;">🏦 Deduction Destinations</h4>
+                                <h4 style="margin:0;">?? Deduction Destinations</h4>
                                 <button class="btn btn-outline btn-sm" onclick="showDeductionAccountForm()">+ Add Account</button>
                             </div>
                             <div id="deduction-accounts-list" style="background:#1e293b;color:#fff;padding:12px;border-radius:8px;"></div>
                         </div>
                         <div class="card" style="margin-bottom:12px;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                                <h4 style="margin:0;">📊 Disbursement Report</h4>
+                                <h4 style="margin:0;">?? Disbursement Report</h4>
                                 <button class="btn btn-primary btn-sm" onclick="generateDisbursementReport()">Generate Report</button>
                             </div>
                         </div>
@@ -268,8 +268,8 @@
                             </div>
                             <div class="form-row">
                                 <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
-                                    <button class="btn btn-primary" onclick="sendMpesaSTKPush()">📱 Send STK Push</button>
-                                    <button class="btn btn-outline" onclick="checkMpesaStatus()">🔄 Check Status</button>
+                                    <button class="btn btn-primary" onclick="sendMpesaSTKPush()">?? Send STK Push</button>
+                                    <button class="btn btn-outline" onclick="checkMpesaStatus()">?? Check Status</button>
                                 </div>
                             </div>
                             <div id="mpesa-health" style="margin-top:8px;font-size:13px;"></div>
@@ -328,13 +328,13 @@
                     <select id="grad-program" class="filter-select" onchange="checkGraduation()"><option value="">Select Program...</option></select>
                     <select id="grad-year" class="filter-select" onchange="checkGraduation()"><option value="">Select Year...</option></select>
                     <button class="btn btn-primary" onclick="checkGraduation()">Check Eligibility</button>
-                    <button class="btn btn-success" onclick="generateGraduationList()">📋 Generate List</button>
+                    <button class="btn btn-success" onclick="generateGraduationList()">?? Generate List</button>
                     <button class="btn btn-outline" onclick="showGraduationRequirements()">Manage Requirements</button>
-                    <button class="btn btn-outline" onclick="showBrochureDesigner()">📰 Brochure</button>
-                    <button class="btn btn-outline" onclick="showInvitationDesigner()">💌 Invitation</button>
-                    <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()">🎓 Generate Diploma</button>
-                    <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()">📜 Generate Completion</button>
-                    <button class="btn btn-outline" onclick="generateGraduationSeating()">🪑 Seating</button>
+                    <button class="btn btn-outline" onclick="showBrochureDesigner()">?? Brochure</button>
+                    <button class="btn btn-outline" onclick="showInvitationDesigner()">?? Invitation</button>
+                    <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()">?? Generate Diploma</button>
+                    <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()">?? Generate Completion</button>
+                    <button class="btn btn-outline" onclick="generateGraduationSeating()">?? Seating</button>
                 </div></div>
                 <div class="card"><div id="graduation-list"></div></div>
             </section>
@@ -373,15 +373,15 @@
                 <div class="screen-header"><h2>Alumni Registry</h2><div class="screen-actions">
                     <input type="text" id="alumni-search" placeholder="Search alumni..." class="search-input">
                     <button class="btn btn-outline" onclick="showAlumniForm()">+ Add Alumni</button>
-                    <button class="btn btn-outline" onclick="sendBulkWhatsApp('alumni')">📱 WhatsApp Alumni</button>
+                    <button class="btn btn-outline" onclick="sendBulkWhatsApp('alumni')">?? WhatsApp Alumni</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Program</th><th>Grad Year</th><th>Ministry/Work</th><th>Contact</th><th>WhatsApp</th><th>Actions</th></tr></thead><tbody id="alumni-body"></tbody></table></div></div>
             </section>
 
             <section id="screen-certificates" class="screen">
                 <div class="screen-header"><h2>Certificates & Documents</h2><div class="screen-actions">
-                    <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()" title="Generate PDF Diploma from template">🎓 Generate Diploma</button>
-                    <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()" title="Generate PDF Completion Certificate from template">📜 Generate Completion</button>
+                    <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()" title="Generate PDF Diploma from template">?? Generate Diploma</button>
+                    <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()" title="Generate PDF Completion Certificate from template">?? Generate Completion</button>
                     <button class="btn btn-primary" onclick="showCertificateForm()">+ Generate Document</button>
                 </div></div>
                 <div class="card"><div id="duplicate-doc-alerts" style="margin-bottom:16px;"></div><div id="certificates-list"><p style="color:var(--text-muted);text-align:center;padding:40px;">No documents generated yet</p></div></div>
@@ -396,7 +396,7 @@
 
             <section id="screen-whatsapp" class="screen">
                 <div class="screen-header"><h2>WhatsApp Messaging</h2><div class="screen-actions">
-                    <button class="btn btn-primary" onclick="sendBulkWhatsApp()">📱 Broadcast Message</button>
+                    <button class="btn btn-primary" onclick="sendBulkWhatsApp()">?? Broadcast Message</button>
                 </div></div>
                 <div class="dashboard-grid">
                     <div class="card" id="whatsapp-test-config-card"><h3>Test Configuration</h3>
@@ -415,15 +415,15 @@
             </section>
 
             <section id="screen-communication" class="screen">
-                <div class="screen-header"><h2>📱 Communication Center</h2><div class="screen-actions">
-                    <button class="btn btn-primary" onclick="sendBulkWhatsApp()">📱 Broadcast Message</button>
+                <div class="screen-header"><h2>?? Communication Center</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="sendBulkWhatsApp()">?? Broadcast Message</button>
                 </div></div>
                 <div id="communication-content"></div>
             </section>
 
             <section id="screen-messages" class="screen">
-                <div class="screen-header"><h2>💬 Internal Messages</h2><div class="screen-actions">
-                    <button class="btn btn-primary" onclick="showComposeMessage()">✏️ New Message</button>
+                <div class="screen-header"><h2>?? Internal Messages</h2><div class="screen-actions">
+                    <button class="btn btn-primary" onclick="showComposeMessage()">?? New Message</button>
                 </div></div>
                 <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start;">
                     <div class="card" style="padding:10px;">
@@ -438,7 +438,7 @@
 
             <section id="screen-sms" class="screen">
                 <div class="screen-header"><h2>SMS Messaging</h2><div class="screen-actions">
-                    <button class="btn btn-primary" onclick="showSMSBroadcast()">📨 Bulk SMS</button>
+                    <button class="btn btn-primary" onclick="showSMSBroadcast()">?? Bulk SMS</button>
                 </div></div>
                 <div class="dashboard-grid">
                     <div class="card"><h3>SMS Templates</h3><div id="sms-templates"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showSMSTemplateForm()">+ Add Template</button></div>
@@ -460,26 +460,26 @@
             </section>
 
             <section id="screen-coverage" class="screen">
-                <div class="screen-header"><h2>📊 Course Coverage per Center</h2><div class="screen-actions">
+                <div class="screen-header"><h2>?? Course Coverage per Center</h2><div class="screen-actions">
                     <select id="coverage-center" class="filter-select" onchange="renderCoverage()"><option value="">All Centers</option></select>
-                    <button class="btn btn-outline" onclick="printCoveragePDF()">🖨 Coverage PDF</button>
-                    <button class="btn btn-outline" onclick="printContactsPDF()">👥 Contacts PDF</button>
-                    <button class="btn btn-outline" onclick="printFinanceCenterPDF()">💰 Center Finance PDF</button>
-                    <button class="btn btn-outline" onclick="printFinanceRegionPDF()">🗺 Region Finance PDF</button>
+                    <button class="btn btn-outline" onclick="printCoveragePDF()">?? Coverage PDF</button>
+                    <button class="btn btn-outline" onclick="printContactsPDF()">?? Contacts PDF</button>
+                    <button class="btn btn-outline" onclick="printFinanceCenterPDF()">?? Center Finance PDF</button>
+                    <button class="btn btn-outline" onclick="printFinanceRegionPDF()">?? Region Finance PDF</button>
                 </div></div>
                 <div class="card"><div id="coverage-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading coverage...</p></div></div>
             </section>
 
             <section id="screen-compare" class="screen">
-                <div class="screen-header"><h2>🌍 Compare Countries</h2><div class="screen-actions">
-                    <button class="btn btn-outline" onclick="renderCompare()">↻ Refresh</button>
+                <div class="screen-header"><h2>?? Compare Countries</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="renderCompare()">? Refresh</button>
                 </div></div>
                 <div class="card"><div id="compare-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading comparison...</p></div></div>
             </section>
 
             <section id="screen-my-country" class="screen">
                 <div class="screen-header"><h2>My Country</h2><div class="screen-actions">
-                    <button class="btn btn-outline" onclick="renderMyCountry()">↻ Refresh</button>
+                    <button class="btn btn-outline" onclick="renderMyCountry()">? Refresh</button>
                 </div></div>
                 <div class="card"><div id="my-country-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading your country...</p></div></div>
             </section>
@@ -489,7 +489,7 @@
                 <div class="card" style="max-width:600px;margin:0 auto;">
                     <div class="form-group"><label>Document ID</label><input type="text" id="verify-docid" placeholder="e.g. FTR-1712345678" style="width:100%;"></div>
                     <div class="form-group"><label>Verification Code</label><input type="text" id="verify-vcode" placeholder="e.g. V-A7K2-M9B3" style="width:100%;"></div>
-                    <button class="btn btn-primary btn-full" onclick="verifyDocument()">🔍 Verify</button>
+                    <button class="btn btn-primary btn-full" onclick="verifyDocument()">?? Verify</button>
                     <div id="verify-result" style="margin-top:16px;"></div>
                 </div>
             </section>
@@ -500,7 +500,7 @@
                     <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Enter the Document ID and Verification Code printed on the document to retrieve and reprint it.</p>
                     <div class="form-group"><label>Document ID</label><input type="text" id="reprint-docid" placeholder="e.g. FTR-1712345678 or TRX-..." style="width:100%;"></div>
                     <div class="form-group"><label>Verification Code</label><input type="text" id="reprint-vcode" placeholder="e.g. V-A7K2-M9B3" style="width:100%;"></div>
-                    <button class="btn btn-primary btn-full" onclick="reprintDocument()">🔍 Retrieve Document</button>
+                    <button class="btn btn-primary btn-full" onclick="reprintDocument()">?? Retrieve Document</button>
                     <div id="reprint-result" style="margin-top:16px;"></div>
                 </div>
             </section>
@@ -525,7 +525,7 @@
             <section id="screen-lessons" class="screen">
                 <div class="screen-header"><h2>Lessons & Topics</h2><div class="screen-actions">
                     <select id="lesson-course" class="filter-select"><option value="">All Courses...</option></select>
-                    <select id="lesson-status-filter" class="filter-select"><option value="all">All Status</option><option value="published">Published Only</option><option value="draft">Draft Only</option><option value="scheduled">Scheduled ⏳</option><option value="drip">Sequenced Only 🔗</option></select>
+                    <select id="lesson-status-filter" class="filter-select"><option value="all">All Status</option><option value="published">Published Only</option><option value="draft">Draft Only</option><option value="scheduled">Scheduled ?</option><option value="drip">Sequenced Only ??</option></select>
                     <button class="btn btn-primary" onclick="showLessonForm()">+ Add Lesson</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>#</th><th>Title</th><th>Description</th><th>Notes</th><th>Questions</th><th>Files</th><th>Actions</th></tr></thead><tbody id="lessons-body"></tbody></table></div></div>
@@ -534,7 +534,7 @@
             <section id="screen-questions" class="screen">
                 <div class="screen-header"><h2>Question Bank</h2><div class="screen-actions">
                     <select id="qb-course" class="filter-select"><option value="">All Courses</option></select>
-                    <select id="qb-type" class="filter-select"><option value="">All Types</option><option value="mcq">Multiple Choice</option><option value="essay">Essay</option><option value="truefalse">True/False</option><option value="matching">🔗 Matching</option><option value="fillin">📝 Fill in the Blanks</option></select>
+                    <select id="qb-type" class="filter-select"><option value="">All Types</option><option value="mcq">Multiple Choice</option><option value="essay">Essay</option><option value="truefalse">True/False</option><option value="matching">?? Matching</option><option value="fillin">?? Fill in the Blanks</option></select>
                     <button class="btn btn-primary" onclick="showQuestionForm()">+ Add Question</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Lesson</th><th>Type</th><th>Question</th><th>Answer</th><th>Points</th><th>Actions</th></tr></thead><tbody id="questions-body"></tbody></table></div></div>
@@ -543,7 +543,7 @@
             <section id="screen-quizzes" class="screen">
                 <div class="screen-header"><h2>Quizzes & Assessments</h2><div class="screen-actions">
                     <select id="quiz-course" class="filter-select"><option value="">All Courses</option></select>
-                    <button class="btn btn-success" onclick="showAutoGenForm()">⚡ Auto-Generate Set</button>
+                    <button class="btn btn-success" onclick="showAutoGenForm()">? Auto-Generate Set</button>
                     <button class="btn btn-primary" onclick="showQuizForm()">+ Create Quiz</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Quiz</th><th>Course</th><th>Lesson</th><th>Questions</th><th>Points</th><th>Pass Mark</th><th>Submissions</th><th>Actions</th></tr></thead><tbody id="quizzes-body"></tbody></table></div></div>
@@ -552,7 +552,7 @@
             <section id="screen-progress" class="screen">
                 <div class="screen-header"><h2>Student Progress</h2><div class="screen-actions">
                     <div class="progress-search-wrapper" style="position:relative;width:320px;">
-                        <input type="text" id="progress-student-search" class="smart-search-input" placeholder="🔍 Search student..." autocomplete="off">
+                        <input type="text" id="progress-student-search" class="smart-search-input" placeholder="?? Search student..." autocomplete="off">
                         <div id="progress-student-dropdown" class="smart-search-results"></div>
                         <input type="hidden" id="progress-student" value="">
                     </div>
@@ -582,38 +582,38 @@
             <section id="screen-portal" class="screen">
                 <div class="screen-header"><h2>Student Portal</h2><div class="screen-actions">
                     <div class="portal-search-wrapper" style="position:relative;width:320px;">
-                        <input type="text" id="portal-student-search" class="smart-search-input" placeholder="🔍 Search student by name, admission #, email..." autocomplete="off">
+                        <input type="text" id="portal-student-search" class="smart-search-input" placeholder="?? Search student by name, admission #, email..." autocomplete="off">
                         <div id="portal-student-dropdown" class="smart-search-results"></div>
                         <input type="hidden" id="portal-student" value="">
                     </div>
-                    <button class="btn btn-outline" onclick="showTicketForm()">🎫 Submit Ticket</button>
+                    <button class="btn btn-outline" onclick="showTicketForm()">?? Submit Ticket</button>
                     <button class="btn btn-outline" onclick="viewPortalTranscript()">View Transcript</button>
                 </div></div>
                 <div class="dashboard-grid">
                     <div id="portal-overview" class="stats-row"></div>
                     <div class="dashboard-cards">
-                        <div class="card"><h3>📝 Active Quizzes</h3><div id="portal-quizzes"></div></div>
-                        <div class="card"><h3>📚 Study Notes</h3><div id="portal-notes"></div></div>
-                        <div class="card"><h3>📊 Recent Grades</h3><div id="portal-grades"></div></div>
-                        <div class="card"><h3>💰 Fee Status</h3><div id="portal-finance"></div></div>
-                        <div class="card"><h3>📋 Attendance</h3><div id="portal-attendance"></div></div>
+                        <div class="card"><h3>?? Active Quizzes</h3><div id="portal-quizzes"></div></div>
+                        <div class="card"><h3>?? Study Notes</h3><div id="portal-notes"></div></div>
+                        <div class="card"><h3>?? Recent Grades</h3><div id="portal-grades"></div></div>
+                        <div class="card"><h3>?? Fee Status</h3><div id="portal-finance"></div></div>
+                        <div class="card"><h3>?? Attendance</h3><div id="portal-attendance"></div></div>
                     </div>
                 </div>
             </section>
 
             <section id="screen-student-hub" class="screen">
-                <div class="screen-header"><h2>🎓 My Student Hub</h2><div class="screen-actions">
+                <div class="screen-header"><h2>?? My Student Hub</h2><div class="screen-actions">
                     <div class="hub-account-row">
-                        <a href="/student-manual.html" target="_blank" class="btn btn-outline" style="text-decoration:none;">📘 Student Manual</a>
-                        <button class="btn btn-outline" onclick="showChangePasswordModal()">🔑 Change Password</button>
-                        <button class="btn btn-outline" onclick="renderStudentHub()" title="Refresh the hub"><span id="hub-refresh-dot" class="hub-live-blink"></span>🔄 Refresh</button>
+                        <a href="/student-manual.html" target="_blank" class="btn btn-outline" style="text-decoration:none;">?? Student Manual</a>
+                        <button class="btn btn-outline" onclick="showChangePasswordModal()">?? Change Password</button>
+                        <button class="btn btn-outline" onclick="renderStudentHub()" title="Refresh the hub"><span id="hub-refresh-dot" class="hub-live-blink"></span>?? Refresh</button>
                     </div>
                 </div></div>
                 <div id="student-hub-content"></div>
             </section>
 
             <section id="screen-fee-gate" class="screen">
-                <div class="screen-header"><h2>🔒 Fee Gate (My Region)</h2></div>
+                <div class="screen-header"><h2>?? Fee Gate (My Region)</h2></div>
                 <div class="card" style="max-width:720px;margin:0 auto;">
                     <div id="feegate-coord-region" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
                     <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="fgc-enabled" style="width:18px;height:18px;"> Enable fee gating for my region</label></div>
@@ -626,9 +626,9 @@
             </section>
 
             <section id="screen-meetings" class="screen">
-                <div class="screen-header"><h2>🏛 Boardroom & Virtual Hall</h2><div class="screen-actions">
+                <div class="screen-header"><h2>?? Boardroom & Virtual Hall</h2><div class="screen-actions">
                     <button class="btn btn-primary" id="meetings-add-btn" onclick="showMeetingForm()">+ New Meeting Space</button>
-                    <button class="btn btn-outline" onclick="renderMeetings()">🔄 Refresh</button>
+                    <button class="btn btn-outline" onclick="renderMeetings()">?? Refresh</button>
                 </div></div>
                 <div id="meetings-list"></div>
             </section>
@@ -642,7 +642,7 @@
             </section>
 
             <section id="screen-discussions" class="screen">
-                <div class="screen-header"><h2>💬 Discussions</h2><div class="screen-actions">
+                <div class="screen-header"><h2>?? Discussions</h2><div class="screen-actions">
                     <select id="disc-course-filter" class="filter-select" onchange="renderDiscussions()"><option value="">All Courses</option></select>
                     <button class="btn btn-primary" onclick="showNewDiscussionModal()">+ New Discussion</button>
                 </div></div>
@@ -658,7 +658,7 @@
             </section>
 
             <section id="screen-regions" class="screen">
-                <div class="screen-header"><h2>🗺 Regions Overview</h2><div class="screen-actions">
+                <div class="screen-header"><h2>?? Regions Overview</h2><div class="screen-actions">
                     <button class="btn btn-outline" onclick="showRegionForm()">+ Add Region</button>
                 </div></div>
                 <div id="regions-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;"></div>
@@ -666,7 +666,7 @@
 
             <section id="screen-settings" class="screen">
                 <div class="screen-header"><h2>Settings & Configuration</h2><div class="screen-actions">
-                    <button class="btn btn-outline" onclick="downloadBackup()">⬇ Backup</button>
+                    <button class="btn btn-outline" onclick="downloadBackup()">? Backup</button>
                     <button class="btn btn-outline" onclick="document.getElementById('restore-input').click()">Restore</button>
                     <input type="file" id="restore-input" style="display:none" accept=".json" onchange="handleRestoreFile(event)">
                 </div></div>
@@ -712,11 +712,11 @@
 </div>
 </div>
 <div id="diploma-pdf-preview" style="font-size:11px;color:var(--text-muted);margin-top:8px;">No template uploaded</div>
-<label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">📄 Choose PDF File<input type="file" id="diploma-pdf-upload" accept="application/pdf" onchange="handleDiplomaPdfUpload(event)" style="display:none;"></label>
+<label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">?? Choose PDF File<input type="file" id="diploma-pdf-upload" accept="application/pdf" onchange="handleDiplomaPdfUpload(event)" style="display:none;"></label>
 <div style="display:flex;gap:8px;margin-top:8px;">
-<button class="btn btn-outline btn-sm" onclick="clearDiplomaPdfPreview()">✕ Clear Preview</button>
-<button class="btn btn-outline btn-sm" onclick="applyPresetCoords('portrait')">📐 Portrait Preset</button>
-<button class="btn btn-outline btn-sm" onclick="applyPresetCoords('landscape')">📄 Landscape Preset</button>
+<button class="btn btn-outline btn-sm" onclick="clearDiplomaPdfPreview()">? Clear Preview</button>
+<button class="btn btn-outline btn-sm" onclick="applyPresetCoords('portrait')">?? Portrait Preset</button>
+<button class="btn btn-outline btn-sm" onclick="applyPresetCoords('landscape')">?? Landscape Preset</button>
 </div>
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
@@ -857,8 +857,8 @@
                              <div class="form-group" style="margin:0;"><label>Director Sig</label><div class="sig-upload"><img id="diploma-sig-director-preview" class="sig-preview" style="display:none;"><input type="file" id="diploma-sig-director-upload" accept="image/*" onchange="handleDiplomaSigUpload('director', event)"><label for="diploma-sig-director-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="diploma-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="diploma-sig-director-y" placeholder="Y" value="240" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="diploma-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
                          </div>
                          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-                             <button class="btn btn-primary" id="btn-save-diploma-config" onclick="saveDiplomaPdfConfig()"><span class="btn-text">Save Template</span><span class="btn-loading" style="display:none;">⏳ Saving...</span></button>
-                             <button class="btn btn-info" onclick="detectDiplomaFieldsWithAI()">🔍 Detect Fields with AI</button>
+                             <button class="btn btn-primary" id="btn-save-diploma-config" onclick="saveDiplomaPdfConfig()"><span class="btn-text">Save Template</span><span class="btn-loading" style="display:none;">? Saving...</span></button>
+                             <button class="btn btn-info" onclick="detectDiplomaFieldsWithAI()">?? Detect Fields with AI</button>
                              <button class="btn btn-outline" onclick="loadDiplomaPdfConfig()">Reload Config</button>
                              <button class="btn btn-success" onclick="showDiplomaPdfGenerator()">Generate Diploma</button>
                          </div>
@@ -878,15 +878,15 @@
 </div>
 </div>
 <span id="completion-pdf-preview2" style="font-size:11px;color:var(--text-muted);display:block;">No template uploaded</span>
-<label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">📄 Choose PDF File<input type="file" id="completion-pdf-upload" accept="application/pdf" onchange="handleCompletionPdfUpload(event)" style="display:none;"></label>
+<label class="btn btn-secondary btn-sm" style="cursor:pointer;width:fit-content;">?? Choose PDF File<input type="file" id="completion-pdf-upload" accept="application/pdf" onchange="handleCompletionPdfUpload(event)" style="display:none;"></label>
 <div style="display:flex;gap:8px;margin-top:8px;">
-<button class="btn btn-outline btn-sm" onclick="clearCompletionPdfPreview()">✕ Clear Preview</button>
-<button class="btn btn-outline btn-sm" onclick="applyCompletionPresetCoords('portrait')">📐 Portrait Preset</button>
-<button class="btn btn-outline btn-sm" onclick="applyCompletionPresetCoords('landscape')">📄 Landscape Preset</button>
+<button class="btn btn-outline btn-sm" onclick="clearCompletionPdfPreview()">? Clear Preview</button>
+<button class="btn btn-outline btn-sm" onclick="applyCompletionPresetCoords('portrait')">?? Portrait Preset</button>
+<button class="btn btn-outline btn-sm" onclick="applyCompletionPresetCoords('landscape')">?? Landscape Preset</button>
 </div>
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
-                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left — 0,0 at bottom-left, like Diploma)</div>
+                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left � 0,0 at bottom-left, like Diploma)</div>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                              <div class="form-group">
@@ -1002,8 +1002,8 @@
                             <div class="form-group" style="margin:0;"><label>Director Sig</label><div class="sig-upload"><img id="completion-sig-director-preview" class="sig-preview" style="display:none;"><input type="file" id="completion-sig-director-upload" accept="image/*" onchange="handleCompletionSigUpload('director', event)"><label for="completion-sig-director-upload" class="sig-placeholder" style="cursor:pointer;font-size:10px;">Upload</label></div><div style="display:flex;gap:4px;margin-top:6px;"><label style="font-size:11px;color:var(--text-muted);margin-right:2px;">X</label><input type="number" id="completion-sig-director-x" placeholder="X" value="170" min="0" max="210" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">Y</label><input type="number" id="completion-sig-director-y" placeholder="Y" value="240" min="0" max="297" style="width:60px;"><label style="font-size:11px;color:var(--text-muted);margin-left:8px;margin-right:2px;">W</label><input type="number" id="completion-sig-director-w" placeholder="W" value="50" min="10" max="200" style="width:60px;"></div></div>
                         </div>
                          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-                             <button class="btn btn-primary" id="btn-save-completion-config" onclick="saveCompletionPdfConfig()"><span class="btn-text">Save Template</span><span class="btn-loading" style="display:none;">⏳ Saving...</span></button>
-                             <button class="btn btn-info" onclick="detectCompletionFieldsWithAI()">🔍 Detect Fields with AI</button>
+                             <button class="btn btn-primary" id="btn-save-completion-config" onclick="saveCompletionPdfConfig()"><span class="btn-text">Save Template</span><span class="btn-loading" style="display:none;">? Saving...</span></button>
+                             <button class="btn btn-info" onclick="detectCompletionFieldsWithAI()">?? Detect Fields with AI</button>
                              <button class="btn btn-outline" onclick="loadCompletionPdfConfig()">Reload Config</button>
                              <button class="btn btn-success" onclick="showCompletionPdfGenerator()">Generate Completion</button>
                          </div>
@@ -1011,12 +1011,12 @@
                      </div>
                      <!-- Alumni Management Section -->
                      <div class="card" style="margin-top:16px;">
-                         <h3>🎓 Alumni Management</h3>
+                         <h3>?? Alumni Management</h3>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Move students between Current and Alumni status</div>
                          <div style="display:flex;gap:8px;margin-bottom:12px;">
-                             <button class="btn btn-outline btn-sm" onclick="loadAlumniManagement()">🔄 Refresh</button>
-                             <button class="btn btn-outline btn-sm" onclick="showMoveToAlumniModal()">➕ Move to Alumni</button>
-                             <button class="btn btn-outline btn-sm" onclick="showRestoreFromAlumniModal()">⤴ Restore from Alumni</button>
+                             <button class="btn btn-outline btn-sm" onclick="loadAlumniManagement()">?? Refresh</button>
+                             <button class="btn btn-outline btn-sm" onclick="showMoveToAlumniModal()">? Move to Alumni</button>
+                             <button class="btn btn-outline btn-sm" onclick="showRestoreFromAlumniModal()">? Restore from Alumni</button>
                          </div>
                          <div id="alumni-management-list" style="max-height:300px;overflow-y:auto;"></div>
                      </div>
@@ -1046,7 +1046,7 @@
                         <div id="countries-list"></div>
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCountryForm()">+ Add Country</button>
                         <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showBulkCountryForm()">Bulk Assign</button>
-                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCountryCoordinatorForm()">＋ Register Country Coordinator</button>
+                        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCountryCoordinatorForm()">+ Register Country Coordinator</button>
                     </div>
                     <div class="card"><h3>Fee Rules & Graduation</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Tuition ceiling caps every fee owed (0 = off). Graduation is a separate ledger: set its amount and its own ceiling. Waivers apply to tuition only, capped per student in total. Empty = disabled.</div>
@@ -1056,7 +1056,7 @@
                         <div class="form-group"><label>Graduation Ceiling (KES)</label><input type="number" id="settings-grad-ceiling" min="0" placeholder="e.g., 8000"></div></div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap;">
                             <button class="btn btn-primary btn-sm" onclick="saveFeeRules()">Save Fee Rules</button>
-                            <button class="btn btn-outline btn-sm" onclick="loadFeeRulesUI()">↻ Refresh</button>
+                            <button class="btn btn-outline btn-sm" onclick="loadFeeRulesUI()">? Refresh</button>
                         </div>
                     </div>
                     <div class="card"><h3>Admission Numbers</h3>
@@ -1068,7 +1068,7 @@
                         <div style="border-top:1px solid var(--border);margin:10px 0;padding-top:10px;">
                             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                                 <div style="font-size:12px;font-weight:600;color:var(--accent);">Available (Reusable) Sequence Numbers</div>
-                                <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:10px;" onclick="loadAdmissionLastSeqSetting()">↻ Refresh</button>
+                                <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:10px;" onclick="loadAdmissionLastSeqSetting()">? Refresh</button>
                             </div>
                             <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Gaps in the current sequence. Click any number to set it as the next admission number.</div>
                             <div id="settings-admission-available" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px;"></div>
@@ -1089,7 +1089,7 @@
                         <div class="form-group"><label>Content (HTML)</label><textarea id="settings-terms-content" rows="16" style="font-family:monospace;font-size:12px;line-height:1.5;" placeholder="Leave empty to use the default Terms &amp; Conditions content."></textarea></div>
                         <button class="btn btn-primary" onclick="saveBranding()">Save T&amp;C</button>
                     </div>
-                    <div class="card"><h3>🔒 Protection Switch</h3>
+                    <div class="card"><h3>?? Protection Switch</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, right-click, text selection, copy, F12, Ctrl+Shift+I/J/C, and Ctrl+U are blocked. Turn OFF while you are working on the system.</div>
                         <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
                             <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
@@ -1101,7 +1101,7 @@
                         <button class="btn btn-primary" onclick="saveBranding()">Save Protection Setting</button>
                     </div>
                     </div>
-                    <div class="card"><h3>📋 Audit Log</h3>
+                    <div class="card"><h3>?? Audit Log</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Manage the system audit trail. View all activities, export to CSV, prune old entries, or clear the entire log.</div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                             <button class="btn btn-outline" onclick="showScreen('audit')">View Audit Log</button>
@@ -1110,7 +1110,7 @@
                             <button class="btn btn-danger" onclick="clearAllAudit()">Clear All Audit Log</button>
                         </div>
                     </div>
-                    <div class="card"><h3>🛠 Maintenance Mode</h3>
+                    <div class="card"><h3>?? Maintenance Mode</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, visitors and all non-admin users are shown a maintenance page with your logo instead of the system. Only administrators can sign in while maintenance is active. Turn it ON while you are updating the system, then turn it OFF when you are done.</div>
                         <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
                             <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
@@ -1185,7 +1185,7 @@
                         </div>
                         <div id="assistant-access-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
-                    <div class="card"><h3>🔒 Fee-Gated Learning</h3>
+                    <div class="card"><h3>?? Fee-Gated Learning</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, students below the weekly target lose access to the tabs you tick, once the deadline passes. When OFF, all students learn free. Use Global for all-at-once, or Per-region to let each regional coordinator set their own.</div>
                         <div class="form-row"><div class="form-group"><label>Mode</label><select id="feegate-mode" onchange="onFeeGateModeChange()"><option value="global">Global (one rule for all)</option><option value="per-region">Per-region (coordinators set theirs)</option></select></div><div class="form-group"><label>Edit Scope</label><select id="feegate-region" onchange="selectFeeGateRegion()"><option value="">Global default</option></select></div></div>
                         <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="feegate-enabled" onchange="toggleFeeGateOptions()" style="width:18px;height:18px;"> Enable fee gating</label></div>
@@ -1193,27 +1193,27 @@
                             <div class="form-row"><div class="form-group"><label>Weekly Target (KES)</label><input type="number" id="feegate-amount" min="1" value="200"></div><div class="form-group"><label>Deadline Day</label><select id="feegate-day"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div><div class="form-group"><label>Deadline Time</label><input type="time" id="feegate-time" value="12:00"></div></div>
                             <div class="form-group"><label>Lock these hub tabs when target missed</label><div id="feegate-tabs" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"></div></div>
                             <div class="form-group"><label>Apply To</label><select id="feegate-scope" onchange="toggleFeeGateStudents()"><option value="all">All students</option><option value="selected">Only selected students</option><option value="except">All except selected</option></select></div>
-                            <div class="form-group" id="feegate-students-group" style="display:none;"><label>Students (optional custom target each; blank = global. Tick Exempt to free a student.)</label><input type="text" id="feegate-student-search" placeholder="🔍 Search student..." oninput="renderFeeGateStudents()" style="width:100%;margin-bottom:6px;"><div id="feegate-students" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-input);"></div></div>
+                            <div class="form-group" id="feegate-students-group" style="display:none;"><label>Students (optional custom target each; blank = global. Tick Exempt to free a student.)</label><input type="text" id="feegate-student-search" placeholder="?? Search student..." oninput="renderFeeGateStudents()" style="width:100%;margin-bottom:6px;"><div id="feegate-students" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-input);"></div></div>
                         </div>
                         <button class="btn btn-primary" onclick="saveFeeGate()">Save Fee Gate</button>
                         <div id="feegate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
-                    <div class="card"><h3>📖 Content Access Gate</h3>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now — tick Unlock per course to release it early. Works globally or per study center.</div>
+                    <div class="card"><h3>?? Content Access Gate</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now � tick Unlock per course to release it early. Works globally or per study center.</div>
                         <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="contentgate-enabled" onchange="toggleContentGateOptions()" style="width:18px;height:18px;"> Enable content gating</label></div>
                         <div id="contentgate-options" style="display:none;">
                             <div class="form-row"><div class="form-group"><label>Mode</label><select id="contentgate-mode" onchange="onContentGateModeChange()"><option value="global">Global (one rule for all)</option><option value="per-region">Per region</option><option value="per-center">Per study center</option><option value="per-student">Per student</option></select></div><div class="form-group"><label>Edit Scope</label><select id="contentgate-center" onchange="selectContentGateCenter()"><option value="">Global default</option></select></div></div>
                             <div id="contentgate-scope-warn" style="display:none;font-size:12px;color:var(--warning);margin-bottom:8px;"></div>
-                            <div class="form-group" id="contentgate-student-group" style="display:none;"><label>Student (per-student unlocks add onto their region/center rule; tick Exempt to free them fully)</label><div style="display:flex;gap:6px;"><input type="text" id="contentgate-student-search" placeholder="🔍 Search name/admission..." oninput="renderContentGateStudentOptions()" style="flex:1;"><label style="display:flex;align-items:center;gap:4px;font-size:12px;">Exempt<input type="checkbox" id="contentgate-student-exempt" style="width:16px;height:16px;"></label></div><select id="contentgate-student" onchange="selectContentGateCenter()" style="width:100%;margin-top:6px;"><option value="">— Select student —</option></select></div>
+                            <div class="form-group" id="contentgate-student-group" style="display:none;"><label>Student (per-student unlocks add onto their region/center rule; tick Exempt to free them fully)</label><div style="display:flex;gap:6px;"><input type="text" id="contentgate-student-search" placeholder="?? Search name/admission..." oninput="renderContentGateStudentOptions()" style="flex:1;"><label style="display:flex;align-items:center;gap:4px;font-size:12px;">Exempt<input type="checkbox" id="contentgate-student-exempt" style="width:16px;height:16px;"></label></div><select id="contentgate-student" onchange="selectContentGateCenter()" style="width:100%;margin-top:6px;"><option value="">� Select student �</option></select></div>
                             <div class="form-group"><label>Courses (tick Unlock to release a future course early)</label><div id="contentgate-courses" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-input);"></div></div>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             <button class="btn btn-primary" onclick="saveContentGate()">Save Content Gate</button>
-                            <button class="btn btn-outline" onclick="resetContentGateScope()">↺ Reset Scope to Auto</button>
+                            <button class="btn btn-outline" onclick="resetContentGateScope()">? Reset Scope to Auto</button>
                         </div>
                         <div id="contentgate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
-                    <div class="card"><h3>📘 User Manuals</h3>
+                    <div class="card"><h3>?? User Manuals</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Open a manual in a new tab. Each manual has a Download PDF button on top.</div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             <a class="btn btn-outline btn-sm" href="/admin-manual.html" target="_blank" style="text-decoration:none;">Admin Manual</a>
@@ -1269,8 +1269,8 @@
                             <label>Database Stats</label>
                             <div id="db-stats" style="font-size:11px;color:var(--text-muted);">Loading...</div>
                         </div>
-                        <div class="form-group"><label>Download Backup</label><button class="btn btn-primary" onclick="downloadBackup()">⬇ Download .json</button></div>
-                        <div class="form-group"><label>Restore Backup</label><input type="file" id="restore-file-input" accept=".json" onchange="restoreData(event)" style="font-size:11px;"> <button class="btn btn-warning" onclick="uploadRestore()">Restore</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">⚠ Overwrites all current data with the backup file.</div></div>
+                        <div class="form-group"><label>Download Backup</label><button class="btn btn-primary" onclick="downloadBackup()">? Download .json</button></div>
+                        <div class="form-group"><label>Restore Backup</label><input type="file" id="restore-file-input" accept=".json" onchange="restoreData(event)" style="font-size:11px;"> <button class="btn btn-warning" onclick="uploadRestore()">Restore</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">? Overwrites all current data with the backup file.</div></div>
                         <div class="form-group"><label>Migrate From Browser Storage</label><button class="btn btn-warning" onclick="migrateIndexedDB()">Migrate Now</button><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Copies all data from your old browser storage (IndexedDB) to the server. Run this once from the PC where you originally entered data.</div></div>
                         <div class="form-group"><label>Clear All Data</label><button class="btn btn-danger" onclick="clearAllData()">Clear All Data</button></div>
                     </div>
@@ -1288,7 +1288,7 @@
         <div class="terms-header">
             <div class="terms-logo"><span class="terms-logo-text">NET</span></div>
             <h2>Terms &amp; Conditions of Use</h2>
-            <p class="terms-subtitle">NET Foundation Kenya — College Management System</p>
+            <p class="terms-subtitle">NET Foundation Kenya � College Management System</p>
             <p class="terms-updated" id="terms-updated-date"></p>
         </div>
         <div class="terms-scroll" id="terms-scroll">
@@ -1309,7 +1309,7 @@
             </div>
             <div class="terms-section">
                 <h3>3. Use of Personal Information</h3>
-                <p>Your personal information — including but not limited to your full name, photograph, date of birth, admission number, national ID number, academic records, attendance records, and examination results — shall appear on official academic documents issued by NET Foundation Kenya, including:</p>
+                <p>Your personal information � including but not limited to your full name, photograph, date of birth, admission number, national ID number, academic records, attendance records, and examination results � shall appear on official academic documents issued by NET Foundation Kenya, including:</p>
                 <ul>
                     <li>Transcripts of academic records</li>
                     <li>Graduation certificates and diplomas</li>
@@ -1369,7 +1369,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=345"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=346"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=45"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
