@@ -2970,6 +2970,31 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         return true;
     }
 
+    // POST /api/terms-accept — any authenticated user records their OWN
+    // acceptance of the current Terms & Conditions. The server stamps only
+    // termsAccepted/termsAcceptedAt/termsVersion on the caller's own user
+    // record — no generic users-store write is ever exposed to non-admins.
+    // The version stored is the one the gates compute client-side
+    // (termsContent ? (termsVersion || 1) : 0), so a mismatch after a fresh
+    // browser / device is impossible once accepted at the current version.
+    if (parts.length === 2 && parts[1] === 'terms-accept' && req.method === 'POST') {
+        try {
+            const authUser = getRequestUser(req);
+            if (!authUser || !authUser.user) return json(res, 401, { error: 'Not authenticated' });
+            const rec = (db.settings || []).find(s => s.key === 'branding');
+            const branding = rec ? (rec.value || rec) : null;
+            const termsVersion = branding && branding.termsContent ? (branding.termsVersion || 1) : 0;
+            const userRec = (db.users || []).find(u => String(u.username) === String(authUser.username));
+            if (!userRec) return json(res, 404, { error: 'Account not found' });
+            userRec.termsAccepted = true;
+            userRec.termsAcceptedAt = new Date().toISOString();
+            userRec.termsVersion = termsVersion;
+            saveDB();
+            auditLog('terms-accepted', 'user', { username: userRec.username, termsVersion }, userRec.username);
+            return json(res, 200, { ok: true, termsVersion });
+        } catch { return json(res, 400, { error: 'Invalid request' }); }
+    }
+
     // GET /api/public-contact — admin phone for login screen (public, no secrets)
     if (parts.length === 2 && parts[1] === 'public-contact' && req.method === 'GET') {
         try {
