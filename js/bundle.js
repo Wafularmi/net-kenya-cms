@@ -486,7 +486,7 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
@@ -1394,7 +1394,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, ...(isStudent ? [] : [{ id: 'exams', icon: '', text: 'Examinations' }]), { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -1827,6 +1827,7 @@ function showScreen(id) {
         case 'grades': updateCourseDropdowns(); break;
         case 'exams': renderExams(); break;
         case 'staff': renderStaff(); break;
+        case 'coordinator-mgmt': renderCoordinatorMgmt(); break;
         case 'finance': renderFinance(); renderPayroll(); onStatementTypeChange(); renderMpesaTab(); break;
         case 'chapel': document.getElementById('chapel-date').value = new Date().toISOString().split('T')[0]; break;
         case 'graduation': populateGraduationFilters(); refreshDocGenButtons(); break;
@@ -3350,6 +3351,122 @@ async function deleteStaff(id) {
     logAudit('deleted', 'staff', { id });
 }
 document.getElementById('staff-search').addEventListener('input', debounce(renderStaff, 300));
+
+// ---------- Coordinator Management (grouped per country) ----------
+// Admin view: all coordinators grouped clearly under their country, with
+// per-country register, edit details, reset own-password, reset the
+// coordinator's password, and delete. Country coordinator view: scoped to
+// their OWN country — they see their country's coordinators (for their own
+// password reset and their own details), plus a student password reset panel
+// for students that resolve to their country.
+async function renderCoordinatorMgmt() {
+    const box = document.getElementById('coordinator-mgmt-content');
+    if (!box) return;
+    const scope = viewerScope();
+    const isCoordViewer = scope.isCoord;
+    const viewingCountry = scope.country || '';
+    const [users, students, regions] = await Promise.all([
+        dbGetAll('users').catch(() => []),
+        dbGetAll('students').catch(() => []),
+        dbGetAll('regions').catch(() => [])
+    ]);
+    let countryNames = [];
+    try { countryNames = (await fetchCountries()).map(c => (c && c.name) || '').filter(Boolean); } catch {}
+    let coordinators = users.filter(u => u.role === 'coordinator' && u.username !== 'admin');
+    const regionName = id => { const r = regions.find(rr => rr.id === id); return r ? r.name : (id || ''); };
+    const groups = {};
+    coordinators.forEach(c => { const k = c.country || ''; (groups[k] = groups[k] || []).push(c); });
+    const orderedKeys = countryNames.filter(n => groups[n]).concat(Object.keys(groups).filter(k => k && !countryNames.includes(k)).sort()).concat(groups[''] ? [''] : []);
+    let html = '';
+    if (isCoordViewer && viewingCountry) {
+        html += `<div class="card" style="margin-bottom:14px;padding:14px;"><div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px;">🔑 Your Own Login Password</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Set a new password for your own coordinator account (no current password needed — you are already signed in).</div>
+        <div class="form-row"><div class="form-group"><label>New Password</label><input type="password" id="cownp" placeholder="min 6 characters"></div><div class="form-group"><label>Confirm</label><input type="password" id="cownm" placeholder="repeat"></div></div>
+        <button class="btn btn-primary btn-sm" onclick="resetOwnPassword()">💾 Update My Password</button></div>`;
+        const myCountry = viewingCountry;
+        const countryStudents = students.filter(s => s && (String(s.country || '') === myCountry ||
+            (s.studyCenterId && window.__centerCountry && window.__centerCountry[s.studyCenterId] === myCountry) ||
+            (s.regionId && regions.find(r => r.id === s.regionId && r.country === myCountry))));
+        const q = document.getElementById('cmgmt-student-q') ? document.getElementById('cmgmt-student-q').value.toLowerCase() : '';
+        const filtered = countryStudents.filter(s => !q || (s.name || '').toLowerCase().includes(q) || (s.admissionNumber || '').toLowerCase().includes(q) || (s.phone || '').toLowerCase().includes(q));
+        html += `<div class="card" style="padding:14px;"><div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:4px;">🎓 Students of ${escapeHtml(myCountry)} — Password Reset</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">You may reset passwords only for students who belong to ${escapeHtml(myCountry)}. Changes apply immediately and are audited.</div>
+        <div class="form-group"><input type="text" id="cmgmt-student-q" placeholder="Search by name, admission or phone…" oninput="renderCoordinatorMgmt()"></div>
+        ${filtered.length ? filtered.slice(0, 100).map(s => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;"><div><b>${escapeHtml(s.name || '')}</b><br><span style="font-size:10px;color:var(--text-muted);">${escapeHtml(s.admissionNumber || s.id || '')}${s.studyCenterId ? ' — ' + escapeHtml((window.__centerName && window.__centerName[s.studyCenterId]) || s.studyCenterId) : ''}</span></div><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="editCoordinatorPassword('${esc(s.id)}')">🔑 Set Password</button><button class="btn btn-outline btn-sm" onclick="resetStudentToAdmission('${esc(s.id)}')">↩ Admission #</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:8px;">No students of your country matched.</div>'}
+        </div>`;
+    }
+    if (!orderedKeys.length && !(isCoordViewer && viewingCountry)) {
+        html += '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">No coordinators found. Use “+ Register Country Coordinator” to add your first one.</div>';
+    }
+    const selfUsername = (() => { try { return JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || ''; } catch { return ''; } })();
+    html += orderedKeys.map(k => {
+        const visible = isCoordViewer ? groups[k].filter(c => c.username === selfUsername) : groups[k];
+        if (!visible.length) return '';
+        return `<div class="card" style="border-left:3px solid var(--accent);padding:12px 14px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-size:14px;font-weight:800;color:var(--text-strong);">${k ? '🇺🇳 ' + escapeHtml(k) : '🌐 Unassigned Country'}<span class="badge badge-info" style="margin-left:8px;font-size:10px;">${visible.length} coordinator${visible.length !== 1 ? 's' : ''}</span></div>${!isCoordViewer ? `<button class="btn btn-success btn-sm" onclick="showCountryCoordinatorForm()">➕ Register for ${escapeHtml(k)}</button>` : ''}</div>
+${visible.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+<div><b>${escapeHtml(c.name || c.username)}</b> <span class="badge badge-warning">Coordinator</span>${c.regionId ? ` <span class="badge badge-info">${escapeHtml(regionName(c.regionId))}</span>` : ''}<br><span style="font-size:10px;color:var(--text-muted);">Login: ${escapeHtml(c.username)}${c.phone ? ' • ' + escapeHtml(c.phone) : ''}${c.email ? ' • ' + escapeHtml(c.email) : ''}</span></div>
+<div style="display:flex;gap:4px;">${!isCoordViewer ? `<button class="btn btn-outline btn-sm" onclick="editStaff('__coord__${esc(c.username)}')">✏️ Edit</button>` : ''}<button class="btn btn-primary btn-sm" onclick="resetCoordinatorPerm('${esc(c.username)}')">🔑 Reset Pwd</button>${!isCoordViewer ? `<button class="btn btn-danger btn-sm" onclick="deleteStaff('__coord__${esc(c.username)}')">Del</button>` : ''}</div>
+</div>`).join('')}</div>`;
+    }).join('');
+    box.innerHTML = html;
+    try {
+        const centers = await getCenters();
+        window.__centerName = {};
+        window.__centerCountry = {};
+        centers.forEach(c => { window.__centerName[c.id] = c.name; window.__centerCountry[c.id] = c.country || ''; });
+    } catch {}
+}
+async function editCoordinatorPassword(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return;
+    const uname = student.phone || student.id;
+    const newPw = await showPrompt('Reset Student Password', 'New password for ' + (student.name || studentId) + ':');
+    if (!newPw || newPw.length < 6) return showToast('Password must be at least 6 characters!');
+    const res = await fetch('/api/reset-password', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ username: uname, newPassword: newPw }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Could not reset password', { type: 'danger' });
+    showToast('Password reset for ' + (student.name || studentId) + '!', { type: 'success' });
+    try { logAudit('updated', 'student-password', { studentId }); } catch {}
+}
+async function resetStudentToAdmission(studentId) {
+    const student = await dbGet('students', studentId);
+    if (!student) return;
+    if (!await showConfirm('Reset to Admission #', 'Reset password for ' + (student.name || studentId) + ' back to their admission number (' + (student.admissionNumber || '—') + ')?')) return;
+    const uname = student.phone || student.id;
+    const res = await fetch('/api/reset-password', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ username: uname, resetToAdmission: true }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Could not reset password', { type: 'danger' });
+    showToast('Password reset to admission number!', { type: 'success' });
+    try { logAudit('updated', 'student-password', { studentId, method: 'to-admission' }); } catch {}
+}
+async function resetCoordinatorPerm(username) {
+    const newPw = await showPrompt('Reset Coordinator Password', 'New password for "' + username + '":');
+    if (!newPw || newPw.length < 6) return showToast('Password must be at least 6 characters!');
+    if (!await showConfirm('Confirm Reset', 'Set new password for "' + username + '"?')) return;
+    const res = await fetch('/api/reset-password', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ username, newPassword: newPw }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Could not reset password', { type: 'danger' });
+    showToast('Password reset for ' + username + '!', { type: 'success' });
+    try { logAudit('updated', 'user-password', { username }); } catch {}
+    try { if (typeof renderCoordinatorMgmt === 'function') renderCoordinatorMgmt(); } catch {}
+}
+async function resetOwnPassword() {
+    const a = document.getElementById('cownp');
+    const b = document.getElementById('cownm');
+    if (!a || !b) return;
+    const newPw = a.value;
+    if (!newPw || newPw.length < 6) return showToast('Password must be at least 6 characters!');
+    if (newPw !== b.value) return showToast('Passwords do not match!');
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!user.username) return showToast('Not signed in', { type: 'danger' });
+    const res = await fetch('/api/reset-password', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ username: user.username, newPassword: newPw }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Could not update password', { type: 'danger' });
+    a.value = ''; b.value = '';
+    showToast('Your password was updated!', { type: 'success' });
+    try { logAudit('updated', 'password', { username: user.username }); } catch {}
+}
 
 function renderStudentCourseCard(c, lessonsByCourseId, staffById, isEnrolled) {
     const stats = lessonsByCourseId[c.id] || {};
@@ -21799,19 +21916,33 @@ async function renderRegions() {
     const students = await dbGetAll('students');
     let countryNames = [];
     try { countryNames = (await fetchCountries()).map(c => c && c.name).filter(Boolean); } catch {}
+    const scope = viewerScope();
+    const visibleRegions = (scope.country && (scope.isCoord || (scope.role === 'admin' && scope.previewing)))
+        ? regions.filter(r => !r.country || r.country === scope.country)
+        : regions;
     const groups = {};
-    regions.forEach(r => { const k = r.country || ''; (groups[k] = groups[k] || []).push(r); });
-    const canManageUsers = !viewerScope().isCoord;
+    visibleRegions.forEach(r => { const k = r.country || ''; (groups[k] = groups[k] || []).push(r); });
+    const canManageUsers = !scope.isCoord;
     const orderedKeys = [...countryNames.filter(n => groups[n]), ...Object.keys(groups).filter(k => k && !countryNames.includes(k)).sort(), ...(groups[''] ? [''] : [])];
-    const groupHead = k => k ? `<div style="font-size:12px;font-weight:800;color:var(--accent);margin:10px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(k)}</div>` : (orderedKeys.length > 1 ? `<div style="font-size:12px;font-weight:800;color:var(--text-muted);margin:10px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Unassigned</div>` : '');
-    document.getElementById('regions-overview').innerHTML = regions.length ? orderedKeys.map(k => groupHead(k) + groups[k].map(r => {
+    document.getElementById('regions-overview').innerHTML = visibleRegions.length ? orderedKeys.map(k => {
+        const countryBlock = groups[k];
+        return `<div class="card" style="border-left:3px solid ${k ? 'var(--accent)' : 'var(--text-muted)'};padding:12px;margin-bottom:16px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">
+<div style="font-size:15px;font-weight:800;color:var(--text-strong);">${k ? '🇺🇳 ' + escapeHtml(k) : '🌐 Unassigned'}<span class="badge badge-info" style="margin-left:8px;font-size:10px;">${countryBlock.length} region${countryBlock.length !== 1 ? 's' : ''}</span></div>
+${!scope.isCoord ? `<button class="btn btn-success btn-sm" onclick="showRegionForm()">➕ Add Region</button>` : ''}</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
+${countryBlock.map(r => {
         const regionCenters = centers.filter(c => c.regionId === r.id);
         const coordinators = users.filter(u => u.role === 'coordinator' && u.regionId === r.id);
         const activeStudents = students.filter(s => s.status === 'active' && regionCenters.some(c => (s.studyCenterId || s.campus) === c.id));
-        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b></span><div style="display:flex;gap:4px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button></div></div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div>${coordinators.length && canManageUsers ? `<div style="font-size:11px;color:var(--accent);margin-top:2px;">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 2px 0;">${esc(u.name || u.username)}<button class="btn btn-outline btn-sm" style="padding:0 5px;font-size:9px;margin-left:2px;" onclick="transferCoordinator('${u.username}')">🔄 Transfer</button></span>`).join('')}</div>` : ''}${canManageUsers ? `<div style="margin-top:4px;"><button class="btn btn-success btn-sm" onclick="showCoordinatorForm('${r.id}')">➕ Register Coordinator</button></div>` : ''}</div>`;
-    }).join('')).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
+        return `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;">${k ? `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);">${escapeHtml(k)}</div>` : ''}<div style="font-size:14px;font-weight:700;color:var(--text-strong);">${escapeHtml(r.name)}</div><div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);"><span>📚 ${regionCenters.length} center${regionCenters.length !== 1 ? 's' : ''}</span><span>👤 ${coordinators.length} coordinator${coordinators.length !== 1 ? 's' : ''}</span><span>🎓 ${activeStudents.length} student${activeStudents.length !== 1 ? 's' : ''}</span></div><div style="display:flex;gap:4px;margin-top:2px;"><button class="btn btn-primary btn-sm" onclick="showRegionDetail('${r.id}')">🔍 Drill Down</button><button class="btn btn-outline btn-sm" onclick="manageRegionCenters('${r.id}')">📚 Centers</button>${!scope.isCoord ? `<button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteRegion('${r.id}')">Del</button>` : ''}</div>${coordinators.length && canManageUsers ? `<div style="font-size:11px;color:var(--accent);margin-top:2px;">Coordinator${coordinators.length > 1 ? 's' : ''}: ${coordinators.map(u => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px 4px 2px 0;">${esc(u.name || u.username)}<button class="btn btn-outline btn-sm" style="padding:0 5px;font-size:9px;margin-left:2px;" onclick="transferCoordinator('${u.username}')">🔄 Transfer</button></span>`).join('')}</div>` : ''}${canManageUsers ? `<div style="margin-top:4px;"><button class="btn btn-success btn-sm" onclick="showCoordinatorForm('${r.id}')">➕ Register Coordinator</button></div>` : ''}</div>`;
+    }).join('')}</div></div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No regions added</div>';
     const settingsList = document.getElementById('regions-list');
-    if (settingsList) settingsList.innerHTML = regions.length ? regions.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> ${r.country ? `<span class="badge badge-info">${escapeHtml(r.country)}</span>` : ''} <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
+    if (settingsList) settingsList.innerHTML = regions.length ? orderedKeys.map(k => {
+        const block = groups[k];
+        return `<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:${k ? 'var(--accent)' : 'var(--text-muted)'};margin-bottom:4px;">${k ? '🇺🇳 ' + escapeHtml(k) : '🌐 Unassigned'}</div>${block.map(r => `<div class="event-item" style="flex-direction:column;align-items:flex-start;gap:2px;border-left:2px solid var(--border);"><div style="display:flex;justify-content:space-between;width:100%;"><span><b>${r.name}</b> <span class="badge badge-info">${(centers.filter(c => c.regionId === r.id).length)} centers</span></span><button class="btn btn-outline btn-sm" onclick="editRegion('${r.id}')">Edit</button></div></div>`).join('')}</div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:11px;">No regions</div>';
 }
 
 async function showRegionForm(region = null) {
@@ -22253,7 +22384,9 @@ function showCountryCoordinatorForm() {
 <div class="form-group"><label>Contact Phone</label><input type="text" id="cc-phone" placeholder="e.g., +254 7XX XXX XXX"><small style="display:block;opacity:.7;">Appears as the contact phone on documents this coordinator generates.</small></div>
 <div style="font-size:11px;color:var(--text-muted);">This account becomes an <b>administrator of the selected country</b>: full management powers fenced to that country's data. Global settings stay with the overall admin.</div>`;
     showModal('Register Country Coordinator', content, `<button class="btn btn-primary" onclick="saveCountryCoordinator()">Register</button>`);
-    loadCountryDropdown('cc-country', '');
+    const ctx = viewerScope();
+    const preset = (ctx && ctx.previewing) ? ctx.country : '';
+    loadCountryDropdown('cc-country', preset);
 }
 async function saveCountryCoordinator() {
     const name = document.getElementById('cc-name').value.trim();
@@ -22272,6 +22405,7 @@ async function saveCountryCoordinator() {
     closeModal();
     try { if (typeof renderUsers === 'function') await renderUsers(); } catch {}
     try { if (typeof renderStaff === 'function') await renderStaff(); } catch {}
+    try { if (typeof renderCoordinatorMgmt === 'function') await renderCoordinatorMgmt(); } catch {}
     showToast('Country coordinator registered for ' + country + '!', { type: 'success' });
     logAudit('created', 'country-coordinator', { username, country });
 }

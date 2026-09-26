@@ -3064,6 +3064,58 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         return true;
     }
 
+    // POST /api/reset-password — decentralized, country-aware password reset.
+    //   - Overall admin: may reset ANY user's password (coordinator or student).
+    //   - Country coordinator: may reset their OWN password, and the password of
+    //     any STUDENT who resolves to their own country (student.country, or via
+    //     study center -> region). Students of other countries are rejected.
+    //   - Body: { username, newPassword }  OR  { username, resetToAdmission: true }
+    //     (resetToAdmission sets the student's password to their admission number).
+    // The users store itself stays write-blocked for non-admins; this is the
+    // only sanctioned path, so decentralization never widens the attack surface.
+    if (parts.length === 2 && parts[1] === 'reset-password' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const authUser = getRequestUser(req);
+                if (!authUser || !authUser.user) return json(res, 401, { error: 'Not authenticated' });
+                const parsed = JSON.parse(body);
+                const username = parsed && parsed.username ? String(parsed.username).trim() : '';
+                const newPassword = parsed && parsed.newPassword ? String(parsed.newPassword) : '';
+                const resetToAdmission = !!(parsed && parsed.resetToAdmission);
+                if (!username) return json(res, 400, { error: 'Enter the account username' });
+                if (!resetToAdmission && newPassword.length < 6) return json(res, 400, { error: 'New password must be at least 6 characters' });
+                const target = (db.users || []).find(u => u.username === username || u.studentId === username || u.phone === username);
+                if (!target) return json(res, 404, { error: 'Account not found' });
+                const hash = pw => crypto.createHash('sha256').update(pw, 'utf8').digest('hex');
+                const isAdmin = authUser.role === 'admin';
+                const scope = countryScopeOf(authUser);
+                if (!isAdmin && !scope) return json(res, 403, { error: 'Only admins and country administrators may reset passwords' });
+                if (!isAdmin && target.username !== authUser.username) {
+                    // Coordinator resetting someone else: they may ONLY reset a
+                    // student of their OWN country, and only via country-scoping.
+                    if (target.role !== 'student') return json(res, 403, { error: 'You may only reset passwords for students of your country' });
+                    const student = (db.students || []).find(s => String(s.id) === String(target.studentId) || s.phone === target.username || s.email === target.username || (s.admissionNumber && s.admissionNumber === target.username));
+                    const tCountry = recordCountryOf('students', student || {});
+                    if (tCountry !== scope) return json(res, 403, { error: 'You may only reset passwords for students of your own country' });
+                }
+                let finalPw = newPassword;
+                if (resetToAdmission) {
+                    const student = (db.students || []).find(s => String(s.id) === String(target.studentId) || s.phone === target.username || s.email === target.username || (s.admissionNumber && s.admissionNumber === target.username));
+                    if (!student || !student.admissionNumber) return json(res, 400, { error: 'Student has no admission number to reset to' });
+                    finalPw = String(student.admissionNumber);
+                }
+                target.password = hash(finalPw);
+                target.status = 'active';
+                saveDB();
+                auditLog('reset-password', 'user', { username: target.username, method: resetToAdmission ? 'to-admission' : 'custom' }, authUser.username);
+                return json(res, 200, { ok: true, resetToAdmission });
+            } catch { return json(res, 400, { error: 'Invalid request' }); }
+        });
+        return true;
+    }
+
     // POST /api/terms-accept — any authenticated user records their OWN
     // acceptance of the current Terms & Conditions. The server stamps only
     // termsAccepted/termsAcceptedAt/termsVersion on the caller's own user

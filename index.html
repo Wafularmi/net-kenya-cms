@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=147">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=347" as="script">
+    <link rel="preload" href="js/bundle.js?v=348" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -662,6 +662,13 @@
                     <button class="btn btn-outline" onclick="showRegionForm()">+ Add Region</button>
                 </div></div>
                 <div id="regions-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;"></div>
+            </section>
+
+            <section id="screen-coordinator-mgmt" class="screen">
+                <div class="screen-header"><h2>🤝 Coordinator Management</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="showCountryCoordinatorForm()">+ Register Country Coordinator</button>
+                </div></div>
+                <div id="coordinator-mgmt-content" style="padding:10px 0;">Loading…</div>
             </section>
 
             <section id="screen-settings" class="screen">
@@ -1369,7 +1376,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=347"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=348"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=45"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
