@@ -337,6 +337,26 @@ function backfillCertIdentifiers(store, rows) {
     if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('backfillCertIdentifiers save failed:', e); } }
     return out;
 }
+function certVerifyCode() {
+    return 'V-' + Math.random().toString(36).substr(2, 4).toUpperCase() + '-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+}
+const DOC_IDENTITY_STORES = new Set(['certificates', 'idCards', 'idcards']);
+// Document ID + Verification Code are the IMMUTABLE identity of an issued
+// document. Once a record exists, its docId/vCode can never change and can
+// never be dropped by an update, reprint, upgrade or legacy payload. New
+// records that somehow arrive without identifiers get them minted at WRITE
+// time (never left to be invented later on a read), so every stored document
+// permanently verifies against what was printed on it.
+function preserveDocIdentity(store, incoming, existing) {
+    if (!DOC_IDENTITY_STORES.has(store) || !incoming || typeof incoming !== 'object') return incoming;
+    if (existing) {
+        if (existing.docId) incoming.docId = String(existing.docId);
+        if (existing.vCode) incoming.vCode = String(existing.vCode);
+    }
+    if (!incoming.docId) incoming.docId = certDocId(incoming);
+    if (!incoming.vCode) incoming.vCode = certVerifyCode();
+    return incoming;
+}
 
 // SSE clients for real-time updates
 const sseClients = [];
@@ -694,6 +714,36 @@ function flushDB() {
 }
 process.on('exit', flushDB);
 process.on('SIGINT', () => { flushDB(); process.exit(); });
+
+// One-time boot stamp: every stored document record must already carry its
+// immutable docId/vCode so a later read can never invent new identifiers and
+// invalidate printed documents. Runs once on start (and only saves when some
+// legacy record had to be fixed).
+function stampDocIdentifiersAtBoot() {
+    try {
+        let changed = false;
+        for (const store of docStoreNames()) {
+            const rows = db[store];
+            if (!Array.isArray(rows)) continue;
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                if (!r || typeof r !== 'object') continue;
+                const before = JSON.stringify(r.docId || null) + '\u0000' + JSON.stringify(r.vCode || null);
+                preserveDocIdentity(store, r, {
+                    docId: r.docId || null,
+                    vCode: r.vCode || null
+                });
+                const after = JSON.stringify(r.docId || null) + '\u0000' + JSON.stringify(r.vCode || null);
+                if (before !== after) changed = true;
+            }
+        }
+        if (changed) { try { flushDB(); } catch (e) { console.error('stampDocIdentifiersAtBoot save failed:', e); } }
+    } catch (e) { console.error('stampDocIdentifiersAtBoot failed:', e.message); }
+}
+function docStoreNames() {
+    return ['certificates', 'idCards', 'idcards'];
+}
+try { stampDocIdentifiersAtBoot(); } catch (e) { console.error('boot doc-id stamp failed:', e); }
 
 function json(res, code, data) {
     res.writeHead(code, {
@@ -3093,12 +3143,22 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     }
                 } catch {}
                 const country = String(stu && stu.country ? stu.country : (studyCountry || record.country || ''));
+                let institutionName = '';
+                try {
+                    if (country) {
+                        const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
+                        const countries = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
+                        const entry = (Array.isArray(countries) ? countries : []).find(c => c && String(c.name) === String(country));
+                        if (entry && entry.brandName) institutionName = String(entry.brandName);
+                    }
+                } catch {}
                 return json(res, 200, { ok: true, isTranscript,
                     studentName: (stu && stu.name) || record.studentName || record.name || '',
                     admission: (stu && (stu.admissionNumber || stu.id)) || record.admission || record.admissionNumber || '',
                     program: (stu && stu.program) || record.program || '',
                     studyCenter,
                     country,
+                    institutionName,
                     docId: record.docId || did,
                     docTitle: record.docTitle || (isTranscript ? 'Official Transcript' : (record.type ? ({ diploma: 'Diploma Certificate', completion: 'Completion Certificate', transcript: 'Official Transcript', admission: 'Admission Letter', enrollment: 'Enrollment Letter', recommendation: 'Recommendation Letter', 'fee-statement': 'Fee Statement' }[record.type] || (String(record.type)[0].toUpperCase() + String(record.type).slice(1))) : 'Certificate')),
                     generatedAt: record.generatedAt || record.createdAt || '',
@@ -3899,6 +3959,7 @@ return json(res, 200, result);
                     const pk = r[keyPath];
                     if (pk === undefined || pk === null) { result.errors.push({ error: 'Missing key field "' + keyPath + '"' }); continue; }
                     const _exB = db[store].find(x => x[keyPath] === pk) || null;
+                    preserveDocIdentity(store, r, _exB);
                     const _scB = scopeWrite(user, store, r, _exB);
                     if (_scB) { result.errors.push({ error: _scB }); continue; }
                     const idx = db[store].findIndex(x => x[keyPath] === pk);
@@ -4116,6 +4177,7 @@ const parsed = JSON.parse(body);
                         return json(res, 400, { error: `Record missing key field "${keyPath}"` });
                     }
                     const _exPut = db[store].find(r => r[keyPath] === pk) || null;
+                    preserveDocIdentity(store, toStore, _exPut);
                     const _scPut = scopeWrite(user, store, toStore, _exPut);
                     if (_scPut) return json(res, 403, { error: _scPut });
                     if (store === 'studyCenters') {
@@ -4195,6 +4257,7 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     if (exists) return json(res, 409, { error: `Record with ${keyPath}="${pk}" already exists` });
                     const _scAdd = scopeWrite(user, store, toStore, null);
                     if (_scAdd) return json(res, 403, { error: _scAdd });
+                    preserveDocIdentity(store, toStore, null);
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
                         if (_dupCode) return json(res, 400, { error: 'Center code already in use: ' + _dupCode });

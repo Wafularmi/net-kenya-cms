@@ -1259,7 +1259,7 @@ async function verifyDocumentPublic() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Verification failed');
         if (!data.ok) {
-            resultDiv.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${data.reason === 'mismatch' ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${data.reason === 'mismatch' ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p>${data.reason !== 'mismatch' ? `<p style="font-size:13px;font-weight:700;color:var(--danger);margin-top:10px;">Check that you typed correctly, if you did, then it could be a clear forgery, and Net Foundation Kenya dissociates with the document and the bearer!</p>` : ''}</div>`;
+            resultDiv.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${data.reason === 'mismatch' ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${data.reason === 'mismatch' ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p>${data.reason !== 'mismatch' ? `<p style="font-size:13px;font-weight:700;color:var(--danger);margin-top:10px;">Check that you typed correctly, if you did, then it could be a clear forgery, and Net Foundation dissociates with the document and the bearer!</p>` : ''}</div>`;
             return;
         }
         const gen = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
@@ -1278,7 +1278,7 @@ async function verifyDocumentPublic() {
                     <div style="margin:0;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document ID</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.docId || '')}</div></div>
                     ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
                 </div>
-                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. Net Foundation Kenya upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>`}
+                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. ${data.institutionName || (data.country ? 'Net Foundation ' + data.country : 'Net Foundation Kenya')} upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>`}
             </div>`;
     } catch (e) {
         resultDiv.innerHTML = `<p style="text-align:center;color:var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
@@ -7893,7 +7893,7 @@ async function generateTranscript() {
         academic: { chapel: studentChapel, attendancePct },
         allGrades, academicSettings: academic
     });
-    const cert = { id: 'CERT-' + Date.now(), studentId, type: 'transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
+    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
     await dbPut('certificates', cert);
     const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: allGrades.length ? allGrades.reduce((s,g)=>{const c=courses.find(c=>c.id===g.courseId);return s+(c?c.credits:3);},0) : 0, generatedAt: new Date().toISOString(), courseHash: '' };
     await dbPut('transcriptVerifications', verification);
@@ -8816,7 +8816,7 @@ async function generateFinalTranscript() {
     const courseHash = await sha256(courseResults.map(r => r.course.id + ':' + r.weightedScore + ':' + r.gradeInfo?.grade).join('|'));
     const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: classification.label, totalCredits, generatedAt: new Date().toISOString(), courseHash };
     await dbPut('transcriptVerifications', verification);
-    const cert = { id: 'CERT-' + Date.now(), studentId, type: 'final-transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
+    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'final-transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
     await dbPut('certificates', cert);
     logAudit('generated', 'transcript', { studentId, docId, docType: 'final' });
     showModal('Final Transcript — ' + student.name,
@@ -10957,7 +10957,7 @@ async function generateCompletionPdf() {
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
         showModal('Completion Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadCompletionPdfBlob('${url}','${displayName}')">Download</button>`);
-        const cert = { id: 'CERT-' + Date.now(), studentId, type: 'completion', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
+        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'completion', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
         await dbPut('certificates', cert);
         logAudit('generated', 'completion', { studentId, docId });
         showToast('Completion certificate generated! ' + displayName + ' removed from dropdown.');
@@ -11369,7 +11369,7 @@ async function generateDiplomaPdf() {
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
         showModal('Diploma Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${displayName}')">Download</button>`);
-        const cert = { id: 'CERT-' + Date.now(), studentId, type: 'diploma', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
+        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'diploma', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
         await dbPut('certificates', cert);
         logAudit('generated', 'diploma', { studentId, docId });
         showToast('Diploma generated! ' + displayName + ' removed from dropdown.');
@@ -11902,7 +11902,7 @@ async function generateCertificate() {
             .doc-verify-code { font-family: 'Courier New', monospace; color: #b8860b; font-weight: 700; letter-spacing: 0.5px; }
             @media print { body { margin: 0; padding: 0; background: #fff; } .doc-container { width: 210mm; height: 297mm; max-width: none; max-height: none; padding: 18mm 20mm; margin: 0; } @page { size: A4; margin: 0; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
         </style></div>`;
-        const cert = { id: 'CERT-' + Date.now(), studentId, studentName: student.name, type, docTitle, content: html, docId, vCode, generatedAt: new Date().toISOString() };
+        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, studentName: student.name, type, docTitle, content: html, docId, vCode, generatedAt: new Date().toISOString() };
         await dbPut('certificates', cert);
         logAudit('generated', 'certificate', cert);
         renderDocumentHistory();
@@ -12002,7 +12002,7 @@ async function generateCertificate() {
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
     }
-    const cert = { id: 'CERT-' + Date.now(), studentId, studentName: student.name, type, docTitle, content: html, docId, vCode, letterDate: letterDateIso, letterDateFormatted: letterDate, generatedAt: new Date().toISOString() };
+    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, studentName: student.name, type, docTitle, content: html, docId, vCode, letterDate: letterDateIso, letterDateFormatted: letterDate, generatedAt: new Date().toISOString() };
     await dbPut('certificates', cert);
     if (type === 'transcript') {
         const ver = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, generatedAt: new Date().toISOString() };
