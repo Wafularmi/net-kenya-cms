@@ -3001,29 +3001,36 @@ async function saveStudent() {
             });
         }
     }
-    const allExisting = await dbGetAll('users');
-    const hasUser = allExisting.some(u => u.studentId === student.id || u.username === student.phone || u.username === student.id || u.name === student.name);
-    if (!hasUser && student.status === 'active' && student.phone && student.admissionNumber && !student.testAccount) {
-        const pwHash = await hashPassword(student.admissionNumber);
-        await dbPut('users', {
-            username: student.phone,
-            password: pwHash,
-            name: student.name,
-            role: 'student',
-            status: 'active',
-            studentId: student.id,
-            createdAt: new Date().toISOString()
-        });
-        showToast('Login account created — username: ' + student.phone + ', password: ' + student.admissionNumber, { type: 'success', duration: 5000 });
-    }
+    let hasUser = false;
+    try {
+        const allExisting = await dbGetAll('users').catch(() => []);
+        hasUser = allExisting.some(u => u.studentId === student.id || u.username === student.phone || u.username === student.id || u.name === student.name);
+    } catch (e) { hasUser = true; }
+    try {
+        if (!hasUser && student.status === 'active' && student.phone && student.admissionNumber && !student.testAccount) {
+            const pwHash = await hashPassword(student.admissionNumber);
+            await dbPut('users', {
+                username: student.phone,
+                password: pwHash,
+                name: student.name,
+                role: 'student',
+                status: 'active',
+                studentId: student.id,
+                createdAt: new Date().toISOString()
+            });
+            showToast('Login account created — username: ' + student.phone + ', password: ' + student.admissionNumber, { type: 'success', duration: 5000 });
+        }
+    } catch (e) { /* account creation denied (e.g. country coordinators) — student record itself already saved */ }
     if (installmentPlan && feeAmount > 0 && !editId) await createInstallmentPlan(id, feeAmount, parseInt(installmentPlan));
     invalidatePortalCache();
     invalidateProgressCache();
     closeModal();
     renderStudents();
     renderDashboard();
-    showToast(editId ? 'Student updated!' : `Student enrolled! Adm#: ${admissionNumber}`);
-    logAudit(editId ? 'updated' : 'created', 'student', { id, admissionNumber, name });
+    const feeTxt = feeAmount > 0 ? ` · Fee: ${formatCurrency(feeAmount)}` : '';
+    if (editId) showToast('Student updated!' + feeTxt);
+    else showToast(`Student enrolled! Adm#: ${admissionNumber}` + feeTxt);
+    logAudit(editId ? 'updated' : 'created', 'student', { id, admissionNumber, name, feeAmount });
 }
 async function editStudent(id) {
     if (!canManageStudents()) return showToast('Only admin / assistant admin can edit students.', { type: 'danger' });

@@ -1002,13 +1002,28 @@ function recordCountryOf(store, rec) {
     if (rec.regionId && idx.regionCountry[rec.regionId]) return idx.regionCountry[rec.regionId];
     return '';
 }
+// Counter keys a country/region coordinator may legitimately read/write: the
+// per-month payment receipt counters (payment-YYYYMM) needed to issue RCT
+// receipt numbers. Everything else (e.g. the global staff ID counter) stays
+// admin/finance-only.
+function isPaymentCounterKey(key) {
+    return typeof key === 'string' && /^payment-\d{6}$/.test(key);
+}
 // Write fence for country administrators: creations get stamped with their
 // country; touching another country's tagged records is rejected. Everyone
 // else (admins, regionals, students, others) passes through untouched.
 function scopeWrite(user, store, rec, existing) {
+    // Coordinators (country OR region bound) may write counters ONLY for the
+    // payment receipt keys they need while recording payments. This guard runs
+    // for every coordinator regardless of country scope so a region coordinator
+    // cannot forge the global staff / other counters either.
+    if (user && user.role === 'coordinator' && store === 'counters') {
+        return isPaymentCounterKey(rec && rec.key) ? null : 'Not permitted';
+    }
     const scope = countryScopeOf(user);
     if (!scope) return null;
-     if (['users', 'counters', 'settings', 'sessions', 'maintenanceBypassTokens', 'audit'].includes(store)) return 'Not permitted';
+    if (['users', 'settings', 'sessions', 'maintenanceBypassTokens', 'audit'].includes(store)) return 'Not permitted';
+    if (store === 'counters') return isPaymentCounterKey(rec && rec.key) ? null : 'Not permitted';
     const tagged = rec && rec.country ? String(rec.country) : '';
     const cur = existing && existing.country ? String(existing.country) : '';
     if (tagged && tagged !== scope) return 'Outside your country scope';
@@ -1074,17 +1089,19 @@ function canAccessStore(user, store, method) {
     // live at the /api/db route level, where the requested key IS in scope.
     // canAccessStore is store-only and stays strict: settings is never granted
     // here, so no unintended settings key ever leaks to non-admin roles.
-    // Country administrator: coordinator bound to a country (no region).
+// Country administrator: coordinator bound to a country (no region).
     // Near-admin access scoped to their country — can access everything
     // except Settings, global admin stores, and audit logs. Can also
-    // create regions and study centers for their country.
+    // create regions and study centers for their country. The counters
+    // store is granted but key-scoped (payment receipt counters only; see
+    // isPaymentCounterKey in scopeWrite + filterStoreForUser).
     if (countryScopeOf(user)) {
-        if (store === 'users' || store === 'counters' || store === 'sessions' || store === 'maintenanceBypassTokens' || store === 'settings' || store === 'audit') return false;
+        if (store === 'users' || store === 'sessions' || store === 'maintenanceBypassTokens' || store === 'settings' || store === 'audit') return false;
         return true;
     }
     // Coordinator: sub-admin scoped to their region.
     if (user.role === 'coordinator') {
-        if (['settings','regions','users','counters'].includes(store)) return false;
+        if (['settings','regions','users'].includes(store)) return false;
         if (['courses','exams','quizzes','questionBank','lessons'].includes(store) && method !== 'GET') return false;
         if (!FINANCIAL_STORES.has(store)) return true;
         return true;
@@ -1249,6 +1266,11 @@ function filterStoreForUser(user, store, rows) {
     // GLOBAL_SHARED_STORES are deliberate institution-wide content (shared
     // curriculum, templates, manuals) that has no country identity by design.
     const countryExemptStores = ['users', 'counters', 'sessions', 'maintenanceBypassTokens'];
+    // Coordinators may only ever see the payment receipt counters (payment-YYYYMM)
+    // they touch while recording payments — never the global staff / other counters.
+    if (user && user.role === 'coordinator' && store === 'counters') {
+        return rows.filter(r => r && isPaymentCounterKey(r.key));
+    }
     if (user && user.user && user.user.country && user.user.role !== 'admin' && !countryExemptStores.includes(store)) {
         const scope = user.user.country;
         if (GLOBAL_SHARED_STORES.has(store)) {
