@@ -2384,12 +2384,13 @@ async function quickEnrollStudent() {
         const center = centerId ? await dbGet('studyCenters', centerId) : null;
         const branding = await dbGet('settings', 'branding');
         const instituteCode = admissionInstituteCode(branding);
-        const seq = await getNextAdmissionSeq();
+        const admCountry = await admissionCountryForCenter(center);
+        const seq = await getNextAdmissionSeq(admCountry);
         const seqStr = String(seq).padStart(3, '0');
         const centerCode = center ? center.code : 'MAIN';
         const my = admissionMonthYear();
         let admissionNumber = `${instituteCode}/${centerCode}/${my.month}-${my.year}/${seqStr}`;
-        await setAdmissionLastSeq(seq);
+        await setAdmissionLastSeq(seq, admCountry);
         const program = sanitizeInput(document.getElementById('quick-program').value.trim());
         const yearVal = parseInt(document.getElementById('quick-year').value) || 1;
         const feeAmount = parseFloat(document.getElementById('quick-fee').value) || 0;
@@ -2821,15 +2822,20 @@ function toggleAdmissionMode() {
     document.getElementById('adm-manual-section').style.display = mode === 'manual' ? 'block' : 'none';
     updateAdmissionPreview();
 }
-async function peekNextAdmissionSeq() {
+async function peekNextAdmissionSeq(country) {
+    const cKey = country ? 'admissionLastSeqByCountry' : 'admissionLastSeq';
     let settingVal = 0;
     try {
-        const setting = await dbGet('settings', 'admissionLastSeq');
-        if (setting && typeof setting.value === 'number') settingVal = setting.value;
+        const setting = await dbGet('settings', cKey);
+        if (country) {
+            if (setting && setting.value && typeof setting.value === 'object' && typeof setting.value[country] === 'number') settingVal = setting.value[country];
+        } else if (setting && typeof setting.value === 'number') {
+            settingVal = setting.value;
+        }
     } catch (e) {}
     let maxExisting = 0;
     try {
-        maxExisting = await getMaxExistingAdmissionSeq();
+        maxExisting = await getMaxExistingAdmissionSeq(country);
     } catch (e) {}
     return Math.max(settingVal, maxExisting) + 1;
 }
@@ -2862,7 +2868,8 @@ async function updateAdmissionPreview() {
     if (yearEl) yearEl.textContent = my.year;
     let seq = '001';
     if (centerId && document.getElementById('adm-mode').value === 'auto') {
-        const nextNum = await peekNextAdmissionSeq();
+        const previewCountry = await admissionCountryForCenter(center);
+        const nextNum = await peekNextAdmissionSeq(previewCountry);
         seq = String(nextNum).padStart(3, '0');
     }
     const seqEl = document.getElementById('adm-preview-seq');
@@ -2926,10 +2933,11 @@ async function saveStudent() {
             const dateInput = document.getElementById('adm-date');
             const date = dateInput ? new Date(dateInput.value) : new Date();
             const my = admissionMonthYear(date);
-            const seq = await getNextAdmissionSeq();
+            const admCountry = await admissionCountryForCenter(center);
+            const seq = await getNextAdmissionSeq(admCountry);
             const seqStr = String(seq).padStart(3, '0');
             admissionNumber = `${instituteCode}/${center.code}/${my.month}-${my.year}/${seqStr}`;
-            await setAdmissionLastSeq(seq);
+            await setAdmissionLastSeq(seq, admCountry);
         }
     }
     const installmentPlan = document.getElementById('student-installment').value;
@@ -3251,6 +3259,18 @@ function previewStaffPhoto(event) {
     };
     reader.readAsDataURL(file);
 }
+async function getNextStaffId(country) {
+    const counterKey = country ? ('staff-' + String(country).toUpperCase()) : 'staff';
+    let counter = await dbGet('counters', counterKey);
+    if (!counter) counter = { key: counterKey, value: 0 };
+    const staffAll = (await dbGetAll('staff').catch(() => [])) || [];
+    let globalMax = 0;
+    staffAll.forEach(s => { const m = String(s.id || '').match(/^STF-(\d+)$/); if (m) { const n = parseInt(m[1], 10); if (n > globalMax) globalMax = n; } });
+    if (counter.value < globalMax) counter.value = globalMax;
+    counter.value++;
+    await dbPut('counters', counter);
+    return 'STF-' + String(counter.value).padStart(4, '0');
+}
 async function saveStaff() {
     const name = document.getElementById('staff-name').value.trim();
     if (!name) return showToast('Name required!');
@@ -3316,14 +3336,15 @@ async function saveStaff() {
         closeModal(); renderStaff(); showToast(isCoordEdit ? 'Coordinator updated!' : `Coordinator created — login: ${username}`, { type: 'success' }); logAudit(isCoordEdit ? 'updated' : 'created', 'user', { username, role: 'coordinator' });
         return;
     }
-    const id = editId || await getNextCounter('staff', 'STF-');
+    const _scEl = document.getElementById('staff-country');
+    const _scLoaded = !!(_scEl && _scEl.options.length > 1);
+    const _scExisting = (editId && !isCoordEdit) ? (((await dbGet('staff', editId)) || {}).country || '') : '';
+    const staffCountry = _scLoaded ? _scEl.value : _scExisting;
+    const id = editId || await getNextStaffId(staffCountry);
     const photoPreview = document.getElementById('staff-photo-preview');
     const photoImg = photoPreview ? photoPreview.querySelector('img') : null;
     const photo = photoImg ? photoImg.src : (editId ? (await dbGet('staff', id)).photo || '' : '');
-    const _scEl = document.getElementById('staff-country');
-    const _scLoaded = !!(_scEl && _scEl.options.length > 1);
-    const _scExisting = (editId && !isCoordEdit) ? (((await dbGet('staff', id)) || {}).country || '') : '';
-    const staff = { id, photo, name, email: document.getElementById('staff-email').value.trim(), phone: username, role, campus: document.getElementById('staff-campus').value, department: document.getElementById('staff-department').value.trim(), qualification: document.getElementById('staff-qualification').value.trim(), status: staffStatus, specialization: document.getElementById('staff-specialization').value.trim(), whatsapp: document.getElementById('staff-whatsapp').value.trim(), loginUsername: username, country: _scLoaded ? _scEl.value : _scExisting, createdAt: editId ? (await dbGet('staff', id)).createdAt : new Date().toISOString() };
+    const staff = { id, photo, name, email: document.getElementById('staff-email').value.trim(), phone: username, role, campus: document.getElementById('staff-campus').value, department: document.getElementById('staff-department').value.trim(), qualification: document.getElementById('staff-qualification').value.trim(), status: staffStatus, specialization: document.getElementById('staff-specialization').value.trim(), whatsapp: document.getElementById('staff-whatsapp').value.trim(), loginUsername: username, country: staffCountry, createdAt: editId ? (await dbGet('staff', id)).createdAt : new Date().toISOString() };
     await dbPut('staff', staff); closeModal(); renderStaff(); showToast(editId ? 'Staff updated!' : `Staff ${id} added — login: ${username}`, { type: 'success' }); logAudit(editId ? 'updated' : 'created', 'staff', staff);
 }
 async function editStaff(id) {
@@ -17256,14 +17277,21 @@ async function openApproveModal(studentId) {
         welcomeStored.message = welcomeDefault.message;
     }
     let settingVal = 0;
+    const apprCountry = student.country || await admissionCountryForCenter(centers.find(c => c.id === student.studyCenterId) || null);
+    const cKey = apprCountry ? 'admissionLastSeqByCountry' : 'admissionLastSeq';
     try {
-        const setting = await dbGet('settings', 'admissionLastSeq');
-        if (setting && typeof setting.value === 'number') settingVal = setting.value;
+        const setting = await dbGet('settings', cKey);
+        if (apprCountry) {
+            if (setting && setting.value && typeof setting.value === 'object' && typeof setting.value[apprCountry] === 'number') settingVal = setting.value[apprCountry];
+        } else if (setting && typeof setting.value === 'number') {
+            settingVal = setting.value;
+        }
     } catch (e) {}
-    const maxExisting = await getMaxExistingAdmissionSeq();
+    const maxExisting = await getMaxExistingAdmissionSeq(apprCountry);
     const seq = Math.max(settingVal, maxExisting) + 1;
     const admissionNumber = generateAdmissionNumber(student, branding, centers, seq);
     _approvalState.admissionSeq = seq;
+    _approvalState.admissionCountry = apprCountry;
     const BUILTIN_MSG = `Welcome to {{school}}, {{name}}! 🎓
 
 We are excited to have you in our {{program}} program at {{center}} ({{centerCode}}, {{region}}).
@@ -17473,11 +17501,51 @@ function parseAdmissionSeq(admissionNumber) {
     const n = parseInt(last, 10);
     return isNaN(n) ? 0 : n;
 }
-async function getMaxExistingAdmissionSeq() {
+// --- Per-country admission roll -------------------------------------------
+// The sequence embedded in admission numbers is a per-country counter stored in
+// settings:admissionLastSeqByCountry (a {country: seq} map); the legacy global
+// settings:admissionLastSeq remains the fallback for untagged (pre-country)
+// students. Roll is always max(saved-for-country, highest-admseq-in-country)+1,
+// which also keeps coordinators correct even though they cannot write settings.
+let __admCcMap = null;
+async function admissionCenterCountryMap() {
+    if (__admCcMap) return __admCcMap;
+    const centers = await dbGetAll('studyCenters').catch(() => []);
+    let regions = [];
+    try { regions = await dbGetAll('regions'); } catch (e) {}
+    const regionCountry = {};
+    (regions || []).forEach(r => { if (r && r.id) regionCountry[r.id] = r.country || ''; });
+    const map = {};
+    (centers || []).forEach(c => { if (c && c.id) map[c.id] = c.country || ((c.regionId && regionCountry[c.regionId]) || ''); });
+    __admCcMap = map;
+    return map;
+}
+function admissionCountryOfStudent(s, cmap) {
+    if (!s) return '';
+    if (s.country) return String(s.country);
+    if (s.studyCenterId && cmap && cmap[s.studyCenterId]) return String(cmap[s.studyCenterId]);
+    return '';
+}
+async function admissionCountryForCenter(center) {
+    if (!center) return '';
+    if (center.country) return String(center.country);
+    if (center.regionId) {
+        try { const r = await dbGet('regions', center.regionId); if (r && r.country) return String(r.country); } catch (e) {}
+    }
+    let u = {};
+    try { u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); } catch (e) {}
+    return u.country || '';
+}
+async function getMaxExistingAdmissionSeq(country) {
     const students = await dbGetAll('students');
+    let cmap = null;
+    if (country) { try { cmap = await admissionCenterCountryMap(); } catch (e) {} }
     let max = 0;
     students.forEach(s => {
         if (s.testAccount) return;
+        if (country) {
+            if (String(admissionCountryOfStudent(s, cmap)) !== String(country)) return;
+        }
         const n = parseAdmissionSeq(s.admissionNumber);
         if (n > max) max = n;
     });
@@ -17506,18 +17574,35 @@ async function getAvailableAdmissionSeqs(limit = 50) {
     }
     return available;
 }
-async function getNextAdmissionSeq() {
+async function getNextAdmissionSeq(country) {
+    const cKey = country ? 'admissionLastSeqByCountry' : 'admissionLastSeq';
     let settingVal = 0;
     try {
-        const setting = await dbGet('settings', 'admissionLastSeq');
-        if (setting && typeof setting.value === 'number') settingVal = setting.value;
+        const setting = await dbGet('settings', cKey);
+        if (country) {
+            if (setting && setting.value && typeof setting.value === 'object' && typeof setting.value[country] === 'number') settingVal = setting.value[country];
+        } else if (setting && typeof setting.value === 'number') {
+            settingVal = setting.value;
+        }
     } catch (e) { /* ignore */ }
-    const maxExisting = await getMaxExistingAdmissionSeq();
+    const maxExisting = await getMaxExistingAdmissionSeq(country);
     const next = Math.max(settingVal, maxExisting) + 1;
-    try { await dbPut('settings', { key: 'admissionLastSeq', value: next }); } catch (e) {}
+    try { await setAdmissionLastSeq(next, country); } catch (e) {}
     return next;
 }
-async function setAdmissionLastSeq(seq) {
+async function setAdmissionLastSeq(seq, country) {
+    if (country) {
+        try {
+            let m = {};
+            try {
+                const ex = await dbGet('settings', 'admissionLastSeqByCountry');
+                if (ex && ex.value && typeof ex.value === 'object') m = ex.value;
+            } catch (e) {}
+            m[country] = seq;
+            await dbPut('settings', { key: 'admissionLastSeqByCountry', value: m });
+            return;
+        } catch (e) { /* country coordinators cannot write settings */ }
+    }
     try { await dbPut('settings', { key: 'admissionLastSeq', value: seq }); } catch (e) { /* country coordinators cannot write settings */ }
 }
 // Unified admission-number pieces:
@@ -17543,9 +17628,12 @@ function generateAdmissionNumber(student, branding, centers, seq) {
 async function regenerateAdmission() {
     const studentId = _approvalState.studentId;
     if (!studentId) return;
-    const seq = await getNextAdmissionSeq();
+    const apprCenterId = document.getElementById('appr-center').value || _approvalState.originalStudent.studyCenterId;
+    const apprCenter = _approvalState.centers.find(c => c.id === apprCenterId) || null;
+    const regenCountry = _approvalState.originalStudent.country || await admissionCountryForCenter(apprCenter);
+    const seq = await getNextAdmissionSeq(regenCountry);
     const newAdmno = generateAdmissionNumber(
-        { ..._approvalState.originalStudent, studyCenterId: document.getElementById('appr-center').value || _approvalState.originalStudent.studyCenterId },
+        { ..._approvalState.originalStudent, studyCenterId: apprCenterId },
         _approvalState.branding,
         _approvalState.centers,
         seq
@@ -17816,14 +17904,30 @@ async function finalizeApproval() {
         const savedSeq = parseAdmissionSeq(admissionNumber);
         if (savedSeq > 0) {
             try {
+                const apprSyncCountry = _approvalState.admissionCountry || student.country;
+                const syncKey = apprSyncCountry ? 'admissionLastSeqByCountry' : 'admissionLastSeq';
                 let currentSetting = 0;
                 try {
-                    const existing = await dbGet('settings', 'admissionLastSeq');
-                    if (existing && typeof existing.value === 'number') currentSetting = existing.value;
+                    const existing = await dbGet('settings', syncKey);
+                    if (apprSyncCountry) {
+                        if (existing && existing.value && typeof existing.value === 'object' && typeof existing.value[apprSyncCountry] === 'number') currentSetting = existing.value[apprSyncCountry];
+                    } else if (existing && typeof existing.value === 'number') {
+                        currentSetting = existing.value;
+                    }
                 } catch (e) { /* ignore */ }
                 const newSetting = Math.max(currentSetting, savedSeq);
                 if (newSetting !== currentSetting) {
-                    await dbPut('settings', { key: 'admissionLastSeq', value: newSetting, updatedAt: new Date().toISOString(), studentId: id, studentName: name });
+                    if (apprSyncCountry) {
+                        let m = {};
+                        try {
+                            const ex = await dbGet('settings', syncKey);
+                            if (ex && ex.value && typeof ex.value === 'object') m = ex.value;
+                        } catch (e) { /* ignore */ }
+                        m[apprSyncCountry] = newSetting;
+                        await dbPut('settings', { key: syncKey, value: m, updatedAt: new Date().toISOString(), studentId: id, studentName: name });
+                    } else {
+                        await dbPut('settings', { key: syncKey, value: newSetting, updatedAt: new Date().toISOString(), studentId: id, studentName: name });
+                    }
                 }
                 _approvalState.admissionSeq = savedSeq;
             } catch (e) { console.warn('admissionLastSeq sync failed:', e); }
@@ -20148,8 +20252,20 @@ async function updateSCAdmissionPreview() {
             detail.innerHTML = '<span style="color:var(--danger);">⚠ Please enter a short center code (max 8 chars) — full name is not used in admission numbers.</span>';
         } else {
             let _sv = 0;
-            try { const _s = await dbGet('settings', 'admissionLastSeq'); if (_s && typeof _s.value === 'number') _sv = _s.value; } catch (e) {}
-            const _me = await getMaxExistingAdmissionSeq();
+            const _ccEl = document.getElementById('sc-country');
+            const _ccLoaded = !!(_ccEl && _ccEl.options.length > 1);
+            const _ccExisting = document.getElementById('sc-edit-id').value ? ((((await dbGet('studyCenters', document.getElementById('sc-edit-id').value)) || {}).country) || '') : '';
+            const _scCountry = (viewerScope() && viewerScope().country) || (_ccLoaded ? _ccEl.value : _ccExisting);
+            try {
+                if (_scCountry) {
+                    const _scSet = await dbGet('settings', 'admissionLastSeqByCountry');
+                    if (_scSet && _scSet.value && typeof _scSet.value === 'object' && typeof _scSet.value[_scCountry] === 'number') _sv = _scSet.value[_scCountry];
+                } else {
+                    const _s = await dbGet('settings', 'admissionLastSeq');
+                    if (_s && typeof _s.value === 'number') _sv = _s.value;
+                }
+            } catch (e) {}
+            const _me = await getMaxExistingAdmissionSeq(_scCountry);
             const _seq = Math.max(_sv, _me) + 1;
             const seqStr = String(_seq).padStart(3, '0');
             detail.innerHTML = `Next: <b>${instituteCode}/${code}/${my.month}-${my.year}/${seqStr}</b> — center: <i>${name || '(unnamed)'}</i>`;
@@ -20180,7 +20296,7 @@ async function saveStudyCenter() {
     const _ccExisting = editId ? (((await dbGet('studyCenters', id)) || {}).country || '') : '';
     const country = scopeCountry || (_ccLoaded ? _ccEl.value : _ccExisting);
     const center = { id, name, code, address: document.getElementById('sc-address').value.trim(), regionId: document.getElementById('sc-region').value || '', country, createdAt: editId ? (await dbGet('studyCenters', id)).createdAt : new Date().toISOString() };
-    await dbPut('studyCenters', center); closeModal(); renderStudyCenters(); showToast(editId ? 'Study Center updated!' : 'Study Center added!'); logAudit(editId ? 'updated' : 'created', 'study-center', center);
+    await dbPut('studyCenters', center); __admCcMap = null; closeModal(); renderStudyCenters(); showToast(editId ? 'Study Center updated!' : 'Study Center added!'); logAudit(editId ? 'updated' : 'created', 'study-center', center);
 }
 function generateCenterCode(country, existingCenters) {
     const letters = (country ? String(country).replace(/[^A-Za-z]/g, '') : '').toUpperCase().slice(0, 4) || 'NF';
@@ -20191,7 +20307,7 @@ function generateCenterCode(country, existingCenters) {
     return code;
 }
 async function editStudyCenter(id) { const c = await dbGet('studyCenters', id); if (!c) return; showStudyCenterForm(c); }
-async function deleteStudyCenter(id) { if (!await showConfirm('Confirm', 'Delete study center?')) return; await dbDelete('studyCenters', id); renderStudyCenters(); showToast('Study center deleted'); logAudit('deleted', 'study-center', { id }); }
+async function deleteStudyCenter(id) { if (!await showConfirm('Confirm', 'Delete study center?')) return; await dbDelete('studyCenters', id); __admCcMap = null; renderStudyCenters(); showToast('Study center deleted'); logAudit('deleted', 'study-center', { id }); }
 async function renderUsers() {
     const users = await dbGetAll('users');
     const auditFilter = document.getElementById('audit-user');
