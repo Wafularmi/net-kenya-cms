@@ -7395,6 +7395,11 @@ async function generateCashBook() {
     const from = document.getElementById('cb-from').value;
     const to = document.getElementById('cb-to').value;
     if (!from || !to) return showToast('Select date range!');
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding ? branding.schoolName : 'College Management System';
+    const logoUrl = branding && branding.logo ? branding.logo : '';
+    const initials = branding && branding.initials ? branding.initials : 'CM';
+    const accentColor = branding && branding.accentColor ? branding.accentColor : '#1e293b';
     const batch = await dbGetBatch(['payments','income','expenses','students']);
     const payments = (batch.payments || []).filter(p => p.date >= from && p.date <= to);
     const income = (batch.income || []).filter(i => i.date >= from && i.date <= to);
@@ -7435,7 +7440,8 @@ async function generateCashBook() {
     _cashBookHtml = `
         <div style="font-family:'Segoe UI',Arial,sans-serif;padding:10px;">
             <div style="text-align:center;border-bottom:2px solid #1e293b;padding-bottom:8px;margin-bottom:12px;">
-                <div style="font-size:16px;font-weight:800;letter-spacing:1px;">CASH BOOK STATEMENT</div>
+                <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px;">${logoUrl ? `<img src="${logoUrl}" style="width:44px;height:44px;object-fit:contain;" alt="Logo">` : `<div style="width:44px;height:44px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;">${initials}</div>`}<div style="font-size:16px;font-weight:800;letter-spacing:1px;">CASH BOOK STATEMENT</div></div>
+                <div style="font-size:12px;font-weight:600;">${schoolName}</div>
                 <div style="font-size:10px;color:#64748b;">Period: ${formatDate(from)} - ${formatDate(to)}</div>
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:10px;">
@@ -7773,7 +7779,7 @@ async function generateGraduationList() {
         const pageNum = p + 1;
         pagesHtml += `<div class="grad-page" style="${p < totalPages - 1 ? 'page-break-after:always;' : ''}padding-bottom:12px;">
         <div style="text-align:center;margin-bottom:16px;${p > 0 ? 'padding-top:12px;border-top:1px solid var(--border);' : ''}">
-            <div style="font-size:18px;font-weight:700;">${schoolName}</div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px;">${branding && branding.logo ? `<img src="${branding.logo}" style="width:46px;height:46px;object-fit:contain;" alt="Logo">` : `<div style="width:46px;height:46px;border-radius:50%;background:${(branding && branding.accentColor) ? branding.accentColor : '#1e40af'};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;">${initials}</div>`}<div style="font-size:18px;font-weight:700;">${schoolName}</div></div>
             <div style="font-size:14px;font-weight:600;">GRADUATION LIST — ${program || 'ALL PROGRAMS'} ${year || ''}</div>
             <div style="font-size:11px;color:var(--text-muted);">Generated: ${dateStr} | Total Eligible: ${eligible.length} | Page ${pageNum} of ${totalPages}</div>
         </div>
@@ -16662,6 +16668,8 @@ async function downloadNote(id, format = 'txt') {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'Study Notes';
     const logoUrl = branding && branding.logo ? branding.logo : '';
+    const initials = branding && branding.initials ? branding.initials : 'CM';
+    const accentColor = branding && branding.accentColor ? branding.accentColor : '#2563eb';
     const date = formatDate(note.createdAt);
     const safeTitle = note.title.replace(/[^a-z0-9]/gi, '_');
     if (format === 'pdf') {
@@ -16678,7 +16686,7 @@ async function downloadNote(id, format = 'txt') {
  @media print{body{margin:20px;}}
  </style></head><body>
  <div class="header">
- ${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : ''}
+ ${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : `<div style="width:60px;height:60px;margin:0 auto 8px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;">${initials}</div>`}
  <h1>${schoolName}</h1><h2>${note.title}</h2></div>
  <div class="meta">${course ? course.name : 'Course'}${lesson ? ' &mdash; ' + lesson.title : ''} &mdash; ${date}</div>
  <div class="content">${note.content}</div>
@@ -16703,7 +16711,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:40px;color:#1e293b;}
 .footer{text-align:center;font-size:10px;color:#94a3b8;margin-top:30px;padding-top:12px;border-top:1px solid #e2e8f0;}
 </style></head><body>
 <div class="header">
-${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : ''}
+${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : `<div style="width:60px;height:60px;margin-bottom:8px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;">${initials}</div>`}
 <h1>${schoolName}</h1><h2>${note.title}</h2></div>
 <div class="meta">${course ? course.name : 'Course'}${lesson ? ' &mdash; ' + lesson.title : ''} &mdash; ${date}</div>
 <div class="content">${note.content}</div>
@@ -20773,8 +20781,12 @@ async function exportGradesPDF() {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     if (!grades.length) return showToast('No grades to export!');
+    const logoUrl = branding && branding.logo ? branding.logo : '';
+    const initials = branding && branding.initials ? branding.initials : 'CMS';
+    const accentColor = branding && branding.accentColor ? branding.accentColor : '#1e40af';
     let html = `<html><head><title>Grades Report</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#1e40af;margin-bottom:4px;}.subtitle{color:#64748b;margin-bottom:20px;}table{width:100%;border-collapse:collapse;margin:16px 0;font-size:12px;}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;}th{background:#020617;color:#f59e0b;}.section{margin:20px 0;}h2{font-size:14px;color:#1e40af;border-bottom:2px solid #f59e0b;padding-bottom:4px;}@media print{body{padding:0;}}</style></head><body>`;
-    html += `<h1>${schoolName}</h1><p class="subtitle">Grades Report - Generated ${new Date().toLocaleDateString()}</p>`;
+    html += `<div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:8px;">${logoUrl ? `<img src="${logoUrl}" style="width:60px;height:60px;object-fit:contain;" alt="Logo">` : `<div style="width:60px;height:60px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;flex-shrink:0;">${initials}</div>`}<h1 style="margin:0;">${schoolName}</h1></div>
+    <p class="subtitle" style="text-align:center;">Grades Report - Generated ${new Date().toLocaleDateString()}</p>`;
     const grouped = {};
     grades.forEach(g => { const key = `${g.studentId}-S${g.semester}`; if (!grouped[key]) grouped[key] = { studentId: g.studentId, semester: g.semester, grades: [] }; grouped[key].grades.push(g); });
     for (const key in grouped) {
@@ -21262,6 +21274,11 @@ async function generateDisbursementReport() {
     if (!paidSlips.length) return showToast('No paid slips for this month!');
     const accounts = await dbGetAll('deductionAccounts').catch(() => []);
     const deductions = await dbGetAll('salaryDeductions').catch(() => []);
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding ? branding.schoolName : 'College Management System';
+    const logoUrl = branding && branding.logo ? branding.logo : '';
+    const initials = branding && branding.initials ? branding.initials : 'CM';
+    const accentColor = branding && branding.accentColor ? branding.accentColor : '#1e40af';
     const disbursements = {};
     paidSlips.forEach(p => {
         if (p.deductions) {
@@ -21286,7 +21303,8 @@ async function generateDisbursementReport() {
     });
     let html = `<div style="padding:20px;font-family:Arial,sans-serif;max-width:800px;">
         <div style="text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:20px;">
-            <div style="font-size:16px;font-weight:bold;">DISBURSEMENT REPORT</div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px;">${logoUrl ? `<img src="${logoUrl}" style="width:48px;height:48px;object-fit:contain;" alt="Logo">` : `<div style="width:48px;height:48px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;">${initials}</div>`}<div style="font-size:16px;font-weight:bold;">DISBURSEMENT REPORT</div></div>
+            <div style="font-size:13px;font-weight:600;">${schoolName}</div>
             <div style="font-size:12px;color:#666;">Period: ${month}</div>
             <div style="font-size:11px;color:#666;">Generated: ${new Date().toLocaleString()}</div>
         </div>
