@@ -5024,10 +5024,18 @@ async function renderSeatingPlan() {
     html += '</div>';
     document.getElementById('seating-plan-result').innerHTML = html;
 }
-function printSeatingPlan() {
+async function printSeatingPlan() {
     const content = document.getElementById('seating-plan-result').innerHTML;
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding && branding.schoolName ? branding.schoolName : 'College Management System';
+    const logoUrl = branding && branding.logo ? branding.logo : '';
+    const initials = branding && branding.initials ? branding.initials : 'CM';
+    const accentColor = branding && branding.accentColor ? branding.accentColor : '#1e40af';
+    const logoHtml = logoUrl
+        ? `<img src="${logoUrl}" style="width:60px;height:60px;object-fit:contain;" alt="Logo">`
+        : `<div style="width:60px;height:60px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;">${initials}</div>`;
     const w = window.open('', '', 'width=900,height=700');
-        w.document.write(`<html><head><title>Seating Plan</title><style>body{font-family:Arial,sans-serif;padding:20px;}h2{margin-bottom:4px;}sub{margin-bottom:16px;display:block;color:#666;}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax:180px,1fr);gap:8px;}.card{padding:8px 10px;border:1px solid #ddd;border-radius:6px;background:#f8fafc;font-size:11px;}.card .no{font-weight:700;font-size:20px;text-align:center;margin-top:4px;}.card .name{font-weight:700;}.card .adm{color:#64748b;}.card .program{color:#475569;}.card .meta{color:#94a3b8;}</style></head><body><h2>Seating Plan</h2>${content.replace(/style="[^"]*"/g, '').replace(/<div style="margin-bottom:12px;[^"]*">[^<]*<\/div>/g, '<sub>$&</sub>').replace(/class="[^"]*"/g, '')}</body></html>`);
+        w.document.write(`<html><head><title>Seating Plan</title><style>body{font-family:Arial,sans-serif;padding:20px;}h2{margin-bottom:4px;}sub{margin-bottom:16px;display:block;color:#666;}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax:180px,1fr);gap:8px;}.card{padding:8px 10px;border:1px solid #ddd;border-radius:6px;background:#f8fafc;font-size:11px;}.card .no{font-weight:700;font-size:20px;text-align:center;margin-top:4px;}.card .name{font-weight:700;}.card .adm{color:#64748b;}.card .program{color:#475569;}.card .meta{color:#94a3b8;}</style></head><body><div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:6px;">${logoHtml}<h2 style="margin:0;">${schoolName} — Seating Plan</h2></div>${content.replace(/style="[^"]*"/g, '').replace(/<div style="margin-bottom:12px;[^"]*">[^<]*<\/div>/g, '<sub>$&</sub>').replace(/class="[^"]*"/g, '')}</body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 500);
 }
@@ -7964,11 +7972,19 @@ async function showGraduationSeating(gradId, program, year, schoolName) {
     html += '</div>';
     showModal('Graduation Seating Plan', html, `<button class="btn btn-outline" onclick="printGraduationSeating()">Print</button>`);
 }
-function printGraduationSeating() {
+async function printGraduationSeating() {
     const content = document.querySelector('#modal-content .modal-body')?.innerHTML || document.querySelector('#modal-content')?.innerHTML;
     if (!content) return;
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding && branding.schoolName ? branding.schoolName : 'College Management System';
+    const logoUrl = branding && branding.logo ? branding.logo : '';
+    const initials = branding && branding.initials ? branding.initials : 'CM';
+    const accentColor = branding && branding.accentColor ? branding.accentColor : '#1e40af';
+    const logoHtml = logoUrl
+        ? `<img src="${logoUrl}" style="width:60px;height:60px;object-fit:contain;" alt="Logo">`
+        : `<div style="width:60px;height:60px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;">${initials}</div>`;
     const w = window.open('', '_blank', 'width=900,height=700');
-    w.document.write('<html><head><title>Graduation Seating Plan</title><style>body{font-family:Arial,sans-serif;padding:20px;}h2{margin-bottom:4px;}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax:200px,1fr);gap:8px;}.card{padding:10px;border:1px solid #ddd;border-radius:8px;background:#f8fafc;text-align:center;}.no{font-size:26px;font-weight:800;color:#2563eb;}.name{font-weight:600;margin-top:4px;}.prog{font-size:10px;color:#64748b;margin-top:2px;}</style></head><body><h2>Graduation Seating Plan</h2>' + content + '</body></html>');
+    w.document.write('<html><head><title>Graduation Seating Plan</title><style>body{font-family:Arial,sans-serif;padding:20px;}h2{margin-bottom:4px;}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax:200px,1fr);gap:8px;}.card{padding:10px;border:1px solid #ddd;border-radius:8px;background:#f8fafc;text-align:center;}.no{font-size:26px;font-weight:800;color:#2563eb;}.name{font-weight:600;margin-top:4px;}.prog{font-size:10px;color:#64748b;margin-top:2px;}</style></head><body><div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:6px;">' + logoHtml + '<h2 style="margin:0;">' + schoolName + ' — Graduation Seating Plan</h2></div>' + content + '</body></html>');
     w.document.close();
     w.print();
 }
