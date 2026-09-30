@@ -2282,7 +2282,7 @@ function handleAPI(req, res) {
             if (user.role !== 'admin' && !(user.role === 'coordinator' && countryScopeOf(user) === name)) {
                 return json(res, 403, { error: 'You may only read your own country' });
             }
-            return json(res, 200, { brandName: entry.brandName || name, initials: entry.initials || '', phone: entry.phone || '', postalAddress: entry.postalAddress || '' });
+            return json(res, 200, { brandName: entry.brandName || name, initials: entry.initials || '', phone: entry.phone || '', postalAddress: entry.postalAddress || '', currencyCode: entry.currencyCode || '', currencySymbol: entry.currencySymbol || '', currencyDecimals: entry.currencyDecimals != null ? entry.currencyDecimals : 2 });
         }
         if (req.method === 'PUT') {
             // Strict: coordinators may edit ONLY their own country's postal
@@ -2297,8 +2297,15 @@ function handleAPI(req, res) {
                     const parsed = JSON.parse(body);
                     const postalAddress = parsed && typeof parsed.postalAddress === 'string' ? parsed.postalAddress.trim().slice(0, 500) : undefined;
                     const phone = parsed && typeof parsed.phone === 'string' ? parsed.phone.trim().slice(0, 50) : undefined;
-                    if (postalAddress === undefined && phone === undefined) {
-                        return json(res, 400, { error: 'Nothing to update (postalAddress || phone)' });
+                    const currencyCode = parsed && typeof parsed.currencyCode === 'string' ? parsed.currencyCode.trim().toUpperCase().slice(0, 5) : undefined;
+                    const currencySymbol = parsed && typeof parsed.currencySymbol === 'string' ? parsed.currencySymbol.trim().slice(0, 10) : undefined;
+                    let currencyDecimals = undefined;
+                    if (parsed && parsed.currencyDecimals !== undefined) {
+                        const decimals = parseInt(parsed.currencyDecimals);
+                        currencyDecimals = isFinite(decimals) ? Math.max(0, Math.min(4, decimals)) : 2;
+                    }
+                    if (postalAddress === undefined && phone === undefined && currencyCode === undefined && currencySymbol === undefined && currencyDecimals === undefined) {
+                        return json(res, 400, { error: 'Nothing to update (postalAddress, phone, currencyCode, currencySymbol, currencyDecimals)' });
                     }
                     const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
                     const countries = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
@@ -2306,10 +2313,13 @@ function handleAPI(req, res) {
                     if (!entry) return json(res, 404, { error: 'Country not found' });
                     if (postalAddress !== undefined) entry.postalAddress = postalAddress;
                     if (phone !== undefined) entry.phone = phone;
-                    auditLog('updated', 'country-self', { name, fields: Object.keys(parsed).filter(k => k === 'postalAddress' || k === 'phone') });
+                    if (currencyCode !== undefined) entry.currencyCode = currencyCode;
+                    if (currencySymbol !== undefined) entry.currencySymbol = currencySymbol;
+                    if (currencyDecimals !== undefined) entry.currencyDecimals = currencyDecimals;
+                    auditLog('updated', 'country-self', { name, fields: Object.keys(parsed).filter(k => k === 'postalAddress' || k === 'phone' || k === 'currencyCode' || k === 'currencySymbol' || k === 'currencyDecimals') });
                     saveDB();
                     broadcastEvent('db-change', { store: 'settings' });
-                    return json(res, 200, { ok: true, postalAddress: entry.postalAddress, phone: entry.phone });
+                    return json(res, 200, { ok: true, postalAddress: entry.postalAddress, phone: entry.phone, currencyCode: entry.currencyCode, currencySymbol: entry.currencySymbol, currencyDecimals: entry.currencyDecimals });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
             });
             return true;
@@ -2332,12 +2342,13 @@ function handleAPI(req, res) {
         req.on('data', c => body += c);
         req.on('end', () => {
             try {
-                const { name, code, brandName, initials, phone, postalAddress } = JSON.parse(body);
+                const { name, code, brandName, initials, phone, postalAddress, currencyCode, currencySymbol, currencyDecimals } = JSON.parse(body);
                 if (!name) return json(res, 400, { error: 'Country name required' });
                 const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
                 const countries = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
                 if (countries.find(c => c.name === name || c.code === code)) return json(res, 400, { error: 'Country already exists' });
-                const entry = { name, code: code || name.toUpperCase().replace(/\s+/g, '-'), brandName: brandName || name, initials: initials || name.substring(0, 2).toUpperCase(), phone: phone || '', postalAddress: postalAddress || '' };
+                const decimals = parseInt(currencyDecimals);
+                const entry = { name, code: code || name.toUpperCase().replace(/\s+/g, '-'), brandName: brandName || name, initials: initials || name.substring(0, 2).toUpperCase(), phone: phone || '', postalAddress: postalAddress || '', currencyCode: (currencyCode || '').trim().toUpperCase(), currencySymbol: (currencySymbol || '').trim(), currencyDecimals: isFinite(decimals) ? Math.max(0, Math.min(4, decimals)) : 2 };
                 db.settings = db.settings || [];
                 if (!countriesSetting) {
                     db.settings.push({ key: 'countries', value: [entry] });
@@ -2364,6 +2375,39 @@ function handleAPI(req, res) {
             auditLog('deleted', 'country', { name }); saveDB();
         }
         return json(res, 200, { ok: true });
+    }
+
+    // PUT /api/countries/:name — update an existing country (admin only).
+    // Accepts optional brandName, initials, phone, postalAddress, and per-country
+    // currency settings (currencyCode, currencySymbol, currencyDecimals).
+    if (parts.length >= 3 && parts[1] === 'countries' && req.method === 'PUT') {
+        const user = getRequestUser(req);
+        if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
+        const name = decodeURIComponent(parts[2]);
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body);
+                const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
+                const countries = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
+                const entry = (Array.isArray(countries) ? countries : []).find(c => c && c.name === name);
+                if (!entry) return json(res, 404, { error: 'Country not found' });
+                if (parsed.brandName !== undefined) entry.brandName = String(parsed.brandName).trim().slice(0, 120) || entry.brandName;
+                if (parsed.initials !== undefined) entry.initials = String(parsed.initials).trim().toUpperCase().slice(0, 4);
+                if (parsed.phone !== undefined) entry.phone = String(parsed.phone).trim().slice(0, 50);
+                if (parsed.postalAddress !== undefined) entry.postalAddress = String(parsed.postalAddress).trim().slice(0, 500);
+                if (parsed.currencyCode !== undefined) entry.currencyCode = String(parsed.currencyCode).trim().toUpperCase().slice(0, 5);
+                if (parsed.currencySymbol !== undefined) entry.currencySymbol = String(parsed.currencySymbol).trim().slice(0, 10);
+                if (parsed.currencyDecimals !== undefined) {
+                    const decimals = parseInt(parsed.currencyDecimals);
+                    entry.currencyDecimals = isFinite(decimals) ? Math.max(0, Math.min(4, decimals)) : 2;
+                }
+                auditLog('updated', 'country', { name }); saveDB();
+                json(res, 200, { ok: true, country: entry });
+            } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
+        });
+        return true;
     }
 
     // POST /api/adopt — adopt an otherwise-unresolvable record into a country.

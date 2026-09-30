@@ -171,8 +171,6 @@ function formatCurrency(amount) {
     const val = (amount || 0).toLocaleString(undefined, { minimumFractionDigits: s.decimals, maximumFractionDigits: s.decimals });
     return s.symbol + ' ' + val;
 }
-let _currencyCache = null;
-function setCurrencyCache(cfg) { _currencyCache = cfg; }
 function showToast(msg, options = {}) {
     const t = document.getElementById('toast');
     if (!t) return;
@@ -19273,10 +19271,53 @@ async function loadAcademicSettings() {
     }
     const grading = settings ? settings.grading : 'standard';
     setGradeScale(grading);
-    const cc = settings ? { code: settings.currencyCode || 'KES', symbol: settings.currencySymbol || 'KES', decimals: parseInt(settings.currencyDecimals) || 2 } : { code: 'KES', symbol: 'KES', decimals: 2 };
-    setCurrencyCache(cc);
+    refreshCurrencyCache();
     loadProgramFeeInputs();
     updateProgramFilter();
+}
+
+let _currencyCache = null;
+function setCurrencyCache(cfg) { _currencyCache = cfg; }
+/**
+ * Country-aware currency resolution:
+ *  1. Logged-in user's country entry has currencyFields  -> use them
+ *  2. Global academic settings currency                   -> use them
+ *  3. Default KES
+ * The active currency is stored in _currencyCache, read synchronously by
+ * formatCurrency(). Admin (no country) always falls to the global academic
+ * currency so the whole-dashboard view stays in one currency.
+ */
+function getGlobalCurrencyCache() {
+    const _academicForCurrency = window.__academicCurrencySettings || null;
+    if (!_academicForCurrency) return { code: 'KES', symbol: 'KES', decimals: 2 };
+    const dec = _academicForCurrency.currencyDecimals != null ? parseInt(_academicForCurrency.currencyDecimals) : 2;
+    return { code: _academicForCurrency.currencyCode || 'KES', symbol: _academicForCurrency.currencySymbol || 'KES', decimals: isFinite(dec) && dec >= 0 && dec <= 4 ? dec : 2 };
+}
+function resolveCurrencyForCountry(entry) {
+    if (!entry || !entry.currencyCode) return null;
+    const dec = entry.currencyDecimals != null ? parseInt(entry.currencyDecimals) : 2;
+    return { code: String(entry.currencyCode).toUpperCase(), symbol: (entry.currencySymbol || entry.currencyCode), decimals: isFinite(dec) && dec >= 0 && dec <= 4 ? dec : 2 };
+}
+async function refreshCurrencyCache() {
+    try {
+        const settings = await dbGet('settings', 'academic');
+        window.__academicCurrencySettings = settings || null;
+    } catch {}
+    let cc = getGlobalCurrencyCache();
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u && u.country) {
+            let countries = window._countriesCache || null;
+            if (!Array.isArray(countries) || !countries.length) {
+                try { countries = await fetchCountries(); } catch {}
+            }
+            const entry = (Array.isArray(countries) ? countries : []).find(c => c && c.name === u.country);
+            const countryCc = resolveCurrencyForCountry(entry);
+            if (countryCc) cc = countryCc;
+        }
+    } catch {}
+    setCurrencyCache(cc);
+    return cc;
 }
 async function saveAcademicSettings() {
     const programs = getProgramsFromInput();
@@ -19286,7 +19327,7 @@ async function saveAcademicSettings() {
         if (val > 0) programFees[inp.dataset.program] = val;
     });
     const settings = { key: 'academic', academicYear: document.getElementById('settings-academic-year').value.trim(), semester: document.getElementById('settings-semester').value, grading: document.getElementById('settings-grading').value, programs: programs.join(', '), departments: document.getElementById('settings-departments').value.trim(), attendanceMin: parseInt(document.getElementById('settings-attendance-min').value) || 75, programFees, currencyCode: document.getElementById('settings-currency-code').value.trim().toUpperCase(), currencySymbol: document.getElementById('settings-currency-symbol').value.trim(), currencyDecimals: parseInt(document.getElementById('settings-currency-decimals').value) || 2 };
-    await dbPut('settings', settings); invalidateAcademicCache(); initAcademicCache(); updateProgramFilter(); showToast('Academic settings saved!'); logAudit('updated', 'academic-settings', settings);
+    await dbPut('settings', settings); invalidateAcademicCache(); initAcademicCache(); updateProgramFilter(); refreshCurrencyCache(); showToast('Academic settings saved!'); logAudit('updated', 'academic-settings', settings);
 }
 async function saveCoordinatorAccess() {
     const s = {
@@ -22153,7 +22194,9 @@ async function fetchCountries() {
     const res = await fetch('/api/countries', { headers: (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) });
     if (!res.ok) throw new Error('Failed to load countries: ' + res.status);
     const data = await res.json();
-    return Array.isArray(data.countries) ? data.countries : [];
+    const list = Array.isArray(data.countries) ? data.countries : [];
+    try { window._countriesCache = list; } catch {}
+    return list;
 }
 async function renderCountries() {
     const box = document.getElementById('countries-list');
@@ -22161,7 +22204,7 @@ async function renderCountries() {
     let countries = [];
     try { countries = await fetchCountries(); }
     catch (e) { box.innerHTML = '<div style="color:var(--danger);font-size:12px;">Unable to load countries.</div>'; return; }
-    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span>${c.phone ? ` <small style="color:var(--text-muted);">${escapeHtml(c.phone)}</small>` : ''}${c.postalAddress ? `<br><small style="color:var(--text-muted);">${escapeHtml(c.postalAddress)}</small>` : ''}</span><button class="btn btn-danger btn-sm" data-name="${encodeURIComponent(c.name)}" onclick="deleteCountry(decodeURIComponent(this.dataset.name))">Del</button></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
+    box.innerHTML = countries.length ? countries.map(c => `<div class="event-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>${escapeHtml(c.brandName || c.name)}</b> <span class="badge badge-info">${escapeHtml(c.code || '')}</span>${c.currencyCode ? ` <span class="badge badge-success" title="Country currency">${escapeHtml(c.currencySymbol || c.currencyCode)} ${escapeHtml(c.currencyCode)}</span>` : ''}${c.phone ? ` <small style="color:var(--text-muted);">${escapeHtml(c.phone)}</small>` : ''}${c.postalAddress ? `<br><small style="color:var(--text-muted);">${escapeHtml(c.postalAddress)}</small>` : ''}</span><span style="white-space:nowrap;"><button class="btn btn-outline btn-sm" data-name="${encodeURIComponent(c.name)}" onclick="showCountryForm(decodeURIComponent(this.dataset.name))">Edit</button> <button class="btn btn-danger btn-sm" data-name="${encodeURIComponent(c.name)}" onclick="deleteCountry(decodeURIComponent(this.dataset.name))">Del</button></span></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No countries configured — logins stay country-free until you add one.</div>';
 }
 
 // Country self-service screen for country coordinators: shows the country's
@@ -22178,12 +22221,37 @@ async function renderMyCountry() {
         const branding = await dbGet('settings', 'branding').catch(() => null);
         const brandName = (branding && branding.country && branding.schoolName) ? branding.schoolName : country;
         const initials = (branding && branding.country && branding.initials) ? branding.initials : (country ? country.substring(0, 2).toUpperCase() : '');
+        let countryData = null;
+        try {
+            const self = await fetch('/api/country/' + encodeURIComponent(country) + '/self', { headers: (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) }).then(r => r.json()).catch(() => null);
+            if (self && self.brandName) countryData = self;
+        } catch {}
+        if (!countryData) {
+            const list = window._countriesCache || (typeof fetchCountries === 'function' ? await fetchCountries() : []);
+            countryData = (Array.isArray(list) ? list : []).find(c => c && c.name === country) || {};
+        }
+        const cc = countryData ? (countryData.currencyCode || '') : '';
+        const cs = countryData ? (countryData.currencySymbol || '') : '';
+        const cd = countryData && countryData.currencyDecimals != null ? Number(countryData.currencyDecimals) : 2;
         box.innerHTML = `<div style="display:grid;gap:12px;max-width:640px;">
 <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:18px;border-radius:12px;"><div style="font-size:13px;opacity:.85;">WORKS IN YOUR COUNTRY</div><h3 style="margin:6px 0 2px;">${escapeHtml(brandName)}</h3><div style="font-size:12px;opacity:.9;">${escapeHtml(initials)} · ${escapeHtml(country)}</div></div>
 <div class="form-group"><label>Contact Phone <small style="opacity:.7">(shows on this country's documents)</small></label><input type="text" id="my-country-phone" value="${escapeHtml((branding && branding.phone) || '')}" placeholder="e.g. +254 7XX XXX XXX"></div>
 <div class="form-group"><label>Postal Address <small style="opacity:.7">(shows on this country's documents)</small></label><input type="text" id="my-country-postal" value="${escapeHtml((branding && branding.postalAddress) || '')}" placeholder="e.g. P.O. Box 12345, Nairobi"></div>
+<div style="border-top:1px dashed var(--border);margin:10px 0;"></div>
+<div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">Currency (this country)</div>
+<div class="form-row">
+<div class="form-group"><label>Currency Code</label><input type="text" id="my-country-currency-code" value="${escapeHtml(cc)}" placeholder="e.g. KES, UGX, TZS" maxlength="5" style="text-transform:uppercase;font-weight:600;"></div>
+<div class="form-group"><label>Currency Symbol</label><input type="text" id="my-country-currency-symbol" value="${escapeHtml(cs)}" placeholder="e.g. KSh, USh, TSh" maxlength="10"></div>
+<div class="form-group"><label>Decimals</label><select id="my-country-currency-decimals">
+<option value="0"${cd === 0 ? ' selected' : ''}>0</option>
+<option value="1"${cd === 1 ? ' selected' : ''}>1</option>
+<option value="2"${cd === 2 ? ' selected' : ''}>2</option>
+<option value="3"${cd === 3 ? ' selected' : ''}>3</option>
+<option value="4"${cd === 4 ? ' selected' : ''}>4</option>
+</select></div>
+</div>
 <button class="btn btn-primary" onclick="saveMyCountrySelf()">💾 Save</button>
-<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">These appear on certificates, receipts, transcripts and letters generated in your country. The institution name and logo come from the overall branding.</p>
+<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">These appear on certificates, receipts, transcripts and letters generated in your country. The institution name and logo come from the overall branding. Fees and amounts across your dashboard display in this country's currency.</p>
 </div>`;
     } catch (e) { box.innerHTML = '<div style="color:var(--danger);text-align:center;padding:20px;">Unable to load your country.</div>'; }
 }
@@ -22193,36 +22261,78 @@ async function saveMyCountrySelf() {
         const country = u.country || '';
         if (!country) return showToast('Your account is not bound to a country', { type: 'danger' });
         const body = { postalAddress: document.getElementById('my-country-postal').value.trim() || '', phone: document.getElementById('my-country-phone').value.trim() || '' };
-        if (!body.postalAddress && !body.phone) return showToast('Nothing to save');
+        const currencyCode = document.getElementById('my-country-currency-code').value.trim().toUpperCase();
+        const currencySymbol = document.getElementById('my-country-currency-symbol').value.trim();
+        const currencyDecimals = parseInt(document.getElementById('my-country-currency-decimals').value) || 2;
+        if (currencyCode || currencySymbol || currencyDecimals !== 2) { body.currencyCode = currencyCode; body.currencySymbol = currencySymbol; body.currencyDecimals = currencyDecimals; }
+        if (!body.postalAddress && !body.phone && !body.currencyCode && !body.currencySymbol) return showToast('Nothing to save');
         const res = await fetch('/api/country/' + encodeURIComponent(country) + '/self', { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify(body) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return showToast(data.error || 'Could not save', { type: 'danger' });
-        showToast('Country details saved — they now appear on your documents', { type: 'success' });
+        if (window._countriesCache && Array.isArray(window._countriesCache)) {
+            const idx = window._countriesCache.findIndex(c => c && c.name === country);
+            if (idx >= 0) { window._countriesCache[idx] = Object.assign({}, window._countriesCache[idx], { phone: body.phone, postalAddress: body.postalAddress, currencyCode, currencySymbol, currencyDecimals }); }
+        }
+        refreshCurrencyCache(); showToast('Country details saved — they now appear on your documents', { type: 'success' });
         renderMyCountry();
     } catch (e) { showToast('Save failed: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
 }
-function showCountryForm() {
-    const content = `<div class="form-group"><label>Country Name *</label><input type="text" id="country-name" placeholder="e.g., Kenya"></div>
-<div class="form-group"><label>Code (short, no spaces)</label><input type="text" id="country-code" placeholder="e.g., KE" maxlength="10" style="text-transform:uppercase;font-weight:600;"></div>
-<div class="form-row"><div class="form-group"><label>Brand Name</label><input type="text" id="country-brand" placeholder="Shown on login (defaults to name)"></div>
-<div class="form-group"><label>Initials</label><input type="text" id="country-initials" placeholder="e.g., KE" maxlength="4"></div></div>
-<div class="form-row"><div class="form-group"><label>Contact Phone</label><input type="text" id="country-phone" placeholder="e.g., +254 7XX XXX XXX"></div>
-<div class="form-group"><label>Postal Address</label><input type="text" id="country-postal" placeholder="e.g., P.O. Box 12345, Nairobi"></div></div>
-<div style="font-size:11px;color:var(--text-muted);">Appears on the login dropdown immediately, and as the closing identity on documents generated in this country. Country coordinators can update the postal address and phone from their dashboard.</div>`;
-    showModal('Add Country', content, `<button class="btn btn-primary" onclick="saveCountry()">Save</button>`);
+function showCountryForm(name) {
+    const editing = !!name;
+    const pre = {};
+    if (editing) {
+        const list = window._countriesCache || [];
+        const found = list.find(c => c && c.name === name);
+        if (found) Object.assign(pre, found);
+    }
+    const val = (k, d) => { const v = pre[k]; return v != null ? String(v) : d; };
+    const content = `<div class="form-group"><label>Country Name *</label><input type="text" id="country-name" placeholder="e.g., Kenya" value="${escapeHtml(val('name', ''))}" ${editing ? 'disabled' : ''}></div>
+<div class="form-group"><label>Code (short, no spaces)</label><input type="text" id="country-code" placeholder="e.g., KE" maxlength="10" style="text-transform:uppercase;font-weight:600;" value="${escapeHtml(val('code', ''))}" ${editing ? 'disabled' : ''}></div>
+<div class="form-row"><div class="form-group"><label>Brand Name</label><input type="text" id="country-brand" placeholder="Shown on login (defaults to name)" value="${escapeHtml(val('brandName', ''))}"></div>
+<div class="form-group"><label>Initials</label><input type="text" id="country-initials" placeholder="e.g., KE" maxlength="4" value="${escapeHtml(val('initials', ''))}"></div></div>
+<div class="form-row"><div class="form-group"><label>Contact Phone</label><input type="text" id="country-phone" placeholder="e.g., +254 7XX XXX XXX" value="${escapeHtml(val('phone', ''))}"></div>
+<div class="form-group"><label>Postal Address</label><input type="text" id="country-postal" placeholder="e.g., P.O. Box 12345, Nairobi" value="${escapeHtml(val('postalAddress', ''))}"></div></div>
+<div style="border-top:1px dashed var(--border);margin:10px 0;"></div>
+<div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">Currency (this country)</div>
+<div class="form-row">
+<div class="form-group"><label>Currency Code</label><input type="text" id="country-currency-code" placeholder="e.g., KES, UGX, TZS" maxlength="5" style="text-transform:uppercase;font-weight:600;" value="${escapeHtml(val('currencyCode', ''))}"></div>
+<div class="form-group"><label>Currency Symbol</label><input type="text" id="country-currency-symbol" placeholder="e.g., KSh, USh, TSh" maxlength="10" value="${escapeHtml(val('currencySymbol', ''))}"></div>
+<div class="form-group"><label>Decimals</label><select id="country-currency-decimals">
+<option value="0"${(pre.currencyDecimals != null ? Number(pre.currencyDecimals) : 2) === 0 ? ' selected' : ''}>0</option>
+<option value="1"${(pre.currencyDecimals != null ? Number(pre.currencyDecimals) : 2) === 1 ? ' selected' : ''}>1</option>
+<option value="2"${(pre.currencyDecimals != null ? Number(pre.currencyDecimals) : 2) === 2 ? ' selected' : ''}>2</option>
+<option value="3"${(pre.currencyDecimals != null ? Number(pre.currencyDecimals) : 2) === 3 ? ' selected' : ''}>3</option>
+<option value="4"${(pre.currencyDecimals != null ? Number(pre.currencyDecimals) : 2) === 4 ? ' selected' : ''}>4</option>
+</select></div>
+</div>
+<div style="font-size:11px;color:var(--text-muted);${editing ? 'display:none;' : ''}">Appears on the login dropdown immediately, and as the closing identity on documents generated in this country. Country coordinators can update the postal address, phone and currency from their dashboard.</div>`;
+    showModal(editing ? 'Edit Country — ' + escapeHtml(name) : 'Add Country', content, `<button class="btn btn-primary" onclick="saveCountry(${editing ? 'decodeURIComponent("' + encodeURIComponent(name) + '")' : ''})">Save</button>`);
 }
-async function saveCountry() {
+async function saveCountry(editName) {
+    const editing = !!editName;
     const name = document.getElementById('country-name').value.trim();
     const code = document.getElementById('country-code').value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
     const brandName = document.getElementById('country-brand').value.trim();
     const initials = document.getElementById('country-initials').value.trim().toUpperCase();
     const phone = document.getElementById('country-phone').value.trim();
     const postalAddress = document.getElementById('country-postal').value.trim();
+    const currencyCode = document.getElementById('country-currency-code').value.trim().toUpperCase();
+    const currencySymbol = document.getElementById('country-currency-symbol').value.trim();
+    const currencyDecimals = parseInt(document.getElementById('country-currency-decimals').value) || 2;
     if (!name) return showToast('Country name required!');
-    const res = await fetch('/api/countries', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ name, code: code || undefined, brandName: brandName || undefined, initials: initials || undefined, phone: phone || undefined, postalAddress: postalAddress || undefined }) });
+    if (editing) {
+        const res = await fetch('/api/countries/' + encodeURIComponent(editName), { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ brandName: brandName || undefined, initials: initials || undefined, phone: phone || undefined, postalAddress: postalAddress || undefined, currencyCode: currencyCode || undefined, currencySymbol: currencySymbol || undefined, currencyDecimals: currencyDecimals }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || 'Failed to update country');
+        if (typeof window._countriesCache !== 'undefined') { try { window._countriesCache = await fetchCountries(); } catch {} }
+        closeModal(); await renderCountries(); refreshCurrencyCache(); showToast('Country updated!'); try { logAudit('updated', 'country', { name: editName }); } catch {}
+        return;
+    }
+    const res = await fetch('/api/countries', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ name, code: code || undefined, brandName: brandName || undefined, initials: initials || undefined, phone: phone || undefined, postalAddress: postalAddress || undefined, currencyCode: currencyCode || undefined, currencySymbol: currencySymbol || undefined, currencyDecimals: currencyDecimals }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || 'Failed to add country');
-    closeModal(); await renderCountries(); showToast('Country added!'); try { logAudit('created', 'country', { name }); } catch {}
+    if (typeof window._countriesCache !== 'undefined') { try { window._countriesCache = await fetchCountries(); } catch {} }
+    closeModal(); await renderCountries(); refreshCurrencyCache(); showToast('Country added!'); try { logAudit('created', 'country', { name }); } catch {}
 }
 async function deleteCountry(name) {
     if (!await showConfirm('Confirm', 'Delete country "' + name + '"? Users tagged to it keep the value but it leaves the login list.')) return;
