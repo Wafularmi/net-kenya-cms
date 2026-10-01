@@ -1289,6 +1289,54 @@ async function submitChangePassword() {
         if (status) { status.textContent = e.message; status.style.color = 'var(--danger)'; }
     }
 }
+// THE verification result panel. One renderer for BOTH the login screen and the
+// in-app Verify tab, so a member of staff sees exactly what the public sees:
+// who the bearer is, which study centre and country they studied in, and the
+// type of document. Both screens call POST /api/verify — one engine, one answer —
+// so the result can never depend on the reader's role or session state.
+// opts.integrity appends the transcript tamper-check (staff-only extra).
+function verificationResultHtml(data, opts) {
+    opts = opts || {};
+    if (!data || data.ok !== true) {
+        const mismatch = data && data.reason === 'mismatch';
+        return `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${mismatch ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${mismatch ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p>${!mismatch ? `<p style="font-size:13px;font-weight:700;color:var(--danger);margin-top:10px;">Check that you typed correctly, if you did, then it could be a clear forgery, and Net Foundation dissociates with the document and the bearer!</p>` : ''}</div>`;
+    }
+    const gen = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+    const field = (label, value, strong) => value ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">${label}</div><div style="font-size:${strong === false ? '14' : '15'}px;font-weight:${strong === false ? '700' : '800'};color:#0f172a;margin-top:2px;">${escapeHtml(value)}</div></div>` : '';
+    // Revoked and authenticated are separate branches so no template expression
+    // spans a multi-line `${cond ? ` : `}` block.
+    if (data.revoked) {
+        return `<div style="border:2px solid var(--danger);background:#fef2f2;text-align:center;padding:16px;border-radius:8px;">
+                    <div style="font-size:44px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 8px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);">This document was revoked and is no longer valid.${data.revokeReason ? ' Reason: ' + escapeHtml(data.revokeReason) : ''}</p>
+                    ${data.revokedBy || data.revokedAt ? `<div style="text-align:left;max-width:440px;margin:12px auto 0;background:#fff;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;font-size:12px;color:#7f1d1d;line-height:1.7;">Revoked by <b>${escapeHtml(data.revokedBy || '—')}</b>${data.revokedAt ? ' on ' + escapeHtml(new Date(data.revokedAt).toLocaleString('en-GB')) : ''}.</div>` : ''}
+                </div>`;
+    }
+    return `<div style="border:2px solid var(--success);background:#f0fdf4;text-align:center;padding:16px;border-radius:8px;">
+                <div style="font-size:44px;margin-bottom:8px;">✅</div><h3 style="color:#15803d;margin:0 0 12px;font-size:18px;">Document Authenticated</h3>
+                <div style="text-align:left;max-width:440px;margin:0 auto;background:#ffffff;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;">
+                    ${field('Student Name', data.studentName || '—')}
+                    ${field('Admission No', data.admission || '—')}
+                    ${field('Studied at', data.studyCenter)}
+                    ${field('Country studied in', data.country)}
+                    ${field('Program', data.program, false)}
+                    ${field('Document', data.docTitle, false)}
+                    ${typeof data.cgpa === 'number' ? field('CGPA', data.cgpa.toFixed(2), false) : ''}
+                    ${field('Classification', data.classification, false)}
+                    ${field('Document ID', data.docId || '')}
+                    ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
+                </div>
+                ${opts.integrity ? `<div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--text-secondary);">${escapeHtml(opts.integrity)}</div>` : ''}
+                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. ${escapeHtml(data.institutionName || (data.country ? 'Net Foundation ' + data.country : 'Net Foundation Kenya'))} upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>
+            </div>`;
+}
+// Shared call to the one verification engine. Returns parsed data or null.
+async function callVerifyApi(docId, vCode) {
+    const res = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docId, vCode }) });
+    if (res.status === 429) return { ok: false, reason: 'rate' };
+    const data = await res.json().catch(() => null);
+    if (!data || typeof data.ok !== 'boolean') return null;
+    return data;
+}
 async function verifyDocumentPublic() {
     const docIdEl = document.getElementById('login-verify-docid');
     const vCodeEl = document.getElementById('login-verify-vcode');
@@ -1299,34 +1347,20 @@ async function verifyDocumentPublic() {
     if (!vCode) return showToast('Enter the Verification Code!');
     resultDiv.innerHTML = '<p style="text-align:center;color:var(--text-muted);">Verifying...</p>';
     try {
-        const res = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docId, vCode }) });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Verification failed');
-        if (!data.ok) {
-            resultDiv.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${data.reason === 'mismatch' ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${data.reason === 'mismatch' ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p>${data.reason !== 'mismatch' ? `<p style="font-size:13px;font-weight:700;color:var(--danger);margin-top:10px;">Check that you typed correctly, if you did, then it could be a clear forgery, and Net Foundation dissociates with the document and the bearer!</p>` : ''}</div>`;
-            return;
-        }
-        const gen = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
-        resultDiv.innerHTML = `
-            <div style="${data.revoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px;border-radius:8px;">
-                ${data.revoked
-                    ? `<div style="font-size:44px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 8px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);">This document was revoked and is no longer valid.${data.revokeReason ? ' Reason: ' + escapeHtml(data.revokeReason) : ''}</p>`
-                    : `<div style="font-size:44px;margin-bottom:8px;">✅</div><h3 style="color:#15803d;margin:0 0 12px;font-size:18px;">Document Authenticated</h3>
-                <div style="text-align:left;max-width:440px;margin:0 auto;background:#ffffff;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;">
-                    <div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Student Name</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.studentName || '—')}</div></div>
-                    <div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Admission No</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.admission || '—')}</div></div>
-                    ${data.studyCenter ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Studied at</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.studyCenter)}</div></div>` : ''}
-                    ${data.country ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Country studied in</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.country)}</div></div>` : ''}
-                    ${data.program ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Program</div><div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(data.program)}</div></div>` : ''}
-                    ${data.docTitle ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document</div><div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">${escapeHtml(data.docTitle)}</div></div>` : ''}
-                    <div style="margin:0;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">Document ID</div><div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtml(data.docId || '')}</div></div>
-                    ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
-                </div>
-                <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. ${data.institutionName || (data.country ? 'Net Foundation ' + data.country : 'Net Foundation Kenya')} upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>`}
-            </div>`;
+        const data = await callVerifyApi(docId, vCode);
+        if (!data) { resultDiv.innerHTML = verificationUnavailableHtml(); return; }
+        resultDiv.innerHTML = verificationResultHtml(data);
     } catch (e) {
-        resultDiv.innerHTML = `<p style="text-align:center;color:var(--danger);">Error: ${escapeHtml(e.message)}</p>`;
+        // Friendly message only: an internal error string (store names, HTTP
+        // codes) must never be rendered to the user.
+        resultDiv.innerHTML = verificationUnavailableHtml();
     }
+}
+function verificationUnavailableHtml() {
+    return `<div style="text-align:center;padding:20px;"><div style="font-size:40px;margin-bottom:10px;">⚠️</div><h3 style="color:var(--danger);margin:0 0 8px;">Verification Unavailable</h3><p style="color:var(--text-muted);font-size:13px;">We could not reach the verification service. Check your connection and try again.</p></div>`;
+}
+function verificationRateHtml() {
+    return `<div style="text-align:center;padding:20px;"><div style="font-size:40px;margin-bottom:10px;">⚠️</div><h3 style="color:var(--danger);margin:0 0 8px;">Too Many Attempts</h3><p style="color:var(--text-muted);font-size:13px;">Please wait 15 minutes before trying again.</p></div>`;
 }
 function adjustHeaderPadding() {
     const header = document.getElementById('main-header');
@@ -13729,30 +13763,43 @@ async function verifyDocument() {
     if (!vCode) return showToast('Enter the Verification Code!');
     const resultDiv = document.getElementById('verify-result');
     resultDiv.innerHTML = '<p style="text-align:center;color:var(--text-muted);">Verifying...</p>';
+    // Staff verification uses the SAME engine and the SAME panel as the public
+    // login-screen verifier, so a coordinator sees identical, complete detail:
+    // bearer, study centre, country and document type. Only the transcript
+    // tamper-check is staff-only extra.
+    let data = null;
     try {
-        let record = await dbGet('transcriptVerifications', docId);
-        let isTranscript = true;
-        if (!record) {
-            const allCerts = await dbGetAll('certificates').catch(() => []);
-            record = (allCerts || []).find(c => c.id === docId || c.docId === docId);
-            isTranscript = false;
-        }
-        if (!record) {
-            resultDiv.innerHTML = `<div style="text-align:center;padding:24px;"><div style="font-size:48px;margin-bottom:12px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">Document Not Found</h3><p style="color:var(--text-muted);">No document matches ID <strong>${escapeHtml(docId)}</strong>. This document may not be authentic or was generated on a different system.</p></div>`;
+        data = await callVerifyApi(docId, vCode);
+        if (!data) { resultDiv.innerHTML = verificationUnavailableHtml(); return; }
+        if (data.reason === 'rate') { resultDiv.innerHTML = verificationRateHtml(); return; }
+        if (!data.ok) {
+            try { logAudit('verify-failed', 'document', { docId, reason: data.reason }); } catch (e) {}
+            resultDiv.innerHTML = verificationResultHtml(data);
             return;
         }
-        if (record.vCode !== vCode) {
-            resultDiv.innerHTML = `<div style="text-align:center;padding:24px;"><div style="font-size:48px;margin-bottom:12px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">Verification Failed</h3><p style="color:var(--text-muted);">The verification code <strong>${escapeHtml(vCode)}</strong> does not match document <strong>${escapeHtml(docId)}</strong>. The document may be a forgery or the code was entered incorrectly.</p></div>`;
-            return;
-        }
-        if (isTranscript) {
-            try {
+    } catch (e) {
+        resultDiv.innerHTML = verificationUnavailableHtml();
+        return;
+    }
+    // Transcript tamper-check: recompute the grade hash and compare it with the
+    // one captured when the transcript was issued.
+    let integrity = '';
+    if (data.isTranscript) {
+        try {
+            let sid = '';
+            const tv = await dbGet('transcriptVerifications', data.docId || docId).catch(() => null);
+            if (tv && tv.studentId) sid = tv.studentId;
+            if (!sid) {
+                const allCerts = await dbGetAll('certificates').catch(() => []);
+                const cr = (allCerts || []).find(c => c && (c.docId === (data.docId || docId) || c.id === docId));
+                if (cr && cr.studentId) sid = cr.studentId;
+            }
+            if (sid && data.courseHash) {
                 const allGrades = await dbGetAll('grades');
-                const savedGrades = allGrades.filter(g => g.studentId === (record.studentId || ''));
+                const savedGrades = allGrades.filter(g => g.studentId === sid);
                 const enrollments = await dbGetAll('enrollments');
-                const fromEnroll = enrollments.filter(e => e.studentId === (record.studentId || '')).map(e => e.courseId);
-                const fromSave = savedGrades.map(g => g.courseId);
-                const allCourseIds = new Set([...fromEnroll, ...fromSave]);
+                const fromEnroll = enrollments.filter(e => e.studentId === sid).map(e => e.courseId);
+                const allCourseIds = new Set([...fromEnroll, ...savedGrades.map(g => g.courseId)]);
                 const courses = await dbGetAll('courses');
                 const courseOrder = [
                     "GOD'S CALL TO MINISTRY", "GOD'S WAY OF SALVATION", "OLD TESTAMENT SURVEY",
@@ -13770,74 +13817,19 @@ async function verifyDocument() {
                 const attendance = await dbGetAll('attendance');
                 const users = await dbGetAll('users');
                 const currentHash = await sha256(studentCours.map(c => {
-                    const r = computeWeightedGrade(record.studentId, c.id, c, quizzes, submissions, attendance, users);
+                    const r = computeWeightedGrade(sid, c.id, c, quizzes, submissions, attendance, users);
                     let ws = Math.round(r.weightedScore);
                     if (ws === 0) { const sg = savedGrades.find(g => g.courseId === c.id); if (sg && sg.score) ws = Math.round(sg.score); }
                     const gi = ws > 0 ? getGrade(ws) : null;
                     return c.id + ':' + ws + ':' + (gi ? gi.grade : '');
                 }).join('|'));
-                record._integrity = currentHash === record.courseHash ? '✅ Authentic — no data tampering detected.' : '⚠️ Data modified since generation — transcript may not reflect current records.';
-            } catch (e) {
-                record._integrity = 'ℹ️ Could not verify data integrity. The document record exists but current grades could not be re-computed.';
+                integrity = currentHash === data.courseHash ? '✅ Authentic — no data tampering detected.' : '⚠️ Data modified since generation — transcript may not reflect current records.';
             }
+        } catch (e) {
+            integrity = 'ℹ️ Could not verify data integrity. The document record exists but current grades could not be re-computed.';
         }
-        const generatedDate = record.generatedAt ? (isNaN(new Date(record.generatedAt)) ? record.generatedAt : new Date(record.generatedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})) : '';
-        const isRevoked = (record.docStatus === 'revoked');
-        let verifyCountry = '';
-        let verifyCenterName = '';
-        // Identity shown on a freshly generated PDF record: PDF generators store
-        // only id/studentId/type, so name + admission + program are resolved here
-        // (and from alumni, for students who have since graduated out of
-        // db.students). Without this a valid certificate displayed "—".
-        let verifyStudentName = record.studentName || record.name || '';
-        let verifyAdmission = record.admission || record.admissionNumber || '';
-        let verifyProgram = record.program || '';
-        try {
-            if (record.studentId) {
-                let vpStudent = await dbGet('students', record.studentId).catch(() => null);
-                if (!vpStudent) {
-                    const vpAlumni = await dbGetAll('alumni').catch(() => []);
-                    vpStudent = (vpAlumni || []).find(a => a && String(a.id) === String(record.studentId)) || null;
-                }
-                if (vpStudent) {
-                    if (!verifyStudentName) verifyStudentName = vpStudent.name || vpStudent.fullName || '';
-                    if (!verifyAdmission) verifyAdmission = vpStudent.admissionNumber || vpStudent.admissionNo || vpStudent.id || '';
-                    if (!verifyProgram) verifyProgram = vpStudent.program || '';
-                    verifyCountry = vpStudent.country || '';
-                    if (vpStudent.studyCenterId) {
-                        const vpCenter = await dbGet('studyCenters', vpStudent.studyCenterId);
-                        verifyCenterName = vpCenter ? (vpCenter.name || '') : '';
-                        if (!verifyCountry) verifyCountry = vpCenter ? (vpCenter.country || '') : '';
-                    }
-                }
-            }
-        } catch {}
-        if (!verifyCountry) verifyCountry = record.country || '';
-        resultDiv.innerHTML = `
-            <div style="${isRevoked ? 'border:2px solid var(--danger);background:#fef2f2;' : 'border:2px solid var(--success);background:#f0fdf4;'} text-align:center;padding:16px 24px;border-radius:8px;">
-                ${isRevoked
-                    ? `<div style="font-size:48px;margin-bottom:8px;">🚫</div><h3 style="color:var(--danger);margin:0 0 12px;">Document Revoked</h3><p style="font-size:12px;color:var(--danger);margin:0 0 8px;">This document was flagged and revoked by the administration. It is no longer valid for official use.</p><div style="text-align:left;font-size:12px;color:#7f1d1d;background:#fff;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;margin-top:10px;line-height:1.7;">Revoked by <b>${escapeHtml(record.revokedBy || '—')}</b> on ${escapeHtml(record.revokedAt ? new Date(record.revokedAt).toLocaleString('en-GB') : '—')}.${record.revokeReason ? ` Reason: ${escapeHtml(record.revokeReason)}.` : ''}${record.revokeContact ? ` Contact: ${escapeHtml(record.revokeContact)}.` : ''}</div>`
-                    : `<div style="font-size:48px;margin-bottom:8px;">✅</div><h3 style="color:var(--success);margin:0 0 12px;">Document Authenticated</h3>`}
-                <div style="text-align:left;max-width:500px;margin:0 auto;font-size:13px;line-height:1.8;">
-                    <p><strong>Document:</strong> ${escapeHtml(certificateTypeLabel(record, isTranscript))}</p>
-                    <p><strong>Student Name:</strong> ${escapeHtml(verifyStudentName || '—')}</p>
-                    <p><strong>Admission No:</strong> ${escapeHtml(verifyAdmission || '—')}</p>
-                    ${verifyCenterName ? `<p><strong>Studied at:</strong> ${escapeHtml(verifyCenterName)}</p>` : ''}
-                    ${verifyCountry ? `<p><strong>Country studied in:</strong> ${escapeHtml(verifyCountry)}</p>` : ''}
-                    ${verifyProgram ? `<p><strong>Program:</strong> ${escapeHtml(verifyProgram)}</p>` : ''}
-                    <p><strong>Document ID:</strong> ${escapeHtml(record.docId || docId)}</p>
-                    <p><strong>Verification Code:</strong> <span style="font-family:'Courier New',monospace;color:#b8860b;font-weight:700;">${escapeHtml(record.vCode)}</span></p>
-                    ${typeof record.cgpa === 'number' ? `<p><strong>CGPA:</strong> ${record.cgpa.toFixed(2)}</p>` : ''}
-                    ${record.classification ? `<p><strong>Classification:</strong> ${escapeHtml(record.classification)}</p>` : ''}
-                    ${record.totalCredits ? `<p><strong>Total Credits:</strong> ${record.totalCredits}</p>` : ''}
-                    ${generatedDate ? `<p><strong>Generated:</strong> ${generatedDate}</p>` : ''}
-                </div>
-                ${isRevoked ? (record.revokedAt ? `<div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--danger);">Revoked on ${new Date(record.revokedAt).toLocaleString('en-GB')}</div>` : '') : `<div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--text-secondary);">${record._integrity || '✅ Document verified against institutional records.'}</div>`}
-            </div>`;
-    } catch (e) {
-        console.error('verifyDocument error:', e);
-        resultDiv.innerHTML = `<div style="text-align:center;padding:24px;"><div style="font-size:48px;margin-bottom:12px;">⚠️</div><h3 style="color:var(--danger);margin:0 0 8px;">Verification Error</h3><p style="color:var(--text-muted);">${escapeHtml(e.message || 'An unexpected error occurred.')}</p></div>`;
     }
+    resultDiv.innerHTML = verificationResultHtml(data, integrity ? { integrity } : {});
 }
 
 async function reprintDocument() {
@@ -13917,7 +13909,9 @@ async function reprintDocument() {
             </div>`;
     } catch (e) {
         console.error('reprintDocument error:', e);
-        resultDiv.innerHTML = `<div style="text-align:center;padding:24px;"><div style="font-size:48px;margin-bottom:12px;">⚠️</div><h3 style="color:var(--danger);margin:0 0 8px;">Error</h3><p style="color:var(--text-muted);">${escapeHtml(e.message || 'An unexpected error occurred.')}</p></div>`;
+        // No internal error text on screen (store names / HTTP codes must never
+        // reach the user) — the reason is always logged to the console instead.
+        resultDiv.innerHTML = `<div style="text-align:center;padding:24px;"><div style="font-size:48px;margin-bottom:12px;">⚠️</div><h3 style="color:var(--danger);margin:0 0 8px;">Reprint Unavailable</h3><p style="color:var(--text-muted);">We could not load this document. Check your connection, or ask an administrator to reissue it.</p></div>`;
     }
 }
 function printReprintedDocument() {

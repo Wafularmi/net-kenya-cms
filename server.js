@@ -3317,7 +3317,8 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     revokedAt: record.revokedAt || '',
                     revokeReason: record.revokeReason || '',
                     cgpa: (typeof record.cgpa === 'number' ? record.cgpa : undefined),
-                    classification: record.classification || ''
+                    classification: record.classification || '',
+                    courseHash: record.courseHash || ''
                 });
             } catch { return json(res, 400, { ok: false, error: 'Invalid request' }); }
         });
