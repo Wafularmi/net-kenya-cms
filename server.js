@@ -958,6 +958,18 @@ function buildCountryIndex() {
         if (s.admissionNumber) byStudentId.set(String(s.admissionNumber), c);
         if (s.email) byPhone.set(String(s.email), c);
     });
+    // Alumni too: a certificate issued before graduation references a student who
+    // has since left db.students, and without this it resolves to no country and
+    // is hidden from every coordinator (and appears "not found" in-app).
+    (db.alumni || []).forEach(s => {
+        if (!s || !s.id) return;
+        if (byStudentId.has(String(s.id))) return;
+        const c = s.country || ((s.studyCenterId && centerCountry[s.studyCenterId]) || '');
+        byStudentId.set(String(s.id), c);
+        if (s.phone) byPhone.set(String(s.phone), c);
+        if (s.admissionNumber) byStudentId.set(String(s.admissionNumber), c);
+        if (s.email) byPhone.set(String(s.email), c);
+    });
     _countryIndexCache = { regionCountry, centerCountry, byStudentId, byPhone };
     return _countryIndexCache;
 }
@@ -2758,79 +2770,99 @@ function handleAPI(req, res) {
         return json(res, 200, { stores: stats, totalRecords: total, fileSize: size, backupCount, hasBackup });
     }
 
-// GET /api/certificate/:id/pdf — serve certificate as PDF
+// Document delivery for issued certificates.
+//   GET /api/certificate/:id/pdf[?v=CODE] -> the real PDF bytes
+//   GET /api/certificate/:id[?v=CODE]     -> a small student download page
+// `:id` accepts either the record id (CERT-...) or the printed Document ID
+// (DIP-/CMP-/TRX-...). Generated diploma/completion PDFs are externalised to
+// disk at boot, so `content` is usually empty — the stored PDF is served
+// directly and Puppeteer is only used for HTML-bodied letters.
+// Access: a public request must present the document's verification code (?v=),
+// which is the same secret printed on the document. Staff who can already read
+// the certificates store do not need it. Without either, the page explains how
+// to get the code instead of leaking the document.
     if (parts.length >= 3 && parts[0] === 'api' && parts[1] === 'certificate' && req.method === 'GET') {
-        console.log('CERT ROUTE HIT:', { parts, path });
-        const isPdf = parts.length === 4 && parts[3] === 'pdf';
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         const certId = decodeURIComponent(parts[2]);
-        const cert = db.certificates?.find(c => c.id === certId);
+        const wantPdf = parts.length >= 4 && parts[3] === 'pdf';
+        const cert = (db.certificates || []).find(c => c && (String(c.id) === certId || String(c.docId || '') === certId));
         if (!cert) return json(res, 404, { error: 'Certificate not found' });
+        const code = String(urlObj.searchParams.get('v') || urlObj.searchParams.get('code') || '').trim();
+        const hasCode = !!cert.vCode && code && String(cert.vCode).toUpperCase() === code.toUpperCase();
+        const authUser = getRequestUser(req);
+        const isStaff = !!authUser && canAccessStore(authUser, 'certificates', 'GET');
+        const branding = (db.settings || []).find(s => s.key === 'branding');
+        const schoolName = (branding && branding.schoolName) || 'Net Foundation';
+        const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const titleOf = (c) => ({ diploma: 'Diploma Certificate', completion: 'Completion Certificate', transcript: 'Official Transcript', 'final-transcript': 'Final Academic Transcript', admission: 'Admission Letter', enrollment: 'Enrollment Letter', recommendation: 'Recommendation Letter', 'fee-statement': 'Fee Statement' }[c.type] || c.docTitle || 'Document');
+        const pdfFile = docPathByKey(cert.id);
+        const hasPdf = !!(pdfFile && fs.existsSync(pdfFile));
 
-        // Serve PDF via Puppeteer (async IIFE)
-        (async () => {
-            try {
-                const puppeteer = require('puppeteer-core');
-                const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
-
-                const browser = await puppeteer.launch({
-                    headless: 'new',
-                    executablePath,
-                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-                });
-                const page = await browser.newPage();
-
-                // Build full HTML with print styles
-                const html = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <title>${cert.docTitle || 'Certificate'}</title>
-                        <style>
-                            @page { size: A4; margin: 20mm; }
-                            body { font-family: 'DejaVu Serif', Georgia, serif; margin: 0; padding: 0; background: #fff; color: #1a1a2e; }
-                            .certificate { width: 100%; height: 100vh; display: flex; flex-direction: column; }
-                            img { max-width: 100%; height: auto; }
-                        </style>
-                    </head>
-                    <body>${cert.content}</body>
-                    </html>
-                `;
-
-                await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 90000 });
-                await page.evaluate(() => {
-                    const imgs = Array.from(document.images);
-                    return Promise.all(imgs.map(img => {
-                        if (img.complete) return Promise.resolve();
-                        return new Promise(resolve => { img.onload = img.onerror = resolve; });
-                    }));
-                });
-                const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' } });
-                await browser.close();
-
-                res.setHeader('Content-Type', 'application/pdf');
-                res.setHeader('Content-Disposition', `attachment; filename="${cert.docTitle || 'certificate'}-${certId}.pdf"`);
-                return res.end(pdfBuffer);
-            } catch (e) {
-                console.error('PDF generation failed:', e);
-                // Fallback: serve HTML with print CSS
-                res.setHeader('Content-Type', 'text/html');
-                return res.end(`
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <title>${cert.docTitle || 'Certificate'}</title>
-                        <style>
-                            @media print { @page { size: A4; margin: 20mm; } body { margin: 0; background: #fff; } .no-print { display: none !important; } }
-                            body { font-family: Georgia, serif; margin: 0; padding: 40px; background: #fff; color: #1a1a2e; line-height: 1.5; }
-                        </style>
-                    </head>
-                    <body>${cert.content}</body>
-                    </html>
-                `);
+        // ---- raw PDF
+        if (wantPdf) {
+            if (!hasCode && !isStaff) return json(res, 403, { error: 'This document link is missing its verification code.' });
+            if (hasPdf) {
+                try {
+                    const buf = fs.readFileSync(pdfFile);
+                    res.writeHead(200, {
+                        'Content-Type': 'application/pdf',
+                        'Content-Length': buf.length,
+                        'Content-Disposition': 'inline; filename="' + docSafeKey(cert.docId || cert.id) + '.pdf"',
+                        'X-Content-Type-Options': 'nosniff',
+                        'Cache-Control': 'private, no-store'
+                    });
+                    res.end(buf);
+                } catch (e) { json(res, 500, { error: 'Could not read the stored document' }); }
+                return true;
             }
-        })();
+            // HTML-bodied letter: render it (or serve the HTML when Puppeteer is unavailable).
+            const html = (maybeReinjectArchived(cert).content) || '';
+            if (!html) return json(res, 404, { error: 'No document content stored for this record' });
+            (async () => {
+                try {
+                    const puppeteer = require('puppeteer-core');
+                    const browser = await puppeteer.launch({ headless: 'new', executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium', args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
+                    const page = await browser.newPage();
+                    await page.setContent(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page{size:A4;margin:12mm}body{font-family:Georgia,serif;margin:0;background:#fff;color:#111}</style></head><body>${html}</body></html>`, { waitUntil: 'networkidle0', timeout: 60000 });
+                    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
+                    await browser.close();
+                    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': pdfBuffer.length, 'Content-Disposition': 'inline; filename="' + docSafeKey(cert.docId || cert.id) + '.pdf"' });
+                    res.end(pdfBuffer);
+                } catch (e) {
+                    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                    res.end(html);
+                }
+            })();
+            return true;
+        }
+
+        // ---- landing page
+        const stu = (db.students || []).find(s => s && String(s.id) === String(cert.studentId));
+        const alumni = !stu ? (db.alumni || []).find(a => a && String(a.id) === String(cert.studentId)) : null;
+        const person = stu || alumni;
+        const verified = hasCode || isStaff;
+        const page = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(titleOf(cert))} — ${escHtml(schoolName)}</title>
+<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:#fff;color:#0f172a;border-radius:16px;padding:28px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+h1{font-size:20px;margin:0 0 4px}.sub{color:#64748b;font-size:13px;margin-bottom:18px}
+.ok{background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;border-radius:10px;padding:10px 14px;font-weight:700;font-size:14px;margin-bottom:18px}
+.warn{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px 14px;font-weight:600;font-size:14px;margin-bottom:18px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:14px;margin:0 0 22px}dt{color:#64748b}dd{margin:0;font-weight:600;word-break:break-word}
+.btn{display:block;text-align:center;background:#1e3c72;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:700;font-size:15px}
+.btn.sec{background:#0f766e;margin-top:10px}.muted{color:#64748b;font-size:12px;margin-top:16px;text-align:center}</style></head><body><div class="card">
+<h1>${escHtml(titleOf(cert))}</h1><div class="sub">${escHtml(schoolName)}</div>
+${verified ? '<div class="ok">✓ This document is authentic</div>' : '<div class="warn">This link is missing its verification code — ask the office for the full link from your message.</div>'}
+<dl><dt>Student</dt><dd>${escHtml((cert.studentName || (person && (person.name || person.fullName))) || '—')}</dd>
+<dt>Admission No.</dt><dd>${escHtml((cert.admission || (person && (person.admissionNumber || person.admissionNo))) || '—')}</dd>
+<dt>Document ID</dt><dd>${escHtml(cert.docId || '—')}</dd>
+<dt>Issued</dt><dd>${escHtml(cert.generatedAt ? new Date(cert.generatedAt).toDateString() : '—')}</dd></dl>
+${verified && hasPdf ? `<a class="btn" href="/api/certificate/${encodeURIComponent(cert.id)}/pdf${hasCode ? '?v=' + encodeURIComponent(cert.vCode) : ''}" download>⬇ Download PDF</a>` : ''}
+${verified ? `<a class="btn sec" href="/#verify">✓ Verify this document</a>` : ''}
+<div class="muted">Keep this link private — it opens this specific document.</div>
+</div></body></html>`;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        res.end(page);
+        return true;
     }
 
     // GET /api/backups â€” list available timestamped backups (admin only)
@@ -4673,6 +4705,17 @@ const server = http.createServer((req, res) => {
 if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
         res.writeHead(403);
         return res.end('Forbidden');
+    }
+
+    // The externalised document store (issued certificate PDFs, blank
+    // diploma/completion templates) lives INSIDE the web root, so without this
+    // guard every issued document and the blank templates are world-readable
+    // and the ids are guessable from their timestamp. Documents are served only
+    // through the authenticated /api/doc-content route or the code-gated
+    // /api/certificate/:id route.
+    if (url === '/docs' || url.indexOf('/docs/') === 0) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end('404 Not Found');
     }
 
     // Integrity watchdog: refuse to serve files that were modified while the

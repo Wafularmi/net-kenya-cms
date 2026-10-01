@@ -11182,9 +11182,13 @@ async function generateCompletionPdf() {
         const blob = new Blob([outBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
-        showModal('Completion Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadCompletionPdfBlob('${url}','${displayName}')">Download</button>`);
-        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'completion', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
-        await dbPut('certificates', cert);
+        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, studentName: displayName, admission: student.admissionNumber || '', program: student.program || '', type: 'completion', docTitle: 'Completion Certificate', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
+        // Store BEFORE showing the preview: if the write is refused (e.g. the
+        // per-country doc-gen gate) staff must never end up holding a PDF whose
+        // Doc ID / verify code were never saved — it could not be verified.
+        try { await dbPut('certificates', cert); }
+        catch (e) { console.error('Completion save failed:', e); return showToast('Could not save the certificate, so it was not issued. Please try again.', { type: 'danger' }); }
+        showModal('Completion Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadCompletionPdfBlob('${url}','${displayName}')">Download</button> <button class="btn btn-success" onclick="sendDocWhatsApp('${cert.id}')">📲 Send on WhatsApp</button>`);
         logAudit('generated', 'completion', { studentId, docId });
         showToast('Completion certificate generated! ' + displayName + ' removed from dropdown.');
     } catch (err) {
@@ -11594,9 +11598,13 @@ async function generateDiplomaPdf() {
         const blob = new Blob([outBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const modalContent = `<div style="text-align:center;"><iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--border);"></iframe></div>`;
-        showModal('Diploma Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${displayName}')">Download</button>`);
-        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'diploma', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
-        await dbPut('certificates', cert);
+        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, studentName: displayName, admission: student.admissionNumber || '', program: student.program || '', type: 'diploma', docTitle: 'Diploma Certificate', content: pdfB64, docId, vCode, generatedAt: new Date().toISOString() };
+        // Store BEFORE showing the preview: if the write is refused (e.g. the
+        // per-country doc-gen gate) staff must never end up holding a PDF whose
+        // Doc ID / verify code were never saved — it could not be verified.
+        try { await dbPut('certificates', cert); }
+        catch (e) { console.error('Diploma save failed:', e); return showToast('Could not save the certificate, so it was not issued. Please try again.', { type: 'danger' }); }
+        showModal('Diploma Certificate — ' + displayName, modalContent, `<button class="btn btn-primary" onclick="window.open('${url}','_blank')">Open PDF</button> <button class="btn btn-outline" onclick="downloadDiplomaPdfBlob('${url}','${displayName}')">Download</button> <button class="btn btn-success" onclick="sendDocWhatsApp('${cert.id}')">📲 Send on WhatsApp</button>`);
         logAudit('generated', 'diploma', { studentId, docId });
         showToast('Diploma generated! ' + displayName + ' removed from dropdown.');
     } catch (err) {
@@ -12603,24 +12611,36 @@ async function printCertificate(certId) {
 async function sendDocWhatsApp(certId) {
     const cert = await dbGet('certificates', certId);
     if (!cert) return showToast('Document not found!');
-    const student = await dbGet('students', cert.studentId);
-    if (!student || !student.phone) return showToast('Student has no phone number!');
-    const typeLabels = { 'admission': 'Admission Letter', 'completion': 'Completion Certificate', 'enrollment': 'Enrollment Letter', 'recommendation': 'Recommendation Letter', 'fee-statement': 'Fee Statement', 'transcript': 'Official Transcript', 'final-transcript': 'Final Academic Transcript' };
-    const docType = typeLabels[cert.type] || cert.type;
+    // The student may have graduated/moved to alumni, so fall back before giving up.
+    let person = await dbGet('students', cert.studentId).catch(() => null);
+    if (!person) person = (await dbGetAll('alumni').catch(() => [])).find(a => a && String(a.id) === String(cert.studentId)) || null;
+    if (!person || !person.phone) return showToast('No phone number on file for this student — add one, then send again.');
+    const typeLabels = { 'diploma': 'Diploma Certificate', 'admission': 'Admission Letter', 'completion': 'Completion Certificate', 'enrollment': 'Enrollment Letter', 'recommendation': 'Recommendation Letter', 'fee-statement': 'Fee Statement', 'transcript': 'Official Transcript', 'final-transcript': 'Final Academic Transcript' };
+    const docType = cert.docTitle || typeLabels[cert.type] || 'Document';
     const branding = await dbGet('settings', 'branding');
-    const schoolName = branding ? branding.schoolName : 'College Management System';
-    const pdfUrl = window.location.origin + '/api/certificate/' + encodeURIComponent(certId) + '/pdf';
+    const schoolName = (branding && branding.schoolName) || 'Net Foundation';
+    const name = cert.studentName || person.name || person.fullName || '';
+    const admission = cert.admission || person.admissionNumber || '';
+    const program = cert.program || person.program || '';
+    // The verification code travels with the link: it is the same secret printed
+    // on the document, it makes the link un-guessable, and it lets the student
+    // self-verify from the login screen.
+    const vCode = cert.vCode || '';
+    const link = window.location.origin + '/api/certificate/' + encodeURIComponent(cert.docId || cert.id) + (vCode ? '?v=' + encodeURIComponent(vCode) : '');
     let msg = `${docType}\n${schoolName}\n\n`;
-    msg += `Student: ${student.name}\n`;
-    if (student.admissionNumber) msg += `Admission: ${student.admissionNumber}\n`;
-    if (student.program) msg += `Program: ${student.program}\n`;
-    msg += `\nThis document was generated on ${new Date(cert.generatedAt).toLocaleDateString('en-GB')}.\n\n`;
-    msg += `Download PDF: ${pdfUrl}\n\n`;
-    msg += `Please contact the administration office for any inquiries.\n\n${schoolName}`;
+    msg += `Student: ${name}\n`;
+    if (admission) msg += `Admission: ${admission}\n`;
+    if (program) msg += `Program: ${program}\n`;
+    msg += `\nThis document was issued on ${new Date(cert.generatedAt || Date.now()).toLocaleDateString('en-GB')}.\n\n`;
+    msg += `Download your document: ${link}\n`;
+    if (cert.docId) msg += `Document ID: ${cert.docId}\n`;
+    if (vCode) msg += `Verification code: ${vCode}\n`;
+    msg += `\nPlease keep this link private. Contact the administration office for any inquiries.\n\n${schoolName}`;
     // Strip markdown and non-ASCII symbols for clean WhatsApp
     msg = msg.replace(/\*+/g, '').replace(/_+/g, '').replace(/`+/g, '').replace(/[^\x00-\x7F]/g, '');
-    sendWhatsApp(student.phone, msg);
-    showToast('Document with PDF link sent to ' + student.name);
+    sendWhatsApp(person.phone, msg);
+    logAudit('sent', 'document-whatsapp', { id: cert.id, docId: cert.docId });
+    showToast('Document link sent to ' + (name || 'student'));
 }
 async function deleteCertificate(certId) {
     if (!await showConfirm('Confirm', 'Delete this document?')) return;
@@ -13713,8 +13733,8 @@ async function verifyDocument() {
         let record = await dbGet('transcriptVerifications', docId);
         let isTranscript = true;
         if (!record) {
-            const allCerts = await dbGetAll('certificates');
-            record = allCerts.find(c => c.id === docId || c.docId === docId);
+            const allCerts = await dbGetAll('certificates').catch(() => []);
+            record = (allCerts || []).find(c => c.id === docId || c.docId === docId);
             isTranscript = false;
         }
         if (!record) {
@@ -13765,10 +13785,24 @@ async function verifyDocument() {
         const isRevoked = (record.docStatus === 'revoked');
         let verifyCountry = '';
         let verifyCenterName = '';
+        // Identity shown on a freshly generated PDF record: PDF generators store
+        // only id/studentId/type, so name + admission + program are resolved here
+        // (and from alumni, for students who have since graduated out of
+        // db.students). Without this a valid certificate displayed "—".
+        let verifyStudentName = record.studentName || record.name || '';
+        let verifyAdmission = record.admission || record.admissionNumber || '';
+        let verifyProgram = record.program || '';
         try {
             if (record.studentId) {
-                const vpStudent = await dbGet('students', record.studentId);
+                let vpStudent = await dbGet('students', record.studentId).catch(() => null);
+                if (!vpStudent) {
+                    const vpAlumni = await dbGetAll('alumni').catch(() => []);
+                    vpStudent = (vpAlumni || []).find(a => a && String(a.id) === String(record.studentId)) || null;
+                }
                 if (vpStudent) {
+                    if (!verifyStudentName) verifyStudentName = vpStudent.name || vpStudent.fullName || '';
+                    if (!verifyAdmission) verifyAdmission = vpStudent.admissionNumber || vpStudent.admissionNo || vpStudent.id || '';
+                    if (!verifyProgram) verifyProgram = vpStudent.program || '';
                     verifyCountry = vpStudent.country || '';
                     if (vpStudent.studyCenterId) {
                         const vpCenter = await dbGet('studyCenters', vpStudent.studyCenterId);
@@ -13786,11 +13820,11 @@ async function verifyDocument() {
                     : `<div style="font-size:48px;margin-bottom:8px;">✅</div><h3 style="color:var(--success);margin:0 0 12px;">Document Authenticated</h3>`}
                 <div style="text-align:left;max-width:500px;margin:0 auto;font-size:13px;line-height:1.8;">
                     <p><strong>Document:</strong> ${escapeHtml(certificateTypeLabel(record, isTranscript))}</p>
-                    <p><strong>Student Name:</strong> ${escapeHtml(record.studentName || record.name || '—')}</p>
-                    <p><strong>Admission No:</strong> ${escapeHtml(record.admission || record.admissionNumber || '—')}</p>
+                    <p><strong>Student Name:</strong> ${escapeHtml(verifyStudentName || '—')}</p>
+                    <p><strong>Admission No:</strong> ${escapeHtml(verifyAdmission || '—')}</p>
                     ${verifyCenterName ? `<p><strong>Studied at:</strong> ${escapeHtml(verifyCenterName)}</p>` : ''}
                     ${verifyCountry ? `<p><strong>Country studied in:</strong> ${escapeHtml(verifyCountry)}</p>` : ''}
-                    ${record.program ? `<p><strong>Program:</strong> ${escapeHtml(record.program)}</p>` : ''}
+                    ${verifyProgram ? `<p><strong>Program:</strong> ${escapeHtml(verifyProgram)}</p>` : ''}
                     <p><strong>Document ID:</strong> ${escapeHtml(record.docId || docId)}</p>
                     <p><strong>Verification Code:</strong> <span style="font-family:'Courier New',monospace;color:#b8860b;font-weight:700;">${escapeHtml(record.vCode)}</span></p>
                     ${typeof record.cgpa === 'number' ? `<p><strong>CGPA:</strong> ${record.cgpa.toFixed(2)}</p>` : ''}
