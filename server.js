@@ -1065,6 +1065,9 @@ function canAccessStore(user, store, method) {
     // Allow unauthenticated reads for login screen / registration
     if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
+    // The overall admin is never limited — full view and full write on every
+    // store, checked before any role/country/assistant rule below can apply.
+    if (user.role === 'admin') return true;
     // Students store: only admin and assistant (if enabled) may create/update/delete
     if (store === 'students' && method !== 'GET') {
         if (user.role === 'admin' || countryScopeOf(user)) return true;

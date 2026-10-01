@@ -484,7 +484,7 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
@@ -1048,10 +1048,14 @@ async function initAuth() {
             const user = JSON.parse(session);
             let dbUser = null;
             try { dbUser = await dbGet('users', user.username); } catch {}
-            if (dbUser && dbUser.status !== 'locked') {
-                sessionStorage.setItem('currentUser', JSON.stringify(dbUser));
-            }
             const effUser = (dbUser && dbUser.status !== 'locked') ? dbUser : user;
+            if (dbUser && effUser.status !== 'locked') {
+                // The users-store record has no session token (and carries the
+                // password hash). Merging keeps the live session alive — without
+                // this every later API call went out unauthenticated and the whole
+                // admin UI came back empty.
+                sessionStorage.setItem('currentUser', JSON.stringify({ ...dbUser, session_token: user.session_token || dbUser.session_token || '', password: undefined }));
+            }
             if (effUser) {
                 // Terms & Conditions check — version-aware
                 const key = 'terms_accepted_' + (effUser.username || effUser.id);
@@ -1979,7 +1983,10 @@ const session = sessionStorage.getItem('currentUser');
             try { dbUser = await dbGet('users', user.username); } catch {}
             const effUser = (dbUser && dbUser.status !== 'locked') ? dbUser : user;
             if (effUser) {
-                if (dbUser && effUser.status !== 'locked') sessionStorage.setItem('currentUser', JSON.stringify(effUser));
+                if (dbUser && effUser.status !== 'locked') {
+                    // Keep the session token alive across this refresh (see initAuth).
+                    sessionStorage.setItem('currentUser', JSON.stringify({ ...effUser, session_token: user.session_token || effUser.session_token || '', password: undefined }));
+                }
                 const key = 'terms_accepted_' + (effUser.username || effUser.id);
                 if (localStorage.getItem(key) !== 'true') {
                     const brandingCheck = await dbGet('settings', 'branding');
@@ -2015,6 +2022,9 @@ function startAutoRefresh() {
     if (!document.getElementById('screen-dashboard')) return;
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (user.username) heartbeat(user);
+    // No signed-in session (login screen) → no live stream; opening it with an
+    // empty token just produced a 401/reconnect loop.
+    if (!user.session_token) return;
     const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); }, ms);
     _refreshTimers.push(pollIfNoSSE(pollTickets, 30000));
     _refreshTimers.push(pollIfNoSSE(pollAlerts, 30000));
@@ -21496,7 +21506,7 @@ function downloadStatementPDF() {
     printStatement();
 }
 async function loadPayrollStaffSelect() {
-    const staff = await dbGetAll('staff');
+    const staff = await dbGetAll('staff').catch(() => []);
     const sel = document.getElementById('payroll-staff');
     if (sel) {
         sel.innerHTML = '<option value="">All Staff</option>' + staff.map(s => `<option value="${s.id}">${escapeHtml(s.name)}${s.status && s.status !== 'active' ? ' — ' + escapeHtml(s.status) : ''}</option>`).join('');
