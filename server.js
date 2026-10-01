@@ -3760,11 +3760,12 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
     }
 
     // Lesson drip engine â€” POST /api/drip/sync
-    // action state | read | evaluate | manual. Server-authoritative: recomputes
-    // completions (read seconds + linked-quiz best >= 50), enforces the drip chain
-    // with per-course pacing (course.dripDaysBetween; 0 = instant; default 3.5d)
-    // and the weekly fee gate, then persists the authoritive unlock/completion
-    // records. Students act on their own record only; staff may name any learner.
+    // action state | read | video | evaluate | manual. Server-authoritative: recomputes
+    // completions (read seconds + lesson video watched >= 90% of its duration + linked-
+    // quiz best >= 50), enforces the drip chain with per-course pacing
+    // (course.dripDaysBetween; 0 = instant; default 3.5d) and the weekly fee gate,
+    // then persists the authoritive unlock/completion records. Students act on their
+    // own record only; staff may name any learner.
     if (parts.length === 3 && parts[1] === 'drip' && parts[2] === 'sync' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         const user = getRequestUser(req);
@@ -3819,8 +3820,58 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                         comp.readSecs = Math.min((comp.readSecs || 0) + add, 86400);
                     }
                     comp.requiredSecs = reqSecs;
-                    persist('lessonCompletions');
-                    result.completion = comp;
+                    // Re-evaluate authoritatively so read time alone can complete a
+                    // lesson (reading is tracked for EVERY lesson now, not just
+                    // sequenced ones) and the chain can advance without waiting for
+                    // a separate client 'evaluate' round trip.
+                    const evaled = E.dripEvalCompletion(db, sid, lesson);
+                    const sweepR = E.dripSweep(db, sid, String(lesson.courseId || ''));
+                    if (sweepR.changed) persist(['lessonCompletions', 'lessonUnlocks']); else persist('lessonCompletions');
+                    result.completion = evaled;
+                    result.justCompleted = !!evaled.justCompleted;
+                    result.videoRequired = !!evaled.videoRequired;
+                    if (sweepR.changed) {
+                        const maps = E.dripMapsFor(db, sid);
+                        result.unlocks = maps.unlocks;
+                        result.completions = maps.completions;
+                    }
+                } else if (action === 'video') {
+                    // Watched-video seconds for one lesson. The client only credits
+                    // FORWARD playback, and the server re-checks the duration ratio,
+                    // so dragging the scrubber to the end does not complete a lesson.
+                    if (!parsed.lessonId) return json(res, 400, { error: 'lessonId required' });
+                    const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
+                    if (!lesson) return json(res, 404, { error: 'Lesson not found' });
+                    const vurl = E.dripLessonVideo(lesson);
+                    if (!E.dripVideoTrackable(vurl)) return json(res, 400, { error: 'This lesson has no trackable video' });
+                    const add = Math.max(0, Math.min(86400, Math.round(Number(parsed.addSecs) || 0)));
+                    const dur = Math.max(0, Math.min(60 * 60 * 12, Math.round(Number(parsed.durationSecs) || 0)));
+                    let comp = db.lessonCompletions.find(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id));
+                    if (!comp) {
+                        comp = { id: E.dripRecId('LC', sid, lesson.id), studentId: String(sid), lessonId: String(lesson.id), courseId: String(lesson.courseId || ''), readSecs: 0 };
+                        db.lessonCompletions.push(comp);
+                    }
+                    if (parsed.reset === true) {
+                        comp.videoSecs = 0; comp.videoDoneAt = null;
+                    } else {
+                        // Cap credited seconds at the real duration (plus a small
+                        // tolerance for player rounding) so a looping embed cannot
+                        // bank unlimited credit.
+                        const ceiling = dur > 0 ? dur * 1.25 : 86400;
+                        comp.videoSecs = Math.min((comp.videoSecs || 0) + add, ceiling);
+                    }
+                    if (dur > 0) comp.videoDurationSecs = dur;
+                    const evaled = E.dripEvalCompletion(db, sid, lesson);
+                    const sweepV = E.dripSweep(db, sid, String(lesson.courseId || ''));
+                    if (sweepV.changed) persist(['lessonCompletions', 'lessonUnlocks']); else persist('lessonCompletions');
+                    result.completion = evaled;
+                    result.videoDone = !!evaled.videoDoneAt;
+                    result.justCompleted = !!evaled.justCompleted;
+                    result.requiredRatio = E.DRIP_VIDEO_RATIO;
+                    if (dur > 0) result.videoPct = Math.min(100, Math.round(((evaled.videoSecs || 0) / dur) * 100));
+                    const maps = E.dripMapsFor(db, sid);
+                    result.unlocks = maps.unlocks;
+                    result.completions = maps.completions;
                 } else if (action === 'evaluate') {
                     if (!parsed.lessonId) return json(res, 400, { error: 'lessonId required' });
                     const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
@@ -3831,6 +3882,8 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     persist('lessonCompletions');
                     result.completion = comp;
                     result.justCompleted = !!comp.justCompleted;
+                    result.videoRequired = !!comp.videoRequired;
+                    result.videoDone = !!comp.videoDoneAt;
                     result.next = E.dripNextInfo(db, sid, String(lesson.courseId || ''), lesson.id);
                     result.fee = sweep.fee;
                     const maps = E.dripMapsFor(db, sid);
@@ -3849,7 +3902,9 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     } else if (parsed.op === 'complete') {
                         const comp = E.dripEvalCompletion(db, sid, lesson);
                         const now = new Date().toISOString();
-                        comp.readDoneAt = comp.readDoneAt || now; comp.quizPassedAt = comp.quizPassedAt || now; comp.completedAt = comp.completedAt || now; comp.manualBy = 'staff';
+                        comp.readDoneAt = comp.readDoneAt || now; comp.quizPassedAt = comp.quizPassedAt || now; comp.completedAt = comp.completedAt || now;
+                        if (E.dripVideoRequired(lesson)) comp.videoDoneAt = comp.videoDoneAt || now;
+                        comp.manualBy = 'staff';
                         const sweep = E.dripSweep(db, sid, String(lesson.courseId || ''));
                         if (sweep.changed) persist(['lessonUnlocks', 'lessonCompletions']); else persist('lessonCompletions');
                         result.completion = comp;

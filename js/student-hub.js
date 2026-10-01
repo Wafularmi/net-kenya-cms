@@ -2116,14 +2116,18 @@ async function viewHubLessonNote(lessonId, courseId) {
         let dripReqSecs = 480, dripStartSecs = 0, dripReadDone = false;
         try { dripReqSecs = (typeof dripRequiredSecs === 'function') ? dripRequiredSecs(lesson, note) : 480; } catch { dripReqSecs = 480; }
         if (me) {
-            if (dripMode && typeof loadDripMaps === 'function') {
-                // Drip: NO instant read — the timer below grants it after the required reading time.
+            // Reading is timed and recorded server-side for EVERY lesson, not only
+            // sequenced ones — this is the signal that feeds course coverage.
+            if (typeof loadDripMaps === 'function') {
                 try { await loadDripMaps(me.id); } catch {}
                 try { const dc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[lessonId] : null; dripStartSecs = (dc && dc.readSecs) || 0; dripReadDone = dripStartSecs >= dripReqSecs; } catch {}
-            } else {
+            }
+            if (!dripReadDone) {
+                // Device-local marker, used only as the pre-existing "read before
+                // video" gate for non-sequenced lessons.
                 const readKey = 'read-lessons-' + me.id;
                 const readLessons = safeGetLocal(readKey, {});
-                readLessons[lessonId] = Date.now();
+                readLessons[lessonId] = readLessons[lessonId] || Date.now();
                 safeSetLocal(readKey, readLessons);
             }
         }
@@ -2131,7 +2135,8 @@ async function viewHubLessonNote(lessonId, courseId) {
         const contentEscaped = esc(content);
         const safeContent = contentEscaped.replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
         const _videoSrcHub = lesson.videoUrl || lesson.video || lesson.videoLink || '';
-        let videoHtml = _videoSrcHub ? `<div style="max-width:720px;margin:0 auto 20px;" id="drip-video-slot">${embedVideo(_videoSrcHub)}</div>` : '';
+        const _isStudentHub = !!(me && (!currentUser || currentUser.role === 'student' || String(currentUser.studentId || '') === String(me.id)));
+        let videoHtml = _videoSrcHub ? `<div style="max-width:720px;margin:0 auto 20px;" id="drip-video-slot">${embedVideo(_videoSrcHub, { track: _isStudentHub })}</div>` : '';
         if (_videoSrcHub && dripMode && !dripReadDone) videoHtml = `<div id="drip-video-slot" style="max-width:720px;margin:0 auto 20px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video — keep these notes open for the required reading time.</div></div>`;
         const html = `
             <div style="max-width:760px;margin:0 auto;">
@@ -2143,9 +2148,9 @@ async function viewHubLessonNote(lessonId, courseId) {
                     <span>⏱ ${readTime} min read</span>
                     ${currentIdx >= 0 ? `<span>📖 Lesson ${currentIdx + 1} of ${courseLessons.length}</span>` : ''}
                     ${note ? '<span style="color:var(--success);">📄 Study notes attached</span>' : ''}
-                    ${dripMode ? `<span id="drip-read-label" style="font-weight:700;color:var(--accent);">${dripReadDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(dripReqSecs / 60) + ' min required'}</span>` : ''}
+                    ${_isStudentHub ? `<span id="drip-read-label" style="font-weight:700;color:var(--accent);">${dripReadDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(dripReqSecs / 60) + ' min required'}</span>` : ''}
                 </div>
-                ${dripMode ? `<div style="margin:0 0 16px;"><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div id="drip-read-bar" style="height:100%;width:${dripReadDone ? 100 : Math.min(100, Math.round(dripStartSecs / Math.max(1, dripReqSecs) * 100))}%;background:linear-gradient(90deg,var(--success),var(--accent));transition:width 0.5s;"></div></div></div>` : ''}
+                ${_isStudentHub ? `<div style="margin:0 0 16px;"><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div id="drip-read-bar" style="height:100%;width:${dripReadDone ? 100 : Math.min(100, Math.round(dripStartSecs / Math.max(1, dripReqSecs) * 100))}%;background:linear-gradient(90deg,var(--success),var(--accent));transition:width 0.5s;"></div></div></div>` : ''}
                 <div style="font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.85;color:var(--text);white-space:pre-line;padding:0 0 24px 0;border-bottom:1px solid var(--border);">${contentEscaped}</div>
                 <div style="display:flex;justify-content:space-between;gap:8px;margin-top:20px;flex-wrap:wrap;">
                     ${prevLesson ? `<button class="btn btn-outline" onclick="closeModal();viewHubLessonNote('${prevLesson.id}','${courseId}')" style="text-align:left;">← <span style="display:block;font-size:11px;opacity:0.7;">Previous</span><span style="font-weight:600;">${esc(prevLesson.title)}</span></button>` : '<div></div>'}
@@ -2155,10 +2160,14 @@ async function viewHubLessonNote(lessonId, courseId) {
         `;
 
         const noteId = note ? note.id : null;
-        showModal('📖 ' + lesson.title, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> ${noteId ? `<button class="btn btn-outline" onclick="downloadNote('${noteId}','pdf')">⬇ PDF</button>` : `<button class="btn btn-outline" onclick="hubDownloadText(\`${safeContent}\`,'${esc(lesson.title)}')">⬇ PDF</button>`} ${dripMode && !dripReadDone ? '<button class="btn btn-outline" onclick="closeModal();">Close (reading timer pauses)</button>' : '<button class="btn btn-success" onclick="closeModal();renderStudentHub();">✓ Marked as Read</button>'}`);
+        showModal('📖 ' + lesson.title, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> ${noteId ? `<button class="btn btn-outline" onclick="downloadNote('${noteId}','pdf')">⬇ PDF</button>` : `<button class="btn btn-outline" onclick="hubDownloadText(\`${safeContent}\`,'${esc(lesson.title)}')">⬇ PDF</button>`} ${(me && !dripReadDone) ? '<button class="btn btn-outline" onclick="closeModal();">Close (reading timer pauses)</button>' : '<button class="btn btn-success" onclick="closeModal();renderStudentHub();">✓ Marked as Read</button>'}`);
+        // Video already visible (not gated behind reading) -> start watch tracking.
+        if (_isStudentHub && _videoSrcHub && !(dripMode && !dripReadDone) && typeof bindLessonVideoTracking === 'function') {
+            try { await bindLessonVideoTracking(lessonId, courseId); } catch (e) {}
+        }
         // Drip timed-reading: 5s ticks while this note stays open & visible. Pauses in background.
         try { if (window._dripReadTimer) { clearInterval(window._dripReadTimer); window._dripReadTimer = null; } } catch {}
-        if (dripMode && me && !dripReadDone && typeof dripRecordRead === 'function') {
+        if (me && !dripReadDone && typeof dripRecordRead === 'function') {
             let pending = 0, ticks = 0, finished = false;
             const reqS = dripReqSecs, sidH = me.id, lidH = lessonId, startS = dripStartSecs, vSrc = _videoSrcHub;
             window._dripReadTimer = setInterval(async () => {
@@ -2182,7 +2191,7 @@ async function viewHubLessonNote(lessonId, courseId) {
                         if (pending > 0) { const p = pending; pending = 0; try { await dripRecordRead(sidH, { id: lidH, courseId }, p); } catch {} }
                         try { const rk = 'read-lessons-' + sidH; const o = safeGetLocal(rk, {}); o[lidH] = Date.now(); safeSetLocal(rk, o); } catch {}
                         const slot = document.querySelector('#drip-video-slot');
-                        if (slot && vSrc && typeof embedVideo === 'function') slot.innerHTML = embedVideo(vSrc);
+                        if (slot && vSrc && typeof embedVideo === 'function') { slot.innerHTML = embedVideo(vSrc, { track: true }); try { if (typeof bindLessonVideoTracking === 'function') await bindLessonVideoTracking(lidH, courseId, slot); } catch (e) {} }
                         if (bar) bar.style.width = '100%';
                         const lbl2 = document.querySelector('#drip-read-label');
                         if (lbl2) lbl2.textContent = '✓ Reading complete';

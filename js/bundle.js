@@ -779,11 +779,57 @@ function sortCoursesBySequence(courses) {
 function coursePassMark(course) {
     return (course && Number(course.passMark) > 0) ? Number(course.passMark) : 50;
 }
-// Covered = (a) auto: passing grade or passed submission in the course, or (b) manual override tick.
+// Course lesson-coverage rollup, computed from the lesson stores when available.
+// Returns { hasLessons, total, done, complete } or null when lesson data was not
+// loaded (e.g. graduation screens) so callers keep their existing behaviour.
+function courseLessonRollup(data, studentId, courseId) {
+    if (!data || !Array.isArray(data.lessons)) return null;
+    const idx = data._lessonCoverIdx;
+    if (idx) {
+        const e = idx[String(studentId) + '|' + String(courseId)];
+        if (!e || !e.total) return { hasLessons: false, total: 0, done: 0, complete: false };
+        return { hasLessons: true, total: e.total, done: e.done, complete: !!e.complete };
+    }
+    const comps = Array.isArray(data.lessonCompletions) ? data.lessonCompletions : [];
+    const lessons = data.lessons.filter(l => l && l.published !== false && String(l.courseId) === String(courseId));
+    if (!lessons.length) return { hasLessons: false, total: 0, done: 0, complete: false };
+    const doneIds = new Set(comps.filter(r => String(r.studentId) === String(studentId) && r && r.completedAt).map(r => String(r.lessonId)));
+    let done = 0;
+    lessons.forEach(l => { if (doneIds.has(String(l.id))) done++; });
+    return { hasLessons: true, total: lessons.length, done, complete: done === lessons.length };
+}
+// Build the { 'studentId|courseId' -> {total,done,complete} } index in one pass.
+function buildLessonCoverIndex(lessons, lessonCompletions) {
+    const byCourse = {};
+    (lessons || []).forEach(l => {
+        if (!l || l.published === false || l.courseId == null) return;
+        const c = String(l.courseId);
+        if (!byCourse[c]) byCourse[c] = new Set();
+        byCourse[c].add(String(l.id));
+    });
+    const idx = {};
+    (lessonCompletions || []).forEach(r => {
+        if (!r || !r.completedAt || r.courseId == null) return;
+        const ids = byCourse[String(r.courseId)];
+        if (!ids || !ids.has(String(r.lessonId))) return;
+        const key = String(r.studentId) + '|' + String(r.courseId);
+        if (!idx[key]) idx[key] = { total: ids.size, done: 0, _seen: new Set() };
+        if (idx[key]._seen.has(String(r.lessonId))) return;
+        idx[key]._seen.add(String(r.lessonId));
+        idx[key].done++;
+    });
+    Object.keys(idx).forEach(k => { const e = idx[k]; e.complete = e.total > 0 && e.done >= e.total; delete e._seen; });
+    return idx;
+}
+// Covered = (a) auto: EVERY lesson of the course completed (read + video watched),
+// or passing grade / passed submission, or (b) manual override tick. Courses with
+// no lessons, or screens that did not load lesson data, behave exactly as before.
 function isCourseCovered(studentId, courseId, data) {
     if (!studentId || !courseId || !data) return false;
     const manual = (data.courseCompletions || []).some(c => String(c.studentId) === String(studentId) && String(c.courseId) === String(courseId) && c.covered !== false);
     if (manual) return true;
+    const roll = courseLessonRollup(data, studentId, courseId);
+    if (roll && roll.hasLessons && roll.complete) return true;
     const course = (data.courses || []).find(c => String(c.id) === String(courseId));
     const pm = coursePassMark(course);
     const passedGrade = (data.grades || []).some(g => String(g.studentId) === String(studentId) && String(g.courseId) === String(courseId) && Number(g.score) >= pm);
@@ -2127,6 +2173,10 @@ const _refreshMap = {
     salaryDeductions: () => { if (isScreenActive('finance')) renderDeductionsSummary(); },
     mpesaTransactions: () => { if (isScreenActive('finance')) renderMpesaTransactions(); },
     messages: (r) => { handleNewMessage(r); refreshMessagesBadge(); if (isScreenActive('messages')) renderMessages(); },
+    // Lesson progress changes course coverage — drop the cache so the next
+    // render reflects it (and re-render if Coverage is on screen).
+    lessonCompletions: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); if (isScreenActive('graduation') && typeof populateGraduationFilters === 'function') populateGraduationFilters(); },
+    lessonUnlocks: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); },
 };
 function onDBChange(store, record) {
     const fn = _refreshMap[store];
@@ -3796,10 +3846,11 @@ async function viewStudentLesson(lessonId) {
     }
     const _videoSrc = lesson.videoUrl || lesson.video || lesson.videoLink || '';
     const _viewerB = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const _dripVB = !!(_videoSrc && _viewerB.role === 'student' && lessonMode(lesson) === 'drip');
-    if (_videoSrc && _viewerB.role === 'student' && !_dripVB) {
-        const studentId = _viewerB.studentId || _viewerB.username;
-        const readKey = 'read-lessons-' + studentId;
+    const _isStudent = _viewerB.role === 'student';
+    const _studentId = _viewerB.studentId || _viewerB.username;
+    const _dripVB = !!(_videoSrc && _isStudent && lessonMode(lesson) === 'drip');
+    if (_videoSrc && _isStudent && !_dripVB) {
+        const readKey = 'read-lessons-' + _studentId;
         const readLessons = JSON.parse(localStorage.getItem(readKey) || '{}');
         if (!readLessons[lessonId]) {
             return showToast('📖 Please read the lesson notes first before watching the video.', { type: 'warning', duration: 4000 });
@@ -3811,13 +3862,19 @@ async function viewStudentLesson(lessonId) {
     const lessonNotes = notes.filter(n => n.lessonId === lessonId);
     const lessonFiles = files.filter(f => f.lessonId === lessonId);
     let _dripVDone = false, _dripVReq = 0, _dripVStart = 0, _dripVSid = null;
-    if (_dripVB) {
-        _dripVSid = _viewerB.studentId || _viewerB.username;
+    // Reading is timed and recorded server-side for EVERY lesson (not just
+    // sequenced ones) — this is what feeds course coverage.
+    let _readTrack = false, _readReq = 0, _readStart = 0;
+    if (_isStudent) {
+        _dripVSid = _studentId;
         try { await loadDripMaps(_dripVSid); } catch {}
-        try { _dripVReq = dripRequiredSecs(lesson, lessonNotes[0] || null); } catch { _dripVReq = 480; }
+        try { _readReq = dripRequiredSecs(lesson, lessonNotes[0] || null); } catch { _readReq = 480; }
         const dc0 = (_dripC && _dripC[lessonId]) || null;
-        _dripVStart = (dc0 && dc0.readSecs) || 0;
-        _dripVDone = _dripVStart >= _dripVReq;
+        _readStart = (dc0 && dc0.readSecs) || 0;
+        _dripVStart = _readStart;
+        _dripVReq = _readReq;
+        _dripVDone = _readStart >= _readReq;
+        _readTrack = !_dripVDone && typeof dripRecordRead === 'function';
     }
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦', 'mp4': '🎬', 'mp3': '🎵' };
     let html = `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course ? course.code + ' — ' + course.name : ''}</b></div>`;
@@ -3826,9 +3883,9 @@ async function viewStudentLesson(lessonId) {
     if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
     if (_videoSrc) {
         if (_dripVB && !_dripVDone) html += `<div id="drip-video-slot-b" style="max-width:720px;margin:0 auto 16px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video.</div></div>`;
-        else html += `<div style="max-width:720px;margin:0 auto 16px;" id="drip-video-slot-b">${embedVideo(_videoSrc)}</div>`;
+        else html += `<div style="max-width:720px;margin:0 auto 16px;" id="drip-video-slot-b">${embedVideo(_videoSrc, { track: _isStudent })}</div>`;
     }
-    if (_dripVB) html += `<div style="margin:0 0 12px;"><div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:4px;" id="drip-read-label-b">${_dripVDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(_dripVReq / 60) + ' min required'}</div><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div id="drip-read-bar-b" style="height:100%;width:${_dripVDone ? 100 : Math.min(100, Math.round(_dripVStart / Math.max(1, _dripVReq) * 100))}%;background:linear-gradient(90deg,var(--success),var(--accent));transition:width 0.5s;"></div></div></div>`;
+    if (_isStudent) html += `<div style="margin:0 0 12px;"><div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:4px;" id="drip-read-label-b">${_dripVDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(_readReq / 60) + ' min required'}</div><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div id="drip-read-bar-b" style="height:100%;width:${_dripVDone ? 100 : Math.min(100, Math.round(_readStart / Math.max(1, _readReq) * 100))}%;background:linear-gradient(90deg,var(--success),var(--accent));transition:width 0.5s;"></div></div></div>`;
     if (lesson.virtualEnabled && lesson.virtualRoom) {
         const vcSchedStr = lesson.virtualScheduled ? String(lesson.virtualScheduled) : '';
         const vcDateStr = vcSchedStr ? (vcSchedStr.indexOf(' ') !== -1 ? vcSchedStr.split(' ')[0] : (vcSchedStr.split('T')[0] || '')) : '';
@@ -3866,9 +3923,9 @@ async function viewStudentLesson(lessonId) {
         });
     }
     try { if (window._dripReadTimerB) { clearInterval(window._dripReadTimerB); window._dripReadTimerB = null; } } catch {}
-    if (_dripVB && !_dripVDone && _dripVSid) {
+    if (_readTrack) {
         let pending = 0, ticks = 0, finished = false;
-        const reqS = _dripVReq, sidH = _dripVSid, lidH = lessonId, startS = _dripVStart, vSrc = _videoSrc, cId = lesson.courseId;
+        const reqS = _readReq, sidH = _studentId, lidH = lessonId, startS = _readStart, vSrc = _videoSrc, cId = lesson.courseId;
         window._dripReadTimerB = setInterval(async () => {
             try {
                 const bar = document.querySelector('#drip-read-bar-b');
@@ -3883,7 +3940,7 @@ async function viewStudentLesson(lessonId) {
                     if (pending > 0) { const p = pending; pending = 0; try { await dripRecordRead(sidH, { id: lidH, courseId: cId }, p); } catch {} }
                     try { const rk = 'read-lessons-' + sidH; const o = JSON.parse(localStorage.getItem(rk) || '{}'); o[lidH] = Date.now(); localStorage.setItem(rk, JSON.stringify(o)); } catch {}
                     const slot = document.querySelector('#drip-video-slot-b');
-                    if (slot && vSrc && typeof embedVideo === 'function') slot.innerHTML = embedVideo(vSrc);
+                    if (slot && vSrc && typeof embedVideo === 'function') { slot.innerHTML = embedVideo(vSrc, { track: true }); try { if (typeof bindLessonVideoTracking === 'function') await bindLessonVideoTracking(lidH, cId, slot); } catch (e) {} }
                     if (bar) bar.style.width = '100%';
                     const lb2 = document.querySelector('#drip-read-label-b');
                     if (lb2) lb2.textContent = '✓ Reading complete';
@@ -3895,6 +3952,10 @@ async function viewStudentLesson(lessonId) {
         }, 5000);
     }
     showModal(lesson.title, html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
+    // Video already visible (not gated) -> start watch tracking now.
+    if (_isStudent && _videoSrc && !(_dripVB && !_dripVDone) && typeof bindLessonVideoTracking === 'function') {
+        try { await bindLessonVideoTracking(lessonId, lesson.courseId); } catch (e) {}
+    }
 }
 async function viewStudentQuizzes(courseId) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -14075,7 +14136,172 @@ async function dripRecordRead(sid, lesson, addSecs) {
     _dripC[lesson.id] = comp;
     return comp;
 }
-// Fail → repeat: wipe timed-read so the lesson must be re-read and retaken.
+// Report watched-video seconds for a lesson. Only FORWARD playback is credited
+// by the caller, and the server independently re-checks the duration ratio.
+async function dripRecordVideo(sid, lesson, addSecs, durationSecs) {
+    if (!sid || !lesson || !lesson.id) return null;
+    if (!(addSecs > 0) && !(durationSecs > 0)) return null;
+    const data = await dripApi({ action: 'video', studentId: sid, lessonId: String(lesson.id), addSecs: Math.max(0, Math.round(addSecs || 0)), durationSecs: Math.max(0, Math.round(durationSecs || 0)) });
+    if (data && data.completion) {
+        _dripC[lesson.id] = data.completion;
+        if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
+        if (Array.isArray(data.completions)) { _dripC = {}; data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+        if (data.next) _dripNext = data.next;
+    }
+    return data;
+}
+
+// ---- Lesson video watch tracking (Vimeo / YouTube / direct file) ----------
+// Records how much of a lesson video was ACTUALLY played. Only forward playback
+// counts, so scrubbing to the end earns nothing, and the server marks the video
+// watched at >= 90% of the real duration.
+const VIDEO_TRACK_RATIO = 0.9, VIDEO_FLUSH_SECS = 20, VIDEO_STEP_MAX = 2.5;
+let _vtState = null;
+function _vtLoadScript(src) {
+    return new Promise((resolve) => {
+        if (document.querySelector('script[data-vt="' + src + '"]')) return resolve(true);
+        const s = document.createElement('script');
+        s.src = src; s.async = true; s.setAttribute('data-vt', src);
+        s.onload = () => resolve(true); s.onerror = () => resolve(false);
+        document.head.appendChild(s);
+    });
+}
+function _vtFormatSecs(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+    return (h ? h + 'h ' : '') + m + 'm ' + r + 's';
+}
+async function bindLessonVideoTracking(lessonId, courseId, root) {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (!u || u.role !== 'student') return;            // staff playback is not learner progress
+        const sid = u.studentId || u.username;
+        if (!sid || !lessonId) return;
+        const scope = root || document;
+        const vimeoEls = Array.from(scope.querySelectorAll('iframe[data-vtrack="vimeo"]'));
+        const ytEls = Array.from(scope.querySelectorAll('iframe[data-vtrack="yt"]'));
+        const fileEls = Array.from(scope.querySelectorAll('video[data-vtrack="file"]'));
+        if (!vimeoEls.length && !ytEls.length && !fileEls.length) return;
+
+        // stop any previous binder (modal reopened / video unlocked in place)
+        if (_vtState && _vtState.sid === sid && _vtState.lessonId === String(lessonId)) { try { _vtState.stop(); } catch (e) {} }
+        if (window._vtStop) { try { window._vtStop(); } catch (e) {} }
+
+        const st = {
+            sid, lessonId: String(lessonId), courseId: courseId ? String(courseId) : '',
+            pending: 0, duration: 0, last: null, done: false, unsubs: [], timer: null, label: null
+        };
+        st.flush = async () => {
+            if (st.pending <= 0) return;
+            const add = st.pending; st.pending = 0;
+            try {
+                const r = await dripRecordVideo(st.sid, { id: st.lessonId, courseId: st.courseId }, add, st.duration);
+                if (r && r.videoDone && !st.done) {
+                    st.done = true;
+                    if (typeof showToast === 'function') showToast('🎬 Video watched — lesson video complete!', { type: 'success' });
+                }
+            } catch (e) {}
+        };
+        st.stop = () => {
+            try { if (st.timer) clearInterval(st.timer); } catch (e) {}
+            try { st.unsubs.forEach(u2 => { if (typeof u2 === 'function') u2(); }); } catch (e) {}
+            try { if (window._vtStop === st.stop) delete window._vtStop; } catch (e) {}
+        };
+        _vtState = st; window._vtStop = st.stop;
+
+        // Progress read-out under the player (best effort).
+        try {
+            const holder = vimeoEls[0] ? vimeoEls[0].parentElement : (fileEls[0] ? fileEls[0].parentElement : null);
+            if (holder && holder.parentElement && !holder.parentElement.querySelector('#video-track-label')) {
+                const lab = document.createElement('div');
+                lab.id = 'video-track-label';
+                lab.style.cssText = 'font-size:11px;color:var(--text-muted);text-align:center;padding:4px 0 0;';
+                lab.textContent = '🎬 Video progress: 0% watched (90% required)';
+                holder.parentElement.appendChild(lab);
+                st.label = lab;
+            }
+        } catch (e) {}
+        st.setLabel = (pct) => { try { if (st.label) st.label.textContent = pct >= 100 ? '🎬 Video watched ✓' : ('🎬 Video progress: ' + Math.floor(pct) + '% watched (90% required)'); } catch (e) {} };
+
+        // onTick(cur, dur): credit only small forward steps (real playback).
+        st.onTick = (cur, dur) => {
+            if (typeof dur === 'number' && dur > 0) st.duration = Math.max(st.duration || 0, Math.round(dur));
+            if (typeof cur !== 'number' || !isFinite(cur)) return;
+            if (st.last != null) {
+                const d = cur - st.last;
+                if (d > 0 && d <= VIDEO_STEP_MAX) st.pending += d;
+            }
+            st.last = cur;
+            if (st.duration > 0) st.setLabel(Math.min(100, (st.pending / (st.duration * VIDEO_TRACK_RATIO)) * 100));
+        };
+        st.timer = setInterval(() => { st.flush(); }, VIDEO_FLUSH_SECS * 1000);
+        // Flush when the tab is hidden or the page goes away, so closing the modal
+        // mid-video never loses credit.
+        try {
+            const onHide = () => { if (document.visibilityState === 'hidden') st.flush(); };
+            document.addEventListener('visibilitychange', onHide);
+            window.addEventListener('pagehide', () => st.flush());
+            st.unsubs.push(() => document.removeEventListener('visibilitychange', onHide));
+        } catch (e) {}
+
+        // ---- Vimeo (player SDK over postMessage)
+        if (vimeoEls.length) {
+            const ok = await _vtLoadScript('https://player.vimeo.com/api/player.js');
+            if (ok && window.Vimeo && window.Vimeo.Player) {
+                for (const el of vimeoEls) {
+                    const pid = el.getAttribute('data-vid');
+                    try {
+                        const p = new window.Vimeo.Player(pid || el);
+                        p.getDuration().then(d => st.onTick(null, d)).catch(() => {});
+                        const h = (data) => { try { const c = (data && data.seconds != null) ? data.seconds : (data && data.duration != null ? data.currentTime : null); st.onTick(c, data && data.duration); } catch (e) {} };
+                        p.on('timeupdate', h);
+                        p.on('ended', () => { st.flush(); });
+                        st.unsubs.push(() => { try { p.off('timeupdate', h); } catch (e) {} });
+                    } catch (e) {}
+                }
+            }
+        }
+        // ---- YouTube (IFrame API)
+        if (ytEls.length) {
+            const ok = await _vtLoadScript('https://www.youtube.com/iframe_api');
+            if (ok) await new Promise(res => {
+                const prev = window.onYouTubeIframeAPIReady;
+                window.onYouTubeIframeAPIReady = () => { try { if (typeof prev === 'function') prev(); } catch (e) {} res(); };
+                setTimeout(res, 4000);   // never block the lesson on a slow/blocked CDN
+            });
+            if (window.YT && window.YT.Player) {
+                for (const el of ytEls) {
+                    try {
+                        const pid = el.getAttribute('data-vid') || ('yt' + Math.random().toString(36).slice(2, 8));
+                        el.setAttribute('id', pid);
+                        const p = new window.YT.Player(pid);
+                        st.unsubs.push(() => { try { p.destroy(); } catch (e) {} });
+                        const attach = () => {
+                            try {
+                                p.getDuration().then(d => st.onTick(null, d)).catch(() => {});
+                                const h = () => { try { st.onTick(p.getCurrentTime(), p.getDuration()); } catch (e) {} };
+                                p.addEventListener('stateChange', e => { if (e && e.data === 0) st.flush(); });
+                                p.addEventListener('onStateChange', h);
+                            } catch (e) {}
+                        };
+                        p.ready ? p.ready(attach) : attach();
+                    } catch (e) {}
+                }
+            }
+        }
+        // ---- direct file
+        fileEls.forEach(el => {
+            const h = () => st.onTick(el.currentTime, el.duration);
+            el.addEventListener('timeupdate', h);
+            el.addEventListener('loadedmetadata', h);
+            el.addEventListener('ended', () => { st.onTick(el.currentTime, el.duration); st.flush(); });
+            st.unsubs.push(() => {
+                try { el.removeEventListener('timeupdate', h); el.removeEventListener('loadedmetadata', h); } catch (e) {}
+            });
+        });
+    } catch (e) { /* tracking must never break the lesson */ }
+}
+// Fail → repeat: wipe timed-read (and watched video) so the lesson must be re-done.
 async function dripResetForRepeat(sid, lesson) {
     await loadDripMaps(sid);
     const data = await dripApi({ action: 'manual', studentId: sid, lessonId: String(lesson.id), op: 'repeat' });
@@ -14280,17 +14506,30 @@ async function editLesson(id) {
     const lesson = await dbGet('lessons', id);
     if (lesson) showLessonForm(lesson);
 }
-function embedVideo(url) {
+// Lesson video embed. Pass opts.track = true ONLY from a student lesson viewer:
+// it turns on the player API (Vimeo/YouTube) and tags the markup so
+// bindLessonVideoTracking() can report real watch progress to the server.
+// Plain embeds (admin preview, lesson editor) are left untouched.
+function embedVideo(url, opts) {
     if (!url) return '';
+    const track = !!(opts && opts.track);
+    const pid = track ? ('vp' + Math.random().toString(36).slice(2, 10)) : '';
     let src = url.trim();
     // YouTube (watch, shorts, embed, youtu.be, mobile)
     let ytId = src.match(/[?&]v=([\w-]{11})/)?.[1] || src.match(/youtube\.com\/(?:shorts|embed)\/([\w-]{11})/)?.[1] || src.match(/youtu\.be\/([\w-]{11})/)?.[1];
-    if (ytId) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://www.youtube.com/embed/${ytId}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe></div>`;
-    // Vimeo
+    if (ytId) {
+        const qs = track ? '?enablejsapi=1&rel=0&modestbranding=1' : '';
+        return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe ${track ? `data-vtrack="yt" data-vid="${pid}" ` : ''}src="https://www.youtube.com/embed/${ytId}${qs}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe></div>`;
+    }
+    // Vimeo — api=1 & player_id are what let the Vimeo Player SDK postMessage the
+    // current time / duration back to us for watch tracking.
     let vimeo = src.match(/vimeo\.com\/(\d+)/);
-    if (vimeo) return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe src="https://player.vimeo.com/video/${vimeo[1]}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allowfullscreen></iframe></div>`;
+    if (vimeo) {
+        const qs = track ? `?api=1&player_id=${pid}&rel=0&dnt=1` : '';
+        return `<div style="position:relative;width:100%;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;border:1px solid var(--border);"><iframe ${track ? `data-vtrack="vimeo" data-vid="${pid}" ` : ''}src="https://player.vimeo.com/video/${vimeo[1]}${qs}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe></div>`;
+    }
     // Direct file (mp4/webm/ogg)
-    if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(src)) return `<video src="${esc(src)}" controls style="width:100%;border-radius:10px;border:1px solid var(--border);max-height:420px;"></video>`;
+    if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(src)) return `<video ${track ? 'data-vtrack="file" ' : ''}src="${esc(src)}" controls style="width:100%;border-radius:10px;border:1px solid var(--border);max-height:420px;"></video>`;
     // Fallback link
     return `<a href="${esc(src)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">🎬 Open Lesson Video</a>`;
 }
@@ -20615,12 +20854,13 @@ async function exportStudentsCSV() {
 }
 let _coverageCache = null;
 async function loadCoverageData() {
-    const [students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, waivers] = await Promise.all([
-        dbGetAll('students'), dbGetAll('courses'), dbGetAll('enrollments'), dbGetAll('grades'), dbGetAll('submissions'), dbGetAll('attendance'), dbGetAll('payments'), dbGetAll('studyCenters'), dbGetAll('regions').catch(() => []), dbGetAll('quizzes'), dbGetAll('exams'), dbGetAll('courseCompletions').catch(() => []), dbGetAll('waivers').catch(() => [])
+    const [students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, waivers, lessons, lessonCompletions] = await Promise.all([
+        dbGetAll('students'), dbGetAll('courses'), dbGetAll('enrollments'), dbGetAll('grades'), dbGetAll('submissions'), dbGetAll('attendance'), dbGetAll('payments'), dbGetAll('studyCenters'), dbGetAll('regions').catch(() => []), dbGetAll('quizzes'), dbGetAll('exams'), dbGetAll('courseCompletions').catch(() => []), dbGetAll('waivers').catch(() => []), dbGetAll('lessons').catch(() => []), dbGetAll('lessonCompletions').catch(() => [])
     ]);
     let academic = null;
     try { const rec = await dbGet('settings', 'academic'); academic = rec ? (rec.value || rec) : null; } catch {}
-    _coverageCache = { students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, waivers, academic, loadedAt: Date.now() };
+    _coverageCache = { students, courses, enrollments, grades, submissions, attendance, payments, studyCenters, regions, quizzes, exams, courseCompletions, waivers, academic, lessons: lessons || [], lessonCompletions: lessonCompletions || [], loadedAt: Date.now() };
+    _coverageCache._lessonCoverIdx = buildLessonCoverIndex(_coverageCache.lessons, _coverageCache.lessonCompletions);
     return _coverageCache;
 }
 function coverageStudentIds() { return null; }
@@ -20672,8 +20912,11 @@ async function renderCoverage() {
                 if (m.attPct != null) { attSum += m.attPct; attN++; }
                 if (m.avg != null) { scoreSum += m.avg; scoreN++; }
                 const manual = (d.courseCompletions || []).some(x => String(x.studentId) === String(s.id) && String(x.courseId) === String(c.id));
+                const roll = courseLessonRollup(d, s.id, c.id);
+                const lessonTxt = roll && roll.hasLessons ? ` · Lessons ${roll.done}/${roll.total}` : '';
+                const tip = (roll && roll.hasLessons && roll.complete && !manual) ? 'Covered — all lessons complete (read + video)' : 'Click to toggle manual override';
                 const pill = st === 'covered' ? `<span class="badge badge-success">✅${manual ? '*' : ''}</span>` : st === 'current' ? `<span class="badge badge-warning">📖</span>` : `<span class="badge badge-secondary">🔒</span>`;
-                return `<td style="text-align:center;" title="Click to toggle manual override"><span style="cursor:pointer;" onclick="toggleCourseCompletion('${s.id}','${c.id}',this)">${pill}</span></td>`;
+                return `<td style="text-align:center;" title="${escapeHtml(tip + lessonTxt)}"><span style="cursor:pointer;" onclick="toggleCourseCompletion('${s.id}','${c.id}',this)">${pill}</span></td>`;
             }).join('');
             rows += `<tr><td><b>${escapeHtml(s.name)}</b>${statusLabel(s)}<br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml(s.admissionNumber || s.id)}</span></td>${cells}<td style="text-align:center;">${attN ? Math.round(attSum / attN) + '%' : '—'}</td><td style="text-align:center;">${scoreN ? Math.round(scoreSum / scoreN) + '%' : '—'}</td></tr>`;
         });

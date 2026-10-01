@@ -3,8 +3,10 @@
 // completions are trusted, tamper-proof, and consistent across devices.
 //
 // Rules (all enforced HERE, not on the client device):
-//   - completion  = note read for >= required seconds AND every linked (published)
-//                   quiz best score >= DRIP_PASS (50)
+//   - completion  = note read for >= required seconds AND the lesson video (when
+//                   the lesson has one) watched for >= DRIP_VIDEO_RATIO of its
+//                   duration AND every linked (published) quiz best score >=
+//                   DRIP_PASS (50)
 //   - chain       = lesson N in a drip course unlocks only when all earlier drip
 //                   lessons are complete, the pacing window has elapsed, and the
 //                   weekly fee target is current
@@ -16,6 +18,10 @@
 
 const DRIP_PASS = 50;
 const DRIP_DEFAULT_PACE_DAYS = 3.5;
+// A lesson video counts as watched once this fraction of its real duration has
+// actually been played (the client only credits forward playback, so scrubbing
+// to the end does not count).
+const DRIP_VIDEO_RATIO = 0.9;
 
 function dripRecId(prefix, sid, lid) {
     return prefix + '-' + String(sid).replace(/[^A-Za-z0-9-]/g, '') + '-' + String(lid).replace(/[^A-Za-z0-9-]/g, '');
@@ -143,8 +149,42 @@ function dripQuizBestForLesson(db, sid, lessonId) {
     return { required: true, best };
 }
 
-// Recompute a learner's completion for one lesson (read time + linked quizzes).
-// Returns the upserted completion row and whether it just flipped to complete.
+// ---- Lesson video ----------------------------------------------------------
+// A lesson's video source, if any. Kept in one place so the server and the
+// completion rule agree on what counts as "this lesson has a video".
+function dripLessonVideo(lesson) {
+    if (!lesson) return '';
+    return String(lesson.videoUrl || lesson.video || lesson.videoLink || '').trim();
+}
+
+// Only embeddable/servable sources can be watched-tracked (a bare "open this
+// link" URL cannot report play progress), so only those gate completion.
+function dripVideoTrackable(url) {
+    const s = String(url || '').trim();
+    if (!s) return false;
+    if (/vimeo\.com\/(?:video\/|channels\/[^\/]+\/)?\d+/i.test(s)) return true;
+    if (/youtube\.com\/(?:watch\?|embed\/|shorts\/)|youtu\.be\//i.test(s)) return true;
+    if (/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(s)) return true;
+    return false;
+}
+function dripVideoRequired(lesson) {
+    return dripVideoTrackable(dripLessonVideo(lesson));
+}
+// Watched-enough test. Needs a known real duration AND enough credited seconds,
+// or an already-stamped videoDoneAt (e.g. granted by staff).
+function dripVideoDone(comp) {
+    if (!comp) return false;
+    if (comp.videoDoneAt) return true;
+    const dur = Number(comp.videoDurationSecs) || 0;
+    const seen = Number(comp.videoSecs) || 0;
+    if (!(dur > 0) || !(seen > 0)) return false;
+    return seen >= dur * DRIP_VIDEO_RATIO;
+}
+
+// Recompute a learner's completion for one lesson (read time + video watch +
+// linked quizzes). Returns the upserted completion row and whether it just
+// flipped to complete. An already-stamped completedAt is never revoked, so
+// adding a video to a lesson later cannot un-complete work already done.
 function dripEvalCompletion(db, sid, lesson, opts) {
     opts = opts || {};
     db.lessonCompletions = db.lessonCompletions || [];
@@ -157,21 +197,72 @@ function dripEvalCompletion(db, sid, lesson, opts) {
     }
     comp.requiredSecs = requiredSecs;
     const readDone = (comp.readSecs || 0) >= requiredSecs;
+    const videoRequired = dripVideoRequired(lesson);
+    const videoDone = !videoRequired || dripVideoDone(comp);
     const q = dripQuizBestForLesson(db, sid, lesson.id);
     const quizDone = !q.required || q.best >= DRIP_PASS;
     if (q.best >= 0) comp.quizBest = q.best;
     const now = new Date().toISOString();
     if (readDone && !comp.readDoneAt) comp.readDoneAt = now;
+    if (videoRequired) comp.videoRequired = true;
+    if (videoDone && videoRequired && !comp.videoDoneAt) comp.videoDoneAt = now;
     if (quizDone && !comp.quizPassedAt) comp.quizPassedAt = now;
-    if (readDone && quizDone && !comp.completedAt) comp.completedAt = now;
+    if (readDone && videoDone && quizDone && !comp.completedAt) comp.completedAt = now;
     comp.justCompleted = !wasComplete && !!comp.completedAt;
     if (opts.resetForRepeat) {
         comp.readSecs = 0; comp.readDoneAt = null; comp.quizPassedAt = null; comp.quizBest = undefined; comp.completedAt = null;
+        comp.videoSecs = 0; comp.videoDurationSecs = undefined; comp.videoDoneAt = null;
         comp.justCompleted = false;
     }
     const idx = db.lessonCompletions.findIndex(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id));
     if (idx >= 0) db.lessonCompletions[idx] = comp; else db.lessonCompletions.push(comp);
     return comp;
+}
+
+// ---- Course-level lesson rollup -------------------------------------------
+// How many of a course's published lessons one learner has completed, and
+// whether that is ALL of them. This is what turns per-lesson reading + video
+// progress into a course-coverage signal.
+function dripCourseLessonRollup(db, sid, courseId) {
+    const lessons = (db.lessons || []).filter(l => l && l.published !== false && String(l.courseId) === String(courseId));
+    const total = lessons.length;
+    if (!total) return { hasLessons: false, total: 0, done: 0, complete: false };
+    const mine = (db.lessonCompletions || []).filter(r => String(r.studentId) === String(sid) && r && r.completedAt);
+    const doneIds = new Set(mine.map(r => String(r.lessonId)));
+    let done = 0;
+    lessons.forEach(l => { if (doneIds.has(String(l.id))) done++; });
+    return { hasLessons: true, total, done, complete: done === total };
+}
+
+// One pass over lessons + completions -> { 'studentId|courseId': {total,done,complete} }
+// for every learner who has completed at least one lesson. Lessons that are not
+// published members of that course are ignored, and duplicate rows never
+// double count.
+function dripLessonCoverIndex(db) {
+    const byCourse = {};
+    (db.lessons || []).forEach(l => {
+        if (!l || l.published === false || l.courseId == null) return;
+        const c = String(l.courseId);
+        if (!byCourse[c]) byCourse[c] = new Set();
+        byCourse[c].add(String(l.id));
+    });
+    const idx = {};
+    (db.lessonCompletions || []).forEach(r => {
+        if (!r || !r.completedAt || r.courseId == null) return;
+        const ids = byCourse[String(r.courseId)];
+        if (!ids || !ids.has(String(r.lessonId))) return;
+        const key = String(r.studentId) + '|' + String(r.courseId);
+        if (!idx[key]) idx[key] = { total: ids.size, done: 0, _seen: new Set() };
+        if (idx[key]._seen.has(String(r.lessonId))) return;
+        idx[key]._seen.add(String(r.lessonId));
+        idx[key].done++;
+    });
+    Object.keys(idx).forEach(k => {
+        const e = idx[k];
+        e.complete = e.total > 0 && e.done >= e.total;
+        delete e._seen;
+    });
+    return idx;
 }
 
 // Sweep a learner's unlock chain across all (or one) course. Grants whatever is
@@ -251,9 +342,10 @@ function dripNextInfo(db, sid, courseId, afterLessonId) {
 }
 
 module.exports = {
-    DRIP_PASS, DRIP_DEFAULT_PACE_DAYS,
+    DRIP_PASS, DRIP_DEFAULT_PACE_DAYS, DRIP_VIDEO_RATIO,
     dripRecId, dripModeOfLesson, dripReadEstimateSecs, dripLessonContent, dripPaceMs,
     dripGroupOfLesson, dripSameLessonUnit,
+    dripLessonVideo, dripVideoTrackable, dripVideoRequired, dripVideoDone,
     dripStartOfWeek, dripFeeOk, dripQuizBestForLesson, dripEvalCompletion, dripSweep,
-    dripMapsFor, dripNextInfo
+    dripMapsFor, dripNextInfo, dripCourseLessonRollup, dripLessonCoverIndex
 };
