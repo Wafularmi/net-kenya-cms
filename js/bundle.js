@@ -318,16 +318,31 @@ function sendWhatsApp(phone, message) {
     logWhatsApp(phone, message);
     return w;
 }
-async function logWhatsApp(phone, message) {
-    const entry = {
-        id: 'WA-' + Date.now(),
-        phone,
-        message: message.substring(0, 200),
+async function logWhatsApp(phone, message, extra) {
+    const x = extra || {};
+    const entry = Object.assign({
+        id: (x.idPrefix || 'WA') + '-' + Date.now(),
+        phone: phone || x.phone || '',
+        message: String(message == null ? '' : message).substring(0, 200),
         date: new Date().toISOString().split('T')[0],
         time: new Date().toLocaleTimeString(),
         createdAt: new Date().toISOString()
-    };
-    try { await dbAdd('whatsappLog', entry); } catch (e) {}
+    }, x);
+    entry.id = x.id || entry.id;
+    entry.phone = x.phone || phone || entry.phone || '';
+    try {
+        // Message logs are scoped per country, so every entry records where it
+        // belongs: the recipient student's country when we know it, otherwise
+        // the sender's own scope. Without this a coordinator's view depends on a
+        // phone lookup and broadcasts to non-student numbers resolve to nowhere.
+        let student = x.student || null;
+        if (!student && x.studentId) student = await dbGet('students', x.studentId).catch(() => null);
+        const country = countryForRecipient(student) || entry.country || (await messageLogCountry());
+        entry.country = country || '';
+        entry.sentBy = (function () { try { return JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || ''; } catch (e) { return ''; } })();
+        delete entry.student;
+        await dbAdd('whatsappLog', entry);
+    } catch (e) {}
 }
 function generateBarcode() {
     let bars = '';
@@ -549,6 +564,40 @@ function viewerScope() {
         if (pv) { previewing = true; country = pv; regionId = ''; }
     } catch {}
     return { role, country, regionId, previewing, isCoord: role === 'coordinator' };
+}
+// The country a message/log entry belongs to. Message logs are scoped per
+// country, so every entry records who sent it and from where. A region-scoped
+// coordinator has no country of their own, so their region decides.
+let _msgCountryCache = null;
+async function messageLogCountry() {
+    if (_msgCountryCache) return _msgCountryCache;
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u.country) return (_msgCountryCache = u.country);
+        if (u.regionId) {
+            const regions = await dbGetAll('regions').catch(() => []);
+            const r = (regions || []).find(x => x && String(x.id) === String(u.regionId));
+            if (r && r.country) return (_msgCountryCache = r.country);
+        }
+    } catch {}
+    return (_msgCountryCache = '');
+}
+let _centerCountryMap = null;
+// The country a message recipient belongs to (student.country, else their
+// study centre's country). Used to stamp message-log entries so they scope
+// per country without depending on a phone lookup later.
+function countryForRecipient(student) {
+    if (!student) return '';
+    if (student.country) return student.country;
+    if (student.studyCenterId) {
+        if (!_centerCountryMap) {
+            _centerCountryMap = {};
+            const map = window.__centerMap || {};
+            Object.keys(map).forEach(k => { _centerCountryMap[k] = (map[k] && map[k].country) || ''; });
+        }
+        return _centerCountryMap[student.studyCenterId] || '';
+    }
+    return '';
 }
 function canManageStudents() {
     try {
@@ -5313,7 +5362,7 @@ async function sendSingleStudentWhatsApp(studentId, examId) {
     sendWhatsApp(student.phone, personalized);
     try {
         const entry = { id: 'WA-' + Date.now(), phone: student.phone, name: student.name, message: personalized.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: 'exam-notify-single', status: 'sent', createdAt: new Date().toISOString() };
-        await dbAdd('whatsappLog', entry);
+        await logWhatsApp(entry.phone, entry.message, { id: entry.id });
     } catch (e) {}
     showToast(`📱 Opened WhatsApp for ${student.name}`);
     logAudit('sent', 'exam-notify-single', { examId, studentId, message: msg.substring(0, 50) });
@@ -5512,7 +5561,7 @@ async function sendExamNotify(examId) {
         }
         sendWhatsApp(student.phone, personalized);
         const entry = { id: 'WA-' + Date.now() + '-' + sent, phone: student.phone, name: student.name, message: personalized.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: 'exam-notify', status: 'sent', createdAt: new Date().toISOString() };
-        try { await dbAdd('whatsappLog', entry); } catch (e) {}
+        try { await logWhatsApp(entry.phone, entry.message, { student: student, name: student.name, id: entry.id }); } catch (e) {}
         sent++;
     }
     closeModal();
@@ -13227,7 +13276,7 @@ function sendNextWhatsApp() {
         sendWhatsApp(s.phone, msg);
         waSentCount++;
         const entry = { id: 'WA-' + Date.now(), phone: s.phone, name: s.name, message: msg.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: current.template, status: 'sent', createdAt: new Date().toISOString() };
-        try { await dbAdd('whatsappLog', entry); } catch (e) {}
+        try { await logWhatsApp(entry.phone, entry.message, { student: s, name: s.name, id: entry.id }); } catch (e) {}
         waQueueIndex++;
         if (waQueueIndex >= waQueue.length) {
             showToast(`Broadcast complete! Sent: ${waSentCount}, Failed: ${waFailedCount}`);
@@ -13291,7 +13340,7 @@ async function quickWhatsAppStudent(studentId, templateId) {
     const resolvedMsg = applyTemplateVars(message, student, schoolName, balance, student.admissionNumber, student.phone);
     sendWhatsApp(student.phone, resolvedMsg);
     const entry = { id: 'WA-' + Date.now(), phone: student.phone, name: student.name, message: resolvedMsg.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: template.name, status: 'sent', createdAt: new Date().toISOString() };
-    try { await dbAdd('whatsappLog', entry); } catch (e) {}
+    try { await logWhatsApp(entry.phone, entry.message, { student: student, name: student.name, id: entry.id }); } catch (e) {}
     showToast(`Message sent to ${student.name}`);
     renderWhatsAppLog();
 }
@@ -13666,17 +13715,7 @@ async function sendCommSingle(studentId) {
     const balance = getCachedStudentFee(student) - paid;
     const resolved = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
     sendWhatsApp(student.phone, resolved);
-    await dbAdd('whatsappLog', {
-        id: 'WA-' + Date.now(),
-        phone: student.phone,
-        name: student.name,
-        message: resolved.substring(0, 200),
-        date: new Date().toISOString().split('T')[0],
-        time: new Date().toLocaleTimeString(),
-        template: 'Communication Center',
-        status: 'sent',
-        createdAt: new Date().toISOString()
-    });
+    await logWhatsApp(student.phone, resolved, { student: student, name: student.name, template: 'Communication Center', status: 'sent' });
     showToast(`Sent to ${student.name}`);
     renderWhatsAppLog();
 }
@@ -18358,15 +18397,7 @@ async function finalizeApproval() {
             waResend.style.display = 'none';
         }
         try {
-            await dbAdd('whatsappLog', {
-                id: 'WL-' + Date.now(),
-                studentId: id,
-                phone: phone,
-                message: finalMessage,
-                template: 'tpl-welcome',
-                status: waOpened ? 'opened' : 'failed',
-                sentAt: new Date().toISOString()
-            });
+            await logWhatsApp(phone, finalMessage, { studentId: id, template: 'tpl-welcome', status: waOpened ? 'opened' : 'failed', sentAt: new Date().toISOString(), idPrefix: 'WL' });
         } catch (e) {}
         renderPendingRegistrations();
         updatePendingBadge();
@@ -23171,7 +23202,7 @@ async function sendMessage(recipient) {
     if (!input) return;
     const body = input.value.trim();
     if (!body) return;
-    const msg = { id: 'MSG-' + Date.now(), sender: currentUser.username, recipient, body, timestamp: Date.now(), read: false };
+    const msg = { id: 'MSG-' + Date.now(), sender: currentUser.username, recipient, body, timestamp: Date.now(), read: false, country: (await messageLogCountry()) || '' };
     await dbPut('messages', msg);
     logAudit('sent', 'message', { recipient });
     openConversation(recipient);
@@ -23194,7 +23225,7 @@ async function sendComposedMessage() {
     const to = document.getElementById('msg-to').value;
     const body = document.getElementById('msg-body').value.trim();
     if (!to || !body) return showToast('Recipient and message required!');
-    const msg = { id: 'MSG-' + Date.now(), sender: currentUser.username, recipient: to, body, timestamp: Date.now(), read: false };
+    const msg = { id: 'MSG-' + Date.now(), sender: currentUser.username, recipient: to, body, timestamp: Date.now(), read: false, country: (await messageLogCountry()) || '' };
     await dbPut('messages', msg);
     closeModal();
     await renderMessages();

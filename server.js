@@ -856,13 +856,16 @@ const GLOBAL_SHARED_STORES = new Set([
     'courses', 'lessons', 'lessonFiles', 'exams', 'quizzes', 'questionBank',
     'programs', 'feeStructure', 'gradRequirements', 'campuses',
     // Templates / manuals / logs
-    'manuals', 'whatsappTemplates', 'smsTemplates', 'whatsappLog', 'smsLog',
+    // NOTE: whatsappLog / smsLog / messages are deliberately NOT here — message
+    // logs are per-country. They used to be shared, which meant every
+    // coordinator could read every other country's messaging history.
+    'manuals', 'whatsappTemplates', 'smsTemplates',
     // Reference lists
     'expenseCategories', 'incomeCategories', 'deductionAccounts',
     // Staff payroll definitions and deliverables
     'salaryDeductions', 'payslips', 'deductionDisbursements',
     // Communication / assets
-    'events', 'alerts', 'messages', 'notes', 'meetings',
+    'events', 'alerts', 'notes', 'meetings',
     'books', 'hostels', 'inventory',
     // Settings (read exemptions live at the route level; must flow unfiltered)
     'settings'
@@ -1286,10 +1289,25 @@ function filterStoreForUser(user, store, rows) {
     if (user && user.role === 'coordinator' && store === 'counters') {
         return rows.filter(r => r && isPaymentCounterKey(r.key));
     }
-    if (user && user.user && user.user.country && user.user.role !== 'admin' && !countryExemptStores.includes(store)) {
-        const scope = user.user.country;
+    if (user && user.user && user.user.role !== 'admin' && !countryExemptStores.includes(store)) {
+        // A country-scoped user filters on their own country. A region-scoped
+        // coordinator has no country of their own, so their scope is the country
+        // their region belongs to — otherwise "scoped per country" would leave
+        // regional coordinators reading every country's message logs.
+        let scope = user.user.country || '';
+        if (!scope && user.user.regionId) {
+            const region = (db.regions || []).find(r => r && String(r.id) === String(user.user.regionId));
+            scope = (region && region.country) || '';
+        }
+        if (!scope) return rows;
         if (GLOBAL_SHARED_STORES.has(store)) {
             // Deliberately-shared institution content: no country filtering.
+        } else if (store === 'messages') {
+            // Staff-to-staff messages: your own threads always stay visible even
+            // when the other party sits in another country, otherwise a Kenya
+            // coordinator could not read a message sent to them by Togo.
+            const me = String(user.username || (user.user && user.user.username) || '');
+            rows = rows.filter(r => r && (r.sender === me || r.recipient === me || recordCountryOf(store, r) === scope));
         } else {
             rows = rows.filter(r => r && recordCountryOf(store, r) === scope);
         }
