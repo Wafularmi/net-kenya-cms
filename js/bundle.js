@@ -1074,6 +1074,8 @@ async function initAuth() {
                         return;
                     }
                 }
+                try { if (typeof startAutoRefresh === 'function') startAutoRefresh(); } catch {}
+                try { if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect(); } catch {}
                 return showApp(effUser);
             }
         }
@@ -1227,6 +1229,10 @@ async function login() {
         }
         showApp(user);
         logAudit('login', 'user', { username: user.username });
+        // Live updates (SSE + polling) are skipped on the login screen, so start
+        // them once there is a session.
+        try { if (typeof startAutoRefresh === 'function') startAutoRefresh(); } catch {}
+        try { if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect(); } catch {}
     } catch (err) {
         showLoginError('Login failed. Please try again.');
         console.error('Login error:', err);
@@ -4656,7 +4662,7 @@ async function renderExams() {
         const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
-        const sorted = exams.filter(e => e.published !== false && e.semester == semester && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const sorted = exams.filter(e => e.published !== false && e.semester == semester && e.date && e.time && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
         const today = new Date().toISOString().split('T')[0];
         const upcoming = sorted.filter(e => e.date >= today);
         const past = sorted.filter(e => e.date < today);
@@ -4739,15 +4745,22 @@ async function renderExams() {
             exams = exams.filter(e => !e.studyCenterId || cidSet.has(e.studyCenterId));
             registrations = regionStudents ? registrations.filter(r => regionStudents.has(r.studentId)) : registrations;
         }
-        const filtered = exams.filter(e => e.semester == semester).sort((a, b) => a.date.localeCompare(b.date));
+        const filtered = exams.filter(e => e.semester == semester).sort((a, b) => {
+            // Exams that are set but not scheduled yet have no date: keep them last.
+            if (!a.date && !b.date) return 0;
+            if (!a.date) return 1;
+            if (!b.date) return -1;
+            return a.date.localeCompare(b.date);
+        });
         document.getElementById('exams-body').innerHTML = filtered.map(e => {
             const course = courses.find(c => c.id === e.courseId);
             const invigilator = staff.find(s => s.id === e.invigilatorId);
             const center = centers.find(x => x.id === e.studyCenterId);
             const examRegs = registrations.filter(r => r.examId === e.id);
             const pub = e.published !== false;
-            return `<tr><td><b>${(e.title || course?.code || e.courseId)}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''}</span>${center ? `<br><span style="font-size:10px;color:var(--accent);">${center.name}</span>` : ''}</td><td>${formatDate(e.date)}</td><td>${e.time}</td><td>${e.venue}</td><td>${examRegs.length}</td><td>${invigilator ? invigilator.name : '--'}</td><td><span class="badge badge-${pub ? 'success' : 'secondary'}" style="cursor:pointer;" onclick="toggleExamPublished('${e.id}')">${pub ? 'Published' : 'Draft'}</span></td><td><button class="btn btn-outline btn-sm" onclick="showExamForm('${e.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showExamRegistration('${e.id}')">Reg</button> <button class="btn btn-outline btn-sm" onclick="showExamResults('${e.id}')">Results</button> <button class="btn btn-warning btn-sm" onclick="showExamNotify('${e.id}')">Notify</button> <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">Del</button></td></tr>`;
-        }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No exams scheduled for this semester</td></tr>';
+            const isScheduled = !!(e.date && e.time);
+            return `<tr><td><b>${(e.title || course?.code || e.courseId)}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''}</span>${center ? `<br><span style="font-size:10px;color:var(--accent);">${center.name}</span>` : ''}</td><td>${isScheduled ? formatDate(e.date) : `<span class="badge badge-warning">⏳ Not scheduled</span>`}</td><td>${isScheduled ? e.time : '--'}</td><td>${e.venue || '--'}</td><td>${examRegs.length}</td><td>${invigilator ? invigilator.name : '--'}</td><td><span class="badge badge-${pub ? 'success' : 'secondary'}" style="cursor:pointer;" onclick="toggleExamPublished('${e.id}')">${pub ? 'Published' : 'Draft'}</span></td><td><button class="btn ${isScheduled ? 'btn-outline' : 'btn-primary'} btn-sm" onclick="showExamSchedule('${e.id}')">${isScheduled ? 'Reschedule' : '📅 Schedule'}</button> <button class="btn btn-outline btn-sm" onclick="showExamForm('${e.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showExamRegistration('${e.id}')">Reg</button> <button class="btn btn-outline btn-sm" onclick="showExamResults('${e.id}')">Results</button> <button class="btn btn-warning btn-sm" onclick="showExamNotify('${e.id}')">Notify</button> <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">Del</button></td></tr>`;
+        }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No exams for this semester yet. Click "+ Set Exam" to set the exam paper, then use "Schedule" to give it a date, time and venue.</td></tr>';
         renderRetakeRequests();
     }
 }
@@ -4903,23 +4916,12 @@ async function showExamForm(exam = null) {
     const content = `<input type="hidden" id="exam-edit-id" value="${fmt(exam ? exam.id : '')}">
 <div class="form-row">
   <div class="form-group"><label>Course *</label><select id="exam-course" onchange="onExamCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${exam && exam.courseId === c.id ? 'selected' : ''}>${c.code} - ${c.name}</option>`).join('')}</select></div>
-  <div class="form-group"><label>Study Center</label><select id="exam-center"><option value="">All Centers</option>${centers.map(c => `<option value="${c.id}" ${exam && exam.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div>
+  <div class="form-group"><label>Type</label><select id="exam-type"><option value="midterm" ${exam && exam.type === 'midterm' ? 'selected' : ''}>Midterm</option><option value="final" ${exam && exam.type === 'final' ? 'selected' : ''}>Final Exam</option><option value="supplementary" ${exam && exam.type === 'supplementary' ? 'selected' : ''}>Supplementary</option></select></div>
 </div>
 <div class="form-group"><label>Exam Title</label><input type="text" id="exam-title" value="${fmt(exam ? exam.title : '')}" placeholder="e.g., Midterm Exam"></div>
 <div class="form-row">
-  <div class="form-group"><label>Date *</label><input type="date" id="exam-date" value="${fmt(exam ? exam.date : '')}"></div>
-  <div class="form-group"><label>Time *</label><input type="text" id="exam-time" value="${fmt(exam ? exam.time : '')}" placeholder="09:00-12:00"></div>
-</div>
-<div class="form-row">
-  <div class="form-group"><label>Venue *</label><input type="text" id="exam-venue" value="${fmt(exam ? exam.venue : '')}" placeholder="Hall A"></div>
-  <div class="form-group"><label>Invigilator</label><select id="exam-invigilator"><option value="">Unassigned</option>${staff.map(s => `<option value="${s.id}" ${exam && exam.invigilatorId === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select></div>
-</div>
-<div class="form-row">
   <div class="form-group"><label>Pass Mark (%)</label><input type="number" id="exam-pass" value="${exam && exam.passMark ? exam.passMark : 50}" min="0" max="100" style="width:80px;"></div>
   <div class="form-group"><label>Duration (min)</label><input type="number" id="exam-duration" value="${exam && exam.duration ? exam.duration : 180}" style="width:80px;"></div>
-</div>
-<div class="form-row">
-  <div class="form-group"><label>Type</label><select id="exam-type"><option value="midterm" ${exam && exam.type === 'midterm' ? 'selected' : ''}>Midterm</option><option value="final" ${exam && exam.type === 'final' ? 'selected' : ''}>Final Exam</option><option value="supplementary" ${exam && exam.type === 'supplementary' ? 'selected' : ''}>Supplementary</option></select></div>
   <div class="form-group"><label>Total Marks</label><input type="number" id="exam-total-marks" value="${totalMarks}" min="1" style="width:80px;"><div style="font-size:10px;color:var(--text-muted);">Auto-filled from course settings</div></div>
 </div>
 <div class="form-row">
@@ -4933,8 +4935,18 @@ async function showExamForm(exam = null) {
     <span id="exam-pub-label" style="font-size:13px;font-weight:600;color:${published ? '#22c55e' : '#64748b'};">${published ? 'Published' : 'Draft'}</span>
   </div>
 </div>
-<div class="form-group"><label>Select Questions</label><div id="exam-question-list" style="max-height:220px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="exam-q-count">0</span> questions, <span id="exam-total-pts">0</span> pts</span><span id="exam-marks-status">Total Marks: <span id="exam-total-marks-display">0</span></span></div></div>`;
-    showModal(exam ? 'Edit Exam' : 'Schedule Exam', content, `<button class="btn btn-primary" onclick="saveExam()">${exam ? 'Update' : 'Schedule'}</button>`);
+<div class="form-group"><label>Select Questions</label><div id="exam-question-list" style="max-height:220px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="exam-q-count">0</span> questions, <span id="exam-total-pts">0</span> pts</span><span id="exam-marks-status">Total Marks: <span id="exam-total-marks-display">0</span></span></div></div>
+<div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border);">Scheduling &mdash; optional, you can set this later</div>
+<div class="form-row">
+  <div class="form-group"><label>Date</label><input type="date" id="exam-date" value="${fmt(exam ? exam.date : '')}"></div>
+  <div class="form-group"><label>Time</label><input type="text" id="exam-time" value="${fmt(exam ? exam.time : '')}" placeholder="09:00-12:00"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Venue</label><input type="text" id="exam-venue" value="${fmt(exam ? exam.venue : '')}" placeholder="Hall A"></div>
+  <div class="form-group"><label>Invigilator</label><select id="exam-invigilator"><option value="">Unassigned</option>${staff.map(s => `<option value="${s.id}" ${exam && exam.invigilatorId === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select></div>
+</div>
+<div class="form-group" style="margin-bottom:0;"><label>Study Center</label><select id="exam-center"><option value="">All Centers</option>${centers.map(c => `<option value="${c.id}" ${exam && exam.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select><div style="font-size:10px;color:var(--text-muted);">Can also be set when you schedule the exam</div></div>`;
+    showModal(exam ? 'Edit Exam' : 'Set Exam', content, `<button class="btn btn-primary" onclick="saveExam()">${exam ? 'Save Changes' : 'Set Exam'}</button>`);
     document.getElementById('exam-published')?.addEventListener('change', function() {
         const lbl = document.getElementById('exam-pub-label');
         const bg = this.parentElement.querySelector('span');
@@ -4995,15 +5007,68 @@ async function saveExam() {
     const courseId = document.getElementById('exam-course').value;
     const date = document.getElementById('exam-date').value;
     const time = document.getElementById('exam-time').value.trim();
-    if (!courseId || !date || !time) return showToast('Course, date, and time required!');
+    const venue = document.getElementById('exam-venue').value.trim();
+    if (!courseId) return showToast('Course required!');
     const editId = document.getElementById('exam-edit-id').value;
     const id = editId || 'EXM-' + Date.now();
     const existing = editId ? await dbGet('exams', id) : null;
     const questionIds = Array.from(document.querySelectorAll('.exam-q-check:checked')).map(c => c.value);
     if (!questionIds.length) return showToast('Select at least one question!');
-    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue: document.getElementById('exam-venue').value.trim(), invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: document.getElementById('exam-semester').value, published: document.getElementById('exam-published').checked, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
-    await dbPut('exams', exam); closeModal(); renderExams(); showToast(editId ? 'Exam updated!' : 'Exam scheduled!'); logAudit(editId ? 'updated' : 'created', 'exam', exam);
-    if (!editId) await autoGenerateSeating(exam);
+    // Setting an exam and scheduling it are two separate steps: a date+time is
+    // enough to schedule, the venue may follow. Without them the exam is simply
+    // "set" and stays out of student view until it is scheduled.
+    const scheduled = !!date && !!time;
+    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: document.getElementById('exam-semester').value, published: document.getElementById('exam-published').checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    await dbPut('exams', exam); closeModal(); renderExams();
+    showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
+    logAudit(editId ? 'updated' : 'created', 'exam', exam);
+    if (scheduled && !existing) await autoGenerateSeating(exam);
+}
+// Schedule step: a set-but-unscheduled exam only needs when and where.
+async function showExamSchedule(examId) {
+    const exam = await dbGet('exams', examId);
+    if (!exam) return;
+    const staff = await dbGetAll('staff');
+    const centers = await getCenters();
+    const course = await dbGet('courses', exam.courseId);
+    const content = `
+  <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;"><b style="color:var(--text-primary);">${escapeHtml(exam.title || (course ? course.name : 'Exam'))}</b> &mdash; ${escapeHtml(exam.type || 'midterm')} &middot; ${(exam.questionIds || []).length} questions</div>
+  <div class="form-row">
+    <div class="form-group"><label>Date *</label><input type="date" id="exs-date" value="${exam.date || ''}"></div>
+    <div class="form-group"><label>Time *</label><input type="text" id="exs-time" value="${exam.time || ''}" placeholder="09:00-12:00"></div>
+  </div>
+  <div class="form-group"><label>Venue</label><input type="text" id="exs-venue" value="${exam.venue || ''}" placeholder="Hall A"></div>
+  <div class="form-row">
+    <div class="form-group"><label>Invigilator</label><select id="exs-invigilator"><option value="">Unassigned</option>${staff.map(s => `<option value="${s.id}" ${exam.invigilatorId === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Study Center</label><select id="exs-center"><option value="">All Centers</option>${centers.map(c => `<option value="${c.id}" ${exam.studyCenterId === c.id ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.code || '')})</option>`).join('')}</select></div>
+  </div>
+  <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+    <input type="checkbox" id="exs-publish" ${exam.published !== false ? 'checked' : ''}>
+    <label for="exs-publish" style="cursor:pointer;">Publish to students now (they can register)</label>
+  </div>`;
+    showModal('Schedule Exam', content, `<button class="btn btn-primary" onclick="saveExamSchedule('${examId}')">Schedule</button>`);
+}
+async function saveExamSchedule(examId) {
+    const exam = await dbGet('exams', examId);
+    if (!exam) return;
+    const date = document.getElementById('exs-date').value;
+    const time = document.getElementById('exs-time').value.trim();
+    if (!date || !time) return showToast('Date and time are required to schedule.');
+    exam.date = date;
+    exam.time = time;
+    exam.venue = document.getElementById('exs-venue').value.trim();
+    exam.invigilatorId = document.getElementById('exs-invigilator').value;
+    exam.studyCenterId = document.getElementById('exs-center').value;
+    exam.published = document.getElementById('exs-publish').checked;
+    exam.scheduled = true;
+    exam.scheduledAt = new Date().toISOString();
+    exam.updatedAt = exam.scheduledAt;
+    await dbPut('exams', exam);
+    closeModal();
+    renderExams();
+    showToast('Exam scheduled!');
+    logAudit('scheduled', 'exam', { id: examId, date, time, venue: exam.venue });
+    await autoGenerateSeating(exam);
 }
 async function editExam(id) {
     const exam = await dbGet('exams', id);
@@ -15167,7 +15232,7 @@ async function renderQuizzes() {
         const examRegs = allExamRegs.filter(r => r.studentId === studentId);
         const me = findStudentForCurrentUser(students, currentUser) || students.find(s => s.id === studentId);
         const myCenterId = me?.studyCenterId || '';
-        const filteredExams = allExams.filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId));
+        const filteredExams = allExams.filter(e => e.published !== false && e.date && e.time && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId));
         const studentSubmissions = submissions.filter(s => s.studentId === currentUser.username || s.studentId === studentId);
         const courseSelect = document.getElementById('quiz-course');
         const currentFilter = courseSelect.value;
@@ -18783,7 +18848,11 @@ async function checkMissingExamsAlert() {
     const now = Date.now();
     const alerts = [];
     for (const exam of exams) {
+        // An exam that is set but not scheduled has no date: it must never
+        // raise "missing exam" alerts.
+        if (!exam.date || !exam.time) continue;
         const examDate = new Date(exam.date || exam.examDate).getTime();
+        if (!examDate || isNaN(examDate)) continue;
         if (examDate > now) continue;
         const registeredIds = registrations.filter(r => r.examId === exam.id).map(r => r.studentId);
         const submittedStudentIds = submissions.filter(s => s.quizId === exam.id).map(s => s.studentId);
@@ -23139,7 +23208,9 @@ async function sendComposedMessage() {
 init().catch(function(e) { console.error('init bootstrap failed:', e); });
 
 document.addEventListener('DOMContentLoaded', function() {
-    if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect();
+    // Payroll data is behind the store guard: only touch it when a session exists
+    // (it is re-run on login, so the dropdown is populated then).
+    if (typeof storedToken === 'function' && storedToken() && typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect();
     document.getElementById('notif-bell')?.addEventListener('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
