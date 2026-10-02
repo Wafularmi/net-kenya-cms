@@ -7540,69 +7540,138 @@ async function handleEditSigRemove(type) {
 }
 function printExpenseVoucher(expenseId) {
     const paperSize = window._voucherPaperSize || 'A4';
+    dbGetAll('expenses').then(async expenses => {
+        const expense = expenses.find(e => e.id === expenseId);
+        if (!expense) return showToast('Expense not found!');
+        const branding = await dbGet('settings', 'branding').catch(() => null);
+        const saved = await dbGet('settings', 'pettyCashVoucherDesign').catch(() => null);
+        const template = saved ? saved.template : 1;
+        const sigs = { receivedSignature: expense.receivedSignature || saved?.receivedSignature || '', paidSignature: expense.paidSignature || saved?.paidSignature || '' };
+        window._voucherBranding = {
+            schoolName: branding?.schoolName || 'PETTY CASH VOUCHER',
+            logo: branding?.logo || '',
+            initials: branding?.initials || 'PV',
+            accentColor: branding?.accentColor || '#1e293b'
+        };
+        const html = renderVoucherHtml(expense, template, sigs);
+        const w = openVoucherPrintWindow(html, paperSize);
+        if (w) w.print();
+    });
+}
+// html2canvas renders any element positioned OUTSIDE the viewport as an empty
+// canvas. The voucher download used to park its markup at
+// position:fixed; top:-9999px, so the saved PDF came out blank even though the
+// preview (which is on screen) was perfect. Keep the capture node in normal
+// flow at the top-left and push it behind the page instead.
+function voucherCaptureNode(html) {
+    const node = document.createElement('div');
+    node.style.cssText = 'position:absolute;left:0;top:0;width:210mm;background:#fff;z-index:-2147483647;';
+    node.innerHTML = html;
+    document.body.appendChild(node);
+    return node;
+}
+// Images (logo, both signatures) must be decoded before html2canvas captures,
+// otherwise they can come out missing even on a successful render.
+function voucherImagesReady(node) {
+    const imgs = Array.from(node.querySelectorAll('img'));
+    return Promise.all(imgs.map(img => {
+        if (img.complete && img.naturalWidth) return Promise.resolve();
+        return new Promise(res => {
+            const done = () => res();
+            img.addEventListener('load', done, { once: true });
+            img.addEventListener('error', done, { once: true });
+        });
+    }));
+}
+// Safety net: if the capture really is blank (all-white), fall back to the print
+// window, which is known to render correctly, instead of saving an empty file.
+function voucherCanvasBlank(canvas) {
+    try {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, h = canvas.height;
+        if (!w || !h) return true;
+        const step = Math.max(1, Math.floor(Math.min(w, h) / 400));
+        const data = ctx.getImageData(0, 0, w, h).data;
+        for (let y = 0; y < h; y += step) {
+            for (let x = 0; x < w; x += step) {
+                const i = (y * w + x) * 4;
+                if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) return false;
+            }
+        }
+        return true;
+    } catch (e) { return false; }
+}
+function openVoucherPrintWindow(html, paperSize) {
     const pageCss = paperSize === 'A5' ? '@page{size:A5;margin:8mm;}'
         : paperSize === 'A6' ? '@page{size:A6;margin:6mm;}'
         : '@page{size:A4;margin:10mm;}';
     const bodyFontSize = paperSize === 'A6' ? '7px' : paperSize === 'A5' ? '8px' : '10px';
-    dbGetAll('expenses').then(async expenses => {
-        const expense = expenses.find(e => e.id === expenseId);
-        if (!expense) return showToast('Expense not found!');
-        const branding = await dbGet('settings', 'branding').catch(() => null);
-        const saved = await dbGet('settings', 'pettyCashVoucherDesign').catch(() => null);
-        const template = saved ? saved.template : 1;
-        const sigs = { receivedSignature: expense.receivedSignature || saved?.receivedSignature || '', paidSignature: expense.paidSignature || saved?.paidSignature || '' };
-        window._voucherBranding = {
-            schoolName: branding?.schoolName || 'PETTY CASH VOUCHER',
-            logo: branding?.logo || '',
-            initials: branding?.initials || 'PV',
-            accentColor: branding?.accentColor || '#1e293b'
-        };
-        const html = renderVoucherHtml(expense, template, sigs);
-        const w = window.open('', '_blank', 'width=800,height=600');
-        w.document.write('<html><head><title>Petty Cash Voucher</title><style>'
-            + 'body{font-family:Segoe UI,Arial,sans-serif;margin:0;padding:5px;background:#fff;font-size:' + bodyFontSize + ';}'
-            + pageCss
-            + '*{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important;}'
-            + '</style></head><body><div id="voucher-print">' + html + '</div></body></html>');
-        w.document.close();
-        w.print();
-    });
+    const w = window.open('', '_blank', 'width=800,height=600');
+    if (!w) { showToast('Allow pop-ups to print the voucher', { type: 'danger' }); return null; }
+    w.document.write('<html><head><title>Petty Cash Voucher</title><style>'
+        + 'body{font-family:Segoe UI,Arial,sans-serif;margin:0;padding:5px;background:#fff;font-size:' + bodyFontSize + ';}'
+        + pageCss
+        + '*{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important;}'
+        + '</style></head><body><div id="voucher-print">' + html + '</div></body></html>');
+    w.document.close();
+    return w;
 }
-function downloadVoucherPdf(expenseId) {
+async function downloadVoucherPdf(expenseId) {
     const paperSize = window._voucherPaperSize || 'A4';
-    const bodyFontSize = paperSize === 'A6' ? '7px' : paperSize === 'A5' ? '8px' : '10px';
-    dbGetAll('expenses').then(async expenses => {
-        const expense = expenses.find(e => e.id === expenseId);
-        if (!expense) return showToast('Expense not found!');
-        const branding = await dbGet('settings', 'branding').catch(() => null);
-        const saved = await dbGet('settings', 'pettyCashVoucherDesign').catch(() => null);
-        const template = saved ? saved.template : 1;
-        const sigs = { receivedSignature: expense.receivedSignature || saved?.receivedSignature || '', paidSignature: expense.paidSignature || saved?.paidSignature || '' };
-        window._voucherBranding = {
-            schoolName: branding?.schoolName || 'PETTY CASH VOUCHER',
-            logo: branding?.logo || '',
-            initials: branding?.initials || 'PV',
-            accentColor: branding?.accentColor || '#1e293b'
-        };
-        const html = renderVoucherHtml(expense, template, sigs);
-        const fullDoc = '<html><head><title>Petty Cash Voucher</title><style>'
-            + 'body{font-family:Segoe UI,Arial,sans-serif;margin:0;padding:10px;background:#fff;font-size:' + bodyFontSize + ';}'
-            + '*{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important;}'
-            + '</style></head><body>' + html + '</body></html>';
-        if (typeof html2pdf === 'undefined') {
-            const w = window.open('', '_blank', 'width=800,height=600');
-            w.document.write(fullDoc);
-            w.document.close();
-            showToast('Select "Save as PDF" in the print dialog');
-            setTimeout(() => w.print(), 500);
-            return;
-        }
-        const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:210mm;background:#fff;';
-        wrapper.innerHTML = html;
-        document.body.appendChild(wrapper);
-        html2pdf().set({ margin: 10, filename: 'voucher-' + expense.voucherNo + '.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' } }).from(wrapper).save().then(() => { document.body.removeChild(wrapper); });
-    });
+    const expenses = await dbGetAll('expenses');
+    const expense = expenses.find(e => e.id === expenseId);
+    if (!expense) return showToast('Expense not found!');
+    const branding = await dbGet('settings', 'branding').catch(() => null);
+    const saved = await dbGet('settings', 'pettyCashVoucherDesign').catch(() => null);
+    const template = saved ? saved.template : 1;
+    const sigs = { receivedSignature: expense.receivedSignature || saved?.receivedSignature || '', paidSignature: expense.paidSignature || saved?.paidSignature || '' };
+    window._voucherBranding = {
+        schoolName: branding?.schoolName || 'PETTY CASH VOUCHER',
+        logo: branding?.logo || '',
+        initials: branding?.initials || 'PV',
+        accentColor: branding?.accentColor || '#1e293b'
+    };
+    const html = renderVoucherHtml(expense, template, sigs);
+    const filename = 'voucher-' + (expense.voucherNo || expense.id) + '.pdf';
+    const printFallback = () => {
+        const w = openVoucherPrintWindow(html, paperSize);
+        if (w) { showToast('Use "Save as PDF" in the print dialog'); setTimeout(() => w.print(), 400); }
+    };
+    if (typeof html2canvas === 'undefined' || !(window.jspdf && window.jspdf.jsPDF)) {
+        return printFallback();
+    }
+    const node = voucherCaptureNode(html);
+    try {
+        await voucherImagesReady(node);
+        const canvas = await html2canvas(node, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+            windowWidth: document.documentElement.offsetWidth
+        });
+        if (voucherCanvasBlank(canvas)) return printFallback();
+        const JsPDF = window.jspdf.jsPDF;
+        const pdf = new JsPDF({ unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' });
+        const pageW = pdf.internal.pageSize.getWidth();
+        const pageH = pdf.internal.pageSize.getHeight();
+        const margin = 10;
+        const imgW = pageW - margin * 2;
+        const pxPerMm = canvas.width / imgW;
+        const imgH = canvas.height / pxPerMm;
+        const usableH = pageH - margin * 2;
+        // A voucher is short, so it fits one page; if a tall one ever overflows,
+        // scale it down rather than silently dropping content.
+        const scale = imgH > usableH ? usableH / imgH : 1;
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW * scale, imgH * scale);
+        pdf.save(filename);
+        showToast('Voucher downloaded');
+    } catch (e) {
+        console.error('voucher pdf failed:', e);
+        printFallback();
+    } finally {
+        node.remove();
+    }
 }
 function showCashBook() {
     const content = `
