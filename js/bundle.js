@@ -1031,13 +1031,13 @@ async function saveMaintenanceMode() {
 }
 
 async function initAuth() {
-    try {
-        const adminExists = await dbGet('users', 'admin');
-        if (!adminExists) {
-            const pwHash = await hashPassword('admin123');
-            await dbPut('users', { username: 'admin', password: pwHash, name: 'Administrator', role: 'admin', createdAt: new Date().toISOString() });
-        }
-    } catch (e) { console.error('initAuth admin check failed:', e); }
+    // NOTE: there used to be a block here that re-created the `admin` account
+    // (with a hardcoded default password) whenever dbGet('users','admin') did
+    // not return a record. dbGet fails open — an unauthenticated call throws
+    // 403, a transient miss returns null — so that block silently OVERWROTE a
+    // real admin account with a fresh default one, destroying its password and
+    // profile. Account creation must never happen as a side effect of loading a
+    // page. Admin accounts are created deliberately, from the Users screen.
     try { await loadBranding(); } catch (e) { console.error('initAuth loadBranding failed:', e); }
     try { await initAcademicCache(); } catch (e) { console.error('initAuth initAcademicCache failed:', e); }
     try { await checkAllAccountActivity(); } catch (e) { console.error('initAuth checkAllAccountActivity failed:', e); }
