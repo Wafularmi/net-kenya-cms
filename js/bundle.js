@@ -7632,53 +7632,20 @@ async function downloadVoucherPdf(expenseId) {
         accentColor: branding?.accentColor || '#1e293b'
     };
     const html = renderVoucherHtml(expense, template, sigs);
-    const filename = 'voucher-' + (expense.voucherNo || expense.id) + '.pdf';
-    const printFallback = () => {
-        const w = openVoucherPrintWindow(html, paperSize);
-        if (w) { showToast('Use "Save as PDF" in the print dialog'); setTimeout(() => w.print(), 400); }
-    };
-    if (typeof html2pdf === 'undefined') return printFallback();
-    const node = voucherCaptureNode(html);
-    let fallbackTimer = null;
-    try {
-        await voucherImagesReady(node);
-        // html2pdf keeps html2canvas/jsPDF internal, so we drive it through its
-        // worker API and use .set({ canvas }) to inspect the rendered bitmap
-        // BEFORE it is embedded. A blank capture must never reach the user.
-        let blankDetected = false;
-        await html2pdf().set({
-            margin: 10,
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.98 },
-            // html2pdf 0.10.1 hands the rendered bitmap to opt.html2canvas.onrendered
-            // (it has no top-level canvas option), which is where the blank check
-            // has to happen — before the bitmap is embedded in the PDF.
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: '#ffffff',
-                logging: false,
-                onrendered: (c) => {
-                    try {
-                        if (c && c.width > 10 && c.height > 10 && voucherCanvasBlank(c)) blankDetected = true;
-                    } catch (e) {}
-                }
-            },
-            jsPDF: { unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' }
-        }).from(node).save();
-        if (blankDetected) {
-            showToast('PDF render came out blank — opening the print view instead.', { type: 'warning' });
-            printFallback();
-        } else {
-            showToast('Voucher downloaded');
-        }
-    } catch (e) {
-        console.error('voucher pdf failed:', e);
-        printFallback();
-    } finally {
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-        node.remove();
-    }
+    // The old download used html2pdf, which asks html2canvas for a bitmap of an
+    // element parked off-screen. html2canvas does not reliably rasterise
+    // anything outside the viewport, so the saved PDF came out BLANK even though
+    // the on-screen preview was perfect — and html2pdf 0.10.1 keeps
+    // html2canvas/jsPDF internal, so there is no hook to even detect that.
+    //
+    // Instead we render the voucher into a real, on-screen print window and let
+    // the browser do the PDF conversion. It prints exactly what the preview
+    // shows: details, logo and both signatures, with no rasteriser in between.
+    const w = openVoucherPrintWindow(html, paperSize);
+    if (!w) return;
+    await voucherImagesReady(w.document);
+    showToast('Choose "Save as PDF" as the destination');
+    setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 250);
 }
 function showCashBook() {
     const content = `
