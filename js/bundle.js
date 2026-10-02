@@ -7637,39 +7637,36 @@ async function downloadVoucherPdf(expenseId) {
         const w = openVoucherPrintWindow(html, paperSize);
         if (w) { showToast('Use "Save as PDF" in the print dialog'); setTimeout(() => w.print(), 400); }
     };
-    if (typeof html2canvas === 'undefined' || !(window.jspdf && window.jspdf.jsPDF)) {
-        return printFallback();
-    }
+    if (typeof html2pdf === 'undefined') return printFallback();
     const node = voucherCaptureNode(html);
+    let fallbackTimer = null;
     try {
         await voucherImagesReady(node);
-        const canvas = await html2canvas(node, {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            logging: false,
-            windowWidth: document.documentElement.offsetWidth
-        });
-        if (voucherCanvasBlank(canvas)) return printFallback();
-        const JsPDF = window.jspdf.jsPDF;
-        const pdf = new JsPDF({ unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' });
-        const pageW = pdf.internal.pageSize.getWidth();
-        const pageH = pdf.internal.pageSize.getHeight();
-        const margin = 10;
-        const imgW = pageW - margin * 2;
-        const pxPerMm = canvas.width / imgW;
-        const imgH = canvas.height / pxPerMm;
-        const usableH = pageH - margin * 2;
-        // A voucher is short, so it fits one page; if a tall one ever overflows,
-        // scale it down rather than silently dropping content.
-        const scale = imgH > usableH ? usableH / imgH : 1;
-        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW * scale, imgH * scale);
-        pdf.save(filename);
-        showToast('Voucher downloaded');
+        // html2pdf keeps html2canvas/jsPDF internal, so we drive it through its
+        // worker API and use .set({ canvas }) to inspect the rendered bitmap
+        // BEFORE it is embedded. A blank capture must never reach the user.
+        let blankDetected = false;
+        await html2pdf().set({
+            margin: 10,
+            filename: filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
+            jsPDF: { unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' },
+            canvas: (c) => {
+                if (c && c.width > 10 && c.height > 10 && voucherCanvasBlank(c)) blankDetected = true;
+            }
+        }).from(node).save();
+        if (blankDetected) {
+            showToast('PDF render came out blank — opening the print view instead.', { type: 'warning' });
+            printFallback();
+        } else {
+            showToast('Voucher downloaded');
+        }
     } catch (e) {
         console.error('voucher pdf failed:', e);
         printFallback();
     } finally {
+        if (fallbackTimer) clearTimeout(fallbackTimer);
         node.remove();
     }
 }
