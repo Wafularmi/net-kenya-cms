@@ -7650,11 +7650,21 @@ async function downloadVoucherPdf(expenseId) {
             margin: 10,
             filename: filename,
             image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
-            jsPDF: { unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' },
-            canvas: (c) => {
-                if (c && c.width > 10 && c.height > 10 && voucherCanvasBlank(c)) blankDetected = true;
-            }
+            // html2pdf 0.10.1 hands the rendered bitmap to opt.html2canvas.onrendered
+            // (it has no top-level canvas option), which is where the blank check
+            // has to happen — before the bitmap is embedded in the PDF.
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                logging: false,
+                onrendered: (c) => {
+                    try {
+                        if (c && c.width > 10 && c.height > 10 && voucherCanvasBlank(c)) blankDetected = true;
+                    } catch (e) {}
+                }
+            },
+            jsPDF: { unit: 'mm', format: paperSize.toLowerCase(), orientation: 'portrait' }
         }).from(node).save();
         if (blankDetected) {
             showToast('PDF render came out blank — opening the print view instead.', { type: 'warning' });
