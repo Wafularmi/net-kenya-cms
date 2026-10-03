@@ -4758,8 +4758,10 @@ async function renderExams() {
             return ad.localeCompare(bd);
         });
         const today = new Date().toISOString().split('T')[0];
-        const upcoming = sorted.filter(e => e.date >= today);
-        const past = sorted.filter(e => e.date < today);
+        // An open-ended exam has no closing date, so it is always "upcoming" -
+        // it must never appear under Past, or students would assume it is closed.
+        const upcoming = sorted.filter(e => e.openWindow || e.date >= today);
+        const past = sorted.filter(e => !e.openWindow && e.date < today);
         const retakeRequests = await dbGetAll('retakeRequests');
         const myRetakeExamIds = new Set(retakeRequests.filter(r => r.studentId === studentId && r.status !== 'rejected').map(r => r.examId));
         const submissions = await dbGetAll('submissions');
