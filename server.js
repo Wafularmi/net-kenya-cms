@@ -208,7 +208,7 @@ function externalizeStoreRecords(store, rows) {
         }
         out.push(maybeReinjectArchived(maybeStripInline(res.record)));
     }
-    if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
+    if (changed) { try { broadcastStoreChange(store, toStore); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
     return out;
 }
 // Heavy settings blobs (PDF templates) live on disk, NOT in server-data.json.
@@ -334,7 +334,7 @@ function backfillCertIdentifiers(store, rows) {
         }
         out.push(rec);
     }
-    if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('backfillCertIdentifiers save failed:', e); } }
+    if (changed) { try { broadcastStoreChange(store, toStore); saveDB(); } catch (e) { console.error('backfillCertIdentifiers save failed:', e); } }
     return out;
 }
 function certVerifyCode() {
@@ -548,16 +548,43 @@ try {
 } catch {}
 
 // ---- End crash-safe data layer ----
-function broadcastEvent(event, data) {
-    const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+function broadcastEvent(event, data, filter) {
+    // `filter(client)` decides who receives this payload. It exists so private
+    // records (staff <-> student messages) are pushed ONLY to the people who own
+    // them, instead of being broadcast to every signed-in browser.
     for (let i = sseClients.length - 1; i >= 0; i--) {
         const client = sseClients[i];
-        if (!client.res.writableEnded) {
-            client.res.write(msg);
-        } else {
-            sseClients.splice(i, 1);
+        if (client.res.writableEnded) { sseClients.splice(i, 1); continue; }
+        let payload = data;
+        if (filter) {
+            let ok = false;
+            try { ok = !!filter(client, data); } catch (e) { ok = false; }
+            if (!ok) continue;
+            if (typeof filter.payload === 'function') {
+                try { payload = filter.payload(client, data); } catch (e) { continue; }
+            }
         }
+        try { client.res.write('event: ' + event + '\ndata: ' + JSON.stringify(payload) + '\n\n'); } catch (e) {}
     }
+}
+
+// Push the changed row along with the event so the client can update its screen
+// from what it already has, instead of refetching (one round-trip is ~700ms here).
+function broadcastStoreChange(store, record, action) {
+    const payload = { store: store, action: action || (record ? 'upsert' : 'change') };
+    if (record) payload.record = record;
+    broadcastEvent('db-change', payload);
+}
+
+// Private store: only the sender and the recipient receive the row itself.
+function broadcastPrivateChange(store, record, usernames) {
+    const allow = new Set((usernames || []).filter(Boolean).map(String));
+    const filter = function (c) {
+        const un = (c.user && c.user.username) || c.username || '';
+        return allow.has(String(un));
+    };
+    filter.payload = function () { return { store: store, action: 'upsert', record: record }; };
+    broadcastEvent('db-change', filter.payload(), filter);
 }
 
 const MIME = {
@@ -2275,7 +2302,8 @@ function handleAPI(req, res) {
         });
         res.write('\n');
         const client = { res, id: Date.now() };
-        sseClients.push(client);
+        client.user = user && user.user ? user.user : (user || null);
+    sseClients.push(client);
         const keepalive = setInterval(() => {
             if (!res.writableEnded) res.write(': keepalive\n\n');
             else clearInterval(keepalive);
@@ -4266,7 +4294,7 @@ return json(res, 200, result);
                     else db[store].push(r);
                     result.ok++;
                 }
-                if (result.ok) { broadcastEvent('db-change', { store }); saveDB(); }
+                if (result.ok) { broadcastStoreChange(store, toStore); saveDB(); }
                 return json(res, 200, result);
             } catch (e) { return json(res, 400, { error: 'Invalid JSON' }); }
         });
@@ -4345,7 +4373,7 @@ return json(res, 200, result);
             if (store === 'students' || store === 'studyCenters' || store === 'regions') {
                 invalidateCountryIndex();
             }
-            broadcastEvent('db-change', { store }); saveDB();
+            broadcastStoreChange(store, toStore); saveDB();
         }
 
         // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)

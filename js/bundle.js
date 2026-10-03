@@ -2290,7 +2290,7 @@ const _refreshMap = {
     courses: (r) => { refreshPortal('courses', r); if (isScreenActive('courses')) renderCourses(); },
     lessons: (r) => { refreshPortal('lessons', r); if (isScreenActive('courses')) renderCourses(); },
     quizzes: (r) => { refreshPortal('quizzes', r); if (isScreenActive('quizzes')) renderQuizzes(); },
-    exams: (r) => { refreshPortal('exams', r); scheduleLiveRender(() => { if (isScreenActive('quizzes')) renderQuizzes(); if (isScreenActive('exams')) renderExams(); }); },
+    exams: (r) => { refreshPortal('exams', r); const d = r && r.data ? r.data : r; const applied = applyLiveRecord('exams', d && d.record, d && d.action); scheduleLiveRender(() => { if (isScreenActive('quizzes')) renderQuizzes(); if (isScreenActive('exams')) renderExams(applied ? { fromCache: true } : undefined); }); },
     questions: () => { if (isScreenActive('questions')) renderQuestionBank(); },
     enrollments: (r) => { refreshPortal('enrollments', r); if (isScreenActive('courses')) renderCourses(); },
     submissions: (r) => { refreshPortal('submissions', r); if (isScreenActive('quizzes')) renderQuizzes(); },
@@ -4722,16 +4722,51 @@ function getGrade(score) {
     return { grade: 'F', gpa: 0.0 };
 }
 
-async function renderExams() {
+// Live cache for the Exams screen. renderExams() fills this on its first run
+// and then renders straight from it, so an SSE "db-change" carrying the new row
+// updates the student's screen with ZERO extra round-trips (each one costs
+// ~700ms on this server, which is what made new exams appear only on refresh).
+let _examsLiveCache = null;
+function applyLiveRecord(store, record, action) {
+    if (!_examsLiveCache || !record) return false;
+    const list = _examsLiveCache[store];
+    if (!Array.isArray(list)) return false;
+    const key = 'id';
+    if (action === 'delete') {
+        const i = list.findIndex(r => String(r[key]) === String(record[key]));
+        if (i >= 0) list.splice(i, 1);
+        return true;
+    }
+    const i = list.findIndex(r => String(r[key]) === String(record[key]));
+    if (i >= 0) list[i] = Object.assign({}, list[i], record);
+    else list.push(record);
+    return true;
+}
+async function renderExams(opts) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
     const isCoord = currentUser.role === 'coordinator';
-    // One batched request instead of six sequential ones. The serial version
+// One batched request instead of six sequential ones. The serial version
     // took seconds to paint, so a newly posted exam could sit invisible for
     // ~8s after the live-update event arrived.
-    const stores = ['exams', 'courses', 'enrollments', 'examRegistrations', 'retakeRequests'];
-    if (!isStudentUser) stores.push('staff');
-    const batch = await dbGetBatch(stores).catch(() => ({}));
+    // opts.fromCache: a live update already delivered the changed row, so render
+    // straight from the cache — no round-trip at all (each costs ~700ms here).
+    let batch = (opts && opts.fromCache) ? _examsLiveCache : null;
+    if (!batch) {
+        const stores = ['exams', 'courses', 'enrollments', 'examRegistrations', 'retakeRequests'];
+        if (!isStudentUser) stores.push('staff');
+        batch = await dbGetBatch(stores).catch(() => ({}));
+        _examsLiveCache = {
+            exams: batch.exams || [],
+            courses: batch.courses || [],
+            enrollments: batch.enrollments || [],
+            examRegistrations: batch.examRegistrations || [],
+            retakeRequests: batch.retakeRequests || [],
+            staff: batch.staff || [],
+            centers: await getCenters(),
+            loadedAt: Date.now()
+        };
+    }
     const exams = batch.exams || [];
     const courses = batch.courses || [];
     const enrollments = batch.enrollments || [];
@@ -4741,7 +4776,7 @@ async function renderExams() {
     // unconditionally threw and aborted the whole student exam list, so only
     // staff load it - and never let it break the render.
     const staff = batch.staff || [];
-    const centers = await getCenters();
+    const centers = batch.centers || await getCenters();
     // 'all' means every semester. A student has no way of knowing which
     // semester an exam belongs to, so the default view must not hide it.
     const semRaw = document.getElementById('exam-semester').value;
@@ -16054,6 +16089,17 @@ function applyInterfaceLanguage() {
 // Coalesce live-update re-renders: a single staff action often writes
 // several stores, and re-rendering once per event queue up redundant full
 // reloads. One trailing render per burst keeps updates near-instant.
+// Apply a pushed row to whichever live cache holds that store, so the next
+// render needs no network at all.
+function patchLiveCaches(d) {
+    if (!d || !d.record) return false;
+    const store = d.store;
+    if (store === 'exams') return applyLiveRecord('exams', d.record, d.action);
+    if (store === 'courses') return applyLiveRecord('courses', d.record, d.action);
+    if (store === 'enrollments') return applyLiveRecord('enrollments', d.record, d.action);
+    if (store === 'examRegistrations') return applyLiveRecord('examRegistrations', d.record, d.action);
+    return false;
+}
 let _liveRenderTimer = null;
 function scheduleLiveRender(fn) {
     if (_liveRenderTimer) clearTimeout(_liveRenderTimer);
