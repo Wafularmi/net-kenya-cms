@@ -4728,7 +4728,10 @@ async function renderExams() {
     const isCoord = currentUser.role === 'coordinator';
     let exams = await dbGetAll('exams');
     const courses = await dbGetAll('courses');
-    const staff = await dbGetAll('staff');
+    // Students have no access to the staff store (403). Fetching it
+    // unconditionally threw and aborted the whole student exam list, so only
+    // staff load it - and never let it break the render.
+    const staff = (currentUser && currentUser.role === 'student') ? [] : await dbGetAll('staff').catch(() => []);
     const enrollments = await dbGetAll('enrollments');
     const centers = await getCenters();
     let registrations = await dbGetAll('examRegistrations');
