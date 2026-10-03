@@ -7563,13 +7563,7 @@ function printExpenseVoucher(expenseId) {
 // position:fixed; top:-9999px, so the saved PDF came out blank even though the
 // preview (which is on screen) was perfect. Keep the capture node in normal
 // flow at the top-left and push it behind the page instead.
-function voucherCaptureNode(html) {
-    const node = document.createElement('div');
-    node.style.cssText = 'position:absolute;left:0;top:0;width:210mm;background:#fff;z-index:-2147483647;';
-    node.innerHTML = html;
-    document.body.appendChild(node);
-    return node;
-}
+
 // Images (logo, both signatures) must be decoded before html2canvas captures,
 // otherwise they can come out missing even on a successful render.
 function voucherImagesReady(node) {
@@ -7585,22 +7579,7 @@ function voucherImagesReady(node) {
 }
 // Safety net: if the capture really is blank (all-white), fall back to the print
 // window, which is known to render correctly, instead of saving an empty file.
-function voucherCanvasBlank(canvas) {
-    try {
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width, h = canvas.height;
-        if (!w || !h) return true;
-        const step = Math.max(1, Math.floor(Math.min(w, h) / 400));
-        const data = ctx.getImageData(0, 0, w, h).data;
-        for (let y = 0; y < h; y += step) {
-            for (let x = 0; x < w; x += step) {
-                const i = (y * w + x) * 4;
-                if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) return false;
-            }
-        }
-        return true;
-    } catch (e) { return false; }
-}
+
 function openVoucherPrintWindow(html, paperSize) {
     const pageCss = paperSize === 'A5' ? '@page{size:A5;margin:8mm;}'
         : paperSize === 'A6' ? '@page{size:A6;margin:6mm;}'
