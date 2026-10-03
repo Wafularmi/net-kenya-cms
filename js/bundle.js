@@ -599,6 +599,40 @@ function countryForRecipient(student) {
     }
     return '';
 }
+// Ask the server to translate English text into Swahili.
+// The Google key lives only on the server (TRANSLATE_API_KEY env var); the
+// browser never sees it. Without a key the server replies 501 and we return
+// null so callers can keep the English text instead of breaking.
+async function translateToSw(texts) {
+    const list = Array.isArray(texts) ? texts : [texts];
+    const clean = list.map(t => String(t == null ? '' : t)).filter(t => t.trim());
+    if (!clean.length) return { ok: true, translations: [] };
+    try {
+        const res = await fetch('/api/translate', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ texts: clean, target: 'sw' })
+        });
+        if (res.status === 501) return { ok: false, reason: 'no_key', translations: [] };
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !Array.isArray(data.translations)) {
+            return { ok: false, reason: (data && data.error) || 'error', translations: [] };
+        }
+        return { ok: true, translations: data.translations };
+    } catch (e) {
+        return { ok: false, reason: 'network', translations: [] };
+    }
+}
+// Swahili labels for the question-bank UI.
+const Q_UI_SW = {
+    multipleChoice: 'Chagua Jibu', trueFalse: 'Kweli / Sio kweli', matching: 'Linganisha',
+    fillBlanks: 'Jaza nafasi', essay: 'Insha',
+    course: 'Kozi', lesson: 'Somo', questionType: 'Aina ya Swali', points: 'Alama',
+    options: 'Chaguo (moja kwa mstari)', correctAnswers: 'Majibu Sahihi',
+    questionEn: 'Swali (Kiingereza)', questionSw: 'Swali (Kiswahili)',
+    save: 'Hifadhi', cancel: 'Ghairi', translating: 'Inatumafasi...', translate: 'Tafsiri kwa Kiswahili'
+};
+function tfSelectLabel(label, lang) { return (lang || appLang()) === 'sw' && Q_UI_SW[label] ? Q_UI_SW[label] : label; }
 function canManageStudents() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -2063,6 +2097,7 @@ const session = sessionStorage.getItem('currentUser');
             }
         }
         await initAuth();
+        try { if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage(); } catch (e) {}
         startAutoRefresh();
     } catch (err) {
         console.error('App initialization failed:', err);
@@ -14862,7 +14897,7 @@ async function saveNoteForLesson(lessonId) {
 async function showQuestionForLesson(lessonId) {
     const lesson = await dbGet('lessons', lessonId);
     const courses = await dbGetAll('courses');
-    const content = `<input type="hidden" id="q-lesson-id" value="${lessonId}"><div class="form-group"><label>Course</label><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;">${(await dbGet('courses', lesson.courseId))?.name || 'Unknown'}</div></div><div class="form-row"><div class="form-group"><label>Question Type *</label><select id="q-type" onchange="toggleQuestionFields()"><option value="mcq">Multiple Choice (MCQ)</option><option value="truefalse">True / False</option><option value="matching">🔗 Matching</option><option value="essay">Essay / Written</option></select></div><div class="form-group"><label>Points *</label><input type="number" id="q-points" value="1" min="1" style="width:80px;"></div></div><div class="form-group"><label>Question *</label><textarea id="q-text" rows="3"></textarea></div><div id="q-mcq-fields"><div class="form-group"><label>Options (one per line)</label><textarea id="q-options" rows="4" placeholder="Option A\nOption B\nOption C\nOption D" oninput="renderLessonMCQCheckboxes()"></textarea></div><div class="form-group"><label>Correct Answers (check ALL that apply)</label><div id="q-answer-checkboxes" style="padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="font-size:11px;color:var(--text-muted);">💡 Check every option that is correct.</div></div><div id="q-tf-fields" style="display:none;"><div class="form-group"><label>Correct Answer</label><select id="q-tf-answer"><option value="True">True</option><option value="False">False</option></select></div></div><div id="q-matching-fields" style="display:none;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Define matching pairs. Each line: <b>Left Item | Right Item</b>.</div><div class="form-group"><label>Matching Pairs</label><textarea id="q-pairs" rows="5" placeholder="Jesus Christ | Son of God\nMoses | Led Israelites out of Egypt\nDavid | King of Israel"></textarea></div></div><div id="q-essay-fields" style="display:none;"><div class="form-group"><label>Reference Answer / Key Points (one per line)</label><textarea id="q-rubric" rows="3" placeholder="Expected points for grading"></textarea></div></div>`;
+    const content = `<input type="hidden" id="q-lesson-id" value="${lessonId}"><div class="form-group"><label>Course</label><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;">${(await dbGet('courses', lesson.courseId))?.name || 'Unknown'}</div></div><div class="form-row"><div class="form-group"><label>Question Type *</label><select id="q-type" onchange="toggleQuestionFields()"><option value="mcq">${appLang() === 'sw' ? Q_UI_SW.multipleChoice : 'Multiple Choice (MCQ)'}</option><option value="truefalse">${appLang() === 'sw' ? Q_UI_SW.trueFalse : 'True / False'}</option><option value="matching">🔗 Matching</option><option value="essay">${appLang() === 'sw' ? Q_UI_SW.essay : 'Essay / Written'}</option></select></div><div class="form-group"><label>Points *</label><input type="number" id="q-points" value="1" min="1" style="width:80px;"></div></div><div class="form-group"><label>Question *</label><textarea id="q-text" rows="3"></textarea></div><div id="q-mcq-fields"><div class="form-group"><label>Options (one per line)</label><textarea id="q-options" rows="4" placeholder="Option A\nOption B\nOption C\nOption D" oninput="renderLessonMCQCheckboxes()"></textarea></div><div class="form-group"><label>Correct Answers (check ALL that apply)</label><div id="q-answer-checkboxes" style="padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="font-size:11px;color:var(--text-muted);">💡 Check every option that is correct.</div></div><div id="q-tf-fields" style="display:none;"><div class="form-group"><label>Correct Answer</label><select id="q-tf-answer"><option value="True">True</option><option value="False">False</option></select></div></div><div id="q-matching-fields" style="display:none;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Define matching pairs. Each line: <b>Left Item | Right Item</b>.</div><div class="form-group"><label>Matching Pairs</label><textarea id="q-pairs" rows="5" placeholder="Jesus Christ | Son of God\nMoses | Led Israelites out of Egypt\nDavid | King of Israel"></textarea></div><div class="form-group" style="margin-top:8px;"><label>Vinavyolingana (Kiswahili) &mdash; same order, use | between the two sides</label><textarea id="q-pairs-sw" rows="5" placeholder="Kushoto | Kulia"></textarea></div></div><div id="q-essay-fields" style="display:none;"><div class="form-group"><label>Reference Answer / Key Points (one per line)</label><textarea id="q-rubric" rows="3" placeholder="Expected points for grading"></textarea></div></div>`;
     showModal('Add Question to: ' + lesson.title, content, `<button class="btn btn-primary" onclick="saveQuestionForLesson('${lessonId}')">Save Question</button>`);
     renderLessonMCQCheckboxes();
     updatePointsPreview();
@@ -15023,7 +15058,7 @@ async function showQuestionForm(question = null) {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
     const isEdit = !!question;
-    const content = `<input type="hidden" id="q-edit-id" value="${question ? question.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="q-course" onchange="onQCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${question && question.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="q-lesson"><option value="">General (no lesson)</option></select></div></div><div class="form-group"><label>Question Type *</label><select id="q-type" onchange="toggleQuestionFields()"><option value="mcq" ${question && question.type === 'mcq' ? 'selected' : ''}>Multiple Choice (MCQ)</option><option value="truefalse" ${question && question.type === 'truefalse' ? 'selected' : ''}>True / False</option><option value="matching" ${question && question.type === 'matching' ? 'selected' : ''}>🔗 Matching</option><option value="fillin" ${question && question.type === 'fillin' ? 'selected' : ''}>📝 Fill in the Blanks</option><option value="essay" ${question && question.type === 'essay' ? 'selected' : ''}>Essay / Written</option></select></div><div class="form-row"><div class="form-group"><label>Points / Marks *</label><input type="number" id="q-points" value="${question ? question.points || 1 : 1}" min="1" style="width:100px;"></div><div class="form-group" style="padding-top:24px;font-size:11px;color:var(--text-muted);">Marks awarded for a fully correct answer</div></div><div class="form-group"><label>Language</label><div style="display:flex;gap:4px;margin-bottom:8px;"><button class="btn btn-sm btn-primary" id="lang-en-btn" onclick="setQLang('en')" style="font-size:11px;">EN</button><button class="btn btn-sm btn-outline" id="lang-sw-btn" onclick="setQLang('sw')" style="font-size:11px;">SW</button></div></div><div id="q-lang-en-fields"><div class="form-group"><label>Question (English) *</label><textarea id="q-text-en" rows="3">${question && question.questionEn ? question.questionEn : ''}</textarea></div></div><div id="q-lang-sw-fields" style="display:none;"><div class="form-group"><label>Swali (Swahili) *</label><textarea id="q-text-sw" rows="3">${question && question.questionSw ? question.questionSw : ''}</textarea></div></div><div id="q-mcq-fields" style="${question && question.type !== 'mcq' ? 'display:none;' : ''}"><div class="form-group"><label>Options (one per line)</label><textarea id="q-options" rows="4" placeholder="Option A&#10;Option B&#10;Option C&#10;Option D" oninput="renderMCQAnswerCheckboxes()">${question && question.options ? question.options.join('\n') : ''}</textarea></div><div class="form-group"><label>Correct Answers (check ALL that apply)</label><div id="q-answer-checkboxes" style="padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="font-size:11px;color:var(--text-muted);">💡 Check every option that is correct. Students must select ALL correct answers to get full marks.</div></div><div id="q-tf-fields" style="display:${question && question.type === 'truefalse' ? 'block' : 'none'};"><div class="form-group"><label>Correct Answer</label><select id="q-tf-answer"><option value="True" ${question && question.correctAnswer === 'True' ? 'selected' : ''}>True</option><option value="False" ${question && question.correctAnswer === 'False' ? 'selected' : ''}>False</option></select></div></div><div id="q-matching-fields" style="display:${question && question.type === 'matching' ? 'block' : 'none'};"><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Define matching pairs. Each line: <b>Left Item | Right Item</b>. Points will be divided evenly across pairs.</div><div class="form-group"><label>Matching Pairs</label><textarea id="q-pairs" rows="6" placeholder="Jesus Christ | Son of God&#10;Moses | Led Israelites out of Egypt&#10;David | King of Israel&#10;Paul | Apostle to the Gentiles">${question && question.pairs ? question.pairs.map(p => p.left + ' | ' + p.right).join('\n') : ''}</textarea></div></div><div id="q-essay-fields" style="display:${question && question.type === 'essay' ? 'block' : 'none'};"><div class="form-group"><label>Reference Answer / Key Points (one per line)</label><textarea id="q-rubric" rows="3" placeholder="Expected points for grading">${question && question.rubric ? question.rubric.join('\n') : ''}</textarea></div></div>`;
+    const content = `<input type="hidden" id="q-edit-id" value="${question ? question.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="q-course" onchange="onQCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${question && question.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="q-lesson"><option value="">General (no lesson)</option></select></div></div><div class="form-group"><label>Question Type *</label><select id="q-type" onchange="toggleQuestionFields()"><option value="mcq" ${question && question.type === 'mcq' ? 'selected' : ''}>Multiple Choice (MCQ)</option><option value="truefalse" ${question && question.type === 'truefalse' ? 'selected' : ''}>True / False</option><option value="matching" ${question && question.type === 'matching' ? 'selected' : ''}>🔗 Matching</option><option value="fillin" ${question && question.type === 'fillin' ? 'selected' : ''}>${appLang() === 'sw' ? '📝 ' + Q_UI_SW.fillBlanks : '📝 Fill in the Blanks'}</option><option value="essay" ${question && question.type === 'essay' ? 'selected' : ''}>Essay / Written</option></select></div><div class="form-row"><div class="form-group"><label>Points / Marks *</label><input type="number" id="q-points" value="${question ? question.points || 1 : 1}" min="1" style="width:100px;"></div><div class="form-group" style="padding-top:24px;font-size:11px;color:var(--text-muted);">Marks awarded for a fully correct answer</div></div><div class="form-group"><label>Language</label><div style="display:flex;gap:4px;margin-bottom:8px;"><button class="btn btn-sm btn-primary" id="lang-en-btn" onclick="setQLang('en')" style="font-size:11px;">EN</button><button class="btn btn-sm btn-outline" id="lang-sw-btn" onclick="setQLang('sw')" style="font-size:11px;">SW</button></div></div><div style="margin-top:6px;"><button class="btn btn-sm btn-outline" id="q-translate-btn" onclick="translateQuestionToSwahili()" style="font-size:11px;">🌐 Tafsiri kwa Kiswahili</button><span id="q-translate-status" style="font-size:11px;color:var(--text-muted);margin-left:8px;"></span></div><div id="q-lang-en-fields"><div class="form-group"><label>Question (English) *</label><textarea id="q-text-en" rows="3">${question && question.questionEn ? question.questionEn : ''}</textarea></div></div><div id="q-lang-sw-fields" style="display:none;"><div class="form-group"><label>Swali (Swahili) *</label><textarea id="q-text-sw" rows="3">${question && question.questionSw ? question.questionSw : ''}</textarea></div></div><div id="q-mcq-fields" style="${question && question.type !== 'mcq' ? 'display:none;' : ''}"><div class="form-group"><label>Options (one per line)</label><textarea id="q-options" rows="4" placeholder="Option A&#10;Option B&#10;Option C&#10;Option D" oninput="renderMCQAnswerCheckboxes()">${question && question.options ? question.options.join('\n') : ''}</textarea></div><div class="form-group"><label>Chaguo (Kiswahili) &mdash; translated, same order</label><textarea id="q-options-sw" rows="4" placeholder="Hii hujafanyiwa moja kwa moja"></textarea><div style="font-size:10px;color:var(--text-muted);">Leave the English options above as the source of truth; the correct answer stays the English option.</div></div><div class="form-group"><label>Correct Answers (check ALL that apply)</label><div id="q-answer-checkboxes" style="padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="font-size:11px;color:var(--text-muted);">💡 Check every option that is correct. Students must select ALL correct answers to get full marks.</div></div><div id="q-tf-fields" style="display:${question && question.type === 'truefalse' ? 'block' : 'none'};"><div class="form-group"><label>Correct Answer</label><select id="q-tf-answer"><option value="True" ${question && question.correctAnswer === 'True' ? 'selected' : ''}>${appLang() === 'sw' ? 'Kweli' : 'True'}</option><option value="False" ${question && question.correctAnswer === 'False' ? 'selected' : ''}>${appLang() === 'sw' ? 'Sio kweli' : 'False'}</option></select></div></div><div id="q-matching-fields" style="display:${question && question.type === 'matching' ? 'block' : 'none'};"><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Define matching pairs. Each line: <b>Left Item | Right Item</b>. Points will be divided evenly across pairs.</div><div class="form-group"><label>Matching Pairs</label><textarea id="q-pairs" rows="6" placeholder="Jesus Christ | Son of God&#10;Moses | Led Israelites out of Egypt&#10;David | King of Israel&#10;Paul | Apostle to the Gentiles">${question && question.pairs ? question.pairs.map(p => p.left + ' | ' + p.right).join('\n') : ''}</textarea></div></div><div id="q-essay-fields" style="display:${question && question.type === 'essay' ? 'block' : 'none'};"><div class="form-group"><label>Reference Answer / Key Points (one per line)</label><textarea id="q-rubric" rows="3" placeholder="Expected points for grading">${question && question.rubric ? question.rubric.join('\n') : ''}</textarea></div></div>`;
     showModal(isEdit ? 'Edit Question' : 'Add Question', content, `<button class="btn btn-primary" onclick="saveQuestion()">${isEdit ? 'Update' : 'Save'}</button>`);
     if (question) {
         onQCourseChange(question.lessonId);
@@ -15040,6 +15075,66 @@ function setQLang(lang) {
     document.getElementById('lang-sw-btn').className = 'btn btn-sm ' + (lang === 'sw' ? 'btn-primary' : 'btn-outline');
     document.getElementById('q-lang-en-fields').style.display = lang === 'en' ? 'block' : 'none';
     document.getElementById('q-lang-sw-fields').style.display = lang === 'sw' ? 'block' : 'none';
+}
+// Translate the English question + options into Swahili. The Google key stays
+// on the server; the browser just posts the English text and gets Swahili back.
+// Answer integrity is untouched: optionsSw / pairsSw are display-only copies and
+// correctAnswer still holds the English option.
+async function translateQuestionToSwahili() {
+    const enEl = document.getElementById('q-text-en');
+    const swEl = document.getElementById('q-text-sw');
+    if (!enEl || !swEl) return;
+    const enText = (enEl.value || '').trim();
+    const optEl = document.getElementById('q-options');
+    const optSwEl = document.getElementById('q-options-sw');
+    const matchEl = document.getElementById('q-pairs');
+    const matchSwEl = document.getElementById('q-pairs-sw');
+    const type = (document.getElementById('q-type') || {}).value;
+
+    const sources = [];
+    if (enText) sources.push(enText);
+    if (type === 'mcq' && optEl) {
+        (optEl.value || '').split('\n').map(o => o.trim()).filter(Boolean).forEach(o => sources.push(o));
+    }
+    if (type === 'matching' && matchEl) {
+        (matchEl.value || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+            const parts = l.split('|');
+            sources.push((parts[0] || '').trim(), (parts[1] || '').trim());
+        });
+    }
+    if (!sources.length) return showToast('Type the English question first', { type: 'warning' });
+
+    const statusEl = document.getElementById('q-translate-status');
+    const btn = document.getElementById('q-translate-btn');
+    if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
+    if (statusEl) statusEl.textContent = Q_UI_SW.translating;
+
+    const res = await translateToSw(sources);
+    if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
+
+    if (!res.ok) {
+        if (statusEl) statusEl.textContent = res.reason === 'no_key'
+            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
+            : 'Translation failed — please try again.';
+        return showToast(res.reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+    }
+    let i = 0;
+    if (enText) swEl.value = res.translations[i++] || '';
+    if (type === 'mcq' && optEl && optSwEl) {
+        const enOpts = (optEl.value || '').split('\n').map(o => o.trim()).filter(Boolean);
+        optSwEl.value = enOpts.map((_, k) => res.translations[i++] || '').join('\n');
+    }
+    if (type === 'matching' && matchEl && matchSwEl) {
+        const lines = (matchEl.value || '').split('\n').map(l => l.trim()).filter(Boolean);
+        matchSwEl.value = lines.map(() => {
+            const l = res.translations[i++] || '';
+            const rr = res.translations[i++] || '';
+            return l + ' | ' + rr;
+        }).join('\n');
+    }
+    setQLang('sw');
+    if (statusEl) statusEl.textContent = '✓ Kiswahili kimefaa. Angalia kisha uhakikishe.';
+    showToast('Translated to Swahili — please review');
 }
 function renderMCQAnswerCheckboxes(preselected) {
     const optionsRaw = document.getElementById('q-options').value.trim();
@@ -15221,9 +15316,17 @@ async function saveQuestion() {
         if (options.length < 2) return showToast('Need at least 2 options!');
         if (!correctAnswers.length) return showToast('Select at least one correct answer!');
         q.options = options;
+        // Swahili options are DISPLAY ONLY and must stay index-aligned with the
+        // English ones. correctAnswers keeps the English text, so grading never
+        // depends on the translation being present or correct.
+        const swRaw = (document.getElementById('q-options-sw') || { value: '' }).value.trim();
+        const optionsSw = swRaw.split('\n').map(o => o.trim()).filter(o => o);
+        if (optionsSw.length === options.length) q.optionsSw = optionsSw;
         q.correctAnswers = correctAnswers;
         q.correctAnswer = correctAnswers[0];
     } else if (type === 'truefalse') {
+        // The stored answer is ALWAYS English "True"/"False"; the screen shows
+        // Kweli / Sio kweli when Swahili is selected.
         q.correctAnswer = document.getElementById('q-tf-answer').value;
         q.correctAnswers = [q.correctAnswer];
     } else if (type === 'matching') {
@@ -15234,6 +15337,12 @@ async function saveQuestion() {
         }).filter(p => p);
         if (pairs.length < 2) return showToast('Need at least 2 matching pairs!');
         q.pairs = pairs;
+        const pairsSwRaw = (document.getElementById('q-pairs-sw') || { value: '' }).value.trim();
+        const pairsSw = pairsSwRaw.split('\n').map(l => {
+            const parts = l.split('|').map(s => s.trim());
+            return parts.length === 2 ? { left: parts[0], right: parts[1] } : null;
+        }).filter(p => p);
+        if (pairsSw.length === pairs.length) q.pairsSw = pairsSw;
     } else if (type === 'fillin') {
         const paragraph = document.getElementById('q-fill-paragraph').value.trim();
         if (!paragraph) return showToast('Paragraph is required!');
@@ -15837,6 +15946,7 @@ function setAppLang(lang) {
     try { const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); u.lang = lang === 'sw' ? 'sw' : 'en'; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
     try { if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage(); } catch (e) {}
     try { if (typeof renderCurrentScreen === 'function') renderCurrentScreen(); } catch (e) {}
+    try { if (typeof buildNavigation === 'function') buildNavigation(JSON.parse(sessionStorage.getItem('currentUser') || '{}')); } catch (e) {}
 }
 // Label shown on screen for a True/False answer. The stored value never changes.
 function tfLabel(value, lang) {
@@ -15872,6 +15982,27 @@ function questionPairs(q, lang) {
     const l = lang || appLang();
     if (l === 'sw' && Array.isArray(q.pairsSw) && q.pairsSw.length === (q.pairs || []).length && q.pairsSw.some(p => (p && p.right))) return q.pairsSw;
     return q.pairs || [];
+}
+// Highlight the active language in the header switcher.
+function applyInterfaceLanguage() {
+    try {
+        const lang = appLang();
+        document.querySelectorAll('#lang-switch button[data-lang]').forEach(b => {
+            const on = b.getAttribute('data-lang') === lang;
+            b.style.background = on ? 'var(--accent,#2563eb)' : 'transparent';
+            b.style.color = on ? '#fff' : 'var(--text-secondary)';
+            b.style.fontWeight = on ? '800' : '700';
+        });
+        document.documentElement.setAttribute('lang', lang);
+    } catch (e) {}
+}
+// Re-render whichever screen is open so the change is visible immediately.
+function renderCurrentScreen() {
+    try {
+        const last = sessionStorage.getItem('lastScreen') || 'dashboard';
+        const btn = document.querySelector('.nav-tab[data-screen="' + last + '"]');
+        if (btn) { showScreen(last); return; }
+    } catch (e) {}
 }
 async function renderStudentQuiz() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -16084,19 +16215,23 @@ function showQuizInterface(quiz, questions, lang) {
                 <span style="font-size:11px;font-weight:600;color:var(--accent,#2563eb);text-transform:uppercase;letter-spacing:0.5px;">Question ${idx + 1} of ${questions.length}</span>
                 <span style="background:#f1f5f9;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#64748b;">${pts} pt${pts !== 1 ? 's' : ''}</span>
             </div>
-            <div style="font-size:12px;margin-bottom:12px;color:#94a3b8;">${q.type === 'mcq' ? 'Multiple Choice' : q.type === 'essay' ? 'Essay' : q.type === 'matching' ? 'Matching' : q.type === 'fillin' ? 'Fill in the Blanks' : 'True / False'}</div>
+            <div style="font-size:12px;margin-bottom:12px;color:#94a3b8;">${q.type === 'mcq' ? (lang === 'sw' ? 'Chagua Jibu' : 'Multiple Choice') : q.type === 'essay' ? (lang === 'sw' ? 'Insha' : 'Essay') : q.type === 'matching' ? (lang === 'sw' ? 'Linganisha' : 'Matching') : q.type === 'fillin' ? (lang === 'sw' ? 'Jaza nafasi' : 'Fill in the Blanks') : (lang === 'sw' ? 'Kweli / Sio kweli' : 'True / False')}</div>
             <div style="font-size:16px;font-weight:600;color:#1e293b;margin-bottom:20px;line-height:1.5;">${getQuestionText(q, lang)}</div>
         `;
         if (q.type === 'mcq') {
             const isMultiple = q.correctAnswers && q.correctAnswers.length > 1;
+            // Display labels follow the chosen language; the submitted VALUE is
+            // always the English option, because that is what correctAnswer
+            // holds. Index-preserving, so grading is untouched.
+            const dispOpts = questionOptions(q, lang);
             if (isMultiple) {
-                qHtml += `<div style="font-size:12px;color:var(--accent,#2563eb);margin-bottom:8px;background:#eff6ff;padding:6px 12px;border-radius:6px;">Select ALL correct answers</div>`;
-                (q.options || []).forEach((opt) => {
-                    qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="checkbox" name="q-${q.id}" value="${opt}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${opt}</label>`;
+                qHtml += `<div style="font-size:12px;color:var(--accent,#2563eb);margin-bottom:8px;background:#eff6ff;padding:6px 12px;border-radius:6px;">${lang === 'sw' ? 'Chagua MAJIBU yote yaliyo sahihi' : 'Select ALL correct answers'}</div>`;
+                (q.options || []).forEach((opt, oi) => {
+                    qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="checkbox" name="q-${q.id}" value="${escapeHtml(opt)}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${escapeHtml(dispOpts[oi] != null ? dispOpts[oi] : opt)}</label>`;
                 });
             } else {
-                (q.options || []).forEach((opt) => {
-                    qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${escapeHtml(opt)}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${escapeHtml(opt)}</label>`;
+                (q.options || []).forEach((opt, oi) => {
+                    qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${escapeHtml(opt)}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${escapeHtml(dispOpts[oi] != null ? dispOpts[oi] : opt)}</label>`;
                 });
             }
         } else if (q.type === 'truefalse') {
@@ -16106,18 +16241,24 @@ function showQuizInterface(quiz, questions, lang) {
                 qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${escapeHtml(opt)}" data-en="${escapeHtml(opt)}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${escapeHtml(tfLabel(opt, lang))}</label>`;
             });
         } else if (q.type === 'matching') {
-            const shuffledRight = [...(q.pairs || [])].sort(() => Math.random() - 0.5);
+            // Display pairs follow the language; the option VALUE stays the
+            // English right-hand item, which is what grading compares against.
+            const dispPairs = questionPairs(q, lang);
+            const enPairs = q.pairs || [];
+            const shuffledIdx = enPairs.map((_, i) => i).sort(() => Math.random() - 0.5);
+            const sw = lang === 'sw';
             qHtml += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                <div><div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Items</div>`;
-            q.pairs.forEach((pair, pi) => {
-                qHtml += `<div style="padding:10px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">${pair.left}</div>`;
+                <div><div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">${sw ? 'Vipengele' : 'Items'}</div>`;
+            enPairs.forEach((pair, pi) => {
+                const d = dispPairs[pi] || pair;
+                qHtml += `<div style="padding:10px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">${escapeHtml(d.left != null ? d.left : pair.left)}</div>`;
             });
-            qHtml += `</div><div><div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Match each item with:</div>`;
-            q.pairs.forEach((pair, pi) => {
+            qHtml += `</div><div><div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">${sw ? 'Linganisha kila kipengele na:' : 'Match each item with:'}</div>`;
+            enPairs.forEach((pair, pi) => {
                 qHtml += `<div style="margin:4px 0;">
                     <select id="match-${q.id}-${pi}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:13px;color:#1e293b;">
-                        <option value="">— Select —</option>
-                        ${shuffledRight.map((rp) => `<option value="${rp.right}">${rp.right}</option>`).join('')}
+                        <option value="">— ${sw ? 'Chagua' : 'Select'} —</option>
+                        ${shuffledIdx.map((si) => { const d = dispPairs[si] || enPairs[si]; return `<option value="${escapeHtml(enPairs[si].right)}">${escapeHtml(d.right != null ? d.right : enPairs[si].right)}</option>`; }).join('')}
                     </select>
                 </div>`;
             });

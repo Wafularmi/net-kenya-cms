@@ -3270,6 +3270,78 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         } catch { return json(res, 200, { phone: '' }); }
     }
 
+    // Google Translate HTML-escapes its output (&amp;, &#39;, &quot; ...). Convert
+// those back to real characters so the Swahili reads naturally in the UI.
+function decodeHtmlEntities(s) {
+    return String(s == null ? '' : s)
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&');
+}
+
+// POST /api/translate — Swahili translation for the question bank.
+    //
+    // Uses the Google Cloud Translation v2 API. The key is read from the
+    // TRANSLATE_API_KEY environment variable and is NEVER sent to the browser:
+    // the client posts English text here and receives Swahili back.
+    //
+    // With no key configured the endpoint returns 501 with a clear reason, so
+    // the UI can fall back to the English text instead of failing silently.
+    if (parts.length === 2 && parts[1] === 'translate' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', async () => {
+            const key = process.env.TRANSLATE_API_KEY || '';
+            if (!key) {
+                return json(res, 501, {
+                    ok: false,
+                    error: 'no_key',
+                    message: 'Translation is not configured on this server yet.'
+                });
+            }
+            if (!user || user.role === 'student') {
+                return json(res, 403, { ok: false, error: 'Only staff can translate questions.' });
+            }
+            let parsed;
+            try { parsed = JSON.parse(body); } catch { return json(res, 400, { ok: false, error: 'Invalid body' }); }
+            // Accept a single string or an array of strings.
+            const items = Array.isArray(parsed.texts) ? parsed.texts : [parsed.text];
+            const texts = items.map(t => String(t == null ? '' : t)).filter(t => t.trim());
+            if (!texts.length) return json(res, 200, { ok: true, translations: [] });
+            if (texts.length > 60) return json(res, 400, { ok: false, error: 'Too many strings in one request (max 60).' });
+            const target = parsed.target === 'en' ? 'en' : 'sw';
+            try {
+                const q = encodeURIComponent(texts.join('\n\u0001'));
+                const r = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(key)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ q: texts, target, format: 'text', source: 'en' })
+                });
+                if (!r.ok) {
+                    const t = await r.text().catch(() => '');
+                    console.error('translate API error', r.status, t.slice(0, 200));
+                    return json(res, 502, { ok: false, error: 'upstream_error', message: 'Translation service rejected the request.' });
+                }
+                const out = await r.json();
+                const data = (out && out.data && out.data.translations) || [];
+                const translations = data.map(d => String((d.translatedText || '')).split('\u0001')[0]);
+                // A single input string comes back as one translation; a batch
+                // may be merged, so fall back to joining with the separator.
+                let list = translations;
+                if (texts.length > 1 && translations.length === 1) list = translations[0].split('\u0001');
+                return json(res, 200, { ok: true, translations: list.map(t => decodeHtmlEntities(t)) });
+            } catch (e) {
+                console.error('translate failed:', e && e.message);
+                return json(res, 502, { ok: false, error: 'network_error', message: 'Could not reach the translation service.' });
+            }
+        });
+        return;
+    }
+
     // POST /api/verify — public guest document verification (rate-limited, minimal fields only)
     if (parts.length === 2 && parts[1] === 'verify' && req.method === 'POST') {
         let body = '';
