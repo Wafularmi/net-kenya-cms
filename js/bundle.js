@@ -5484,7 +5484,9 @@ async function startExam(examId) {
     // Auto-generated finals: sit the linked quiz so the score flows into the 50% exam weight.
     if (exam.quizId) { try { const lq = await dbGet('quizzes', exam.quizId); if (lq) return startQuiz(exam.quizId); } catch {} }
     // Drip: exam opens only when every drip lesson in its course is complete (students only).
-    if (currentUser.role === 'student') {
+    // An OPEN exam is deliberately exempt: its whole point is that it stays available to
+    // students until staff close it, so a lesson gate must not lock them out of it.
+    if (currentUser.role === 'student' && !openExam) {
         try {
             const gate = await dripExamOpen(studentId, exam);
             if (!gate.open) return showToast(`🔗 Exam locked — complete ${gate.remaining} more lesson${gate.remaining !== 1 ? 's' : ''} first${gate.next ? ` (next: ${gate.next.title})` : ''}.`, { type: 'warning', duration: 5000 });
