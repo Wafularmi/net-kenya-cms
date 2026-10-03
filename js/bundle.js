@@ -2290,7 +2290,7 @@ const _refreshMap = {
     courses: (r) => { refreshPortal('courses', r); if (isScreenActive('courses')) renderCourses(); },
     lessons: (r) => { refreshPortal('lessons', r); if (isScreenActive('courses')) renderCourses(); },
     quizzes: (r) => { refreshPortal('quizzes', r); if (isScreenActive('quizzes')) renderQuizzes(); },
-    exams: (r) => { refreshPortal('exams', r); if (isScreenActive('quizzes')) renderQuizzes(); if (isScreenActive('exams')) renderExams(); },
+    exams: (r) => { refreshPortal('exams', r); scheduleLiveRender(() => { if (isScreenActive('quizzes')) renderQuizzes(); if (isScreenActive('exams')) renderExams(); }); },
     questions: () => { if (isScreenActive('questions')) renderQuestionBank(); },
     enrollments: (r) => { refreshPortal('enrollments', r); if (isScreenActive('courses')) renderCourses(); },
     submissions: (r) => { refreshPortal('submissions', r); if (isScreenActive('quizzes')) renderQuizzes(); },
@@ -4726,15 +4726,22 @@ async function renderExams() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
     const isCoord = currentUser.role === 'coordinator';
-    let exams = await dbGetAll('exams');
-    const courses = await dbGetAll('courses');
+    // One batched request instead of six sequential ones. The serial version
+    // took seconds to paint, so a newly posted exam could sit invisible for
+    // ~8s after the live-update event arrived.
+    const stores = ['exams', 'courses', 'enrollments', 'examRegistrations', 'retakeRequests'];
+    if (!isStudentUser) stores.push('staff');
+    const batch = await dbGetBatch(stores).catch(() => ({}));
+    const exams = batch.exams || [];
+    const courses = batch.courses || [];
+    const enrollments = batch.enrollments || [];
+    let registrations = batch.examRegistrations || [];
+    const retakeRequests = batch.retakeRequests || [];
     // Students have no access to the staff store (403). Fetching it
     // unconditionally threw and aborted the whole student exam list, so only
     // staff load it - and never let it break the render.
-    const staff = (currentUser && currentUser.role === 'student') ? [] : await dbGetAll('staff').catch(() => []);
-    const enrollments = await dbGetAll('enrollments');
+    const staff = batch.staff || [];
     const centers = await getCenters();
-    let registrations = await dbGetAll('examRegistrations');
     // 'all' means every semester. A student has no way of knowing which
     // semester an exam belongs to, so the default view must not hide it.
     const semRaw = document.getElementById('exam-semester').value;
@@ -4762,7 +4769,7 @@ async function renderExams() {
         // it must never appear under Past, or students would assume it is closed.
         const upcoming = sorted.filter(e => e.openWindow || e.date >= today);
         const past = sorted.filter(e => !e.openWindow && e.date < today);
-        const retakeRequests = await dbGetAll('retakeRequests');
+
         const myRetakeExamIds = new Set(retakeRequests.filter(r => r.studentId === studentId && r.status !== 'rejected').map(r => r.examId));
         const submissions = await dbGetAll('submissions');
         const tbody = document.getElementById('exams-body');
@@ -4793,7 +4800,7 @@ async function renderExams() {
                     <div>
                         <b style="font-size:14px;">${typeIcon} ${e.title || course?.code || e.courseId}</b>
                         <span class="badge badge-info" style="font-size:9px;margin-left:6px;">${typeLabel}</span>
-                        ${e.openWindow ? '<span class="badge badge-success" style="font-size:9px;margin-left:6px;">OPEN — no time limit</span>' : ''}
+                        ${e.openWindow ? '<span class="badge badge-success" style="font-size:9px;margin-left:6px;">OPEN — no time limit</span>' : ''}${e.ungated ? '<span class="badge badge-warning" style="font-size:9px;margin-left:6px;">Ungated</span>' : ''}
                         ${course ? `<br><span style="font-size:11px;color:var(--text-muted);">${course.name} (${course.code})</span>` : ''}
                     </div>
                     <div style="text-align:right;">
@@ -5042,6 +5049,10 @@ async function showExamForm(exam = null) {
   <div class="form-group"><label>Venue</label><input type="text" id="exam-venue" value="${fmt(exam ? exam.venue : '')}" placeholder="Hall A"></div>
   <div class="form-group"><label>Invigilator</label><select id="exam-invigilator"><option value="">Unassigned</option>${staff.map(s => `<option value="${s.id}" ${exam && exam.invigilatorId === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select></div>
 </div>
+<div class="form-group" style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
+  <input type="checkbox" id="exam-ungated" ${exam && exam.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;">
+  <label for="exam-ungated" style="cursor:pointer;margin:0;"><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may sit this exam even if drip lessons or the content gate would otherwise lock it.</span></label>
+</div>
 <div class="form-group" style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;">
   <input type="checkbox" id="exam-open-window" ${exam && exam.openWindow ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;">
   <label for="exam-open-window" style="cursor:pointer;margin:0;"><b>Open-ended (no time limit)</b><br><span style="font-size:11px;color:var(--text-muted);">Published + open = every enrolled student can sit it any time until you set it back to Draft.</span></label>
@@ -5119,7 +5130,7 @@ async function saveExam() {
     // enough to schedule, the venue may follow. Without them the exam is simply
     // "set" and stays out of student view until it is scheduled.
     const scheduled = !!date && !!time;
-    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('exams', exam); closeModal(); renderExams();
     showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
     logAudit(editId ? 'updated' : 'created', 'exam', exam);
@@ -5134,6 +5145,10 @@ async function showExamSchedule(examId) {
     const course = await dbGet('courses', exam.courseId);
     const content = `
   <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;"><b style="color:var(--text-primary);">${escapeHtml(exam.title || (course ? course.name : 'Exam'))}</b> &mdash; ${escapeHtml(exam.type || 'midterm')} &middot; ${(exam.questionIds || []).length} questions</div>
+  <div class="form-group" style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
+    <input type="checkbox" id="exs-ungated" ${exam.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;">
+    <label for="exs-ungated" style="cursor:pointer;margin:0;"><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may sit this exam even if drip lessons or the content gate would otherwise lock it.</span></label>
+  </div>
   <div class="form-group" style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;">
     <input type="checkbox" id="exs-open" ${exam.openWindow ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;">
     <label for="exs-open" style="cursor:pointer;margin:0;">
@@ -5172,6 +5187,7 @@ async function saveExamSchedule(examId) {
     exam.studyCenterId = document.getElementById('exs-center').value;
     exam.published = document.getElementById('exs-publish').checked;
     exam.openWindow = openWindow;
+    exam.ungated = !!document.getElementById('exs-ungated')?.checked;
     exam.scheduled = true;
     exam.scheduledAt = new Date().toISOString();
     exam.updatedAt = exam.scheduledAt;
@@ -5491,7 +5507,8 @@ async function startExam(examId) {
     // Drip: exam opens only when every drip lesson in its course is complete (students only).
     // An OPEN exam is deliberately exempt: its whole point is that it stays available to
     // students until staff close it, so a lesson gate must not lock them out of it.
-    if (currentUser.role === 'student' && !openExam) {
+    const ungated = openExam || !!exam.ungated;
+    if (currentUser.role === 'student' && !ungated) {
         try {
             const gate = await dripExamOpen(studentId, exam);
             if (!gate.open) return showToast(`🔗 Exam locked — complete ${gate.remaining} more lesson${gate.remaining !== 1 ? 's' : ''} first${gate.next ? ` (next: ${gate.next.title})` : ''}.`, { type: 'warning', duration: 5000 });
@@ -15564,7 +15581,7 @@ async function showQuizForm(quiz = null) {
     const courses = await dbGetAll('courses');
     const questions = await dbGetAll('questionBank');
     const isEdit = !!quiz;
-    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label>Max Retakes</label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-group"><label>Select Questions</label><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
+    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes</label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-group"><label>Select Questions</label><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
     showModal(isEdit ? 'Edit Quiz' : 'Create Quiz', content, `<button class="btn btn-primary" onclick="saveQuiz()">${isEdit ? 'Update' : 'Create'}</button>`);
     if (quiz) {
         onQuizCourseChange(quiz.lessonId, quiz.questionIds || []);
@@ -15609,7 +15626,7 @@ async function saveQuiz() {
     const editId = document.getElementById('quiz-edit-id').value;
     const id = editId || generateId('QUIZ');
     const assessmentType = document.getElementById('quiz-type-select').value;
-    const quiz = { id, courseId, lessonId: document.getElementById('quiz-lesson-select').value, title, assessmentType, passMark: parseInt(document.getElementById('quiz-pass').value) || 50, timeLimit: parseInt(document.getElementById('quiz-time').value) || 0, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 1, questionIds, createdAt: editId ? (await dbGet('quizzes', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const quiz = { id, courseId, lessonId: document.getElementById('quiz-lesson-select').value, title, assessmentType, passMark: parseInt(document.getElementById('quiz-pass').value) || 50, timeLimit: parseInt(document.getElementById('quiz-time').value) || 0, ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 1, questionIds, createdAt: editId ? (await dbGet('quizzes', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('quizzes', quiz); closeModal(); renderQuizzes(); showToast(editId ? 'Assessment updated!' : `Assessment created with ${questionIds.length} questions!`); logAudit(editId ? 'updated' : 'created', 'quiz', { id, courseId, questions: questionIds.length });
 }
 async function editQuiz(id) {
@@ -16033,6 +16050,14 @@ function applyInterfaceLanguage() {
         });
         document.documentElement.setAttribute('lang', lang);
     } catch (e) {}
+}
+// Coalesce live-update re-renders: a single staff action often writes
+// several stores, and re-rendering once per event queue up redundant full
+// reloads. One trailing render per burst keeps updates near-instant.
+let _liveRenderTimer = null;
+function scheduleLiveRender(fn) {
+    if (_liveRenderTimer) clearTimeout(_liveRenderTimer);
+    _liveRenderTimer = setTimeout(() => { _liveRenderTimer = null; try { fn(); } catch (e) { console.error('live render failed:', e); } }, 120);
 }
 // Re-render whichever screen is open so the change is visible immediately.
 function renderCurrentScreen() {
