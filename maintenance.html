@@ -47,35 +47,105 @@
             animation: pulse 2.6s ease-out infinite;
         }
         .pulse-ring.r2 { animation-delay: 1.3s; border-color: rgba(245,158,11,.16); }
+        /* --- Interlocked gears -------------------------------------------------
+           Two real meshed gears. For gears that actually turn against each other:
+             * both turn in OPPOSITE directions (external mesh),
+             * angular speeds are inversely proportional to tooth counts,
+             * the pitch circles are exactly TANGENT so the teeth engage.
+           Big gear: 12 teeth. Small gear: 8 teeth  ->  small must turn 12/8 = 1.5x
+           faster than the big one, in the opposite direction.
+           Pitch radius = (teeth * module) / 2; module = 7px here, so
+             big  r = 12*7/2 = 42px  (outer 52px with the tooth tips)
+             small r =  8*7/2 = 28px  (outer 38px)
+           Centre distance for a correct mesh = 42 + 28 = 70px.
+        ---------------------------------------------------------------------- */
+        .gearbox { position: absolute; inset: 0; }
         .gear {
             position: absolute; border-radius: 50%;
+            /* machined body: dark metal disc, lit from the top-left */
             background:
-                radial-gradient(circle, transparent 0 42px, #f59e0b 43px 45px, transparent 46px),
-                radial-gradient(circle, #f59e0b 0 43px, transparent 44px),
-                conic-gradient(from 0deg,
-                    #f59e0b 0 15deg, transparent 15deg 30deg, #f59e0b 30deg 45deg, transparent 45deg 60deg,
-                    #f59e0b 60deg 75deg, transparent 75deg 90deg, #f59e0b 90deg 105deg, transparent 105deg 120deg,
-                    #f59e0b 120deg 135deg, transparent 135deg 150deg, #f59e0b 150deg 165deg, transparent 165deg 180deg,
-                    #f59e0b 180deg 195deg, transparent 195deg 210deg, #f59e0b 210deg 225deg, transparent 225deg 240deg,
-                    #f59e0b 240deg 255deg, transparent 255deg 270deg, #f59e0b 270deg 285deg, transparent 285deg 300deg,
-                    #f59e0b 300deg 315deg, transparent 315deg 330deg, #f59e0b 330deg 345deg, transparent 345deg 360deg);
-            animation: spin 5s linear infinite;
+                radial-gradient(circle at 38% 32%, #4b4b66 0%, #34344c 42%, #23233a 78%, #1b1b2e 100%);
+            box-shadow:
+                0 10px 22px rgba(0,0,0,.6),
+                0 2px 6px rgba(0,0,0,.5),
+                inset 0 0 0 1px rgba(245,158,11,.25);
         }
+        /* teeth: a repeating conic gradient masked to the OUTER RIM, so the
+           silhouette shows real gear teeth. The mask is generous (from 62% of
+           the radius outward) - too narrow a band and the teeth vanish.
+           --tp = tooth pitch (360/teeth), --tw = tooth width. Teeth are drawn
+           ~30% of pitch wide, matching real gears, and the small gear's pitch
+           is different so the two rims actually interlock. */
+        .gear::before {
+            content: ""; position: absolute; inset: 0; border-radius: 50%;
+            background: repeating-conic-gradient(from 0deg,
+                var(--tooth) 0deg var(--tw), transparent var(--tw) var(--tp));
+            /* closest-side matters: a plain `circle` mask is sized to the
+               farthest CORNER, so the percentages would land outside the gear
+               and the teeth would vanish. */
+            -webkit-mask: radial-gradient(circle closest-side, transparent 0 var(--rim-in), #000 calc(var(--rim-in) + 2%) 100%);
+            mask: radial-gradient(circle closest-side, transparent 0 var(--rim-in), #000 calc(var(--rim-in) + 2%) 100%);
+            filter: drop-shadow(0 1px 1px rgba(0,0,0,.6));
+        }
+        /* hub + bolt circle: reads as the axle and gives the gear scale */
         .gear::after {
             content: ""; position: absolute; left: 50%; top: 50%;
-            width: 46px; height: 46px; margin-left: -23px; margin-top: -23px;
-            border-radius: 50%; background: #16162c;
-            box-shadow: inset 0 0 0 5px #23233d, 0 0 0 2px rgba(245,158,11,.4);
+            width: 30%; height: 30%; margin-left: -15%; margin-top: -15%;
+            border-radius: 50%;
+            background:
+                radial-gradient(circle at 40% 34%, #52526e, #26263d 72%);
+            box-shadow:
+                inset 0 0 0 2px rgba(245,158,11,.55),
+                inset 0 2px 5px rgba(255,255,255,.07),
+                0 2px 5px rgba(0,0,0,.6);
         }
-        .gear.big { width: 128px; height: 128px; left: 8px; top: 20px; }
-        .gear.small { width: 86px; height: 86px; right: 6px; bottom: 8px; animation-direction: reverse; animation-duration: 3.4s; }
-        .gear.small::after { width: 30px; height: 30px; margin-left: -15px; margin-top: -15px; }
+        /* 12 teeth -> one revolution in 6s */
+        .gear.big {
+            width: 104px; height: 104px;
+            --tooth: #f59e0b; --tw: 17deg; --tp: 30deg; --rim-in: 72%;
+            left: 6px; top: 30px;
+            animation: spin 6s linear infinite;
+        }
+        /* 8 teeth, 1.5x faster, opposite direction: 6s / (8/12) = 4s.
+           Big centre = (58, 82). Pitch radius = teeth*module/2 (module 7px):
+           big 42px, small 28px -> tangent centre distance 70px, so the small
+           gear centre sits at (128, 82). */
+        .gear.small {
+            width: 76px; height: 76px;
+            --tooth: #fbbf24; --tw: 24deg; --tp: 45deg; --rim-in: 72%;
+            left: 90px; top: 44px;
+            animation: spin 4s linear infinite reverse;
+        }
+        /* mesh contact shadow so the teeth look engaged, not overlapping */
+        .mesh-point {
+            position: absolute; left: 88px; top: 74px; width: 20px; height: 16px;
+            margin: -8px 0 0 -10px; border-radius: 50%;
+            background: radial-gradient(ellipse at center, rgba(0,0,0,.32), transparent 72%);
+            pointer-events: none;
+        }
+        /* specular sweep that stays still while the metal turns underneath */
+        .gear-gloss {
+            position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+            background:
+                linear-gradient(150deg, rgba(255,255,255,.18) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,.26) 100%),
+                radial-gradient(circle at 26% 22%, rgba(255,255,255,.10), transparent 46%);
+        }
+        .gear-gloss.big { left: 6px; top: 30px; width: 104px; height: 104px; }
+        .gear-gloss.small { left: 90px; top: 44px; width: 76px; height: 76px; }
+        /* oil sheen pooling in the lower-right of each gear */
+        .gear-oil {
+            position: absolute; border-radius: 50%; pointer-events: none;
+            background: radial-gradient(circle at 62% 68%, rgba(245,158,11,.13), transparent 58%);
+        }
+        .gear-oil.big { left: 6px; top: 30px; width: 104px; height: 104px; }
+        .gear-oil.small { left: 90px; top: 44px; width: 76px; height: 76px; }
         .wrench {
-            position: absolute; left: 50%; top: 6px; margin-left: -24px;
-            font-size: 46px; line-height: 1;
+            position: absolute; right: 4px; top: -6px;
+            font-size: 34px; line-height: 1;
             transform-origin: 50% 80%;
             animation: swing 1.6s ease-in-out infinite;
             filter: drop-shadow(0 6px 10px rgba(0,0,0,.4));
+            opacity: .95;
         }
         .spark { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; opacity: 0; animation: sparkle 3.2s ease-in-out infinite; }
         .spark.s1 { left: 6px; top: 0; animation-delay: 0s; }
@@ -139,8 +209,15 @@
     <div class="scene">
         <div class="pulse-ring"></div>
         <div class="pulse-ring r2"></div>
-        <div class="gear big"></div>
-        <div class="gear small"></div>
+        <div class="gearbox">
+            <div class="gear big"></div>
+            <div class="gear small"></div>
+            <div class="mesh-point"></div>
+            <div class="gear-oil big"></div>
+            <div class="gear-oil small"></div>
+            <div class="gear-gloss big"></div>
+            <div class="gear-gloss small"></div>
+        </div>
         <div class="wrench">🛠️</div>
         <div class="spark s1"></div>
         <div class="spark s2"></div>

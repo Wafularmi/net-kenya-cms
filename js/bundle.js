@@ -15815,6 +15815,64 @@ function getQuestionText(q, lang) {
     if (lang === 'sw' && q.questionSw) return q.questionSw;
     return q.questionEn || q.question || '';
 }
+// ---------------------------------------------------------------------------
+// Language preference.
+//
+// The UI follows the language the person selected: True/False becomes
+// Kweli / Sio kweli, MCQ options render from their Swahili copy, and so on.
+// Translations are kept as DATA (optionsSw, pairsSw, ...) rather than as
+// translated text baked into the English field, so the stored answer never
+// changes - only what the screen shows. That keeps scoring intact: a question
+// whose correct answer is "True" is still "True" internally when the screen
+// says "Kweli".
+// ---------------------------------------------------------------------------
+const APP_LANG_KEY = 'appLanguage';
+const TTF_EN = { True: 'True', False: 'False' };
+const TTF_SW = { True: 'Kweli', False: 'Sio kweli' };
+function appLang() {
+    try { return localStorage.getItem(APP_LANG_KEY) === 'sw' ? 'sw' : 'en'; } catch (e) { return 'en'; }
+}
+function setAppLang(lang) {
+    try { localStorage.setItem(APP_LANG_KEY, lang === 'sw' ? 'sw' : 'en'); } catch (e) {}
+    try { const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); u.lang = lang === 'sw' ? 'sw' : 'en'; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
+    try { if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage(); } catch (e) {}
+    try { if (typeof renderCurrentScreen === 'function') renderCurrentScreen(); } catch (e) {}
+}
+// Label shown on screen for a True/False answer. The stored value never changes.
+function tfLabel(value, lang) {
+    const map = (lang || appLang()) === 'sw' ? TTF_SW : TTF_EN;
+    return map[value] || value;
+}
+function tfValueFromLabel(label, lang) {
+    const map = (lang || appLang()) === 'sw' ? TTF_SW : TTF_EN;
+    const found = Object.keys(map).find(k => map[k] === label);
+    return found || label;
+}
+// Question text in the active language.
+function questionText(q, lang) { return getQuestionText(q, lang || appLang()); }
+// MCQ options in the active language. Falls back to the English options so an
+// untranslated question is still answerable.
+function questionOptions(q, lang) {
+    const l = lang || appLang();
+    if (l === 'sw' && Array.isArray(q.optionsSw) && q.optionsSw.length === (q.options || []).length && q.optionsSw.some(o => String(o || '').trim())) {
+        return q.optionsSw.map((o, i) => String(o == null ? '' : o).trim() || String(q.options[i] || ''));
+    }
+    return q.options || [];
+}
+// The option VALUE stored with a submission. When Swahili labels are on screen we
+// still submit the English option text, because that is what correctAnswer holds.
+function questionOptionValue(q, index, lang) {
+    const l = lang || appLang();
+    const opts = q.options || [];
+    if (l === 'sw' && Array.isArray(q.optionsSw) && q.optionsSw.length === opts.length) return String(opts[index] || '');
+    return String(opts[index] || '');
+}
+// Matching pairs in the active language.
+function questionPairs(q, lang) {
+    const l = lang || appLang();
+    if (l === 'sw' && Array.isArray(q.pairsSw) && q.pairsSw.length === (q.pairs || []).length && q.pairsSw.some(p => (p && p.right))) return q.pairsSw;
+    return q.pairs || [];
+}
 async function renderStudentQuiz() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (!currentUser || currentUser.role !== 'student') return;
@@ -16038,12 +16096,14 @@ function showQuizInterface(quiz, questions, lang) {
                 });
             } else {
                 (q.options || []).forEach((opt) => {
-                    qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${opt}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${opt}</label>`;
+                    qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${escapeHtml(opt)}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${escapeHtml(opt)}</label>`;
                 });
             }
         } else if (q.type === 'truefalse') {
             ['True', 'False'].forEach((opt) => {
-                qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${opt}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${opt}</label>`;
+                // Screen shows the localized word; the VALUE stays "True"/"False"
+                // so grading, which compares against correctAnswer, is unaffected.
+                qHtml += `<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:4px 0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent,#2563eb)'" onmouseout="this.style.borderColor='#e2e8f0'"><input type="radio" name="q-${q.id}" value="${escapeHtml(opt)}" data-en="${escapeHtml(opt)}" style="accent-color:var(--accent,#2563eb);width:16px;height:16px;"> ${escapeHtml(tfLabel(opt, lang))}</label>`;
             });
         } else if (q.type === 'matching') {
             const shuffledRight = [...(q.pairs || [])].sort(() => Math.random() - 0.5);
