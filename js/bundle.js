@@ -4750,7 +4750,10 @@ async function renderExams() {
         const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
-        const sorted = exams.filter(e => e.published !== false && semMatches(e) && e.date && e.time && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const sorted = exams.filter(e => e.published !== false && semMatches(e) && (e.openWindow || (e.date && e.time)) && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => {
+            const ad = a.date || '9999-12-31', bd = b.date || '9999-12-31';
+            return ad.localeCompare(bd);
+        });
         const today = new Date().toISOString().split('T')[0];
         const upcoming = sorted.filter(e => e.date >= today);
         const past = sorted.filter(e => e.date < today);
@@ -4785,23 +4788,23 @@ async function renderExams() {
                     <div>
                         <b style="font-size:14px;">${typeIcon} ${e.title || course?.code || e.courseId}</b>
                         <span class="badge badge-info" style="font-size:9px;margin-left:6px;">${typeLabel}</span>
+                        ${e.openWindow ? '<span class="badge badge-success" style="font-size:9px;margin-left:6px;">OPEN — no time limit</span>' : ''}
                         ${course ? `<br><span style="font-size:11px;color:var(--text-muted);">${course.name} (${course.code})</span>` : ''}
                     </div>
                     <div style="text-align:right;">
-                        ${passed ? '<span class="badge badge-success">PASSED</span>' : examSub ? '<span class="badge badge-danger">FAILED</span>' : isRegistered ? '<span class="badge badge-info">REGISTERED</span>' : ''}
+                        ${passed ? '<span class="badge badge-success">PASSED</span>' : examSub ? '<span class="badge badge-danger">FAILED</span>' : isRegistered || e.openWindow ? '<span class="badge badge-info">REGISTERED</span>' : ''}
                     </div>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-                    <span>📅 ${formatDate(e.date)}</span>
-                    <span>⏰ ${e.time}</span>
+                    ${e.openWindow ? '<span>🗓️ Open until staff close it</span>' : `<span>📅 ${formatDate(e.date)}</span><span>⏰ ${e.time}</span>`}
                     <span>📍 ${e.venue || '--'}</span>
                     <span>📝 ${e.questionIds ? e.questionIds.length : 0} questions</span>
                     <span>🎯 Pass: ${e.passMark || 50}%</span>
-                    ${e.duration ? `<span>⏱ ${e.duration} min</span>` : ''}
+                    ${!e.openWindow && e.duration ? `<span>⏱ ${e.duration} min</span>` : ''}
                     ${center ? `<span>🏛 ${center.name}</span>` : ''}
                 </div>
                 <div style="margin-top:8px;">
-                    ${examSub ? `<span>Score: <b style="color:${passed ? 'var(--success)' : 'var(--danger)'};">${examSub.score}%</b></span>` : isRegistered ? `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')">📝 Take Exam</button>` : `<span style="font-size:11px;color:var(--text-muted);">Not registered</span>`}
+                    ${examSub ? `<span>Score: <b style="color:${passed ? 'var(--success)' : 'var(--danger)'};">${examSub.score}%</b></span>` : (isRegistered || e.openWindow) ? `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')">📝 ${e.openWindow ? 'Start Exam (untimed)' : 'Take Exam'}</button>` : `<span style="font-size:11px;color:var(--text-muted);">Not registered</span>`}
                     ${!passed && hasPendingRequest ? '<br><span class="badge badge-warning" style="margin-top:6px;">⏳ Request Pending</span>' : ''}
                     ${!passed && !hasPendingRequest && e.date < today ? `<br><button class="btn btn-outline btn-sm" onclick="requestMissedExam('${e.id}')" style="margin-top:6px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>` : ''}
                 </div>
@@ -4846,8 +4849,9 @@ async function renderExams() {
             const center = centers.find(x => x.id === e.studyCenterId);
             const examRegs = registrations.filter(r => r.examId === e.id);
             const pub = e.published !== false;
-            const isScheduled = !!(e.date && e.time);
-            return `<tr><td><b>${(e.title || course?.code || e.courseId)}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''}</span>${center ? `<br><span style="font-size:10px;color:var(--accent);">${center.name}</span>` : ''}</td><td>${isScheduled ? formatDate(e.date) : `<span class="badge badge-warning">⏳ Not scheduled</span>`}</td><td>${isScheduled ? e.time : '--'}</td><td>${e.venue || '--'}</td><td>${examRegs.length}</td><td>${invigilator ? invigilator.name : '--'}</td><td><span class="badge badge-${pub ? 'success' : 'secondary'}" style="cursor:pointer;" onclick="toggleExamPublished('${e.id}')">${pub ? 'Published' : 'Draft'}</span></td><td><button class="btn ${isScheduled ? 'btn-outline' : 'btn-primary'} btn-sm" onclick="showExamSchedule('${e.id}')">${isScheduled ? 'Reschedule' : '📅 Schedule'}</button> <button class="btn btn-outline btn-sm" onclick="showExamForm('${e.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showExamRegistration('${e.id}')">Reg</button> <button class="btn btn-outline btn-sm" onclick="showExamResults('${e.id}')">Results</button> <button class="btn btn-warning btn-sm" onclick="showExamNotify('${e.id}')">Notify</button> <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">Del</button></td></tr>`;
+            const isScheduled = !!(e.date && e.time) || !!e.openWindow;
+            const openFlag = e.openWindow ? `<span class="badge badge-success">Open</span> ` : '';
+            return `<tr><td><b>${(e.title || course?.code || e.courseId)}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''}</span>${center ? `<br><span style="font-size:10px;color:var(--accent);">${center.name}</span>` : ''}</td><td>${isScheduled ? (e.openWindow ? `${openFlag}<span style="font-size:10px;color:var(--text-muted);">open-ended</span>` : formatDate(e.date)) : `<span class="badge badge-warning">⏳ Not scheduled</span>`}</td><td>${e.openWindow ? '—' : (isScheduled ? e.time : '--')}</td><td>${e.venue || '--'}</td><td>${examRegs.length}</td><td>${invigilator ? invigilator.name : '--'}</td><td><span class="badge badge-${pub ? 'success' : 'secondary'}" style="cursor:pointer;" onclick="toggleExamPublished('${e.id}')">${pub ? 'Published' : 'Draft'}</span></td><td><button class="btn ${isScheduled ? 'btn-outline' : 'btn-primary'} btn-sm" onclick="showExamSchedule('${e.id}')">${isScheduled ? 'Reschedule' : '📅 Schedule'}</button> <button class="btn btn-outline btn-sm" onclick="showExamForm('${e.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showExamRegistration('${e.id}')">Reg</button> <button class="btn btn-outline btn-sm" onclick="showExamResults('${e.id}')">Results</button> <button class="btn btn-warning btn-sm" onclick="showExamNotify('${e.id}')">Notify</button> <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">Del</button></td></tr>`;
         }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No exams here yet. Click "+ Set Exam" to set the exam paper, then use "Schedule" to give it a date, time and venue.</td></tr>';
         renderRetakeRequests();
     }
@@ -5033,6 +5037,10 @@ async function showExamForm(exam = null) {
   <div class="form-group"><label>Venue</label><input type="text" id="exam-venue" value="${fmt(exam ? exam.venue : '')}" placeholder="Hall A"></div>
   <div class="form-group"><label>Invigilator</label><select id="exam-invigilator"><option value="">Unassigned</option>${staff.map(s => `<option value="${s.id}" ${exam && exam.invigilatorId === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}</select></div>
 </div>
+<div class="form-group" style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;">
+  <input type="checkbox" id="exam-open-window" ${exam && exam.openWindow ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;">
+  <label for="exam-open-window" style="cursor:pointer;margin:0;"><b>Open-ended (no time limit)</b><br><span style="font-size:11px;color:var(--text-muted);">Published + open = every enrolled student can sit it any time until you set it back to Draft.</span></label>
+</div>
 <div class="form-group" style="margin-bottom:0;"><label>Study Center</label><select id="exam-center"><option value="">All Centers</option>${centers.map(c => `<option value="${c.id}" ${exam && exam.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select><div style="font-size:10px;color:var(--text-muted);">Can also be set when you schedule the exam</div></div>`;
     showModal(exam ? 'Edit Exam' : 'Set Exam', content, `<button class="btn btn-primary" onclick="saveExam()">${exam ? 'Save Changes' : 'Set Exam'}</button>`);
     document.getElementById('exam-published')?.addEventListener('change', function() {
@@ -5106,7 +5114,7 @@ async function saveExam() {
     // enough to schedule, the venue may follow. Without them the exam is simply
     // "set" and stays out of student view until it is scheduled.
     const scheduled = !!date && !!time;
-    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('exams', exam); closeModal(); renderExams();
     showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
     logAudit(editId ? 'updated' : 'created', 'exam', exam);
@@ -5121,6 +5129,13 @@ async function showExamSchedule(examId) {
     const course = await dbGet('courses', exam.courseId);
     const content = `
   <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;"><b style="color:var(--text-primary);">${escapeHtml(exam.title || (course ? course.name : 'Exam'))}</b> &mdash; ${escapeHtml(exam.type || 'midterm')} &middot; ${(exam.questionIds || []).length} questions</div>
+  <div class="form-group" style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:12px;">
+    <input type="checkbox" id="exs-open" ${exam.openWindow ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;">
+    <label for="exs-open" style="cursor:pointer;margin:0;">
+      <b>Keep this exam open (no time limit)</b><br>
+      <span style="font-size:11px;color:var(--text-muted);">Published + open means every enrolled student can sit it any time, untimed, until you switch it back to Draft. Leave unticked for a normal dated, timed sitting.</span>
+    </label>
+  </div>
   <div class="form-row">
     <div class="form-group"><label>Date *</label><input type="date" id="exs-date" value="${exam.date || ''}"></div>
     <div class="form-group"><label>Time *</label><input type="text" id="exs-time" value="${exam.time || ''}" placeholder="09:00-12:00"></div>
@@ -5139,23 +5154,27 @@ async function showExamSchedule(examId) {
 async function saveExamSchedule(examId) {
     const exam = await dbGet('exams', examId);
     if (!exam) return;
+    const openWindow = !!document.getElementById('exs-open')?.checked;
     const date = document.getElementById('exs-date').value;
     const time = document.getElementById('exs-time').value.trim();
-    if (!date || !time) return showToast('Date and time are required to schedule.');
-    exam.date = date;
-    exam.time = time;
+    // An open exam does not need a sitting slot - it stays available until the
+    // staff switch it back to Draft. A dated exam still requires date + time.
+    if (!openWindow && (!date || !time)) return showToast('Date and time are required to schedule.');
+    exam.date = openWindow ? (date || '') : date;
+    exam.time = openWindow ? (time || '') : time;
     exam.venue = document.getElementById('exs-venue').value.trim();
     exam.invigilatorId = document.getElementById('exs-invigilator').value;
     exam.studyCenterId = document.getElementById('exs-center').value;
     exam.published = document.getElementById('exs-publish').checked;
+    exam.openWindow = openWindow;
     exam.scheduled = true;
     exam.scheduledAt = new Date().toISOString();
     exam.updatedAt = exam.scheduledAt;
     await dbPut('exams', exam);
     closeModal();
     renderExams();
-    showToast('Exam scheduled!');
-    logAudit('scheduled', 'exam', { id: examId, date, time, venue: exam.venue });
+    showToast(openWindow ? 'Exam published — open until you set it back to Draft' : 'Exam scheduled!');
+    logAudit('scheduled', 'exam', { id: examId, date: exam.date, time: exam.time, venue: exam.venue, openWindow });
     await autoGenerateSeating(exam);
 }
 async function editExam(id) {
@@ -5453,8 +5472,13 @@ async function startExam(examId) {
     if (!exam) return;
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const studentId = currentUser.studentId || currentUser.username;
+    // A published exam stays open until the staff switch it back to Draft, and an
+    // open exam has no time limit - the student may sit it whenever they like.
+    if (exam.published === false) return showToast('This exam is not open yet.', { type: 'warning' });
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId && r.studentId === studentId);
-    if (!regs.length) return showToast('Not registered for this exam!');
+    // An OPEN exam needs no explicit registration: publishing it is the invitation.
+    const openExam = !!exam.openWindow;
+    if (!regs.length && !openExam) return showToast('Not registered for this exam!');
     const subs = (await dbGetAll('submissions')).filter(s => s.quizId === examId && s.studentId === studentId);
     if (subs.length) return showToast('Already submitted this exam!');
     // Auto-generated finals: sit the linked quiz so the score flows into the 50% exam weight.
@@ -5471,9 +5495,11 @@ async function startExam(examId) {
     if (!examQuestions.length) return showToast('No questions in this exam!');
     const studentLang = (await dbGet('students', studentId))?.langPref || 'en';
     showLangSelectionModal(studentId, studentLang, (chosenLang) => {
-        quizTimeRemaining = exam.duration ? exam.duration * 60 : 0;
-        if (exam.duration && !exam.timeLimit) exam.timeLimit = exam.duration;
-        showQuizInterface(exam, examQuestions, chosenLang);
+        // openWindow = untimed: no countdown is started at all.
+        const minutes = openExam ? 0 : (exam.duration || 0);
+        quizTimeRemaining = minutes ? minutes * 60 : 0;
+        if (!openExam && exam.duration && !exam.timeLimit) exam.timeLimit = exam.duration;
+        showQuizInterface(exam, examQuestions, chosenLang, { openExam });
     });
 }
 async function showExamNotify(examId) {
@@ -16165,8 +16191,12 @@ async function startQuiz(quizId) {
         });
     } catch (e) { console.error('startQuiz open failed:', e); showToast('Could not open: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
 }
-function showQuizInterface(quiz, questions, lang) {
+function showQuizInterface(quiz, questions, lang, opts) {
     lang = lang || 'en';
+    // opts.openExam: the exam stays open until staff set it back to Draft, and is
+    // therefore untimed - no countdown is shown or enforced.
+    const openExam = !!(opts && opts.openExam);
+    const timeLimit = openExam ? 0 : (quiz.timeLimit || 0);
     const totalPoints = questions.reduce((s, q) => s + (q.points || 1), 0);
     const branding = document.querySelector('.diploma-school') ? document.querySelector('.diploma-school').textContent : 'Assessment';
     let currentQ = 0;
@@ -16180,7 +16210,7 @@ function showQuizInterface(quiz, questions, lang) {
                 <div style="font-size:11px;color:#94a3b8;">${questions.length} questions · ${totalPoints} total points · Pass: ${quiz.passMark}%</div>
             </div>
             <div style="display:flex;align-items:center;gap:16px;">
-                ${quiz.timeLimit ? `<div id="quiz-timer" style="font-size:20px;font-weight:700;font-family:'Courier New',monospace;color:#1e293b;background:#f1f5f9;padding:6px 16px;border-radius:8px;">${formatTime(quizTimeRemaining)}</div>` : ''}
+                ${timeLimit ? `<div id="quiz-timer" style="font-size:20px;font-weight:700;font-family:'Courier New',monospace;color:#1e293b;background:#f1f5f9;padding:6px 16px;border-radius:8px;">${formatTime(quizTimeRemaining)}</div>` : (openExam ? `<div style="font-size:11px;font-weight:700;color:#15803d;background:#f0fdf4;border:1px solid #bbf7d0;padding:6px 12px;border-radius:8px;">OPEN — no time limit</div>` : '')}
                 <button onclick="confirmQuizSubmit('${quiz.id}')" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='var(--accent,#2563eb)'" style="background:var(--accent,#2563eb);color:#fff;border:none;padding:8px 24px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;transition:background 0.15s;">Submit</button>
             </div>
         </div>
@@ -16296,7 +16326,8 @@ function showQuizInterface(quiz, questions, lang) {
         dot.onclick = () => goToQuestion(idx);
         navDots.appendChild(dot);
     });
-    if (quiz.timeLimit) {
+    // An open exam is untimed: no interval, no auto-submit on time running out.
+    if (timeLimit) {
         quizTimerInterval = setInterval(() => {
             quizTimeRemaining--;
             const timer = document.getElementById('quiz-timer');
@@ -19108,7 +19139,9 @@ async function checkMissingExamsAlert() {
     const alerts = [];
     for (const exam of exams) {
         // An exam that is set but not scheduled has no date: it must never
-        // raise "missing exam" alerts.
+        // raise "missing exam" alerts. Neither must an open-ended exam, which
+        // has no closing date to miss.
+        if (exam.openWindow) continue;
         if (!exam.date || !exam.time) continue;
         const examDate = new Date(exam.date || exam.examDate).getTime();
         if (!examDate || isNaN(examDate)) continue;
