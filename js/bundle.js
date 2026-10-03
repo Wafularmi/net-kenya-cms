@@ -512,7 +512,7 @@ function getRolePermissions(role, user) {
         registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions','meetings'],
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
-        student: ['student-hub','library','tickets','discussions'],
+        student: ['student-hub','exams','library','tickets','discussions'],
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','meetings'],
         assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings']
@@ -4732,7 +4732,11 @@ async function renderExams() {
     const enrollments = await dbGetAll('enrollments');
     const centers = await getCenters();
     let registrations = await dbGetAll('examRegistrations');
-    const semester = document.getElementById('exam-semester').value;
+    // 'all' means every semester. A student has no way of knowing which
+    // semester an exam belongs to, so the default view must not hide it.
+    const semRaw = document.getElementById('exam-semester').value;
+    const semester = (semRaw === 'all' || !semRaw) ? null : semRaw;
+    const semMatches = (e) => semester === null || String(e.semester) === String(semester);
     if (isStudentUser) {
         const addBtn = document.querySelector('#screen-exams .btn-primary');
         if (addBtn) addBtn.style.display = 'none';
@@ -4746,7 +4750,7 @@ async function renderExams() {
         const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
-        const sorted = exams.filter(e => e.published !== false && e.semester == semester && e.date && e.time && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
+        const sorted = exams.filter(e => e.published !== false && semMatches(e) && e.date && e.time && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => a.date.localeCompare(b.date));
         const today = new Date().toISOString().split('T')[0];
         const upcoming = sorted.filter(e => e.date >= today);
         const past = sorted.filter(e => e.date < today);
@@ -4829,7 +4833,7 @@ async function renderExams() {
             exams = exams.filter(e => !e.studyCenterId || cidSet.has(e.studyCenterId));
             registrations = regionStudents ? registrations.filter(r => regionStudents.has(r.studentId)) : registrations;
         }
-        const filtered = exams.filter(e => e.semester == semester).sort((a, b) => {
+        const filtered = exams.filter(e => semMatches(e)).sort((a, b) => {
             // Exams that are set but not scheduled yet have no date: keep them last.
             if (!a.date && !b.date) return 0;
             if (!a.date) return 1;
@@ -4844,7 +4848,7 @@ async function renderExams() {
             const pub = e.published !== false;
             const isScheduled = !!(e.date && e.time);
             return `<tr><td><b>${(e.title || course?.code || e.courseId)}</b><br><span style="font-size:11px;color:var(--text-muted);">${course ? course.name : ''}</span>${center ? `<br><span style="font-size:10px;color:var(--accent);">${center.name}</span>` : ''}</td><td>${isScheduled ? formatDate(e.date) : `<span class="badge badge-warning">⏳ Not scheduled</span>`}</td><td>${isScheduled ? e.time : '--'}</td><td>${e.venue || '--'}</td><td>${examRegs.length}</td><td>${invigilator ? invigilator.name : '--'}</td><td><span class="badge badge-${pub ? 'success' : 'secondary'}" style="cursor:pointer;" onclick="toggleExamPublished('${e.id}')">${pub ? 'Published' : 'Draft'}</span></td><td><button class="btn ${isScheduled ? 'btn-outline' : 'btn-primary'} btn-sm" onclick="showExamSchedule('${e.id}')">${isScheduled ? 'Reschedule' : '📅 Schedule'}</button> <button class="btn btn-outline btn-sm" onclick="showExamForm('${e.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showExamRegistration('${e.id}')">Reg</button> <button class="btn btn-outline btn-sm" onclick="showExamResults('${e.id}')">Results</button> <button class="btn btn-warning btn-sm" onclick="showExamNotify('${e.id}')">Notify</button> <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">Del</button></td></tr>`;
-        }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No exams for this semester yet. Click "+ Set Exam" to set the exam paper, then use "Schedule" to give it a date, time and venue.</td></tr>';
+        }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No exams here yet. Click "+ Set Exam" to set the exam paper, then use "Schedule" to give it a date, time and venue.</td></tr>';
         renderRetakeRequests();
     }
 }
@@ -5102,7 +5106,7 @@ async function saveExam() {
     // enough to schedule, the venue may follow. Without them the exam is simply
     // "set" and stays out of student view until it is scheduled.
     const scheduled = !!date && !!time;
-    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: document.getElementById('exam-semester').value, published: document.getElementById('exam-published').checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('exams', exam); closeModal(); renderExams();
     showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
     logAudit(editId ? 'updated' : 'created', 'exam', exam);
@@ -5243,7 +5247,7 @@ async function autoGenerateSeating(exam) {
 async function showSeatingPlan() {
     const exams = await dbGetAll('exams');
     const semester = document.getElementById('exam-semester').value;
-    const semesterExams = exams.filter(e => e.semester == semester);
+    const semesterExams = exams.filter(e => semester === 'all' || String(e.semester) === String(semester));
     const content = `<div class="form-group"><label>Select Exam</label><select id="seating-exam">${semesterExams.map(e => `<option value="${e.id}">${e.title || e.courseId} — ${formatDate(e.date)} ${e.time}</option>`).join('')}</select></div><button class="btn btn-primary" onclick="renderSeatingPlan()" style="margin-top:8px;">Generate Seating Plan</button><div id="seating-plan-result" style="margin-top:16px;"></div>`;
     showModal('Seating Plan', content, `<button class="btn btn-outline" onclick="printSeatingPlan()">Print</button>`);
 }
@@ -5295,11 +5299,12 @@ async function showModerationReport() {
     const grades = await dbGetAll('grades');
     const students = await dbGetAll('students');
     const courses = await dbGetAll('courses');
-    const semester = document.getElementById('exam-semester').value;
-    const semesterGrades = grades.filter(g => g.semester == semester);
+    const _ms = document.getElementById('exam-semester').value;
+    const semester = (_ms === 'all' || !_ms) ? 'all' : _ms;
+    const semesterGrades = grades.filter(g => semester === 'all' || String(g.semester) === String(semester));
     const courseGrades = {};
     semesterGrades.forEach(g => { if (!courseGrades[g.courseId]) courseGrades[g.courseId] = []; courseGrades[g.courseId].push(g); });
-    let html = '<h4 style="color:var(--accent);margin-bottom:12px;">Grade Moderation Report - Semester ' + semester + '</h4>';
+    let html = '<h4 style="color:var(--accent);margin-bottom:12px;">Grade Moderation Report - ' + (semester === 'all' ? 'All Semesters' : 'Semester ' + semester) + '</h4>';
     for (const courseId in courseGrades) {
         const course = courses.find(c => c.id === courseId);
         const gList = courseGrades[courseId];
