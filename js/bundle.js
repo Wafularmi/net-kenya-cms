@@ -2125,32 +2125,55 @@ function startAutoRefresh() {
 // burned its connection budget on repeats of the same data. Everything now
 // shares a single stream through netSSESubscribe().
 // ---------------------------------------------------------------------------
-const __netSSE = { es: null, token: '', subs: {}, connecting: false };
-function netSSEconnect() {
+const __netSSE = { es: null, token: '', subs: {}, connecting: false, retries: 0, timer: null, opened: false, delivered: 0 };
+
+// Opens (or reuses) the single live-update stream for this tab. The browser's
+// own EventSource retry is NOT relied on: if the stream dies we schedule our own
+// backoff reconnect, so a closed stream can never leave the tab permanently deaf
+// to updates.
+function netSSEconnect(force) {
     try {
         const tok = storedToken();
-        if (!tok) return;
-        if (__netSSE.es && __netSSE.token === tok &&
-            (__netSSE.es.readyState === 1 || __netSSE.connecting)) return;
+        if (!tok) return;                       // not signed in yet
+        const live = __netSSE.es && (__netSSE.es.readyState === 1 || __netSSE.connecting);
+        if (!force && live && __netSSE.token === tok) return;
+        if (__netSSE.timer) { clearTimeout(__netSSE.timer); __netSSE.timer = null; }
         if (__netSSE.es) { try { __netSSE.es.close(); } catch (e) {} __netSSE.es = null; }
         __netSSE.token = tok;
         __netSSE.connecting = true;
-        const es = new EventSource('/api/events?token=' + encodeURIComponent(tok));
+
+        let es;
+        try { es = new EventSource('/api/events?token=' + encodeURIComponent(tok)); }
+        catch (e) { __netSSE.connecting = false; console.error('SSE could not be opened:', e); return; }
         __netSSE.es = es;
-        es.addEventListener('open', () => { __netSSE.connecting = false; _sseConnected = true; });
-        es.addEventListener('error', () => {
-            __netSSE.connecting = false; _sseConnected = false;
-            // Let the browser's own retry run; drop our handle if it gave up.
-            try { if (es.readyState === 2) { __netSSE.es = null; __netSSE.token = ''; } } catch (e) {}
+
+        es.addEventListener('open', () => {
+            __netSSE.connecting = false; __netSSE.opened = true; __netSSE.retries = 0;
+            _sseConnected = true;
         });
+
+        es.addEventListener('error', () => {
+            __netSSE.connecting = false;
+            _sseConnected = false;
+            __netSSE.opened = false;
+            if (__netSSE.es === es) __netSSE.es = null;
+            if (__netSSE.timer) return;
+            const delay = Math.min(15000, 800 * Math.pow(2, __netSSE.retries++));
+            __netSSE.timer = setTimeout(() => { __netSSE.timer = null; netSSEconnect(true); }, delay);
+        });
+
         ['db-change', 'maintenance', 'cleanup-candidates', 'security-push'].forEach((evt) => {
             es.addEventListener(evt, (e) => {
+                __netSSE.delivered++;
                 const list = __netSSE.subs[evt] || [];
-                list.forEach((fn) => { try { fn(e); } catch (err) { console.error('sse handler failed:', err); } });
+                for (let i = 0; i < list.length; i++) {
+                    try { list[i](e); } catch (err) { console.error('sse handler failed:', err); }
+                }
             });
         });
     } catch (e) { console.error('netSSEconnect failed:', e); }
 }
+
 function netSSESubscribe(eventName, fn) {
     try {
         const list = __netSSE.subs[eventName] || (__netSSE.subs[eventName] = []);
@@ -2165,7 +2188,31 @@ function netSSESubscribe(eventName, fn) {
         } catch (e) {}
     };
 }
+
+// Close for real (logout / teardown). Must not be used for routine refreshes.
+function netSSEDisconnect() {
+    try {
+        if (__netSSE.timer) { clearTimeout(__netSSE.timer); __netSSE.timer = null; }
+        if (__netSSE.es) { try { __netSSE.es.close(); } catch (e) {} }
+        __netSSE.es = null; __netSSE.token = ''; __netSSE.opened = false;
+    } catch (e) {}
+}
 window.netSSEconnect = netSSEconnect;
+window.netSSESubscribe = netSSESubscribe;
+window.netSSEDisconnect = netSSEDisconnect;
+// Diagnostics: proves whether the stream is open and delivering.
+window.__netSSEDebug = function () {
+    return {
+        hasEventSource: !!__netSSE.es,
+        readyState: __netSSE.es ? __netSSE.es.readyState : -1,
+        opened: __netSSE.opened,
+        delivered: __netSSE.delivered,
+        connecting: __netSSE.connecting,
+        retries: __netSSE.retries,
+        tokenLength: (__netSSE.token || '').length,
+        subscribers: Object.keys(__netSSE.subs).map(function (k) { return k + '=' + __netSSE.subs[k].length; }).join(', ')
+    };
+};
 window.netSSESubscribe = netSSESubscribe;
 const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); }, ms);
     _refreshTimers.push(pollIfNoSSE(pollTickets, 30000));
@@ -2180,7 +2227,7 @@ const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); },
         const sessionToken = currentUser.session_token || '';
         const authHeaders = getAuthHeaders();
         const authToken = authHeaders['Authorization'] ? authHeaders['Authorization'].replace('Bearer ', '') : sessionToken;
-        _sseConnection = { close: function () { __netSSE.es = null; __netSSE.token = ''; } };
+        _sseConnection = { close: function () { }, readyState: 1 };
         netSSEconnect();
         netSSESubscribe('db-change', (e) => {
             _sseConnected = true;
