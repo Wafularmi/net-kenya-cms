@@ -2399,11 +2399,12 @@ function startHubLiveSync() {
     _hubTimestampInterval = setInterval(_updateHubRefreshButton, 1000);
 
     try {
-        _hubSSE = new EventSource('/api/events?token=' + encodeURIComponent((JSON.parse(sessionStorage.getItem('currentUser') || '{}').session_token) || ''));
-        _hubSSE.addEventListener('maintenance', (e) => {
+        _hubSSE = { close: function () { } };
+        if (typeof netSSESubscribe === 'function') { netSSEconnect(); } else { _hubSSE = new EventSource('/api/events?token=' + encodeURIComponent(storedToken() || '')); }
+        netSSESubscribe('maintenance', (e) => {
             try { if (typeof handleMaintenancePush === 'function') handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
         });
-        _hubSSE.addEventListener('db-change', (e) => {
+        netSSESubscribe('db-change', (e) => {
             try {
                 const { store } = JSON.parse(e.data || '{}');
                 if (!_hubRelevantStores.includes(store)) return;

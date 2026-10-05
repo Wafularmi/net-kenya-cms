@@ -2115,7 +2115,59 @@ function startAutoRefresh() {
     // No signed-in session (login screen) → no live stream; opening it with an
     // empty token just produced a 401/reconnect loop.
     if (!user.session_token) return;
-    const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); }, ms);
+    // ---------------------------------------------------------------------------
+// One live-update connection per tab.
+//
+// The bundle and the student hub each used to open their OWN /api/events
+// stream, on top of the maintenance stream and reconnect retries. Chrome
+// allows only a handful of concurrent streams per origin, so those duplicates
+// crowded out each other: updates arrived late, or not at all, and the tab
+// burned its connection budget on repeats of the same data. Everything now
+// shares a single stream through netSSESubscribe().
+// ---------------------------------------------------------------------------
+const __netSSE = { es: null, token: '', subs: {}, connecting: false };
+function netSSEconnect() {
+    try {
+        const tok = storedToken();
+        if (!tok) return;
+        if (__netSSE.es && __netSSE.token === tok &&
+            (__netSSE.es.readyState === 1 || __netSSE.connecting)) return;
+        if (__netSSE.es) { try { __netSSE.es.close(); } catch (e) {} __netSSE.es = null; }
+        __netSSE.token = tok;
+        __netSSE.connecting = true;
+        const es = new EventSource('/api/events?token=' + encodeURIComponent(tok));
+        __netSSE.es = es;
+        es.addEventListener('open', () => { __netSSE.connecting = false; _sseConnected = true; });
+        es.addEventListener('error', () => {
+            __netSSE.connecting = false; _sseConnected = false;
+            // Let the browser's own retry run; drop our handle if it gave up.
+            try { if (es.readyState === 2) { __netSSE.es = null; __netSSE.token = ''; } } catch (e) {}
+        });
+        ['db-change', 'maintenance', 'cleanup-candidates', 'security-push'].forEach((evt) => {
+            es.addEventListener(evt, (e) => {
+                const list = __netSSE.subs[evt] || [];
+                list.forEach((fn) => { try { fn(e); } catch (err) { console.error('sse handler failed:', err); } });
+            });
+        });
+    } catch (e) { console.error('netSSEconnect failed:', e); }
+}
+function netSSESubscribe(eventName, fn) {
+    try {
+        const list = __netSSE.subs[eventName] || (__netSSE.subs[eventName] = []);
+        if (list.indexOf(fn) === -1) list.push(fn);
+        netSSEconnect();
+    } catch (e) { console.error('netSSESubscribe failed:', e); }
+    return function () {
+        try {
+            const list = __netSSE.subs[eventName] || [];
+            const i = list.indexOf(fn);
+            if (i >= 0) list.splice(i, 1);
+        } catch (e) {}
+    };
+}
+window.netSSEconnect = netSSEconnect;
+window.netSSESubscribe = netSSESubscribe;
+const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); }, ms);
     _refreshTimers.push(pollIfNoSSE(pollTickets, 30000));
     _refreshTimers.push(pollIfNoSSE(pollAlerts, 30000));
     _refreshTimers.push(pollIfNoSSE(pollDashboard, 60000));
@@ -2128,8 +2180,9 @@ function startAutoRefresh() {
         const sessionToken = currentUser.session_token || '';
         const authHeaders = getAuthHeaders();
         const authToken = authHeaders['Authorization'] ? authHeaders['Authorization'].replace('Bearer ', '') : sessionToken;
-        _sseConnection = new EventSource('/api/events?token=' + encodeURIComponent(authToken));
-        _sseConnection.addEventListener('db-change', (e) => {
+        _sseConnection = { close: function () { __netSSE.es = null; __netSSE.token = ''; } };
+        netSSEconnect();
+        netSSESubscribe('db-change', (e) => {
             _sseConnected = true;
             try {
                 const { store, record } = JSON.parse(e.data);
@@ -2138,16 +2191,16 @@ function startAutoRefresh() {
                 else { pollDashboard(); onDBChange(store, record); }
             } catch {}
         });
-        _sseConnection.addEventListener('maintenance', (e) => {
+        netSSESubscribe('maintenance', (e) => {
             try { handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
         });
-        _sseConnection.addEventListener('cleanup-candidates', (e) => {
+        netSSESubscribe('cleanup-candidates', (e) => {
             try {
                 const d = JSON.parse(e.data || '{}');
                 if (d && d.count > 0) refreshCleanupStatus();
             } catch {}
         });
-        _sseConnection.addEventListener('security-push', (e) => {
+        netSSESubscribe('security-push', (e) => {
             try {
                 const d = JSON.parse(e.data || '{}');
                 if (d && d.phone && d.title && typeof sendWhatsApp === 'function') {
