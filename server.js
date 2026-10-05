@@ -208,7 +208,7 @@ function externalizeStoreRecords(store, rows) {
         }
         out.push(maybeReinjectArchived(maybeStripInline(res.record)));
     }
-    if (changed) { try { broadcastStoreChange(store, toStore); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
+    if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('externalizeStoreRecords save failed:', e); } }
     return out;
 }
 // Heavy settings blobs (PDF templates) live on disk, NOT in server-data.json.
@@ -334,7 +334,7 @@ function backfillCertIdentifiers(store, rows) {
         }
         out.push(rec);
     }
-    if (changed) { try { broadcastStoreChange(store, toStore); saveDB(); } catch (e) { console.error('backfillCertIdentifiers save failed:', e); } }
+    if (changed) { try { broadcastEvent('db-change', { store }); saveDB(); } catch (e) { console.error('backfillCertIdentifiers save failed:', e); } }
     return out;
 }
 function certVerifyCode() {
@@ -4294,7 +4294,7 @@ return json(res, 200, result);
                     else db[store].push(r);
                     result.ok++;
                 }
-                if (result.ok) { broadcastStoreChange(store, toStore); saveDB(); }
+                if (result.ok) { broadcastEvent('db-change', { store }); saveDB(); }
                 return json(res, 200, result);
             } catch (e) { return json(res, 400, { error: 'Invalid JSON' }); }
         });
@@ -4373,7 +4373,7 @@ return json(res, 200, result);
             if (store === 'students' || store === 'studyCenters' || store === 'regions') {
                 invalidateCountryIndex();
             }
-            broadcastStoreChange(store, toStore); saveDB();
+            broadcastEvent('db-change', { store }); saveDB();
         }
 
         // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)
