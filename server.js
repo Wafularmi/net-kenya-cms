@@ -865,7 +865,7 @@ const STUDENT_DENY_STORES = new Set([
     'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
     'invoices', 'installments', 'whatsappTemplates', 'whatsappLog',
-    'expenseCategories', 'gradRequirements', 'sessions'
+    'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets'
 ]);
 
 // Stores a student is allowed to write to (their own activity records)

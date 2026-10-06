@@ -15867,7 +15867,7 @@ async function renderSubmissions() {
         const pointsDisplay = s.pointsEarned != null ? `${Math.round(s.pointsEarned * 10) / 10}/${s.totalPoints} pts` : '';
         const isPendingReview = s.status === 'pending_review' || s.needsReview;
         const reviewBtn = isPendingReview ? `<button class="btn btn-warning btn-sm" onclick="showEssayReviewPanel('${s.id}')">📝 Review</button> ` : '';
-        return `<tr><td>${student ? student.name : s.studentId}</td><td style="font-size:12px;">${quiz ? quiz.title : s.quizId}</td><td style="font-weight:700;">${s.score}%</td><td>${pointsDisplay}</td><td>${s.grade || '--'}</td><td><span class="badge badge-${isPendingReview ? 'warning' : statusClass}">${isPendingReview ? 'PENDING REVIEW' : s.status.toUpperCase()}</span></td><td>${s.attempts || 1}</td><td style="font-size:11px;">${formatDate(s.submittedAt)}</td><td>${reviewBtn}${s.essayAnalysis ? `<button class="btn btn-outline btn-sm" onclick="viewEssayAnalysis('${s.id}')">View AI</button>` : ''} <button class="btn btn-outline btn-sm" onclick="viewSubmissionDetails('${s.id}')">Details</button> <button class="btn btn-danger btn-sm" onclick="deleteSubmission('${s.id}')">Del</button></td></tr>`;
+        return `<tr><td>${student ? student.name : s.studentId}</td><td style="font-size:12px;">${quiz ? quiz.title : s.quizId}</td><td style="font-weight:700;">${s.score}%</td><td>${pointsDisplay}</td><td>${s.grade || '--'}</td><td><span class="badge badge-${isPendingReview ? 'warning' : statusClass}">${isPendingReview ? 'PENDING REVIEW' : s.status.toUpperCase()}</span></td><td>${s.attempts || 1}</td><td style="font-size:11px;">${formatDate(s.submittedAt)}</td><td>${reviewBtn}${s.essayAnalysis ? `<button class="btn btn-outline btn-sm" onclick="viewEssayAnalysis('${s.id}')">View AI</button>` : ''} <button class="btn btn-outline btn-sm" onclick="viewSubmissionDetails('${s.id}')">Details</button> <button class="btn btn-warning btn-sm" onclick="resetSubmission('${s.id}')">Reset</button> <button class="btn btn-danger btn-sm" onclick="deleteSubmission('${s.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No submissions yet.</td></tr>';
     if (savedStatus) statusSelect.value = savedStatus;
     quizSelect.onchange = renderSubmissions;
@@ -15939,6 +15939,47 @@ async function viewSubmissionDetails(submissionId) {
 async function deleteSubmission(id) {
     if (!await showConfirm('Confirm', 'Delete this submission?')) return;
     await dbDelete('submissions', id); renderSubmissions(); showToast('Submission deleted');
+}
+async function resetSubmission(id) {
+    const sub = await dbGet('submissions', id);
+    if (!sub) return showToast('Submission not found.', { type: 'danger' });
+    const quiz = (await dbGetAll('quizzes')).find(q => q.id === sub.quizId);
+    const quizTitle = quiz ? quiz.title : sub.quizId;
+    window._resetSubmissionId = id;
+    window._resetSubmissionConfirm = async function() {
+        const reason = document.getElementById('reset-reason')?.value.trim();
+        if (!reason) return showToast('Enter a reason for the reset.', { type: 'warning' });
+        const sub2 = await dbGet('submissions', window._resetSubmissionId);
+        if (!sub2) { closeModal(); return showToast('Submission no longer exists.', { type: 'warning' }); }
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const resetRecord = {
+            id: generateId('SUBRESET'),
+            originalSubmissionId: sub2.id,
+            studentId: sub2.studentId,
+            quizId: sub2.quizId,
+            quizTitle,
+            score: sub2.score,
+            status: sub2.status,
+            reason,
+            resetAt: new Date().toISOString(),
+            resetBy: u.username || ''
+        };
+        await dbPut('submissionResets', resetRecord);
+        // Remove any grade directly keyed by this submission.
+        const allGrades = await dbGetAll('grades');
+        for (const g of allGrades) {
+            if (g && ((g.submissionId === sub2.id) || (g.studentId === sub2.studentId && g.quizId === sub2.quizId && String(g.score) === String(sub2.score)))) {
+                try { await dbDelete('grades', g.id); } catch {}
+            }
+        }
+        await dbDelete('submissions', sub2.id);
+        invalidatePortalCache(); invalidateProgressCache();
+        logAudit('reset-submission', 'submission-reset', { studentId: sub2.studentId, quizId: sub2.quizId, reason });
+        closeModal();
+        renderSubmissions();
+        showToast('Submission reset. The student can retake this assessment.', { type: 'success' });
+    };
+    showModal('Reset Submission', `<div style="padding:12px;"><p>This clears the failed submission for this student so they can retake it from the beginning.</p><div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Score: ${sub.score}% · Status: ${sub.status} · Quiz: ${quizTitle}</div><label style="display:block;margin-bottom:6px;font-weight:600;">Reason for reset *</label><textarea id="reset-reason" rows="4" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:13px;resize:vertical;" placeholder="e.g., system error, internet dropped, failed submission not registered"></textarea></div>`, `<button class="btn btn-danger" onclick="window._resetSubmissionConfirm()">Reset & Allow Retake</button><button class="btn btn-outline" onclick="closeModal()">Cancel</button>`);
 }
 async function showEssayReviewPanel(submissionId) {
     const sub = await dbGet('submissions', submissionId);
@@ -16724,7 +16765,7 @@ async function submitQuiz(quizId) {
     if (!hasEssays) {
         const gradeInfo = getGrade(totalScore);
         const gradeEntry = {
-            id: generateId('GRADE'), studentId,
+            id: generateId('GRADE'), studentId, submissionId: submission.id,
             courseId: quiz.courseId, score: totalScore, grade: gradeInfo.grade,
             gpa: gradeInfo.gpa,
             semester: 1, type: quiz.assessmentType || 'quiz', quizId,
