@@ -2232,10 +2232,10 @@ const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); },
         netSSESubscribe('db-change', (e) => {
             _sseConnected = true;
             try {
-                const { store, record } = JSON.parse(e.data);
+                const { store, record, action } = JSON.parse(e.data);
                 if (store === 'tickets') pollTickets();
                 else if (store === 'alerts') pollAlerts();
-                else { pollDashboard(); onDBChange(store, record); }
+                else { pollDashboard(); onDBChange(store, record, action); }
             } catch {}
         });
         netSSESubscribe('maintenance', (e) => {
@@ -2390,7 +2390,7 @@ const _refreshMap = {
     courses: (r) => { refreshPortal('courses', r); if (isScreenActive('courses')) renderCourses(); },
     lessons: (r) => { refreshPortal('lessons', r); if (isScreenActive('courses')) renderCourses(); },
     quizzes: (r) => { refreshPortal('quizzes', r); if (isScreenActive('quizzes')) renderQuizzes(); },
-    exams: (r) => { refreshPortal('exams', r); const d = r && r.data ? r.data : r; const applied = applyLiveRecord('exams', d && d.record, d && d.action); scheduleLiveRender(() => { if (isScreenActive('quizzes')) renderQuizzes(); if (isScreenActive('exams')) renderExams(applied ? { fromCache: true } : undefined); }); },
+    exams: (r, action) => { refreshPortal('exams', r); const applied = applyLiveRecord('exams', r, action); scheduleLiveRender(() => { if (isScreenActive('quizzes')) renderQuizzes(); if (isScreenActive('exams')) renderExams(applied ? { fromCache: true } : undefined); }); },
     questions: () => { if (isScreenActive('questions')) renderQuestionBank(); },
     enrollments: (r) => { refreshPortal('enrollments', r); if (isScreenActive('courses')) renderCourses(); },
     submissions: (r) => { refreshPortal('submissions', r); if (isScreenActive('quizzes')) renderQuizzes(); },
@@ -2412,11 +2412,11 @@ const _refreshMap = {
     lessonCompletions: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); if (isScreenActive('graduation') && typeof populateGraduationFilters === 'function') populateGraduationFilters(); },
     lessonUnlocks: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); },
 };
-function onDBChange(store, record) {
-    const fn = _refreshMap[store];
-    if (fn) {
-        try { fn(record); } catch (e) {}
-    }
+function onDBChange(store, record, action) {
+const fn = _refreshMap[store];
+if (fn) {
+try { fn(record, action); } catch (e) {}
+}
     if (isScreenActive('dashboard')) {
         try { renderDashboard(); } catch (e) {}
     }
