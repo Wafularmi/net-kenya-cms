@@ -499,7 +499,7 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','verify','reprint','discussions','regions','coverage','compare','meetings'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
@@ -1566,7 +1566,7 @@ function buildNavigation(user) {
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, { id: 'exams', icon: '', text: 'Examinations' }, { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
         { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
-        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }] }
+        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'settings', icon: '', text: 'Settings' }, { id: 'analytics', icon: '', text: '📐 Analytics' }] }
     ];
     let html = '';
     sections.forEach(section => {
@@ -1971,6 +1971,13 @@ function toggleSidebar() {
     if (!sidebar) return;
     sidebar.classList.toggle('open');
 }
+function trackAnalyticsEvent(event, path) {
+    try {
+        const headers = getAuthHeaders();
+        const source = new URLSearchParams(window.location.search).get('src') || '';
+        fetch('/api/analytics/event', { method: 'POST', headers, body: JSON.stringify({ event: event || 'page', path: path || window.location.pathname || '/', referrer: document.referrer || '', source }) }).catch(() => {});
+    } catch (e) {}
+}
 function showScreen(id) {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const perms = getRolePermissions(user.role, user);
@@ -1982,6 +1989,7 @@ function showScreen(id) {
         return;
     }
     sessionStorage.setItem('lastScreen', id);
+    try { trackAnalyticsEvent('page', id); } catch {}
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.getElementById('screen-' + id).classList.add('active');
@@ -2027,6 +2035,7 @@ function showScreen(id) {
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
         case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'analytics': renderAnalytics(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
@@ -19493,6 +19502,35 @@ async function dismissAlert(id) {
     updateNotificationBadge();
     renderAlertDashboard();
     refreshCleanupStatus();
+}
+async function renderAnalytics() {
+    const el = document.getElementById('analytics-content');
+    if (!el) return;
+    const rows = await dbGetAll('analyticsEvents').catch(() => []);
+    function count(key) {
+        const m = {};
+        rows.forEach(r => { m[r[key] || 'Unknown'] = (m[r[key] || 'Unknown'] || 0) + 1; });
+        return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    }
+    function table(title, entries) {
+        return `<div class="card" style="margin-bottom:12px;"><h3>${title}</h3><table class="data-table"><tbody>${entries.map(([k, v]) => `<tr><td>${escapeHtml(String(k))}</td><td style="text-align:right;font-weight:700;">${v}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--text-muted);">No data yet</td></tr>'}</tbody></table></div>`;
+    }
+    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px;">
+        <div class="card"><div style="font-size:28px;font-weight:800;">${rows.length}</div><div style="font-size:12px;color:var(--text-muted);">Recorded events</div></div>
+        <div class="card"><div style="font-size:28px;font-weight:800;">${new Set(rows.map(r => r.at && r.at.slice(0, 10))).size}</div><div style="font-size:12px;color:var(--text-muted);">Days with activity</div></div>
+        <div class="card"><div style="font-size:28px;font-weight:800;">${count('country').length}</div><div style="font-size:12px;color:var(--text-muted);">Countries tracked</div></div>
+        <div class="card"><div style="font-size:28px;font-weight:800;">${count('source').length}</div><div style="font-size:12px;color:var(--text-muted);">Source types</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">
+        ${table('Top Countries', count('country'))}
+        ${table('Browsers', count('browser'))}
+        ${table('Operating Systems', count('os'))}
+        ${table('Devices', count('device'))}
+        ${table('Top Paths', count('path'))}
+        ${table('Sources', count('source'))}
+        ${table('Roles', count('role'))}
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Analytics are aggregate usage counts only. No raw IPs or student identifiers are stored.</p>`;
 }
 async function renderAlertDashboard() {
     const alerts = (await dbGetAll('alerts')).filter(a => a.status === 'active');

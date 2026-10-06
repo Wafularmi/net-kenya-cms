@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=147">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=394" as="script">
+    <link rel="preload" href="js/bundle.js?v=395" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -1288,6 +1288,11 @@
                     </div>
                 </div>
             </section>
+            <section id="screen-analytics" class="screen">
+                <div class="screen-header"><h2>📐 System Analytics</h2><div class="screen-actions"><button class="btn btn-outline" onclick="renderAnalytics()">Refresh</button></div></div>
+                <div id="analytics-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading analytics...</p></div>
+            </section>
+
         </main>
     </div>
 
@@ -1381,7 +1386,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=394"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=395"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=50"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
@@ -1408,5 +1413,10 @@
     // Populate country dropdown before bundle.js loads
     (function(){ try { fetch('/api/countries').then(function(r){return r.json();}).then(function(d){ var sel=document.getElementById('login-country'); if(!sel||!d.countries) return; sel.innerHTML='<option value="">-- Select country --</option>'+d.countries.map(function(c){return '<option value="'+c.name+'">'+c.brandName+'</option>';}).join(''); }).catch(function(){}); } catch(e){} })();
     </script>
+    <div id="privacy-analytics-note" style="position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;max-width:680px;width:calc(100% - 24px);background:rgba(15,23,42,0.96);color:#fff;padding:12px 14px;border-radius:10px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,0.35);display:flex;gap:10px;align-items:center;">
+        <span style="flex:1;line-height:1.45;">This portal uses privacy-safe analytics to understand usage by country, browser, device and source. No raw IPs or student identifiers are stored.</span>
+        <button type="button" onclick="localStorage.setItem('privacyAnalyticsSeen','1');document.getElementById('privacy-analytics-note').style.display='none';" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-weight:700;">OK</button>
+    </div>
+    <script>try{if(localStorage.getItem('privacyAnalyticsSeen')==='1'){var n=document.getElementById('privacy-analytics-note');if(n)n.style.display='none';}}catch(e){}</script>
 </body>
 </html>

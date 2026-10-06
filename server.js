@@ -865,7 +865,7 @@ const STUDENT_DENY_STORES = new Set([
     'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
     'invoices', 'installments', 'whatsappTemplates', 'whatsappLog',
-    'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets'
+    'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents'
 ]);
 
 // Stores a student is allowed to write to (their own activity records)
@@ -3435,6 +3435,60 @@ function decodeHtmlEntities(s) {
             }
         });
         return;
+    }
+
+    // POST /api/analytics/event — privacy-safe anonymous usage event
+    if (parts.length === 3 && parts[1] === 'analytics' && parts[2] === 'event' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const event = JSON.parse(body || '{}') || {};
+                const user = getRequestUser(req);
+                const ua = String(req.headers['user-agent'] || '');
+                function classifyBrowser() {
+                    if (/Edg\//i.test(ua)) return 'Edge';
+                    if (/Chrome\//i.test(ua) && !/Edg|OPR|Brave/i.test(ua)) return 'Chrome';
+                    if (/Firefox\//i.test(ua)) return 'Firefox';
+                    if (/Safari\//i.test(ua) && !/Chrome/i.test(ua)) return 'Safari';
+                    if (/OPR\//i.test(ua)) return 'Opera';
+                    return 'Unknown';
+                }
+                function classifyOS() {
+                    if (/Windows/i.test(ua)) return 'Windows';
+                    if (/Android/i.test(ua)) return 'Android';
+                    if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+                    if (/Mac OS X|Macintosh/i.test(ua)) return 'macOS';
+                    if (/Linux/i.test(ua)) return 'Linux';
+                    return 'Unknown';
+                }
+                const device = /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop';
+                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : 'Unknown';
+                const role = user && user.role ? String(user.role) : 'public';
+                const rec = {
+                    id: 'AE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+                    at: new Date().toISOString(),
+                    event: String(event.event || event.type || 'page').slice(0, 60),
+                    path: String(event.path || event.screen || '/').slice(0, 120),
+                    referrer: String(event.referrer || req.headers.referer || '').slice(0, 140),
+                    source: String(event.source || '').slice(0, 80),
+                    country,
+                    role,
+                    browser: classifyBrowser(),
+                    os: classifyOS(),
+                    device,
+                    authenticated: !!user
+                };
+                if (!db.analyticsEvents) db.analyticsEvents = [];
+                db.analyticsEvents.push(rec);
+                if (db.analyticsEvents.length > 50000) db.analyticsEvents = db.analyticsEvents.slice(-50000);
+                saveDB();
+                return json(res, 200, { ok: true });
+            } catch (e) {
+                return json(res, 400, { ok: false, error: 'Invalid analytics event' });
+            }
+        });
+        return true;
     }
 
     // POST /api/verify — public guest document verification (rate-limited, minimal fields only)
