@@ -2313,10 +2313,18 @@ function handleAPI(req, res) {
             'X-Accel-Buffering': 'no',
             'Access-Control-Allow-Origin': '*'
         });
-        res.write('\n');
-        const client = { res, id: Date.now() };
-        client.user = user && user.user ? user.user : (user || null);
-    sseClients.push(client);
+res.write('\n');
+        // Register the client IMMEDIATELY, using only values already resolved
+        // above. This line used to read `user` — a name that does not exist in
+        // this scope — so it threw a ReferenceError *after* the 200 headers had
+        // already been sent. The throw was swallowed by the outer handler, the
+        // browser saw a healthy open stream, and sseClients stayed permanently
+        // empty: every broadcastEvent() delivered to 0 clients, so live updates
+        // never arrived anywhere in the app. qUser/hUser are the session objects
+        // ({ username, role, user }) that broadcastPrivateChange() filters on.
+        const client = { res, id: Date.now(), user: qUser || hUser || null };
+        sseClients.push(client);
+        process.stderr.write('[sse] client registered: ' + (client.user && client.user.username || 'anon') + ' total=' + sseClients.length + '\n');
         const keepalive = setInterval(() => {
             if (!res.writableEnded) res.write(': keepalive\n\n');
             else clearInterval(keepalive);
