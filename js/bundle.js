@@ -16086,6 +16086,15 @@ async function showLangSelectionModal(studentId, currentLang, onConfirm) {
                 await dbPut('students', student);
             }
         } catch (e) { console.error('langPref save failed (non-blocking):', e); }
+        try {
+            // Keep the Exams/Quiz switcher, the stored preference, and this assessment
+            // on the same language so the next launch matches what the user selected.
+            const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+            u.lang = chosenLang;
+            sessionStorage.setItem('currentUser', JSON.stringify(u));
+            localStorage.setItem(APP_LANG_KEY, chosenLang);
+            if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage();
+        } catch (e) {}
         closeModal();
         try { onConfirm(chosenLang); } catch (e) { console.error('quiz launch failed:', e); showToast('Could not start: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
     };
@@ -16134,6 +16143,24 @@ function appLang() {
 function setAppLang(lang) {
     try { localStorage.setItem(APP_LANG_KEY, lang === 'sw' ? 'sw' : 'en'); } catch (e) {}
     try { const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); u.lang = lang === 'sw' ? 'sw' : 'en'; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
+    try {
+        // On Exams/Quizzes the switcher also drives the student's assessment language,
+        // so persist it on their record. This keeps the next exam/quiz prompt in sync
+        // without rebuilding the whole app.
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u.role === 'student') {
+            const sid = u.studentId || u.username;
+            (async () => {
+                try {
+                    const stu = await dbGet('students', sid);
+                    if (stu && stu.langPref !== (lang === 'sw' ? 'sw' : 'en')) {
+                        stu.langPref = lang === 'sw' ? 'sw' : 'en';
+                        await dbPut('students', stu);
+                    }
+                } catch (e) { console.error('persist langPref from switcher failed:', e); }
+            })();
+        }
+    } catch (e) {}
     try { if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage(); } catch (e) {}
     try { if (isScreenActive('exams') && typeof renderExams === 'function') renderExams(); } catch (e) {}
     try { if (isScreenActive('quizzes') && typeof renderQuizzes === 'function') renderQuizzes(); } catch (e) {}
