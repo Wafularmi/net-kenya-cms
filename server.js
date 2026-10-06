@@ -3365,7 +3365,11 @@ function decodeHtmlEntities(s) {
             if (!texts.length) return json(res, 200, { ok: true, translations: [] });
             if (texts.length > 60) return json(res, 400, { ok: false, error: 'Too many strings in one request (max 60).' });
             const target = parsed.target === 'en' ? 'en' : 'sw';
-            if (key) {
+            const useGoogle = (process.env.TRANSLATE_PROVIDER || 'libretranslate').toLowerCase() === 'google';
+            if (useGoogle && !key) {
+                return json(res, 400, { ok: false, error: 'missing_key', message: 'Google mode is selected but TRANSLATE_API_KEY is not set. Set TRANSLATE_PROVIDER=libretranslate to use the free default.' });
+            }
+            if (key && useGoogle) {
                 try {
                     const r = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(key)}`, {
                         method: 'POST',
@@ -3390,7 +3394,7 @@ function decodeHtmlEntities(s) {
             }
 
             try {
-                const libreUrl = process.env.LIBRETRANSLATE_URL || '';
+                const libreUrl = process.env.LIBRETRANSLATE_URL || 'https://libretranslate.com/translate';
                 const libreKey = process.env.LIBRETRANSLATE_API_KEY || '';
                 if (libreUrl) {
                     const r = await fetch(libreUrl, {
