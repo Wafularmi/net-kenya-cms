@@ -360,6 +360,9 @@ function preserveDocIdentity(store, incoming, existing) {
 
 // SSE clients for real-time updates
 const sseClients = [];
+// Diagnostic stamp: event name + how many clients it was delivered to. Lets us
+// prove whether a broadcast reached anyone instead of guessing from the browser.
+let __lastBroadcast = null;
 // Public maintenance-status subscribers (login screen has no session token)
 const maintClients = [];
 function broadcastMaintenance(active) {
@@ -552,6 +555,7 @@ function broadcastEvent(event, data, filter) {
     // `filter(client)` decides who receives this payload. It exists so private
     // records (staff <-> student messages) are pushed ONLY to the people who own
     // them, instead of being broadcast to every signed-in browser.
+    let delivered = 0;
     for (let i = sseClients.length - 1; i >= 0; i--) {
         const client = sseClients[i];
         if (client.res.writableEnded) { sseClients.splice(i, 1); continue; }
@@ -564,8 +568,9 @@ function broadcastEvent(event, data, filter) {
                 try { payload = filter.payload(client, data); } catch (e) { continue; }
             }
         }
-        try { client.res.write('event: ' + event + '\ndata: ' + JSON.stringify(payload) + '\n\n'); } catch (e) {}
+        try { client.res.write('event: ' + event + '\ndata: ' + JSON.stringify(payload) + '\n\n'); delivered++; } catch (e) {}
     }
+    __lastBroadcast = { event: event, delivered: delivered, at: Date.now() };
 }
 
 // Push the changed row along with the event so the client can update its screen
@@ -2275,7 +2280,15 @@ function handleAPI(req, res) {
     if (parts.length === 2 && parts[1] === 'health') {
         const s = db.mpesaSettings || {};
         const mpesaConfigured = !!(s.shortcode && s.consumerKey && s.consumerSecret && s.passkey);
-        return json(res, 200, { status: 'ok', uptime: process.uptime(), mpesaConfigured });
+        // `sse`/`lastBroadcast` are diagnostics for the live-update stream.
+        return json(res, 200, {
+            status: 'ok',
+            uptime: process.uptime(),
+            mpesaConfigured,
+            sse: sseClients.length,
+            sseWritable: sseClients.filter(c => c.res && !c.res.writableEnded && !c.res.destroyed).length,
+            lastBroadcast: __lastBroadcast
+        });
     }
 
     // GET /api/session — session health: who the server thinks you are.
