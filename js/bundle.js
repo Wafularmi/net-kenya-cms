@@ -19515,13 +19515,13 @@ async function renderAnalytics() {
     function table(title, entries) {
         return `<div class="card" style="margin-bottom:12px;overflow-x:auto;"><h3>${title}</h3><div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:240px;"><tbody>${entries.map(([k, v]) => `<tr><td>${escapeHtml(String(k))}</td><td style="text-align:right;font-weight:700;">${v}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--text-muted);">No data yet</td></tr>'}</tbody></table></div></div>`;
     }
-    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px;">
+    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px;">
         <div class="card"><div style="font-size:28px;font-weight:800;">${rows.length}</div><div style="font-size:12px;color:var(--text-muted);">Recorded events</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${new Set(rows.map(r => r.at && r.at.slice(0, 10))).size}</div><div style="font-size:12px;color:var(--text-muted);">Days with activity</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${count('country').length}</div><div style="font-size:12px;color:var(--text-muted);">Countries tracked</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${count('source').length}</div><div style="font-size:12px;color:var(--text-muted);">Source types</div></div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">
+    <div style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:100%;">
         ${table('Top Countries', count('country'))}
         ${table('Browsers', count('browser'))}
         ${table('Operating Systems', count('os'))}
