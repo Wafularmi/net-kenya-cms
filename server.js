@@ -2308,7 +2308,13 @@ function handleAPI(req, res) {
             if (!res.writableEnded) res.write(': keepalive\n\n');
             else clearInterval(keepalive);
         }, 15000);
-        req.on('close', () => {
+        // Deregister on the RESPONSE closing, never on `req`. On current Node the
+        // request stream for a bodyless GET completes immediately, so `req`'s
+        // close event fires right away and used to remove this client from
+        // sseClients milliseconds after it was added. The stream stayed open in
+        // the browser while every broadcastEvent() found an empty list, so live
+        // updates silently never arrived.
+        res.on('close', () => {
             clearInterval(keepalive);
             const idx = sseClients.indexOf(client);
             if (idx >= 0) sseClients.splice(idx, 1);
@@ -2627,7 +2633,9 @@ function handleAPI(req, res) {
             if (!res.writableEnded) res.write(': keepalive\n\n');
             else clearInterval(keepalive);
         }, 15000);
-        req.on('close', () => {
+        // Same reasoning as /api/events above: use `res`, not `req`, so the
+        // client stays subscribed for the life of the open stream.
+        res.on('close', () => {
             clearInterval(keepalive);
             const idx = maintClients.indexOf(client);
             if (idx >= 0) maintClients.splice(idx, 1);
