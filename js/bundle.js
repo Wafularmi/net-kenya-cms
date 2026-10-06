@@ -14640,7 +14640,7 @@ async function bindLessonVideoTracking(lessonId, courseId, root) {
                 for (const el of vimeoEls) {
                     const pid = el.getAttribute('data-vid');
                     try {
-                        const p = new window.Vimeo.Player(pid || el);
+                        const p = new window.Vimeo.Player(el);
                         p.getDuration().then(d => st.onTick(null, d)).catch(() => {});
                         const h = (data) => { try { const c = (data && data.seconds != null) ? data.seconds : (data && data.duration != null ? data.currentTime : null); st.onTick(c, data && data.duration); } catch (e) {} };
                         p.on('timeupdate', h);
@@ -14665,15 +14665,27 @@ async function bindLessonVideoTracking(lessonId, courseId, root) {
                         el.setAttribute('id', pid);
                         const p = new window.YT.Player(pid);
                         st.unsubs.push(() => { try { p.destroy(); } catch (e) {} });
-                        const attach = () => {
+                        // Polling is more reliable than stateChange alone: the
+                        // YouTube iframe API only emits state events, not per-frame
+                        // time updates. Credit only small real forward steps.
+                        const poll = setInterval(() => {
                             try {
-                                p.getDuration().then(d => st.onTick(null, d)).catch(() => {});
-                                const h = () => { try { st.onTick(p.getCurrentTime(), p.getDuration()); } catch (e) {} };
-                                p.addEventListener('stateChange', e => { if (e && e.data === 0) st.flush(); });
-                                p.addEventListener('onStateChange', h);
+                                if (p && typeof p.getCurrentTime === 'function') {
+                                    st.onTick(p.getCurrentTime(), p.getDuration());
+                                }
                             } catch (e) {}
-                        };
-                        p.ready ? p.ready(attach) : attach();
+                        }, 1000);
+                        st.unsubs.push(() => clearInterval(poll));
+                        try {
+                            p.addEventListener('onStateChange', (e) => {
+                                try {
+                                    if (e && e.data === 0) {
+                                        st.onTick(p.getCurrentTime(), p.getDuration());
+                                        st.flush();
+                                    }
+                                } catch (_) {}
+                            });
+                        } catch (e) {}
                     } catch (e) {}
                 }
             }
