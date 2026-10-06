@@ -6569,7 +6569,7 @@ async function saveExpenseCategory() {
     const name = document.getElementById('exp-cat-name').value.trim();
     if (!name) return showToast('Category name required!');
     const id = 'CAT-' + Date.now().toString(36).toUpperCase();
-    const category = { id, name, icon: document.getElementById('exp-cat-icon').value.trim() || 'dY"<', type: document.getElementById('exp-cat-type').value, createdAt: new Date().toISOString() };
+    const category = { id, name, icon: document.getElementById('exp-cat-icon').value.trim() || '📦', type: document.getElementById('exp-cat-type').value, createdAt: new Date().toISOString() };
     await dbPut('expenseCategories', category);
     closeModal();
     renderPayroll();
@@ -19200,16 +19200,16 @@ async function generateAlerts() {
     const existing = await dbGetAll('alerts');
     const now = new Date().toISOString();
     const alertRules = [
-        { id: 'rule-quiz-fail', type: 'quiz-failed-all', check: checkQuizFailures, icon: '[!]', severity: 'danger' },
-        { id: 'rule-low-attendance', type: 'low-attendance', check: checkLowAttendance, icon: '[i]', severity: 'warning' },
-        { id: 'rule-fee-overdue', type: 'fee-overdue', check: checkFeeOverdue, icon: '[$]', severity: 'danger' },
-        { id: 'rule-new-submissions', type: 'new-submissions', check: checkNewSubmissions, icon: '[#]', severity: 'info' },
-        { id: 'rule-graduation-eligible', type: 'graduation-ready', check: checkGraduationReady, icon: '[+]', severity: 'success' },
-        { id: 'rule-low-stock', type: 'low-stock', check: checkLowStock, icon: '[^]', severity: 'warning' },
-        { id: 'rule-missing-manuals', type: 'missing-manuals', check: checkMissingManualsAlert, icon: '[M]', severity: 'danger' },
-        { id: 'rule-missing-exams', type: 'missing-exams', check: checkMissingExamsAlert, icon: '[E]', severity: 'danger' },
-        { id: 'rule-absent-2weeks', type: 'absent-2-weeks', check: checkAbsent2WeeksAlert, icon: '[A]', severity: 'danger' },
-        { id: 'rule-duplicate-documents', type: 'duplicate-documents', check: checkDuplicateDocuments, icon: '[#]', severity: 'warning' },
+        { id: 'rule-quiz-fail', type: 'quiz-failed-all', check: checkQuizFailures, icon: '❌', severity: 'danger' },
+        { id: 'rule-low-attendance', type: 'low-attendance', check: checkLowAttendance, icon: 'ℹ️', severity: 'warning' },
+        { id: 'rule-fee-overdue', type: 'fee-overdue', check: checkFeeOverdue, icon: '💸', severity: 'danger' },
+        { id: 'rule-new-submissions', type: 'new-submissions', check: checkNewSubmissions, icon: '📥', severity: 'info' },
+        { id: 'rule-graduation-eligible', type: 'graduation-ready', check: checkGraduationReady, icon: '🎓', severity: 'success' },
+        { id: 'rule-low-stock', type: 'low-stock', check: checkLowStock, icon: '📦', severity: 'warning' },
+        { id: 'rule-missing-manuals', type: 'missing-manuals', check: checkMissingManualsAlert, icon: '📘', severity: 'danger' },
+        { id: 'rule-missing-exams', type: 'missing-exams', check: checkMissingExamsAlert, icon: '📅', severity: 'danger' },
+        { id: 'rule-absent-2weeks', type: 'absent-2-weeks', check: checkAbsent2WeeksAlert, icon: '⚠️', severity: 'danger' },
+        { id: 'rule-duplicate-documents', type: 'duplicate-documents', check: checkDuplicateDocuments, icon: '🗂️', severity: 'warning' },
     ];
     const generatedAlerts = [];
     for (const rule of alertRules) {
