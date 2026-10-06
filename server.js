@@ -3352,9 +3352,12 @@ function decodeHtmlEntities(s) {
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
-            const key = process.env.TRANSLATE_API_KEY || '';
+            const translateUser = getRequestUser(req);
+            const translationSetting = db.settings ? (db.settings.find(s => s && s.key === 'translation') || {}) : {};
+            const trVal = translationSetting && (translationSetting.value && typeof translationSetting.value === 'object') ? translationSetting.value : translationSetting;
+            const key = trVal.googleApiKey || process.env.TRANSLATE_API_KEY || '';
             // No hard Google-only check now: fall back to free providers below.
-            if (!user || user.role === 'student') {
+            if (!translateUser || translateUser.role === 'student') {
                 return json(res, 403, { ok: false, error: 'Only staff can translate questions.' });
             }
             let parsed;
@@ -3365,7 +3368,7 @@ function decodeHtmlEntities(s) {
             if (!texts.length) return json(res, 200, { ok: true, translations: [] });
             if (texts.length > 60) return json(res, 400, { ok: false, error: 'Too many strings in one request (max 60).' });
             const target = parsed.target === 'en' ? 'en' : 'sw';
-            const useGoogle = (process.env.TRANSLATE_PROVIDER || 'libretranslate').toLowerCase() === 'google';
+            const useGoogle = ((trVal.provider || process.env.TRANSLATE_PROVIDER || 'libretranslate')).toLowerCase() === 'google';
             if (useGoogle && !key) {
                 return json(res, 400, { ok: false, error: 'missing_key', message: 'Google mode is selected but TRANSLATE_API_KEY is not set. Set TRANSLATE_PROVIDER=libretranslate to use the free default.' });
             }
@@ -3394,8 +3397,8 @@ function decodeHtmlEntities(s) {
             }
 
             try {
-                const libreUrl = process.env.LIBRETRANSLATE_URL || 'https://libretranslate.com/translate';
-                const libreKey = process.env.LIBRETRANSLATE_API_KEY || '';
+                const libreUrl = trVal.libreUrl || process.env.LIBRETRANSLATE_URL || 'https://libretranslate.com/translate';
+                const libreKey = trVal.libreApiKey || process.env.LIBRETRANSLATE_API_KEY || '';
                 if (libreUrl) {
                     const r = await fetch(libreUrl, {
                         method: 'POST',

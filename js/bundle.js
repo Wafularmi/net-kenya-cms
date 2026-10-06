@@ -20078,6 +20078,7 @@ async function initSettings() {
     });
     await loadSignatures();
     await loadMpesaSettings();
+    await loadTranslationSettings();
     loadFeeRules().catch(() => {});
     await loadAdmissionLastSeqSetting();
 }
@@ -20703,6 +20704,29 @@ async function loadContentGate() {
     await loadContentGateCenters();
     onContentGateModeChange();
     selectContentGateCenter();
+}
+async function saveTranslationSettings() {
+    const s = {
+        key: 'translation',
+        provider: document.getElementById('settings-translation-provider').value,
+        libreUrl: document.getElementById('settings-translation-libre-url').value.trim(),
+        libreApiKey: document.getElementById('settings-translation-libre-key').value.trim(),
+        googleApiKey: document.getElementById('settings-translation-google-key').value.trim()
+    };
+    await dbPut('settings', s);
+    showToast('Translation settings saved!', { type: 'success' });
+    logAudit('updated', 'translation-settings', { provider: s.provider });
+}
+async function loadTranslationSettings() {
+    try {
+        const rec = await dbGet('settings', 'translation');
+        if (!rec) return;
+        const s = rec.value && typeof rec.value === 'object' ? rec.value : rec;
+        if (s.provider) document.getElementById('settings-translation-provider').value = s.provider;
+        if (s.libreUrl) document.getElementById('settings-translation-libre-url').value = s.libreUrl;
+        if (s.libreApiKey) document.getElementById('settings-translation-libre-key').value = s.libreApiKey;
+        if (s.googleApiKey) document.getElementById('settings-translation-google-key').value = s.googleApiKey;
+    } catch (e) { console.error('loadTranslationSettings failed:', e); }
 }
 async function saveMpesaSettings() {
     const s = { key: 'mpesa', shortcode: document.getElementById('settings-mpesa-shortcode').value.trim(), businessName: document.getElementById('settings-mpesa-name').value.trim(), consumerKey: document.getElementById('settings-mpesa-key').value.trim(), consumerSecret: document.getElementById('settings-mpesa-secret').value.trim(), passkey: document.getElementById('settings-mpesa-passkey').value.trim(), environment: document.getElementById('settings-mpesa-env').value, transactionType: document.getElementById('settings-mpesa-type').value, payButtonEnabled: !!document.getElementById('settings-mpesa-paybtn')?.checked };

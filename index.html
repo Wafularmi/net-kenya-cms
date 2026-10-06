@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=147">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=387" as="script">
+    <link rel="preload" href="js/bundle.js?v=388" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -676,7 +676,7 @@
                 <div class="screen-header"><h2>?? Coordinator Management</h2><div class="screen-actions">
                     <button class="btn btn-outline" onclick="showCountryCoordinatorForm()">+ Register Country Coordinator</button>
                 </div></div>
-                <div id="coordinator-mgmt-content" style="padding:10px 0;">Loading…</div>
+                <div id="coordinator-mgmt-content" style="padding:10px 0;">Loadingï¿½</div>
             </section>
 
             <section id="screen-settings" class="screen">
@@ -901,7 +901,7 @@
 </div>
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
-                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left — 0,0 at bottom-left, like Diploma)</div>
+                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left ï¿½ 0,0 at bottom-left, like Diploma)</div>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                              <div class="form-group">
@@ -1214,12 +1214,12 @@
                         <div id="feegate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
                     <div class="card"><h3>?? Content Access Gate</h3>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now — tick Unlock per course to release it early. Works globally or per study center.</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now ï¿½ tick Unlock per course to release it early. Works globally or per study center.</div>
                         <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="contentgate-enabled" onchange="toggleContentGateOptions()" style="width:18px;height:18px;"> Enable content gating</label></div>
                         <div id="contentgate-options" style="display:none;">
                             <div class="form-row"><div class="form-group"><label>Mode</label><select id="contentgate-mode" onchange="onContentGateModeChange()"><option value="global">Global (one rule for all)</option><option value="per-region">Per region</option><option value="per-center">Per study center</option><option value="per-student">Per student</option></select></div><div class="form-group"><label>Edit Scope</label><select id="contentgate-center" onchange="selectContentGateCenter()"><option value="">Global default</option></select></div></div>
                             <div id="contentgate-scope-warn" style="display:none;font-size:12px;color:var(--warning);margin-bottom:8px;"></div>
-                            <div class="form-group" id="contentgate-student-group" style="display:none;"><label>Student (per-student unlocks add onto their region/center rule; tick Exempt to free them fully)</label><div style="display:flex;gap:6px;"><input type="text" id="contentgate-student-search" placeholder="?? Search name/admission..." oninput="renderContentGateStudentOptions()" style="flex:1;"><label style="display:flex;align-items:center;gap:4px;font-size:12px;">Exempt<input type="checkbox" id="contentgate-student-exempt" style="width:16px;height:16px;"></label></div><select id="contentgate-student" onchange="selectContentGateCenter()" style="width:100%;margin-top:6px;"><option value="">— Select student —</option></select></div>
+                            <div class="form-group" id="contentgate-student-group" style="display:none;"><label>Student (per-student unlocks add onto their region/center rule; tick Exempt to free them fully)</label><div style="display:flex;gap:6px;"><input type="text" id="contentgate-student-search" placeholder="?? Search name/admission..." oninput="renderContentGateStudentOptions()" style="flex:1;"><label style="display:flex;align-items:center;gap:4px;font-size:12px;">Exempt<input type="checkbox" id="contentgate-student-exempt" style="width:16px;height:16px;"></label></div><select id="contentgate-student" onchange="selectContentGateCenter()" style="width:100%;margin-top:6px;"><option value="">ï¿½ Select student ï¿½</option></select></div>
                             <div class="form-group"><label>Courses (tick Unlock to release a future course early)</label><div id="contentgate-courses" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-input);"></div></div>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1249,6 +1249,14 @@
                         <div class="form-group"><label>Username</label><input type="text" id="settings-sms-username" placeholder="e.g., sandbox or your AT username"></div>
                         <div class="form-group"><label>Sender ID</label><input type="text" id="settings-sms-senderid" placeholder="e.g., NETCMS (optional)"></div>
                         <button class="btn btn-primary" onclick="saveSMSSettings()">Save SMS Settings</button>
+                    </div>
+
+                    <div class="card"><h3>Translation Provider</h3>
+                        <div class="form-group"><label>Provider</label><select id="settings-translation-provider"><option value="libretranslate">LibreTranslate (free default)</option><option value="google">Google Cloud Translation</option></select></div>
+                        <div class="form-group"><label>LibreTranslate URL</label><input type="text" id="settings-translation-libre-url" placeholder="https://libretranslate.com/translate" autocomplete="off"></div>
+                        <div class="form-group"><label>LibreTranslate API key (optional)</label><input type="password" id="settings-translation-libre-key" placeholder="Leave blank if public/self-hosted" autocomplete="off"></div>
+                        <div class="form-group"><label>Google API key</label><input type="password" id="settings-translation-google-key" placeholder="Google Cloud Translation API key" autocomplete="off"></div>
+                        <button class="btn btn-primary" onclick="saveTranslationSettings()">Save Translation Settings</button>
                     </div>
 
                     <div class="card"><h3>M-Pesa Integration</h3>
@@ -1303,7 +1311,7 @@
         <div class="terms-header">
             <div class="terms-logo"><span class="terms-logo-text">NET</span></div>
             <h2>Terms &amp; Conditions of Use</h2>
-            <p class="terms-subtitle">NET Foundation Kenya — College Management System</p>
+            <p class="terms-subtitle">NET Foundation Kenya ï¿½ College Management System</p>
             <p class="terms-updated" id="terms-updated-date"></p>
         </div>
         <div class="terms-scroll" id="terms-scroll">
@@ -1324,7 +1332,7 @@
             </div>
             <div class="terms-section">
                 <h3>3. Use of Personal Information</h3>
-                <p>Your personal information — including but not limited to your full name, photograph, date of birth, admission number, national ID number, academic records, attendance records, and examination results — shall appear on official academic documents issued by NET Foundation Kenya, including:</p>
+                <p>Your personal information ï¿½ including but not limited to your full name, photograph, date of birth, admission number, national ID number, academic records, attendance records, and examination results ï¿½ shall appear on official academic documents issued by NET Foundation Kenya, including:</p>
                 <ul>
                     <li>Transcripts of academic records</li>
                     <li>Graduation certificates and diplomas</li>
@@ -1384,7 +1392,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=387"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=388"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=49"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
