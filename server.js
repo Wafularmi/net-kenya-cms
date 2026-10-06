@@ -3353,13 +3353,7 @@ function decodeHtmlEntities(s) {
         req.on('data', c => body += c);
         req.on('end', async () => {
             const key = process.env.TRANSLATE_API_KEY || '';
-            if (!key) {
-                return json(res, 501, {
-                    ok: false,
-                    error: 'no_key',
-                    message: 'Translation is not configured on this server yet.'
-                });
-            }
+            // No hard Google-only check now: fall back to free providers below.
             if (!user || user.role === 'student') {
                 return json(res, 403, { ok: false, error: 'Only staff can translate questions.' });
             }
@@ -3371,29 +3365,66 @@ function decodeHtmlEntities(s) {
             if (!texts.length) return json(res, 200, { ok: true, translations: [] });
             if (texts.length > 60) return json(res, 400, { ok: false, error: 'Too many strings in one request (max 60).' });
             const target = parsed.target === 'en' ? 'en' : 'sw';
-            try {
-                const q = encodeURIComponent(texts.join('\n\u0001'));
-                const r = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(key)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ q: texts, target, format: 'text', source: 'en' })
-                });
-                if (!r.ok) {
-                    const t = await r.text().catch(() => '');
-                    console.error('translate API error', r.status, t.slice(0, 200));
-                    return json(res, 502, { ok: false, error: 'upstream_error', message: 'Translation service rejected the request.' });
+            if (key) {
+                try {
+                    const r = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(key)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ q: texts, target, format: 'text', source: 'en' })
+                    });
+                    if (!r.ok) {
+                        const t = await r.text().catch(() => '');
+                        console.error('translate API error', r.status, t.slice(0, 200));
+                        return json(res, 502, { ok: false, error: 'upstream_error', message: 'Translation service rejected the request.' });
+                    }
+                    const out = await r.json();
+                    const data = (out && out.data && out.data.translations) || [];
+                    const translations = data.map(d => String((d.translatedText || '')).split('\u0001')[0]);
+                    let list = translations;
+                    if (texts.length > 1 && translations.length === 1) list = translations[0].split('\u0001');
+                    return json(res, 200, { ok: true, provider: 'google', translations: list.map(t => decodeHtmlEntities(t)) });
+                } catch (e) {
+                    console.error('google translate failed:', e && e.message);
+                    return json(res, 502, { ok: false, error: 'network_error', message: 'Could not reach the translation service.' });
                 }
-                const out = await r.json();
-                const data = (out && out.data && out.data.translations) || [];
-                const translations = data.map(d => String((d.translatedText || '')).split('\u0001')[0]);
-                // A single input string comes back as one translation; a batch
-                // may be merged, so fall back to joining with the separator.
-                let list = translations;
-                if (texts.length > 1 && translations.length === 1) list = translations[0].split('\u0001');
-                return json(res, 200, { ok: true, translations: list.map(t => decodeHtmlEntities(t)) });
+            }
+
+            try {
+                const libreUrl = process.env.LIBRETRANSLATE_URL || '';
+                const libreKey = process.env.LIBRETRANSLATE_API_KEY || '';
+                if (libreUrl) {
+                    const r = await fetch(libreUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ q: texts, source: 'en', target, format: 'text', api_key: libreKey || undefined })
+                    });
+                    if (!r.ok) {
+                        const t = await r.text().catch(() => '');
+                        console.error('libretranslate error', r.status, t.slice(0, 200));
+                        return json(res, 502, { ok: false, error: 'upstream_error', message: 'Free translation service rejected the request.' });
+                    }
+                    const out = await r.json();
+                    let list = [];
+                    if (Array.isArray(out.translatedText)) list = out.translatedText;
+                    else if (Array.isArray(out.translations)) list = out.translations.map(t => t.translatedText || '');
+                    else list = [out.translatedText || ''];
+                    return json(res, 200, { ok: true, provider: 'libretranslate', translations: list.map(t => decodeHtmlEntities(String(t))) });
+                }
+            } catch (e) { console.error('libretranslate failed:', e && e.message); }
+
+            try {
+                const translations = [];
+                for (const text of texts) {
+                    const r = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${target === 'sw' ? 'en|sw' : 'sw|en'}`);
+                    if (!r.ok) throw new Error('mymemory http ' + r.status);
+                    const out = await r.json();
+                    const t = out && out.responseData && out.responseData.translatedText;
+                    translations.push(decodeHtmlEntities(String(t || text)));
+                }
+                return json(res, 200, { ok: true, provider: 'mymemory', translations });
             } catch (e) {
-                console.error('translate failed:', e && e.message);
-                return json(res, 502, { ok: false, error: 'network_error', message: 'Could not reach the translation service.' });
+                console.error('mymemory failed:', e && e.message);
+                return json(res, 502, { ok: false, error: 'upstream_error', message: 'No translation provider is available.' });
             }
         });
         return;
