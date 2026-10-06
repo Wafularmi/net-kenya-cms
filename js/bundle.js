@@ -16135,8 +16135,8 @@ function setAppLang(lang) {
     try { localStorage.setItem(APP_LANG_KEY, lang === 'sw' ? 'sw' : 'en'); } catch (e) {}
     try { const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); u.lang = lang === 'sw' ? 'sw' : 'en'; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
     try { if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage(); } catch (e) {}
-    try { if (typeof renderCurrentScreen === 'function') renderCurrentScreen(); } catch (e) {}
-    try { if (typeof buildNavigation === 'function') buildNavigation(JSON.parse(sessionStorage.getItem('currentUser') || '{}')); } catch (e) {}
+    try { if (isScreenActive('exams') && typeof renderExams === 'function') renderExams(); } catch (e) {}
+    try { if (isScreenActive('quizzes') && typeof renderQuizzes === 'function') renderQuizzes(); } catch (e) {}
 }
 // Label shown on screen for a True/False answer. The stored value never changes.
 function tfLabel(value, lang) {
@@ -16177,7 +16177,7 @@ function questionPairs(q, lang) {
 function applyInterfaceLanguage() {
     try {
         const lang = appLang();
-        document.querySelectorAll('#lang-switch button[data-lang]').forEach(b => {
+        document.querySelectorAll('.lang-switch button[data-lang]').forEach(b => {
             const on = b.getAttribute('data-lang') === lang;
             b.style.background = on ? 'var(--accent,#2563eb)' : 'transparent';
             b.style.color = on ? '#fff' : 'var(--text-secondary)';

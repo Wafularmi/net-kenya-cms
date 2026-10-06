@@ -70,10 +70,6 @@
                         <div id="smart-search-results" class="smart-search-results"></div>
                     </div>
                     <div class="header-date" id="header-date"></div>
-                    <div class="lang-switch" id="lang-switch" title="Interface language / Lugha ya kiolesura" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;">
-                        <button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button>
-                        <button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button>
-                    </div>
                     <button class="btn-icon" id="notif-bell" title="Notifications" style="position:relative;"><span id="notif-badge" class="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;">0</span></button>
                     <button class="btn-icon" onclick="showScreen('messages')" title="Internal Messages" style="position:relative;"><span id="msg-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;"></span></button>
                     <button class="btn-icon" id="btn-help" title="Help Mode - click to learn about any feature" style="font-weight:800;font-size:16px;">Help</button>
@@ -168,6 +164,10 @@
                     <button class="btn btn-outline" onclick="showSeatingPlan()">Seating Plan</button>
                     <button class="btn btn-outline" onclick="showModerationReport()">Moderation Report</button>
                     <button class="btn btn-success" onclick="showExamNotifyForm()">📱 Notify</button>
+                    <div class="lang-switch" title="Exam language / Lugha ya mtihani" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;">
+                        <button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button>
+                        <button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button>
+                    </div>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Date</th><th>Time</th><th>Venue</th><th>Students</th><th>Invigilator</th><th>Status</th><th>Actions</th></tr></thead><tbody id="exams-body"></tbody></table></div></div>
             </section>
@@ -549,6 +549,10 @@
                     <select id="quiz-course" class="filter-select"><option value="">All Courses</option></select>
                     <button class="btn btn-success" onclick="showAutoGenForm()">⚡ Auto-Generate Set</button>
                     <button class="btn btn-primary" onclick="showQuizForm()">+ Create Quiz</button>
+                    <div class="lang-switch" title="Quiz language / Lugha ya mjaribio" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;">
+                        <button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button>
+                        <button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button>
+                    </div>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Quiz</th><th>Course</th><th>Lesson</th><th>Questions</th><th>Points</th><th>Pass Mark</th><th>Submissions</th><th>Actions</th></tr></thead><tbody id="quizzes-body"></tbody></table></div></div>
             </section>
