@@ -5638,7 +5638,7 @@ async function startExam(examId) {
     const subs = (await dbGetAll('submissions')).filter(s => s.quizId === examId && s.studentId === studentId);
     if (subs.length) return showToast('Already submitted this exam!');
     // Auto-generated finals: sit the linked quiz so the score flows into the 50% exam weight.
-    if (exam.quizId) { try { const lq = await dbGet('quizzes', exam.quizId); if (lq) return startQuiz(exam.quizId); } catch {} }
+    if (exam.quizId) { try { const lq = await dbGet('quizzes', exam.quizId); if (lq) return startQuiz(exam.quizId, { openExam }); } catch {} }
     // Drip: exam opens only when every drip lesson in its course is complete (students only).
     // An OPEN exam is deliberately exempt: its whole point is that it stays available to
     // students until staff close it, so a lesson gate must not lock them out of it.
@@ -16377,7 +16377,7 @@ async function runAutoGen() {
     showToast(`Auto set created (${summary}). Weights 20/20/50/10 applied.` + (short > 0 ? ` Bank short by ${short} — add questions and re-run.` : ''), { duration: 8000 });
     logAudit('created', 'autogen-set', { courseId, batch, made: summary });
 }
-async function startQuiz(quizId) {
+async function startQuiz(quizId, opts) {
     let quiz = null;
     try {
     quiz = await dbGet('quizzes', quizId);
@@ -16405,7 +16405,7 @@ async function startQuiz(quizId) {
     try {
         showLangSelectionModal(studentId, studentLang, (chosenLang) => {
             quizTimeRemaining = quiz.timeLimit ? quiz.timeLimit * 60 : 0;
-            showQuizInterface(quiz, quizQuestions, chosenLang);
+            showQuizInterface(quiz, quizQuestions, chosenLang, opts);
         });
     } catch (e) { console.error('startQuiz open failed:', e); showToast('Could not open: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
 }
