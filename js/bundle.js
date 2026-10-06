@@ -16632,6 +16632,7 @@ function formatTime(seconds) {
 }
 async function submitQuiz(quizId) {
     if (quizTimerInterval) { clearInterval(quizTimerInterval); quizTimerInterval = null; }
+    try {
     let quiz = await dbGet('quizzes', quizId);
     if (!quiz) {
         const exam = await dbGet('exams', quizId);
@@ -16814,6 +16815,10 @@ async function submitQuiz(quizId) {
     const toastMsg = isPending ? `📝 Submitted for review. AI-estimated score: ${totalScore}%.` : (passed ? `🎉 Congratulations! You passed with ${totalScore}%!` : `Your score: ${totalScore}%. ${attempts < (quiz.maxRetakes || 1) ? 'You can retake this assessment.' : 'Maximum attempts reached.'}`);
     showToast(toastMsg);
     logAudit('submitted', 'quiz-submission', { quizId, studentId: currentUser.username, score: totalScore, status: submission.status });
+    } catch (e) {
+        console.error('submitQuiz failed:', e);
+        showToast('Could not save submission: ' + (e && e.message ? e.message : e), { type: 'danger', duration: 10000 });
+    }
 }
 const SW_WORDS = ['ni','na','ya','wa','kwa','za','la','cha','vya','li','lo','yo','po','ko','mo','huu','hii','hizi','hizo','watu','kitu','sana','pia','kama','basi','lakini','ingawa','kwamba','baada','kabla','hata','zaidi','ndiyo','siyo','ambao','ambayo','ambacho','ambavyo','ambalo','mara','hiyo','hivyo','hivyo','vivyo',' vile','kabisa','tena','kweli','jinsi','miongoni','kupitia','kutoka','mpaka','hadi','katika','kwa','kwenye','kutokana','kuhusu','pamoja','bila','kila','pekee','mengine','baadhi','wote','mimi','wewe','yeye','sisi','nyinyi','wao','yangu','yako','yake','yetu','wenu','yao','angu','ako','ake','etu','enu','etu','mimi','mwenyewe','wenyewe','nini','nani','gani','lini','wapi','kwanini','vipi','kidogo','kubwa','ndogo','refu','fupi','zuri','baya','ingine','mbalimbali','sawa','tofauti','halafu','ndipo','ndio','zaidi','huo','hicho','hizo','hiyo','zile','wale','kile','kile','yule','hao'];
 function detectEssayLang(text) {
