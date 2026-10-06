@@ -3463,7 +3463,8 @@ function decodeHtmlEntities(s) {
                     return 'Unknown';
                 }
                 const device = /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop';
-                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : 'Unknown';
+                const edgeCountry = String(req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || req.headers['x-country-code'] || '').toUpperCase().slice(0, 2);
+                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : (edgeCountry && edgeCountry !== 'XX' ? edgeCountry : 'Unknown');
                 const role = user && user.role ? String(user.role) : 'public';
                 const rec = {
                     id: 'AE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
