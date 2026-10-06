@@ -14578,11 +14578,12 @@ async function bindLessonVideoTracking(lessonId, courseId, root) {
 
         const st = {
             sid, lessonId: String(lessonId), courseId: courseId ? String(courseId) : '',
-            pending: 0, duration: 0, last: null, done: false, unsubs: [], timer: null, label: null
+            pending: 0, duration: 0, last: null, done: false, unsubs: [], timer: null, label: null, totalWatched: 0
         };
         st.flush = async () => {
             if (st.pending <= 0) return;
             const add = st.pending; st.pending = 0;
+            st.totalWatched += Math.max(0, add);
             try {
                 const r = await dripRecordVideo(st.sid, { id: st.lessonId, courseId: st.courseId }, add, st.duration);
                 if (r && r.videoDone && !st.done) {
@@ -14621,7 +14622,7 @@ async function bindLessonVideoTracking(lessonId, courseId, root) {
                 if (d > 0 && d <= VIDEO_STEP_MAX) st.pending += d;
             }
             st.last = cur;
-            if (st.duration > 0) st.setLabel(Math.min(100, (st.pending / (st.duration * VIDEO_TRACK_RATIO)) * 100));
+            if (st.duration > 0) st.setLabel(Math.min(100, ((st.totalWatched + st.pending) / (st.duration * VIDEO_TRACK_RATIO)) * 100));
         };
         st.timer = setInterval(() => { st.flush(); }, VIDEO_FLUSH_SECS * 1000);
         // Flush when the tab is hidden or the page goes away, so closing the modal
