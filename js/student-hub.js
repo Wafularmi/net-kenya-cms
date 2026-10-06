@@ -360,6 +360,7 @@ function _hubBuildComputed(data, me) {
     const upcomingRegisteredExams = myRegisteredExams.filter(e => e.date >= today);
     const pastRegisteredExams = myRegisteredExams.filter(e => e.date < today);
     const availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const missedDroppedIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'dropped').map(r => r.examId));
     // Drip: courses with incomplete drip lessons hide upcoming exam registration until lessons complete.
     const dripIncompleteCourseIds = new Set();
     try {
@@ -371,7 +372,7 @@ function _hubBuildComputed(data, me) {
         });
     } catch {}
     const upcomingAvailableExams = availableExams.filter(e => e.date >= today && !dripIncompleteCourseIds.has(e.courseId));
-    const pastAvailableExams = availableExams.filter(e => e.date < today);
+    const pastAvailableExams = availableExams.filter(e => e.date < today && !missedDroppedIds.has(e.id));
     const activeQuizzes = (data.quizzes || []).filter(q => enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     const allGrades = (data.grades || []).filter(g => allStudentIds.has(g.studentId));
     const allSubs = (data.submissions || []).filter(s => allStudentIds.has(s.studentId));
@@ -1113,6 +1114,8 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
     const mySubmissions = (data.submissions || []).filter(s => myIds.has(String(s.studentId)));
     const myGrades = (data.grades || []).filter(g => myIds.has(String(g.studentId)));
     const myRetakeRequests = (data.retakeRequests || []).filter(r => myIds.has(String(r.studentId)));
+    const droppedExamIds = new Set(myRetakeRequests.filter(r => r.status === 'dropped').map(r => String(r.examId)));
+    const droppedExams = (data.exams || []).filter(e => droppedExamIds.has(String(e.id))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const myCourseIds = new Set(myCourses.map(c => String(c.id)));
     const myExamIds = new Set((data.exams || []).filter(e => myCourseIds.has(String(e.courseId)) && e.published !== false).map(e => String(e.id)));
     const quizToExam = {};
@@ -1211,7 +1214,7 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
         } else if (isRegistered) {
             actionBtn = `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:11px;padding:6px 14px;">${typeIcon} Take Exam</button>`;
         } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
-            actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button></div>`;
+            actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button><button class="btn btn-outline btn-sm" onclick="hubDropMissedExam('${e.id}','${esc(me.name)}')" style="font-size:11px;border-color:var(--danger);color:var(--danger);padding:5px 10px;">🗑️ Drop</button></div>`;
         } else if (!isRegistered) {
             actionBtn = `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button>`;
         }
@@ -1306,6 +1309,7 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
         ${renderCategory('Past Registered', '📋', pastRegisteredExams, true)}
         ${renderCategory('Available for Registration', '➕', upcomingAvailableExams, false)}
         ${renderCategory('Missed Exams', '⚠️', pastAvailableExams, false, { today: new Date().toISOString().split('T')[0], showHint: true, hint: 'Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.' })}
+        ${renderCategory('Dropped Exams', '🗑️', droppedExams, false, { today: new Date().toISOString().split('T')[0], showHint: true, hint: 'These exams were hidden from your missed list. Use Register or Request Exam here to re-activate them later.' })}
 
         ${renderHubRetakeRequests(myRetakeRequests).replace('<div style="margin-top:24px;">', '<div id="hub-retake-section" style="margin-top:24px;">')}
     `;
@@ -1356,6 +1360,33 @@ async function hubDropExam(examId, studentName) {
         renderStudentHub();
     } catch (e) {
         console.error('hubDropExam error:', e);
+        showToast('Error: ' + e.message, { type: 'danger', duration: 6000 });
+    }
+}
+
+async function hubDropMissedExam(examId, studentName) {
+    try {
+        if (!await showConfirm('Drop Missed Exam', `Drop this missed exam for ${studentName}? It will be hidden from the missed list but can still be requested later.`)) return;
+        const data = await loadStudentHubData();
+        const me = _hubGetMe();
+        if (!me) return showToast('Could not identify your profile', { type: 'danger' });
+        const existingPending = (data.retakeRequests || []).find(r => r.studentId === me.id && r.examId === examId && r.status === 'pending');
+        const rec = {
+            id: existingPending ? existingPending.id : `RET-${examId}-${me.id}`,
+            examId, studentId: me.id,
+            reason: existingPending ? (existingPending.reason || '') : '',
+            status: 'dropped',
+            requestType: 'missed',
+            createdAt: existingPending ? existingPending.createdAt : new Date().toISOString(),
+            droppedAt: new Date().toISOString()
+        };
+        await dbPut('retakeRequests', rec);
+        _hubCachePush('retakeRequests', rec);
+        showToast('Dropped from Missed Exams');
+        logAudit('dropped', 'missedExam', { studentId: me.id, examId });
+        renderStudentHub();
+    } catch (e) {
+        console.error('hubDropMissedExam error:', e);
         showToast('Error: ' + e.message, { type: 'danger', duration: 6000 });
     }
 }
