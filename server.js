@@ -4395,14 +4395,33 @@ return json(res, 200, result);
         // Ensure the store array exists in the DB
         if (!db[store]) db[store] = [];
 
-        // Helper to save DB after mutations â€” broadcast FIRST so clients get instant notification
-        function mutate(record) {
+        // Stores whose records may be pushed over the live stream to EVERY signed-in
+// browser so screens can update without refetching. Only non-personal teaching
+// content belongs here. Stores holding personal or secret data (users incl.
+// password hashes/session tokens, students, messages, whatsappLog, smsLog,
+// payments, grades, certificates, idCards, attendance, enrollments,
+// examRegistrations, retakeRequests) are deliberately EXCLUDED and keep the
+// signal-only broadcast, so no record can ever leak to the wrong person.
+const LIVE_PUSH_STORES = new Set([
+    'exams', 'quizzes', 'lessons', 'notes', 'courses',
+    'questionBank', 'studyCenters', 'regions', 'announcements',
+    'categories', 'programs', 'manuals'
+]);
+
+// Helper to save DB after mutations â€” broadcast FIRST so clients get instant notification
+        function mutate(record, action) {
             // Invalidate derived-country index whenever its inputs change so
             // new students/centers/regions are resolvable immediately.
             if (store === 'students' || store === 'studyCenters' || store === 'regions') {
                 invalidateCountryIndex();
             }
-            broadcastEvent('db-change', { store }); saveDB();
+            if (record && record._cleared) record = null;            // whole-store clear: signal only
+            if (record && LIVE_PUSH_STORES.has(store)) {
+                broadcastStoreChange(store, record, action || (record._deleted ? 'delete' : 'upsert'));
+            } else {
+                broadcastEvent('db-change', { store });
+            }
+            saveDB();
         }
 
         // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)
@@ -4557,7 +4576,7 @@ const parsed = JSON.parse(body);
                     const idx = db[store].findIndex(r => r[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);
-                    mutate(toStore);
+                    mutate(toStore, idx >= 0 ? 'update' : 'insert');
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }
@@ -4619,7 +4638,7 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                         if (_dupCode) return json(res, 400, { error: 'Center code already in use: ' + _dupCode });
                     }
                     db[store].push(toStore);
-                    mutate(toStore);
+                    mutate(toStore, 'insert');
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }
@@ -4655,7 +4674,7 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     }
                 } catch (e) { console.error('DEL-CLEAN err:', e && e.message); }
             }
-            mutate({ [keyPath]: key, _deleted: true });
+            mutate({ [keyPath]: key, _deleted: true }, 'delete');
             auditLog('delete', store, { key }, user && user.username);
             return json(res, 200, { ok: true, deleted: idx >= 0 });
         }
