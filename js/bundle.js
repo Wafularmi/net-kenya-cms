@@ -499,7 +499,7 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
@@ -518,6 +518,7 @@ function getRolePermissions(role, user) {
         assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings']
     };
     const base = perms[role] ? [...perms[role]] : [];
+    if (role !== 'admin') { const gi = base.indexOf('global-viewer'); if (gi !== -1) base.splice(gi, 1); }
     if (role === 'coordinator' && _coordinatorAccessCache) {
         if (_coordinatorAccessCache.exams === false) {
             const idx = base.indexOf('exams');
@@ -1650,7 +1651,7 @@ function buildNavigation(user) {
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, { id: 'exams', icon: '', text: 'Examinations' }, { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quizzes' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
         { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
-        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'analytics', icon: '', text: '📐 Analytics' }, { id: 'media', icon: '', text: '📸 Media' }, { id: 'settings', icon: '', text: 'Settings' }] }
+        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'analytics', icon: '', text: '📐 Analytics' }, { id: 'media', icon: '', text: '📸 Media' }, { id: 'global-viewer', icon: '', text: '🌐 Global Viewer' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
     sections.forEach(section => {
@@ -2120,6 +2121,7 @@ function showScreen(id) {
         case 'regions': renderRegions(); break;
         case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'media': renderMediaGallery(); break;
+        case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
@@ -19618,6 +19620,57 @@ async function renderAnalytics() {
     </div>
     <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Analytics are aggregate usage counts only. No raw IPs or student identifiers are stored.</p>`;
 }
+async function renderGlobalViewer() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (currentUser.role !== 'admin') { const el = document.getElementById('global-viewer-content'); if (el) el.innerHTML = '<p style="color:var(--danger);text-align:center;padding:40px;">Global Viewer is available to the overall admin only.</p>'; return; }
+    const el = document.getElementById('global-viewer-content');
+    if (!el) return;
+    el.innerHTML = `<p style="color:var(--text-muted);text-align:center;padding:40px;">Loading transparency data...</p>`;
+    const [students, courses, quizzes, exams, submissions, payments, income, expenses, mediaUploads, submissionResets, retakeRequests, countries, regions, centers, certificates, alerts] = await Promise.all([
+        dbGetAll('students').catch(() => []), dbGetAll('courses').catch(() => []), dbGetAll('quizzes').catch(() => []), dbGetAll('exams').catch(() => []), dbGetAll('submissions').catch(() => []), dbGetAll('payments').catch(() => []), dbGetAll('income').catch(() => []), dbGetAll('expenses').catch(() => []), dbGetAll('mediaUploads').catch(() => []), dbGetAll('submissionResets').catch(() => []), dbGetAll('retakeRequests').catch(() => []), dbGetAll('countries').catch(() => []), dbGetAll('regions').catch(() => []), dbGetAll('studyCenters').catch(() => []), dbGetAll('certificates').catch(() => []), dbGetAll('alerts').catch(() => [])
+    ]);
+    const activeStudents = students.filter(s => s.status === 'active').length;
+    const pendingStudents = students.filter(s => s.status === 'pending').length;
+    const passedSubs = submissions.filter(s => s.status === 'pass').length;
+    const failedSubs = submissions.filter(s => s.status === 'fail').length;
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+    const monthlyPayments = payments.filter(p => p.date && new Date(p.date) >= monthStart).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const monthlyIncome = income.filter(i => i.date && new Date(i.date) >= monthStart).reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+    const monthlyExpenses = expenses.filter(e => e.date && new Date(e.date) >= monthStart).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const byCountry = {};
+    centers.forEach(c => { if (!byCountry[c.country || 'Unknown']) byCountry[c.country || 'Unknown'] = { centers: 0, regions: 0, students: 0 }; byCountry[c.country || 'Unknown'].centers++; });
+    regions.forEach(r => { if (!byCountry[r.country || 'Unknown']) byCountry[r.country || 'Unknown'] = { centers: 0, regions: 0, students: 0 }; byCountry[r.country || 'Unknown'].regions++; });
+    students.forEach(s => { const country = s.country || ((centers.find(c => c.id === s.studyCenterId)?.country) || 'Unknown'); if (!byCountry[country]) byCountry[country] = { centers: 0, regions: 0, students: 0 }; byCountry[country].students++; });
+    const topCountries = Object.entries(byCountry).map(([name,v])=>({name,...v})).sort((a,b)=>b.students-a.students).slice(0,8);
+    el.innerHTML = `
+        <div class="stats-row" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px;">
+            <div class="stat-card"><div class="stat-label">Students</div><div class="stat-value">${students.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value" style="color:var(--success)">${activeStudents}</div></div>
+            <div class="stat-card"><div class="stat-label">Courses</div><div class="stat-value">${courses.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Quizzes / Exams</div><div class="stat-value">${quizzes.length} / ${exams.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Submissions</div><div class="stat-value">${submissions.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Passed / Failed</div><div class="stat-value" style="color:${passedSubs >= failedSubs ? 'var(--success)' : 'var(--danger)'}">${passedSubs} / ${failedSubs}</div></div>
+            <div class="stat-card"><div class="stat-label">Media Uploads</div><div class="stat-value">${mediaUploads.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Reset Requests</div><div class="stat-value">${submissionResets.length + retakeRequests.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Monthly Revenue</div><div class="stat-value" style="color:var(--accent)">${formatCurrency(monthlyPayments + monthlyIncome - monthlyExpenses)}</div></div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+            <h3>Countries / Regions / Study Centers</h3>
+            <table class="data-table" style="width:100%;"><thead><tr><th>Country</th><th>Regions</th><th>Centers</th><th>Students</th></tr></thead><tbody>${topCountries.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${c.regions}</td><td>${c.centers}</td><td>${c.students}</td></tr>`).join('') || '<tr><td colspan="4">No recent data</td></tr>'}</tbody></table>
+        </div>
+        <div class="card">
+            <h3>Accountability Snapshot</h3>
+            <ul style="list-style:none;padding-left:0;columns:2;gap:30px;">
+                <li>• Certificates/Documents generated: <strong>${certificates.length}</strong></li>
+                <li>• Active alerts: <strong>${(alerts||[]).filter(a=>a.status==='active').length}</strong></li>
+                <li>• Resets/Retake records: <strong>${submissionResets.length + retakeRequests.length}</strong></li>
+                <li>• Media uploads for evidence: <strong>${mediaUploads.length}</strong></li>
+                <li>• Submissions recorded: <strong>${submissions.length}</strong></li>
+                <li>• Countries/regions/center coverage: <strong>${countries.length}/${regions.length}/${centers.length}</strong></li>
+            </ul>
+            <p style="font-size:12px;color:var(--text-muted);">Global Viewer is the overall admin view: all countries, aggregated counts, no student-level writes, no profile editing.</p>
+        </div>`;
+}
 async function renderAlertDashboard() {
     const alerts = (await dbGetAll('alerts')).filter(a => a.status === 'active');
     const container = document.getElementById('dash-alerts');
@@ -23587,6 +23640,15 @@ function downloadFeeStructurePDF() {
     const w = window.open('', '', 'width=960,height=700');
     if (!w) return;
     w.document.write(`<html><head><title>Fee Structure</title><style>body{margin:0;padding:0;background:#fff;color:#111827;font-family:'Segoe UI',Arial,sans-serif;}@page{size:A4;margin:12mm;}table{page-break-inside:auto;}tr{page-break-inside:avoid;}</style></head><body>${content}</body></html>`);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 900);
+}
+function downloadGlobalViewerPDF() {
+    const content = document.getElementById('global-viewer-content')?.innerHTML;
+    if (!content) return;
+    const w = window.open('', '', 'width=1000,height=750');
+    if (!w) return;
+    w.document.write(`<html><head><title>Global Viewer Report</title><style>body{margin:0;padding:24px;background:#fff;color:#111827;font-family:'Segoe UI',Arial,sans-serif;}.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}.stat-card{border:1px solid #e5e7eb;border-radius:8px;padding:12px}.data-table{width:100%;border-collapse:collapse;font-size:12px}.data-table th,.data-table td{padding:6px;border-top:1px solid #e5e7eb;text-align:left}.card{border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:14px}@page{size:A4;margin:12mm;}tr{page-break-inside:avoid;}</style></head><body><h2>Global Viewer Report</h2><p style="color:#6b7280;font-size:12px;">Generated from the overall admin transparency dashboard</p>${content}</body></html>`);
     w.document.close();
     setTimeout(() => { w.focus(); w.print(); }, 900);
 }
