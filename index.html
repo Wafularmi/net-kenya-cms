@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=399" as="script">
+    <link rel="preload" href="js/bundle.js?v=400" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -1066,6 +1066,7 @@
                         <div class="form-group"><label>Graduation Ceiling (KES)</label><input type="number" id="settings-grad-ceiling" min="0" placeholder="e.g., 8000"></div></div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap;">
                             <button class="btn btn-primary btn-sm" onclick="saveFeeRules()">Save Fee Rules</button>
+                            <button class="btn btn-outline btn-sm" onclick="generateFeeStructure()">📄 Fee Structure PDF</button>
                             <button class="btn btn-outline btn-sm" onclick="loadFeeRulesUI()">↻ Refresh</button>
                         </div>
                     </div>
@@ -1386,7 +1387,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=399"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=400"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=50"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

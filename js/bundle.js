@@ -23515,6 +23515,76 @@ async function saveFeeRules() {
     showToast('Fee rules saved!', { type: 'success' });
     try { logAudit('updated', 'fee-rules', value); } catch {}
 }
+async function generateFeeStructure() {
+    try {
+        const courses = (await dbGetAll('courses')).filter(c => c.published !== false).sort((a,b) => String(a.name || a.code || '').localeCompare(String(b.name || b.code || '')));
+        if (!courses.length) return showToast('No active courses found.');
+        const fees = await dbGetAll('feeStructure');
+        const getFee = (label) => (fees.find(f => String(f.program || '').trim().toLowerCase() === label.toLowerCase()) || {}).amount || 0;
+        const registration = getFee('Registration') || getFee('Admission') || getFee('Admission Fee');
+        const tuition = getFee('Tuition per course') || getFee('Tuition') || getFee('Course Tuition');
+        const examFee = getFee('Exams per course') || getFee('Exam per course') || getFee('Exam Fee');
+        const branding = await dbGet('settings', 'branding');
+        const schoolName = branding ? branding.schoolName || 'College Management System' : 'College Management System';
+        const tagline = branding ? branding.tagline || 'Academic Excellence' : 'Academic Excellence';
+        const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+        let rows = '';
+        let tuitionTotal = 0, examTotal = 0;
+        courses.forEach((c, i) => {
+            tuitionTotal += tuition;
+            examTotal += examFee;
+            rows += `<tr style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:8px;font-weight:600;">${i+1}</td>
+                <td style="padding:8px;">${escapeHtml(c.code || '')}</td>
+                <td style="padding:8px;">${escapeHtml(c.name || '')}</td>
+                <td style="padding:8px;">${escapeHtml(c.department || '-')}</td>
+                <td style="padding:8px;text-align:center;">${c.credits || 3}</td>
+                <td style="padding:8px;text-align:right;">${tuition.toLocaleString()}</td>
+                <td style="padding:8px;text-align:right;">${examFee.toLocaleString()}</td>
+                <td style="padding:8px;text-align:right;font-weight:700;">${(tuition + examFee).toLocaleString()}</td>
+            </tr>`;
+        });
+        const total = registration + tuitionTotal + examTotal;
+        const html = `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:900px;margin:0 auto;background:#fff;color:#1f2937;padding:32px;border:1px solid #e5e7eb;">
+            <div style="text-align:center;border-bottom:3px solid #2563eb;padding-bottom:12px;margin-bottom:16px;">
+                <h1 style="margin:0;font-size:22px;color:#1e40af;">${escapeHtml(schoolName)}</h1>
+                <div style="font-size:12px;color:#6b7280;">${escapeHtml(tagline)}</div>
+                <h2 style="margin:10px 0 0;font-size:18px;">Detailed Fee Structure</h2>
+                <div style="font-size:12px;color:#6b7280;">Generated: ${dateStr}</div>
+            </div>
+            <div style="margin:12px 0 20px;padding:12px;background:#eff6ff;border-radius:6px;font-size:13px;">
+                <strong>One-time Admission/Registration:</strong> KES ${registration.toLocaleString()}
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead><tr style="background:#2563eb;color:#fff;">
+                    <th style="padding:10px;text-align:left;">#</th><th style="padding:10px;text-align:left;">Code</th><th style="padding:10px;text-align:left;">Course</th><th style="padding:10px;text-align:left;">Department</th><th style="padding:10px;text-align:center;">Credits</th><th style="padding:10px;text-align:right;">Tuition (KES)</th><th style="padding:10px;text-align:right;">Exam (KES)</th><th style="padding:10px;text-align:right;">Course Total (KES)</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+                <tfoot><tr style="background:#f3f4f6;font-weight:800;"><td colspan="5" style="padding:10px;text-align:right;">Totals</td><td style="padding:10px;text-align:right;">${tuitionTotal.toLocaleString()}</td><td style="padding:10px;text-align:right;">${examTotal.toLocaleString()}</td><td style="padding:10px;text-align:right;">${(tuitionTotal + examTotal + registration).toLocaleString()}</td></tr></tfoot>
+            </table>
+            <p style="font-size:12px;color:#6b7280;margin-top:16px;">Note: Registration/Admission is payable once. Tuition and exam fees are shown per active course. Fees are subject to institutional regulations.</p>
+        </div>`;
+        showModal('Fee Structure', `<div id="fee-structure-print-area">${html}</div>`, `<button class="btn btn-primary" onclick="downloadFeeStructurePDF()">📄 Download PDF</button> <button class="btn btn-outline" onclick="printFeeStructureDocument()">🖨️ Print</button>`, { maxWidth: '960px' });
+    } catch (e) { console.error(e); showToast('Could not generate fee structure: ' + (e && e.message ? e.message : e), { type: 'danger' }); }
+}
+function printFeeStructureDocument() {
+    const content = document.getElementById('fee-structure-print-area')?.innerHTML;
+    if (!content) return;
+    const w = window.open('', '', 'width=960,height=700');
+    if (!w) return;
+    w.document.write(`<html><head><title>Fee Structure</title><style>body{margin:0;padding:0;background:#fff;color:#111827;font-family:'Segoe UI',Arial,sans-serif;}@page{size:A4;margin:12mm;}table{page-break-inside:auto;}tr{page-break-inside:avoid;}</style></head><body>${content}</body></html>`);
+    w.document.close();
+    setTimeout(() => w.print(), 700);
+}
+function downloadFeeStructurePDF() {
+    const content = document.getElementById('fee-structure-print-area')?.innerHTML;
+    if (!content) return;
+    const w = window.open('', '', 'width=960,height=700');
+    if (!w) return;
+    w.document.write(`<html><head><title>Fee Structure</title><style>body{margin:0;padding:0;background:#fff;color:#111827;font-family:'Segoe UI',Arial,sans-serif;}@page{size:A4;margin:12mm;}table{page-break-inside:auto;}tr{page-break-inside:avoid;}</style></head><body>${content}</body></html>`);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 900);
+}
 function previewCountry() {
     try { return sessionStorage.getItem('previewCountry') || ''; } catch { return ''; }
 }
