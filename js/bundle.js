@@ -23545,8 +23545,11 @@ async function generateFeeStructure() {
             </tr>`;
         });
         const total = registration + tuitionTotal + examTotal;
+        const logo = branding ? branding.logo : null;
+        const partnerLogos = [1, 2].map(i => branding && branding[`partner${i}Logo`] ? `<img src="${branding[`partner${i}Logo`]}" alt="${escapeHtml(branding[`partner${i}Name`] || `Partner ${i}`)}" style="max-height:42px;max-width:140px;object-fit:contain;margin:0 8px;">` : '').filter(Boolean).join('');
         const html = `<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:900px;margin:0 auto;background:#fff;color:#1f2937;padding:32px;border:1px solid #e5e7eb;">
             <div style="text-align:center;border-bottom:3px solid #2563eb;padding-bottom:12px;margin-bottom:16px;">
+                ${logo ? `<img src="${logo}" alt="${escapeHtml(schoolName)} logo" style="max-height:56px;max-width:180px;object-fit:contain;margin-bottom:8px;">` : ''}
                 <h1 style="margin:0;font-size:22px;color:#1e40af;">${escapeHtml(schoolName)}</h1>
                 <div style="font-size:12px;color:#6b7280;">${escapeHtml(tagline)}</div>
                 <h2 style="margin:10px 0 0;font-size:18px;">Detailed Fee Structure</h2>
@@ -23562,6 +23565,7 @@ async function generateFeeStructure() {
                 <tbody>${rows}</tbody>
                 <tfoot><tr style="background:#f3f4f6;font-weight:800;"><td colspan="5" style="padding:10px;text-align:right;">Totals</td><td style="padding:10px;text-align:right;">${tuitionTotal.toLocaleString()}</td><td style="padding:10px;text-align:right;">${examTotal.toLocaleString()}</td><td style="padding:10px;text-align:right;">${(tuitionTotal + examTotal + registration).toLocaleString()}</td></tr></tfoot>
             </table>
+            ${partnerLogos ? `<div style="margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb;text-align:center;">${partnerLogos}</div>` : ''}
             <p style="font-size:12px;color:#6b7280;margin-top:16px;">Note: Registration/Admission is payable once. Tuition and exam fees are shown per active course. Fees are subject to institutional regulations.</p>
         </div>`;
         showModal('Fee Structure', `<div id="fee-structure-print-area">${html}</div>`, `<button class="btn btn-primary" onclick="downloadFeeStructurePDF()">📄 Download PDF</button> <button class="btn btn-outline" onclick="printFeeStructureDocument()">🖨️ Print</button>`, { maxWidth: '960px' });
