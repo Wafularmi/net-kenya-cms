@@ -515,7 +515,7 @@ function getRolePermissions(role, user) {
         student: ['student-hub','exams','library','tickets','discussions'],
         librarian: ['dashboard','library'],
         coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','meetings'],
-        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings']
+        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings']
     };
     const base = perms[role] ? [...perms[role]] : [];
     if (role === 'coordinator' && _coordinatorAccessCache) {
@@ -20457,7 +20457,7 @@ function updateCoordAccessLabel(key) {
         status.style.color = on ? 'var(--success)' : 'var(--danger)';
     }
 }
-const ASSISTANT_TABS = ['dashboard','compare','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','verify','reprint','discussions','regions','coverage','meetings'];
+const ASSISTANT_TABS = ['dashboard','compare','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings'];
 function renderAssistantAccessToggles() {
     const container = document.getElementById('assistant-access-toggles');
     if (!container) return;

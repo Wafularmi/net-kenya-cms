@@ -3520,6 +3520,8 @@ function decodeHtmlEntities(s) {
                 if (approxBytes > 8 * 1024 * 1024) return json(res, 413, { error: 'File too large' });
                 const su = authUser.user || {};
                 const student = authUser.role === 'student' ? ((db.students || []).find(s => s.id === su.studentId || String(s.phone || '').replace(/[^0-9]/g, '') === String(authUser.username || '').replace(/[^0-9]/g, '') || String(s.phone || '') === authUser.username) || {}) : {};
+                const studentRegion = (db.regions || []).find(r => r && r.id === (student.regionId || su.regionId || ''));
+                const studentCenter = (db.studyCenters || []).find(c => c && c.id === (student.studyCenterId || su.studyCenterId || su.campusId || ''));
                 const rec = {
                     id: 'MED-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
                     uploaderUsername: authUser.username,
@@ -3528,7 +3530,9 @@ function decodeHtmlEntities(s) {
                     studentId: su.studentId || '',
                     country: student.country || su.country || '',
                     regionId: student.regionId || su.regionId || '',
+                    regionName: studentRegion ? (studentRegion.name || studentRegion.id) : '',
                     studyCenterId: student.studyCenterId || su.studyCenterId || su.campusId || '',
+                    studyCenterName: studentCenter ? (studentCenter.name || studentCenter.id) : '',
                     type: isImage ? 'image' : 'video',
                     dataUrl: p.dataUrl,
                     title: String(p.title || '').slice(0, 120),

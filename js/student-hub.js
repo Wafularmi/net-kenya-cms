@@ -1989,8 +1989,8 @@ async function renderMediaGallery() {
         const groups = {};
         media.forEach(m => {
             const country = m.country || 'Unknown';
-            const region = m.regionId || 'Unknown';
-            const center = m.studyCenterId || 'Unknown';
+            const region = m.regionName || m.regionId || 'Unknown';
+            const center = m.studyCenterName || m.studyCenterId || 'Unknown';
             const day = m.createdAt ? m.createdAt.slice(0, 10) : 'No date';
             groups[country] = groups[country] || {};
             groups[country][region] = groups[country][region] || {};
@@ -2035,7 +2035,8 @@ function renderHubMedia(me, data) {
                 <input id="media-title" type="text" placeholder="e.g. Sunday service" style="width:100%;">
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
-                <label class="btn btn-primary" style="cursor:pointer;">📷 Choose Image / Video<input type="file" id="media-file" accept="image/*,video/*" capture="environment" style="display:none" onchange="previewMediaUpload()"></label>
+                <label class="btn btn-primary" style="cursor:pointer;">📷 Open Camera<input type="file" id="media-camera-file" accept="image/*" capture="environment" style="display:none" onchange="useCameraCapture(this)"></label>
+                <label class="btn btn-outline" style="cursor:pointer;">📁 Choose File<input type="file" id="media-file" accept="image/*,video/*" style="display:none" onchange="previewMediaUpload()"></label>
                 <button class="btn btn-outline" onclick="clearMediaPreview()">Clear</button>
             </div>
             <div id="media-preview" style="display:none;margin-top:10px;"></div>
@@ -2047,6 +2048,14 @@ function renderHubMedia(me, data) {
         </div>`;
 }
 
+function useCameraCapture(sourceInput) {
+    const target = document.getElementById('media-file');
+    if (sourceInput && sourceInput.files && sourceInput.files[0]) {
+        const dt = new DataTransfer();
+        dt.items.add(sourceInput.files[0]);
+        if (target) { target.files = dt.files; previewMediaUpload(); }
+    }
+}
 async function previewMediaUpload() {
     const file = document.getElementById('media-file')?.files?.[0];
     const preview = document.getElementById('media-preview');
