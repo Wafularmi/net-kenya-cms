@@ -2054,7 +2054,40 @@ async function previewMediaUpload() {
     window._mediaUploadData = null;
     if (!file || !preview) return;
     if (file.size > 8 * 1024 * 1024) return showToast('File too large. Please use an image under 8MB or a short video under 8MB.', { type: 'warning' });
-    const dataUrl = await new Promise(resolve => { const reader = new FileReader(); reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
+    let dataUrl = null;
+    if (file.type.startsWith('image/')) {
+        try {
+            dataUrl = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    const maxSize = 1400;
+                    let w = img.naturalWidth;
+                    let h = img.naturalHeight;
+                    if (w > maxSize || h > maxSize) {
+                        const scale = Math.min(maxSize / w, maxSize / h);
+                        w = Math.round(w * scale);
+                        h = Math.round(h * scale);
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    // Mild enhancement: auto brighten/contrast/saturation before upload,
+                    // then re-encode as JPEG to save space.
+                    ctx.filter = 'brightness(1.06) contrast(1.08) saturate(1.06)';
+                    ctx.drawImage(img, 0, 0, w, h);
+                    resolve(canvas.toDataURL('image/jpeg', 0.82));
+                };
+                img.onerror = reject;
+                img.src = URL.createObjectURL(file);
+            });
+        } catch (e) {
+            console.warn('image enhance failed, using original', e);
+        }
+    }
+    if (!dataUrl) {
+        dataUrl = await new Promise(resolve => { const reader = new FileReader(); reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
+    }
     preview.style.display = 'block';
     preview.innerHTML = file.type.startsWith('video/')
         ? `<video src="${dataUrl}" controls style="max-width:100%;max-height:320px;border-radius:8px;background:#000;"></video>`
