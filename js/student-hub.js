@@ -2009,8 +2009,8 @@ async function renderMediaGallery() {
                         html += `<div style="font-size:12px;color:var(--text-muted);margin:8px 0;">${escapeHtml(day)}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;">`;
                         items.forEach(m => {
                             html += m.type === 'image'
-                                ? `<a href="${m.dataUrl}" target="_blank" title="${escapeHtml(m.uploaderName)}"><img src="${m.dataUrl}" alt="upload" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a>`
-                                : `<div style="background:var(--bg-input);border-radius:8px;padding:8px;"><video src="${m.dataUrl}" controls preload="metadata" style="width:100%;max-height:140px;border-radius:6px;background:#000;"></video></div>`;
+                                ? `<div style="margin-bottom:4px;"><a href="${m.dataUrl}" target="_blank" title="${escapeHtml(m.uploaderName)}"><img src="${m.dataUrl}" alt="upload" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a><a href="${m.dataUrl}" download="${escapeHtml(m.id || 'media')}.JPG" style="display:block;font-size:12px;color:var(--accent);margin-top:4px;text-align:center;">⬇️ Download</a></div>`
+                                : `<div style="background:var(--bg-input);border-radius:8px;padding:8px;"><video src="${m.dataUrl}" controls preload="metadata" style="width:100%;max-height:140px;border-radius:6px;background:#000;"></video><a href="${m.dataUrl}" download="${escapeHtml(m.id || 'media')}.MP4" style="display:block;font-size:12px;color:var(--accent);margin-top:4px;text-align:center;">⬇️ Download</a></div>`;
                         });
                         html += `</div>`;
                     }
