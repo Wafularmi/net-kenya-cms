@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=402" as="script">
+    <link rel="preload" href="js/bundle.js?v=403" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -333,7 +333,6 @@
                     <button class="btn btn-success" onclick="generateGraduationList()">📋 Generate List</button>
                     <button class="btn btn-outline" onclick="showGraduationRequirements()">Manage Requirements</button>
                     <button class="btn btn-outline" onclick="showBrochureDesigner()">📰 Brochure</button>
-                    <button class="btn btn-outline" onclick="generateFeeStructure()">📄 Fee Structure</button>
                     <button class="btn btn-outline" onclick="showInvitationDesigner()">💌 Invitation</button>
                     <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()">🎓 Generate Diploma</button>
                     <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()">📜 Generate Completion</button>
@@ -385,6 +384,7 @@
                 <div class="screen-header"><h2>Certificates & Documents</h2><div class="screen-actions">
                     <button class="btn btn-success" data-docgen="diploma" onclick="showDiplomaPdfGenerator()" title="Generate PDF Diploma from template">🎓 Generate Diploma</button>
                     <button class="btn btn-success" data-docgen="completion" onclick="showCompletionPdfGenerator()" title="Generate PDF Completion Certificate from template">📜 Generate Completion</button>
+                    <button class="btn btn-outline" onclick="generateFeeStructure()" title="Generate/download the institution's fee structure">📄 Fee Structure</button>
                     <button class="btn btn-primary" onclick="showCertificateForm()">+ Generate Document</button>
                 </div></div>
                 <div class="card"><div id="duplicate-doc-alerts" style="margin-bottom:16px;"></div><div id="certificates-list"><p style="color:var(--text-muted);text-align:center;padding:40px;">No documents generated yet</p></div></div>
@@ -1388,7 +1388,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=402"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=403"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=50"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
