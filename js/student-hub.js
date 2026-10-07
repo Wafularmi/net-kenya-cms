@@ -594,6 +594,7 @@ async function renderStudentHub() {
                 <button class="hub-tab" data-tab="notes" onclick="switchHubTab('notes',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📄 Notes</button>
                 <button class="hub-tab" data-tab="live" onclick="switchHubTab('live',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">🎥 Live Classes</button>
                 <button class="hub-tab" data-tab="discussions" onclick="switchHubTab('discussions',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">💬 Discussions</button>
+                <button class="hub-tab" data-tab="media" onclick="switchHubTab('media',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📸 Media</button>
             </div>
 
             <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.upcomingRegisteredExams, c.pendingQuizzes, c.completedQuizzes, c.data, c.todoItems)}</div>
@@ -603,6 +604,7 @@ async function renderStudentHub() {
             <div id="hub-tab-notes" style="display:none;"></div>
             <div id="hub-tab-live" style="display:none;"></div>
             <div id="hub-tab-discussions" style="display:none;"><div class="card"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading discussions...</p></div></div>
+            <div id="hub-tab-media" style="display:none;"></div>
         `;
         _hubRenderedTabs.overview = true;
 
@@ -695,6 +697,7 @@ async function switchHubTab(tab, btn) {
             else if (tab === 'exams') container.innerHTML = renderHubExams(rc.me, rc.upcomingRegisteredExams, rc.pastRegisteredExams, rc.upcomingAvailableExams, rc.pastAvailableExams, rc.data);
             else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(rc.me, rc.pendingQuizzes, rc.completedQuizzes, rc.data, rc.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
             else if (tab === 'notes') container.innerHTML = renderHubNotes(rc.me, rc.myCourses, rc.myLessons, rc.myNotes, rc.data);
+            else if (tab === 'media') container.innerHTML = renderHubMedia(rc.me, studentHubCache || {});
             else if (tab === 'live') container.innerHTML = renderHubLiveClasses(rc.me, rc.myCourses, rc.myLessons, (rc.data.meetings || studentHubCache.meetings || []));
             else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(rc.me, rc.data); return; }
         } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
@@ -1971,6 +1974,115 @@ async function hubJoinHall(id) {
         const url = getJitsiUrl({ virtualRoom: m.room, virtualPassword: m.password }, { moderator: false, user: { displayName: (me && me.name) || '' }, token: tk.token, jitsiBase: tk.base, appId: tk.appId });
         showModal('🎓 ' + (m.title || 'Virtual Hall'), `<div style="text-align:center;"><iframe src="${url}" allow="camera; microphone; fullscreen; display-capture" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px;"></iframe></div>`, `<button class="btn btn-outline" onclick="window.open('${url}','_blank')">Open in new tab</button>`);
     } catch (e) { showToast('Could not join hall', { type: 'danger' }); }
+}
+
+async function renderMediaGallery() {
+    const el = document.getElementById('media-gallery');
+    if (!el) return;
+    el.innerHTML = `<p style="color:var(--text-muted);text-align:center;padding:40px;">Loading media uploads...</p>`;
+    try {
+        const r = await fetch('/api/media', { headers: getAuthHeaders() });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || 'Failed to load media');
+        const media = data.media || [];
+        if (!media.length) { el.innerHTML = '<div class="card"><p style="color:var(--text-muted);text-align:center;padding:40px;">No media uploads yet.</p></div>'; return; }
+        const groups = {};
+        media.forEach(m => {
+            const country = m.country || 'Unknown';
+            const region = m.regionId || 'Unknown';
+            const center = m.studyCenterId || 'Unknown';
+            const day = m.createdAt ? m.createdAt.slice(0, 10) : 'No date';
+            groups[country] = groups[country] || {};
+            groups[country][region] = groups[country][region] || {};
+            groups[country][region][center] = groups[country][region][center] || {};
+            groups[country][region][center][day] = groups[country][region][center][day] || [];
+            groups[country][region][center][day].push(m);
+        });
+        let html = '';
+        for (const [country, regions] of Object.entries(groups)) {
+            html += `<div class="card" style="margin-bottom:14px;"><h3>🌍 ${escapeHtml(country)}</h3>`;
+            for (const [region, centers] of Object.entries(regions)) {
+                html += `<div style="font-weight:700;color:var(--text-muted);margin:10px 0 6px;">📍 ${escapeHtml(region)}</div>`;
+                for (const [center, days] of Object.entries(centers)) {
+                    html += `<div style="font-weight:600;margin:8px 0 4px;">🏫 ${escapeHtml(center)}</div>`;
+                    for (const [day, items] of Object.entries(days)) {
+                        html += `<div style="font-size:12px;color:var(--text-muted);margin:8px 0;">${escapeHtml(day)}</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;">`;
+                        items.forEach(m => {
+                            html += m.type === 'image'
+                                ? `<a href="${m.dataUrl}" target="_blank" title="${escapeHtml(m.uploaderName)}"><img src="${m.dataUrl}" alt="upload" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a>`
+                                : `<div style="background:var(--bg-input);border-radius:8px;padding:8px;"><video src="${m.dataUrl}" controls preload="metadata" style="width:100%;max-height:140px;border-radius:6px;background:#000;"></video></div>`;
+                        });
+                        html += `</div>`;
+                    }
+                }
+            }
+            html += `</div>`;
+        }
+        el.innerHTML = html || '<p style="color:var(--text-muted);text-align:center;padding:40px;">No media uploads yet.</p>';
+    } catch (e) {
+        el.innerHTML = `<p style="color:var(--danger);text-align:center;padding:40px;">${escapeHtml(e.message)}</p>`;
+    }
+}
+
+function renderHubMedia(me, data) {
+    const uploads = (studentHubCache && studentHubCache.mediaUploads ? studentHubCache.mediaUploads : []).filter(m => m && String(m.uploaderUsername || '') === String(((JSON.parse(sessionStorage.getItem('currentUser')||'{}')||{}).username) || '')).slice(-12);
+    return `
+        <div class="card">
+            <h3>📸 Photo / Short Video Upload</h3>
+            <p style="font-size:12px;color:var(--text-muted);">The upload is tagged automatically with your account's country, region, study center, and date.</p>
+            <div class="form-group">
+                <label>Title (optional)</label>
+                <input id="media-title" type="text" placeholder="e.g. Sunday service" style="width:100%;">
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+                <label class="btn btn-primary" style="cursor:pointer;">📷 Choose Image / Video<input type="file" id="media-file" accept="image/*,video/*" capture="environment" style="display:none" onchange="previewMediaUpload()"></label>
+                <button class="btn btn-outline" onclick="clearMediaPreview()">Clear</button>
+            </div>
+            <div id="media-preview" style="display:none;margin-top:10px;"></div>
+            <button class="btn btn-success" id="media-upload-btn" onclick="submitMediaUpload()" disabled>Upload</button>
+        </div>
+        <div class="card" style="margin-top:14px;">
+            <h3>My Recent Uploads</h3>
+            <div id="media-my-list" style="font-size:12px;color:var(--text-muted);">No uploads in this session yet. Your recent uploads will appear here after refresh.</div>
+        </div>`;
+}
+
+async function previewMediaUpload() {
+    const file = document.getElementById('media-file')?.files?.[0];
+    const preview = document.getElementById('media-preview');
+    const btn = document.getElementById('media-upload-btn');
+    window._mediaUploadData = null;
+    if (!file || !preview) return;
+    if (file.size > 8 * 1024 * 1024) return showToast('File too large. Please use an image under 8MB or a short video under 8MB.', { type: 'warning' });
+    const dataUrl = await new Promise(resolve => { const reader = new FileReader(); reader.onload = e => resolve(e.target.result); reader.readAsDataURL(file); });
+    preview.style.display = 'block';
+    preview.innerHTML = file.type.startsWith('video/')
+        ? `<video src="${dataUrl}" controls style="max-width:100%;max-height:320px;border-radius:8px;background:#000;"></video>`
+        : `<img src="${dataUrl}" alt="Preview" style="max-width:100%;max-height:320px;border-radius:8px;border:1px solid var(--border);">`;
+    window._mediaUploadData = dataUrl;
+    if (btn) btn.disabled = false;
+}
+function clearMediaPreview() {
+    try { document.getElementById('media-file').value = ''; } catch {}
+    const p = document.getElementById('media-preview'); if (p) { p.style.display = 'none'; p.innerHTML = ''; }
+    const b = document.getElementById('media-upload-btn'); if (b) b.disabled = true;
+    window._mediaUploadData = null;
+}
+async function submitMediaUpload() {
+    try {
+        if (!window._mediaUploadData) return showToast('Choose a file first.', { type: 'warning' });
+        const title = document.getElementById('media-title')?.value.trim() || '';
+        const r = await fetch('/api/media', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ dataUrl: window._mediaUploadData, title }) });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok) return showToast(res.error || 'Upload failed', { type: 'danger' });
+        showToast('Media uploaded.', { type: 'success' });
+        clearMediaPreview();
+        const list = document.getElementById('media-my-list'); if (list) list.innerHTML = 'Your last uploaded file is saved. Open the Media tab again after refresh to see all saved records.';
+        switchHubTab('media', document.querySelector('.hub-tab[data-tab=media]'));
+    } catch (e) {
+        console.error('media upload failed:', e);
+        showToast('Upload failed: ' + (e && e.message ? e.message : e), { type: 'danger' });
+    }
 }
 
 function renderHubNotes(me, myCourses, myLessons, myNotes, data) {

@@ -3492,6 +3492,61 @@ function decodeHtmlEntities(s) {
         return true;
     }
 
+    // GET /api/media — list media uploads (student sees their own; admins see all)
+    if (parts.length === 2 && parts[1] === 'media' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser) return json(res, 401, { error: 'Not authenticated' });
+        const rows = (db.mediaUploads || []).slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        const filtered = authUser.role === 'student'
+            ? rows.filter(r => r && r.uploaderUsername === authUser.username)
+            : rows;
+        return json(res, 200, { media: filtered.slice(-200) });
+    }
+
+    // POST /api/media — upload a compressed photo or short video as base64
+    if (parts.length === 2 && parts[1] === 'media' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const authUser = getRequestUser(req);
+                if (!authUser) return json(res, 401, { error: 'Not authenticated' });
+                const p = JSON.parse(body || '{}');
+                if (!p.dataUrl || typeof p.dataUrl !== 'string') return json(res, 400, { error: 'Missing file data' });
+                const isImage = p.dataUrl.startsWith('data:image/');
+                const isVideo = p.dataUrl.startsWith('data:video/');
+                if (!isImage && !isVideo) return json(res, 400, { error: 'Only image or video data URLs are accepted' });
+                const approxBytes = Math.floor((p.dataUrl.length - (p.dataUrl.indexOf(',') + 1)) * 0.75);
+                if (approxBytes > 8 * 1024 * 1024) return json(res, 413, { error: 'File too large' });
+                const su = authUser.user || {};
+                const student = authUser.role === 'student' ? ((db.students || []).find(s => s.id === su.studentId || String(s.phone || '').replace(/[^0-9]/g, '') === String(authUser.username || '').replace(/[^0-9]/g, '') || String(s.phone || '') === authUser.username) || {}) : {};
+                const rec = {
+                    id: 'MED-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+                    uploaderUsername: authUser.username,
+                    uploaderRole: authUser.role,
+                    uploaderName: su.name || su.fullName || authUser.username || '',
+                    studentId: su.studentId || '',
+                    country: student.country || su.country || '',
+                    regionId: student.regionId || su.regionId || '',
+                    studyCenterId: student.studyCenterId || su.studyCenterId || su.campusId || '',
+                    type: isImage ? 'image' : 'video',
+                    dataUrl: p.dataUrl,
+                    title: String(p.title || '').slice(0, 120),
+                    notes: String(p.notes || '').slice(0, 300),
+                    createdAt: new Date().toISOString()
+                };
+                if (!db.mediaUploads) db.mediaUploads = [];
+                db.mediaUploads.push(rec);
+                if (db.mediaUploads.length > 2000) db.mediaUploads = db.mediaUploads.slice(-2000);
+                saveDB();
+                return json(res, 200, { ok: true, media: rec });
+            } catch (e) {
+                return json(res, 400, { error: 'Invalid upload' });
+            }
+        });
+        return true;
+    }
+
     // POST /api/verify — public guest document verification (rate-limited, minimal fields only)
     if (parts.length === 2 && parts[1] === 'verify' && req.method === 'POST') {
         let body = '';
