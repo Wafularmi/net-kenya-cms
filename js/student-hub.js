@@ -1976,6 +1976,52 @@ async function hubJoinHall(id) {
     } catch (e) { showToast('Could not join hall', { type: 'danger' }); }
 }
 
+async function deleteMediaUpload(id) {
+    if (!await showConfirm('Delete Upload', 'Delete this uploaded photo/video permanently?')) return;
+    try {
+        const r = await fetch('/api/media/' + encodeURIComponent(id), { method: 'DELETE', headers: getAuthHeaders() });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return showToast(data.error || 'Delete failed', { type: 'danger' });
+        showToast('Upload deleted.', { type: 'success' });
+        renderMediaGallery();
+    } catch (e) { showToast('Delete failed: ' + e.message, { type: 'danger' }); }
+}
+async function showMoveMediaModal(uploadId) {
+    try {
+        const headers = getAuthHeaders();
+        const mediaRes = await fetch('/api/media', { headers });
+        const media = (await mediaRes.json()).media || [];
+        const upload = media.find(m => String(m.id) === String(uploadId));
+        if (!upload) return showToast('Upload not found.', { type: 'danger' });
+        const centers = await (await fetch('/api/db/studyCenters', { headers })).json();
+        const regions = await (await fetch('/api/db/regions', { headers })).json();
+        const regionId = upload.regionId || upload.studyCenterId && (centers.find(c => c.id === upload.studyCenterId)?.regionId || '') || '';
+        const region = regions.find(r => String(r.id) === String(regionId));
+        const regionName = region ? (region.name || region.id) : (upload.regionName || 'Same region');
+        const same = centers.filter(c => String(c.regionId) === String(regionId));
+        const list = same.length ? same : centers;
+        const opts = list.map(c => `<option value="${c.id}" data-name="${escapeHtml(c.name || c.id)}" ${String(c.id) === String(upload.studyCenterId) ? 'selected' : ''}>${escapeHtml(c.name || c.id)} ${c.code ? '(' + escapeHtml(c.code) + ')' : ''}</option>`).join('');
+        showModal('Move Upload', `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">Current center: <b>${escapeHtml(upload.studyCenterName || upload.studyCenterId || 'Unknown')}</b></div><div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Same region: <b>${escapeHtml(regionName)}</b></div><div class="form-group"><label>Move to study center</label><select id="move-center" style="width:100%;">${opts}</select></div>`, `<button class="btn btn-primary" onclick="moveMediaUpload()">Move</button>`);
+        window._moveMediaId = uploadId;
+    } catch (e) {
+        showToast('Could not load centers to move.', { type: 'danger' });
+    }
+}
+async function moveMediaUpload() {
+    try {
+        const select = document.getElementById('move-center');
+        const centerId = select ? select.value : '';
+        const centerName = select && select.selectedOptions && select.selectedOptions[0] ? select.selectedOptions[0].dataset.name || select.selectedOptions[0].textContent : '';
+        if (!centerId || !window._moveMediaId) return;
+        const r = await fetch('/api/media/' + encodeURIComponent(window._moveMediaId), { method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify({ studyCenterId: centerId, studyCenterName: centerName }) });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return showToast(data.error || 'Move failed', { type: 'danger' });
+        showToast('Moved to ' + centerName, { type: 'success' });
+        closeModal();
+        renderMediaGallery();
+    } catch (e) { showToast('Move failed: ' + e.message, { type: 'danger' }); }
+}
+
 async function renderMediaGallery() {
     const el = document.getElementById('media-gallery');
     if (!el) return;
@@ -2011,6 +2057,7 @@ async function renderMediaGallery() {
                             html += m.type === 'image'
                                 ? `<div style="margin-bottom:4px;"><a href="${m.dataUrl}" target="_blank" title="${escapeHtml(m.uploaderName)}"><img src="${m.dataUrl}" alt="upload" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a><a href="${m.dataUrl}" download="${escapeHtml(m.id || 'media')}.JPG" style="display:block;font-size:12px;color:var(--accent);margin-top:4px;text-align:center;">⬇️ Download</a></div>`
                                 : `<div style="background:var(--bg-input);border-radius:8px;padding:8px;"><video src="${m.dataUrl}" controls preload="metadata" style="width:100%;max-height:140px;border-radius:6px;background:#000;"></video><a href="${m.dataUrl}" download="${escapeHtml(m.id || 'media')}.MP4" style="display:block;font-size:12px;color:var(--accent);margin-top:4px;text-align:center;">⬇️ Download</a></div>`;
+                            html += `<div style="display:flex;gap:6px;justify-content:center;margin-top:4px;"><a href="#" onclick="deleteMediaUpload('${m.id}');return false;" style="color:var(--danger);font-size:12px;text-decoration:none;">Delete</a><span style="color:var(--border);font-size:12px;">|</span><a href="#" onclick="showMoveMediaModal('${m.id}');return false;" style="font-size:12px;text-decoration:none;">Move</a></div>`;
                         });
                         html += `</div>`;
                     }
@@ -2029,6 +2076,13 @@ function renderHubMedia(me, data) {
     return `
         <div class="card">
             <h3>📸 Photo / Short Video Upload</h3>
+            <div id="media-help-banner" style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:12px 14px;border-radius:12px;margin:10px 0;display:flex;gap:12px;align-items:center;justify-content:space-between;box-shadow:0 4px 10px rgba(30,60,114,0.25);">
+                <div style="line-height:1.45;">
+                    <div style="font-weight:700;margin-bottom:4px;">How to add a photo</div>
+                    <div>Tap <b>Choose File</b> to select a photo, or tap <b>Open Camera</b> to take and upload a photo directly.</div>
+                </div>
+                <button class="btn btn-sm" style="background:#fff;color:#1e3c72;font-weight:800;white-space:nowrap;" onclick="document.getElementById('media-help-banner').style.display='none';">Got it</button>
+            </div>
             <p style="font-size:12px;color:var(--text-muted);">The upload is tagged automatically with your account's country, region, study center, and date.</p>
             <div class="form-group">
                 <label>Title (optional)</label>

@@ -3503,6 +3503,42 @@ function decodeHtmlEntities(s) {
         return json(res, 200, { media: filtered.slice(-200) });
     }
 
+    // DELETE /api/media/:id — remove a media upload
+    if (parts.length === 3 && parts[1] === 'media' && req.method === 'DELETE') {
+        const authUser = getRequestUser(req);
+        if (!authUser || !['admin', 'assistant', 'coordinator'].includes(authUser.role)) return json(res, 403, { error: 'Admin access required' });
+        const id = decodeURIComponent(parts[2] || '');
+        const before = (db.mediaUploads || []).length;
+        db.mediaUploads = (db.mediaUploads || []).filter(r => r && String(r.id) !== id);
+        if (before === (db.mediaUploads || []).length) return json(res, 404, { error: 'Media not found' });
+        saveDB();
+        return json(res, 200, { ok: true });
+    }
+
+    // PATCH /api/media/:id — move an upload to another study center in its region
+    if (parts.length === 3 && parts[1] === 'media' && req.method === 'PATCH') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const authUser = getRequestUser(req);
+                if (!authUser || !['admin', 'assistant', 'coordinator'].includes(authUser.role)) return json(res, 403, { error: 'Admin access required' });
+                const id = decodeURIComponent(parts[2] || '');
+                const p = JSON.parse(body || '{}');
+                const rec = (db.mediaUploads || []).find(r => r && String(r.id) === id);
+                if (!rec) return json(res, 404, { error: 'Media not found' });
+                rec.studyCenterId = p.studyCenterId || rec.studyCenterId;
+                rec.studyCenterName = p.studyCenterName || rec.studyCenterName;
+                rec.updatedAt = new Date().toISOString();
+                saveDB();
+                return json(res, 200, { ok: true, media: rec });
+            } catch (e) {
+                return json(res, 400, { error: 'Invalid update' });
+            }
+        });
+        return true;
+    }
+
     // POST /api/media — upload a compressed photo or short video as base64
     if (parts.length === 2 && parts[1] === 'media' && req.method === 'POST') {
         let body = '';
