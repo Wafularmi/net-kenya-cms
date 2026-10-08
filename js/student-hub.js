@@ -748,6 +748,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${formatDate(ev.date)}${ev.type ? ' · ' + esc(ev.type) : ''}${ev.description ? ' · ' + esc(ev.description).substring(0,40) + ((ev.description||'').length > 40 ? '...' : '') : ''}</div>
                     </div>
                 `).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">No upcoming events.</div>'}
+                <button class="btn btn-outline btn-sm" style="margin-top:10px;width:100%;" onclick="openStudentCalendar()">📅 Open Calendar</button>
             </div>
 
             <div class="card" style="border-top:3px solid var(--warning);">
@@ -1974,6 +1975,31 @@ function renderHubLiveClasses(me, myCourses, myLessons, halls) {
     }).join('');
     return hallHtml + '<div style="margin-bottom:14px;"><h3 style="color:var(--accent);margin:0 0 4px 0;">🎥 Live Classes</h3><div style="font-size:12px;color:var(--text-muted);">Your scheduled virtual classrooms. The join button appears 10 minutes before the start time.</div></div>' + rows;
 }
+async function openStudentCalendar() {
+    try {
+        const data = studentHubCache || {};
+        const events = (data.events || []).filter(e => e && e.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        const byDate = {};
+        events.forEach(e => { byDate[e.date] = byDate[e.date] || []; byDate[e.date].push(e); });
+        const now = new Date();
+        let year = now.getFullYear(), month = now.getMonth();
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const first = new Date(year, month, 1).getDay();
+        const days = new Date(year, month + 1, 0).getDate();
+        let cells = '';
+        for (let i = 0; i < first; i++) cells += '<td style="background:var(--bg-input);height:56px;"></td>';
+        for (let d = 1; d <= days; d++) {
+            const dateKey = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+            const dayEvents = byDate[dateKey] || [];
+            cells += `<td style="vertical-align:top;padding:4px;border:1px solid var(--border);background:${dayEvents.length ? 'var(--accent-bg, rgba(37,99,235,0.08))' : 'var(--bg-card)'};min-width:60px;"><b>${d}</b>${dayEvents.length ? dayEvents.map(e => `<div style="font-size:10px;color:var(--accent);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">• ${esc(e.title || 'Event')}</div>`).join('') : ''}</td>`;
+            if ((first + d) % 7 === 0) cells += '</tr><tr>';
+        }
+        const html = `<table class="data-table" style="font-size:11px;width:100%;border-collapse:collapse;"><thead><tr><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th></tr></thead><tbody><tr>${cells}</tr></tbody></table>`;
+        const eventList = events.filter(e => String(e.date).slice(0,7) === year + '-' + String(month + 1).padStart(2,'0')).map(e => `<div style="font-size:12px;margin:4px 0;">📅 <b>${esc(e.title || 'Event')}</b> — ${formatDate(e.date)}${e.type ? ' · ' + esc(e.type) : ''}${e.description ? ' · ' + esc(e.description) : ''}</div>`).join('');
+        showModal('📅 Academic Calendar — ' + monthNames[month] + ' ' + year, `<div style="max-height:260px;overflow-y:auto;margin-bottom:12px;">${eventList || '<p style="color:var(--text-muted);text-align:center;">No scheduled events for this month.</p>'}</div>` + html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
+    } catch (e) { showToast('Could not open calendar', { type: 'danger' }); }
+}
+
 async function hubJoinHall(id) {
     try {
         const all = (studentHubCache && studentHubCache.meetings) || await dbGetAll('meetings');
