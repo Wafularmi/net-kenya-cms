@@ -17,7 +17,7 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','meetings','waivers'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','meetings','waivers','events'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -715,6 +715,8 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
     const myAttendance = (data.attendance || []).filter(a => a.studentId === me.id);
     const attended = myAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
     const attendancePct = myAttendance.length ? Math.round((attended / myAttendance.length) * 100) : 0;
+    const todayText = new Date().toISOString().split('T')[0];
+    const upcomingEvents = (data.events || []).filter(ev => ev && ev.date && String(ev.date) >= todayText).sort((a,b) => String(a.date).localeCompare(String(b.date))).slice(0,5);
 
     return `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">
@@ -736,6 +738,16 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${course ? esc(course.name) : ''} · ${formatDate(e.date)} ${esc(e.time || '')}</div>
                     </div>`;
                 }).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">No exams registered. <a href="#" onclick="switchHubTab(\'exams\', document.querySelector(\'.hub-tab[data-tab=exams]\'));return false;" style="color:var(--accent);">Register →</a></div>'}
+            </div>
+
+            <div class="card" style="border-top:3px solid var(--accent);">
+                <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">📅 Academic Calendar</h3>
+                ${upcomingEvents.length ? upcomingEvents.map(ev => `
+                    <div class="event-item" style="padding:8px 0;">
+                        <div><b>${esc(ev.title || 'Event')}</b></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${formatDate(ev.date)}${ev.type ? ' · ' + esc(ev.type) : ''}${ev.description ? ' · ' + esc(ev.description).substring(0,40) + ((ev.description||'').length > 40 ? '...' : '') : ''}</div>
+                    </div>
+                `).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">No upcoming events.</div>'}
             </div>
 
             <div class="card" style="border-top:3px solid var(--warning);">
@@ -2559,7 +2571,7 @@ let _hubPollInterval = null;
 let _hubTimestampInterval = null;
 let _hubLastUpdate = Date.now();
 let _hubRenderDebounce = null;
-const _hubRelevantStores = ['notes','lessons','courses','enrollments','exams','examRegistrations','quizzes','submissions','students','payments','attendance','grades','retakeRequests','meetings'];
+const _hubRelevantStores = ['notes','lessons','courses','enrollments','exams','examRegistrations','quizzes','submissions','students','payments','attendance','grades','retakeRequests','meetings','events'];
 
 function _hubIsActive() {
     const el = document.getElementById('screen-student-hub');
