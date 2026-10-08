@@ -3432,20 +3432,60 @@ async function editStudent(id) {
 async function viewStudent(id) {
     const student = await dbGet('students', id);
     if (!student) return;
-    const payments = (await dbGetAll('payments')).filter(p => p.studentId === id);
-    const grades = (await dbGetAll('grades')).filter(g => g.studentId === id);
-    const courses = await dbGetAll('courses');
-    const center = student.studyCenterId ? await dbGet('studyCenters', student.studyCenterId) : null;
+    const [payments, grades, courses, enrolls, submissions, examRegs, retakeRequests, mediaUploads, certificates, audits, attendance] = await Promise.all([
+        dbGetAll('payments').then(rows => rows.filter((p) => p.studentId === id)).catch(() => []),
+        dbGetAll('grades').then(rows => rows.filter((g) => g.studentId === id)).catch(() => []),
+        dbGetAll('courses').catch(() => []),
+        dbGetAll('enrollments').then(rows => rows.filter((e) => e.studentId === id)).catch(() => []),
+        dbGetAll('submissions').then(rows => rows.filter((s) => s.studentId === id)).catch(() => []),
+        dbGetAll('examRegistrations').then(rows => rows.filter((r) => r.studentId === id)).catch(() => []),
+        dbGetAll('retakeRequests').then(rows => rows.filter((r) => r.studentId === id)).catch(() => []),
+        dbGetAll('mediaUploads').then(rows => rows.filter((m) => m.studentId === id)).catch(() => []),
+        dbGetAll('certificates').then(rows => rows.filter((c) => c.studentId === id)).catch(() => []),
+        dbGetAll('audit').then(rows => rows.filter((a) => String(a.details || '').includes(String(id)) || String(a.entityName || '').toLowerCase().includes(String(student.name || '').toLowerCase()))).catch(() => []),
+        dbGetAll('attendance').then(rows => rows.filter((a) => a.studentId === id)).catch(() => [])
+    ]);
+    const center = student.studyCenterId ? await dbGet('studyCenters', student.studyCenterId).catch(() => null) : null;
     const paid = tuitionPaid(payments, id);
     const studentFee = getCachedStudentFee(student);
     const balance = studentFee - paid;
-    const photoHtml = student.photo ? `<div style="text-align:center;margin-bottom:16px;"><img src="${student.photo}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--accent);"></div>` : '';
-    let html = `${photoHtml}<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;"><div><b>Admission #:</b> <span style="color:var(--accent);font-weight:700;">${student.admissionNumber || '--'}</span>${student.testAccount ? ' <span class="badge badge-warning" style="font-size:9px;">TEST</span>' : ''}</div><div><b>Status:</b> <span class="badge badge-${student.status === 'active' ? 'success' : student.status === 'inactive' ? 'secondary' : 'warning'}">${student.status}</span></div><div><b>Name:</b> ${student.name}</div><div><b>Program:</b> ${student.program || '--'}</div><div><b>Study Center:</b> ${center ? center.name : 'Main'}</div><div><b>Phone:</b> ${student.phone || '--'}</div><div><b>Email:</b> ${student.email || '--'}</div><div><b>Year:</b> ${student.year || 1}</div><div><b>Fee Amount:</b> ${formatCurrency(studentFee)}</div><div><b>Balance:</b> <span style="color:${balance > 0 ? 'var(--warning)' : 'var(--success)'};font-weight:700;">${formatCurrency(balance)}</span></div></div>`;
-    if (student.phone) html += `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:6px;"><div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">📱 Quick WhatsApp</div><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-success btn-sm" onclick="quickWhatsAppStudent('${student.id}')">💬 Custom</button><button class="btn btn-outline btn-sm" onclick="quickWhatsAppStudent('${student.id}','tpl-fee')">💰 Fee (${formatCurrency(balance)})</button><button class="btn btn-outline btn-sm" onclick="quickWhatsAppStudent('${student.id}','tpl-welcome')">👋 Welcome</button><button class="btn btn-outline btn-sm" onclick="quickWhatsAppStudent('${student.id}','tpl-attendance')">⚠️ Attendance</button></div></div>`;
-    html += `<h4 style="color:var(--accent);margin-bottom:8px;">Payment History (${payments.length})</h4><table class="data-table"><thead><tr><th>Date</th><th>Receipt</th><th>Amount</th><th>Method</th></tr></thead><tbody>${payments.map(p => `<tr><td>${formatDate(p.date)}</td><td>${p.receiptNo}</td><td>${formatCurrency(p.amount)}</td><td>${p.method}</td></tr>`).join('') || '<tr><td colspan="4" style="text-align:center;">No payments</td></tr>'}</tbody></table>`;
-    if (grades.length) { html += `<h4 style="color:var(--accent);margin:12px 0 8px;">Grades</h4><table class="data-table"><thead><tr><th>Course</th><th>Score</th><th>Grade</th></tr></thead><tbody>${grades.map(g => { const c = courses.find(c => c.id === g.courseId); return `<tr><td>${c ? c.name : g.courseId}</td><td>${g.score}</td><td>${getGrade(g.score).grade}</td></tr>`; }).join('')}</tbody></table>`; }
-    showModal('Student: ' + student.name, html, `<button class="btn btn-outline" onclick="editStudent('${id}');closeModal();">Edit</button>`);
+    const passCount = submissions.filter((s) => s.status === 'pass').length;
+    const failCount = submissions.filter((s) => s.status === 'fail').length;
+    const recentAudits = (audits || []).slice(-5).reverse();
+    const photoHtml = student.photo
+        ? '<div style="text-align:center;margin-bottom:12px;"><img src="' + student.photo + '" style="width:84px;height:84px;border-radius:50%;object-fit:cover;border:3px solid var(--accent);"></div>'
+        : '<div style="text-align:center;margin-bottom:12px;padding:12px;background:#fff7ed;border-radius:8px;color:#9a3412;">Passport photo missing. Add it from the student form for profile and future certificates.</div>';
+    let html = photoHtml +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">' +
+        '<div><b>Admission #:</b> <span style="color:var(--accent);font-weight:700;">' + (student.admissionNumber || '--') + '</span></div>' +
+        '<div><b>Status:</b> <span class="badge badge-' + (student.status === 'active' ? 'success' : 'warning') + '">' + (student.status || 'active') + '</span></div>' +
+        '<div><b>Name:</b> ' + escapeHtml(student.name || '') + '</div>' +
+        '<div><b>Phone:</b> ' + escapeHtml(student.phone || '--') + '</div>' +
+        '<div><b>Email:</b> ' + escapeHtml(student.email || '--') + '</div>' +
+        '<div><b>Program:</b> ' + escapeHtml(student.program || '--') + '</div>' +
+        '<div><b>Year:</b> ' + (student.year || 1) + '</div>' +
+        '<div><b>Study Center:</b> ' + (center ? center.name : 'Main') + '</div>' +
+        '<div><b>Country:</b> ' + escapeHtml(student.country || '—') + '</div>' +
+        '<div><b>Enrollment Date:</b> ' + (student.createdAt ? formatDate(student.createdAt) : '—') + '</div>' +
+        '<div><b>Fee Amount:</b> ' + formatCurrency(studentFee) + '</div>' +
+        '<div><b>Balance:</b> <span style="color:' + (balance > 0 ? 'var(--warning)' : 'var(--success)') + ';font-weight:700;">' + formatCurrency(balance) + '</span></div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px;">' +
+        '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:var(--success);">' + enrolls.length + '</div><div style="font-size:11px;color:var(--text-muted);">Courses</div></div>' +
+        '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:var(--accent);">' + examRegs.length + '</div><div style="font-size:11px;color:var(--text-muted);">Exams</div></div>' +
+        '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:var(--accent);">' + submissions.length + '</div><div style="font-size:11px;color:var(--text-muted);">Submissions</div></div>' +
+        '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:' + (passCount >= failCount ? 'var(--success)' : 'var(--danger)') + '">' + passCount + '/' + failCount + '</div><div style="font-size:11px;color:var(--text-muted);">Pass/Fail</div></div>' +
+        '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:var(--warning);">' + mediaUploads.length + '</div><div style="font-size:11px;color:var(--text-muted);">Uploads</div></div>' +
+        '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:' + (attendance.length ? 'var(--success)' : 'var(--danger)') + '">' + attendance.length + '</div><div style="font-size:11px;color:var(--text-muted);">Attendance records</div></div>' +
+        '</div>';
+    if (payments.length) html += '<h4 style="color:var(--accent);margin-bottom:6px;">Recent Payments</h4><table class="data-table"><thead><tr><th>Date</th><th>Receipt</th><th>Amount</th><th>Method</th></tr></thead><tbody>' + payments.slice(-5).map((p) => '<tr><td>' + formatDate(p.date) + '</td><td>' + (p.receiptNo || '--') + '</td><td>' + formatCurrency(p.amount) + '</td><td>' + (p.method || '--') + '</td></tr>').join('') + '</tbody></table>';
+    if (grades.length) html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Latest Grades</h4><table class="data-table"><thead><tr><th>Course</th><th>Score</th><th>Grade</th></tr></thead><tbody>' + grades.slice(-5).map((g) => { const c = courses.find((c) => c.id === g.courseId); return '<tr><td>' + (c ? c.name : g.courseId) + '</td><td>' + (g.score || 0) + '</td><td>' + getGrade(g.score || 0).grade + '</td></tr>'; }).join('') + '</tbody></table>';
+    html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Documents & Accountability</h4><p style="font-size:12px;color:var(--text-muted);">Media uploads: <strong>' + mediaUploads.length + '</strong> • Retake requests: <strong>' + retakeRequests.length + '</strong> • Certificates/documents: <strong>' + certificates.length + '</strong></p>';
+    if (recentAudits.length) html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Recent Audit Actions</h4><ul style="font-size:12px;line-height:1.6;list-style:none;padding-left:0;">' + recentAudits.map((a) => '<li>• ' + escapeHtml(a.action || a.entityId || 'update') + ' — ' + escapeHtml((a.details || '').substring(0, 80)) + ((a.details || '').length > 80 ? '...' : '') + '</li>').join('') + '</ul>';
+    html += '<div style="margin-top:12px;padding:10px 12px;background:var(--bg-input);border-radius:8px;font-size:11px;color:var(--text-muted);">Passport photo is stored under the student form. It is optional/recommended and can appear on certificates later.</div>';
+    showModal('Student: ' + student.name, html, '<button class="btn btn-outline" onclick="editStudent(\"' + id + '\");closeModal();">Edit</button>');
 }
+
 async function showProgramAssignment() {
     const programs = await getProgramsList();
     const students = await dbGetAll('students');
