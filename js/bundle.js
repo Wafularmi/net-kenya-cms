@@ -15363,6 +15363,126 @@ async function deleteQuestionFromLesson(questionId, lessonId) {
     logAudit('deleted', 'question', { questionId });
 }
 
+// Bulk-delete selection for the Question Bank screen.
+let _qbSelected = new Set();
+function qbShownIds() {
+    return Array.from(document.querySelectorAll('#questions-body input[data-qid]')).map(el => el.getAttribute('data-qid'));
+}
+function qbSyncSelectionUi() {
+    const n = _qbSelected.size;
+    const cnt = document.getElementById('qb-selected-count');
+    if (cnt) cnt.textContent = String(n);
+    const btn = document.getElementById('qb-delete-selected-btn');
+    if (btn) btn.disabled = n === 0;
+    const all = document.getElementById('qb-select-all');
+    if (all) {
+        const shown = qbShownIds();
+        const checkedCount = shown.filter(id => _qbSelected.has(id)).length;
+        all.checked = shown.length > 0 && checkedCount === shown.length;
+        all.indeterminate = checkedCount > 0 && checkedCount < shown.length;
+    }
+}
+function toggleAllQuestions(checked) {
+    qbShownIds().forEach(id => { if (checked) _qbSelected.add(id); else _qbSelected.delete(id); });
+    qbSyncSelectionUi();
+}
+function selectAllQuestions() {
+    const shown = qbShownIds();
+    if (!shown.length) { showToast('No questions match the current filter.', { type: 'info' }); return; }
+    shown.forEach(id => _qbSelected.add(id));
+    qbSyncSelectionUi();
+    showToast(`${shown.length} question${shown.length !== 1 ? 's' : ''} selected.`);
+}
+function selectNoQuestions() {
+    _qbSelected.clear();
+    qbSyncSelectionUi();
+}
+// Remove deleted question ids from quizzes/exams so paper counts stay honest.
+async function _qbPruneReferences(ids) {
+    const gone = new Set(ids.map(String));
+    let touched = 0;
+    for (const store of ['quizzes', 'exams']) {
+        let rows = [];
+        try { rows = await dbGetAll(store); } catch (e) { continue; }
+        for (const r of rows) {
+            if (!r || !Array.isArray(r.questionIds) || !r.questionIds.length) continue;
+            const kept = r.questionIds.filter(x => !gone.has(String(x)));
+            if (kept.length === r.questionIds.length) continue;
+            r.questionIds = kept;
+            r.updatedAt = new Date().toISOString();
+            try { await dbPut(store, r); touched++; } catch (e) {}
+        }
+    }
+    return touched;
+}
+async function deleteSelectedQuestions() {
+    const ids = Array.from(_qbSelected);
+    if (!ids.length) { showToast('Select at least one question first.', { type: 'info' }); return; }
+    const ok = await showConfirm('Delete selected questions',
+        `Delete ${ids.length} question${ids.length !== 1 ? 's' : ''}? This cannot be undone. Any quiz or exam that uses them will drop those questions.`);
+    if (!ok) return;
+    showToast('Deleting...');
+    let failed = 0;
+    for (const id of ids) {
+        try { await dbDelete('questionBank', id); } catch (e) { failed++; }
+    }
+    _qbSelected.clear();
+    await _qbPruneReferences(ids);
+    await renderQuestionBank();
+    showToast(failed ? `Deleted ${ids.length - failed} of ${ids.length}. ${failed} failed.` : `Deleted ${ids.length} question${ids.length !== 1 ? 's' : ''}.`, { type: failed ? 'error' : 'success' });
+    logAudit('deleted', 'questionBank-bulk', { count: ids.length, failed });
+}
+async function clearAllQuestions() {
+    const all = await dbGetAll('questionBank');
+    if (!all.length) { showToast('The Question Bank is already empty.', { type: 'info' }); return; }
+    const ok = await showConfirm('Clear the entire Question Bank',
+        `Permanently delete ALL ${all.length} questions? Your English and Swahili text will be lost. Quizzes and exams will lose those questions too. This cannot be undone.`);
+    if (!ok) return;
+    const typed = prompt('Type DELETE ALL to confirm:');
+    if (String(typed || '').trim().toUpperCase() !== 'DELETE ALL') { showToast('Cancelled — nothing was deleted.', { type: 'info' }); return; }
+    try {
+        await dbClear('questionBank');
+        _qbSelected.clear();
+        await _qbPruneReferences(all.map(q => q.id));
+        await renderQuestionBank();
+        showToast(`Question Bank cleared (${all.length} removed).`, { type: 'success' });
+        logAudit('cleared', 'questionBank', { count: all.length });
+    } catch (e) {
+        showToast('Could not clear the Question Bank: ' + e.message, { type: 'error' });
+    }
+}
+
+// Delete every question belonging to one course.
+async function deleteCourseQuestions(courseId) {
+    if (!courseId) { showToast('Pick a course first, then use Delete Course Questions.', { type: 'info' }); return; }
+    const all = await dbGetAll('questionBank');
+    const course = (await dbGetAll('courses').catch(() => [])).find(c => String(c.id) === String(courseId));
+    const ids = all.filter(q => String(q.courseId) === String(courseId)).map(q => q.id);
+    if (!ids.length) { showToast('That course has no questions.', { type: 'info' }); return; }
+    const ok = await showConfirm('Delete course questions',
+        `Delete all ${ids.length} question${ids.length !== 1 ? 's' : ''} in "${course ? course.name : 'this course'}"? Their English and Swahili text will be lost. This cannot be undone.`);
+    if (!ok) return;
+    showToast('Deleting...');
+    let failed = 0;
+    for (const id of ids) { try { await dbDelete('questionBank', id); } catch (e) { failed++; } }
+    _qbSelected.clear();
+    await _qbPruneReferences(ids);
+    await renderQuestionBank();
+    showToast(failed ? `Deleted ${ids.length - failed} of ${ids.length}.` : `Deleted ${ids.length} question${ids.length !== 1 ? 's' : ''}.`, { type: failed ? 'error' : 'success' });
+    logAudit('deleted', 'questionBank-by-course', { courseId, count: ids.length });
+}
+// Delete a single question without the extra confirm round-trip (row checkbox path).
+async function deleteQuestionQuiet(id) {
+    try {
+        await dbDelete('questionBank', id);
+        _qbSelected.delete(String(id));
+        await _qbPruneReferences([id]);
+        await renderQuestionBank();
+        showToast('Question deleted', { type: 'success' });
+        logAudit('deleted', 'question', { id });
+    } catch (e) { showToast('Delete failed: ' + e.message, { type: 'error' }); }
+}
+
 async function renderQuestionBank() {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
@@ -15380,6 +15500,9 @@ async function renderQuestionBank() {
     if (courseFilter) filtered = filtered.filter(q => q.courseId === courseFilter);
     if (typeFilter) filtered = filtered.filter(q => q.type === typeFilter);
     filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Drop selections for questions that no longer exist / are filtered away.
+    const visibleIds = new Set(filtered.map(q => String(q.id)));
+    _qbSelected.forEach(id => { if (!visibleIds.has(id)) _qbSelected.delete(id); });
     document.getElementById('questions-body').innerHTML = filtered.map(q => {
         const course = courses.find(c => c.id === q.courseId);
         const lesson = lessons.find(l => l.id === q.lessonId);
@@ -15392,10 +15515,11 @@ async function renderQuestionBank() {
         else if (q.type === 'matching') answerPreview = `<span style="color:var(--accent);font-size:11px;">${q.pairs ? q.pairs.length + ' pairs' : 'No pairs'}</span>`;
         else if (q.type === 'fillin') answerPreview = `<span style="color:var(--success);font-size:11px;">${q.blanks ? q.blanks.length + ' blanks' : 'No blanks'}</span>`;
         else answerPreview = `<span style="color:var(--accent);font-size:11px;">Rubric: ${q.rubric ? q.rubric.length + ' criteria' : 'None'}</span>`;
-        return `<tr><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td>${typeLabel}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${q.question}">${q.question}</td><td>${answerPreview}</td><td><span class="badge badge-info">${q.points || 1} pt${(q.points || 1) !== 1 ? 's' : ''}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuestion('${q.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteQuestion('${q.id}')">Del</button></td></tr>`;
-    }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No questions yet. Click "+ Add Question" to create one.</td></tr>';
+        return `<tr><td><input type="checkbox" data-qid="${q.id}" ${_qbSelected.has(String(q.id)) ? 'checked' : ''} onclick="this.checked?_qbSelected.add('${q.id}'):_qbSelected.delete('${q.id}');qbSyncSelectionUi()"></td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td>${typeLabel}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${q.question}">${q.question}</td><td>${answerPreview}</td><td><span class="badge badge-info">${q.points || 1} pt${(q.points || 1) !== 1 ? 's' : ''}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuestion('${q.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteQuestion('${q.id}')">Del</button></td></tr>`;
+    }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No questions yet. Click "+ Add Question" to create one.</td></tr>';
     courseSelect.onchange = renderQuestionBank;
     typeSelect.onchange = renderQuestionBank;
+    qbSyncSelectionUi();
 }
 async function showQuestionForm(question = null) {
     const courses = await dbGetAll('courses');

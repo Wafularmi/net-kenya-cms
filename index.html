@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=416" as="script">
+    <link rel="preload" href="js/bundle.js?v=417" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -538,9 +538,14 @@
                 <div class="screen-header"><h2>Question Bank</h2><div class="screen-actions">
                     <select id="qb-course" class="filter-select"><option value="">All Courses</option></select>
                     <select id="qb-type" class="filter-select"><option value="">All Types</option><option value="mcq">Multiple Choice</option><option value="essay">Essay</option><option value="truefalse">True/False</option><option value="matching">🔗 Matching</option><option value="fillin">📝 Fill in the Blanks</option></select>
+                    <button class="btn btn-outline" onclick="selectAllQuestions()">Select All</button>
+                    <button class="btn btn-outline" onclick="selectNoQuestions()">Clear Selection</button>
+                    <button class="btn btn-danger" onclick="deleteCourseQuestions(document.getElementById('qb-course').value)" title="Delete every question in the course chosen in the filter">Delete Course Questions</button>
+                    <button class="btn btn-danger" id="qb-delete-selected-btn" onclick="deleteSelectedQuestions()" disabled>🗑 Delete Selected (<span id="qb-selected-count">0</span>)</button>
+                    <button class="btn btn-danger" onclick="clearAllQuestions()">Clear All Questions</button>
                     <button class="btn btn-primary" onclick="showQuestionForm()">+ Add Question</button>
                 </div></div>
-                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Lesson</th><th>Type</th><th>Question</th><th>Answer</th><th>Points</th><th>Actions</th></tr></thead><tbody id="questions-body"></tbody></table></div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th style="width:36px;"><input type="checkbox" id="qb-select-all" onclick="toggleAllQuestions(this.checked)" title="Select all shown questions"></th><th>Course</th><th>Lesson</th><th>Type</th><th>Question</th><th>Answer</th><th>Points</th><th>Actions</th></tr></thead><tbody id="questions-body"></tbody></table></div></div>
             </section>
 
             <section id="screen-quizzes" class="screen">
@@ -1398,7 +1403,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=416"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=417"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=58"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
