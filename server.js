@@ -5149,6 +5149,15 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
         return;
     }
 
+    // API paths must never fall through to static file serving. Several routes
+    // (e.g. POST /api/translate) answer from inside an async provider callback,
+    // so the static handler used to race them and its 404 HTML page won before
+    // the real JSON arrived. Anything unmatched under /api/ returns JSON 404.
+    if (/^\/api(\/|$)/.test(url)) {
+        if (res.headersSent) return;
+        return json(res, 404, { ok: false, error: 'not_found', path: url });
+    }
+
     serveCachedFile(res, filePath, url, req);
 });
 
