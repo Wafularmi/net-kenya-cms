@@ -4885,15 +4885,21 @@ const parsed = JSON.parse(body);
                     // The submitted answers are re-marked here against the answer
                     // key, so a tampered client cannot award itself marks.
                     if (store === 'grades' && user && user.role === 'student') {
-                        const mySid = String((user.studentId || user.username) || '');
-                        if (!mySid || String(toStore.studentId) !== mySid) {
+                        // The session may not carry studentId, so resolve it from
+                        // the users record before comparing.
+                        const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username));
+                        const myStu = (db.students || []).find(s => s && String(s.id) === String((user.studentId || (uRec && uRec.studentId) || '')));
+                        const myAliases = new Set([String(user.studentId || ''), String((uRec && uRec.studentId) || ''), String(user.username || ''), String((myStu && myStu.admissionNumber) || '')].filter(Boolean));
+                        const claimed = String(toStore.studentId || '');
+                        if (!myAliases.size || !myAliases.has(claimed)) {
                             return json(res, 403, { error: 'You can only record your own grade' });
                         }
                         if (toStore.submissionId === undefined || toStore.submissionId === null || toStore.submissionId === '') {
                             return json(res, 400, { error: 'A grade must reference the submission it was scored from' });
                         }
                         const sub = (db.submissions || []).find(x => x && String(x.id) === String(toStore.submissionId));
-                        if (!sub || String(sub.studentId) !== mySid) {
+                        const owns = sub && Array.from(myAliases).some(a => String(sub.studentId) === a);
+                        if (!owns) {
                             return json(res, 403, { error: 'That submission is not yours' });
                         }
                         if (sub.needsReview || (Array.isArray(sub.answers) && sub.answers.some(a => a && a.type === 'essay'))) {
