@@ -16394,6 +16394,18 @@ function questionPairs(q, lang) {
     if (l === 'sw' && Array.isArray(q.pairsSw) && q.pairsSw.length === (q.pairs || []).length && q.pairsSw.some(p => (p && p.right))) return q.pairsSw;
     return q.pairs || [];
 }
+// Fill-in-the-blank DISPLAY labels in the active language. Stored answer and
+// submitted VALUE always stay the English option, so grading is unaffected.
+function questionBlankLabels(q, lang) {
+    const l = lang || appLang();
+    const blanks = q.blanks || [];
+    if (l !== 'sw' || !Array.isArray(q.blanksSw) || q.blanksSw.length !== blanks.length) return blanks;
+    return blanks.map((b, i) => {
+        const swOpts = (q.blanksSw[i] && Array.isArray(q.blanksSw[i].options)) ? q.blanksSw[i].options : null;
+        if (!swOpts || swOpts.length !== (b.options || []).length) return b;
+        return Object.assign({}, b, { options: swOpts.map((o, k) => String(o == null ? '' : o).trim() || String((b.options || [])[k] || '')) });
+    });
+}
 // Highlight the active language in the header switcher.
 function applyInterfaceLanguage() {
     try {
@@ -16698,14 +16710,16 @@ function showQuizInterface(quiz, questions, lang, opts) {
             });
             qHtml += `</div></div>`;
         } else if (q.type === 'fillin') {
-            const blanks = q.blanks || [];
-            let paraHtml = q.question || '';
+            // Paragraph + choice labels follow the selected language; the
+            // <option value> stays English so grading still matches blanks[].answer.
+            const blanks = questionBlankLabels(q, lang);
+            let paraHtml = getQuestionText(q, lang);
             blanks.forEach((b, i) => {
                 // Shuffle so position can't be memorized; escape staff text for safety.
                 const shuffled = (b.options || []).slice();
                 for (let k = shuffled.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); const t = shuffled[k]; shuffled[k] = shuffled[j]; shuffled[j] = t; }
                 const opts = shuffled.map(o => { const e = String(o).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); return `<option value="${e}">${e}</option>`; }).join('');
-                paraHtml = paraHtml.replace('{b}', `<select id="fill-${q.id}-${i}" style="padding:6px 10px;border:2px solid #cbd5e1;border-radius:6px;font-size:15px;background:#fff;margin:0 4px;max-width:230px;"><option value="">— choose —</option>${opts}</select>`);
+                paraHtml = paraHtml.replace('{b}', `<select id="fill-${q.id}-${i}" style="padding:6px 10px;border:2px solid #cbd5e1;border-radius:6px;font-size:15px;background:#fff;margin:0 4px;max-width:230px;"><option value="">— ${lang === 'sw' ? 'chagua' : 'choose'} —</option>${opts}</select>`);
             });
             qHtml += `<div style="font-size:15px;line-height:2;color:#1e293b;padding:14px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">${paraHtml}</div>`;
         } else {
