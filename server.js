@@ -3340,7 +3340,15 @@ function decodeHtmlEntities(s) {
         .replace(/&amp;/g, '&');
 }
 
-// POST /api/translate — Swahili translation for the question bank.
+// GET /api/translate — lightweight provider self-test (also used to confirm
+    // the route is reachable without spending a translation call).
+    if (parts.length === 2 && parts[1] === 'translate' && req.method === 'GET') {
+        const s = db.settings ? (db.settings.find(x => x && x.key === 'translation') || {}) : {};
+        const v = s.value && typeof s.value === 'object' ? s.value : s;
+        return json(res, 200, { ok: true, provider: v.provider || 'mymemory', libreUrlConfigured: !!(v.libreUrl || process.env.LIBRETRANSLATE_URL), googleKeyConfigured: !!(v.googleApiKey || process.env.TRANSLATE_API_KEY) });
+    }
+
+    // POST /api/translate — Swahili translation for the question bank.
     //
     // Uses the Google Cloud Translation v2 API. The key is read from the
     // TRANSLATE_API_KEY environment variable and is NEVER sent to the browser:
