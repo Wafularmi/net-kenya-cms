@@ -2505,8 +2505,11 @@ const _refreshMap = {
     messages: (r) => { handleNewMessage(r); refreshMessagesBadge(); if (isScreenActive('messages')) renderMessages(); },
     // Lesson progress changes course coverage — drop the cache so the next
     // render reflects it (and re-render if Coverage is on screen).
-    lessonCompletions: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); if (isScreenActive('graduation') && typeof populateGraduationFilters === 'function') populateGraduationFilters(); },
+    lessonCompletions: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); if (isScreenActive('graduation') && typeof populateGraduationFilters === 'function') populateGraduationFilters(); if (typeof window.refreshHubCoverage === 'function') { try { window.refreshHubCoverage(); } catch (e) {} } },
     lessonUnlocks: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); },
+    // Admin ticked a course as covered -> the student's Courses list shows it
+    // as COVERED straight away, without a manual refresh.
+    courseCompletions: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); if (isScreenActive('graduation') && typeof populateGraduationFilters === 'function') populateGraduationFilters(); if (typeof window.refreshHubCoverage === 'function') { try { window.refreshHubCoverage(); } catch (e) {} } },
 };
 function onDBChange(store, record, action) {
 const fn = _refreshMap[store];

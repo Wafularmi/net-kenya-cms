@@ -17,10 +17,14 @@ function safeSetLocal(key, value) {
 
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','meetings','waivers','events'];
+    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
+    // Lesson rollup index so course coverage matches the admin Coverage tab.
+    try {
+        if (typeof buildLessonCoverIndex === 'function') studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []);
+    } catch (e) {}
     return studentHubCache;
 }
 
@@ -947,8 +951,47 @@ async function submitMpesaStk(studentId) {
     }
 }
 
+// Course coverage for the signed-in student. Mirrors the admin Coverage tab:
+// manual override from courseCompletions first, then the automatic rules
+// (all lessons done, passing grade, passed submission).
+function _hubStudentIds(me) {
+    return [me && me.id, me && me.studentId, me && me.admissionNumber, me && me.username]
+        .filter(v => v !== undefined && v !== null && String(v).trim() !== '')
+        .map(String);
+}
+function _hubCoveredIds(me, data) {
+    const out = new Set();
+    if (!me || !data) return out;
+    const ids = _hubStudentIds(me);
+    if (!ids.length) return out;
+    (data.courseCompletions || []).forEach(c => {
+        if (!c || c.covered === false) return;
+        if (ids.includes(String(c.studentId)) && c.courseId != null) out.add(String(c.courseId));
+    });
+    (data.courses || []).forEach(c => {
+        if (!c || c.id == null) return;
+        for (const sid of ids) {
+            try { if (typeof isCourseCovered === 'function' && isCourseCovered(sid, c.id, data)) { out.add(String(c.id)); return; } }
+            catch (e) {}
+        }
+    });
+    return out;
+}
+// Called when an admin marks a course covered from the Coverage tab.
+function refreshHubCoverage() {
+    if (typeof invalidateStudentHubCache !== 'function') return;
+    invalidateStudentHubCache();
+    try { delete _hubRenderedTabs.courses; } catch (e) {}
+    try {
+        const el = document.getElementById('hub-tab-courses');
+        if (el && el.style.display !== 'none') switchHubTab('courses');
+    } catch (e) {}
+}
+window.refreshHubCoverage = refreshHubCoverage;
+
 function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
     const locked = lockedIds instanceof Set ? lockedIds : new Set(lockedIds || []);
+    const coveredIds = _hubCoveredIds(me, data);
     return `
         <div style="margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -956,15 +999,22 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
             </div>
             ${myCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${myCourses.map(c => {
                 const isLocked = locked.has(c.id);
+                const isCovered = coveredIds.has(String(c.id));
+                const coveredCount = myCourses.filter(x => coveredIds.has(String(x.id))).length;
                 const reason = (window._hubCourseAccess && window._hubCourseAccess.reasons && window._hubCourseAccess.reasons[c.id]) || 'sequence';
                 const reasonTxt = reason === 'manual' ? 'Locked by administrator' : 'Locked — complete earlier courses first';
+                const borderColor = isCovered ? 'var(--success)' : (isLocked ? 'var(--text-muted)' : 'var(--accent)');
                 return `
-                <div class="card" title="${isLocked ? esc(reasonTxt) : ''}" style="border-left:4px solid ${isLocked ? 'var(--text-muted)' : 'var(--success)'};transition:box-shadow 0.2s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
-                    <div style="font-weight:700;font-size:15px;color:var(--text);">${isLocked ? '🔒 ' : ''}${esc(c.code)}</div>
+                <div class="card" title="${isCovered ? 'Course covered' : (isLocked ? esc(reasonTxt) : '')}" style="border-left:4px solid ${borderColor};transition:box-shadow 0.2s;${isCovered ? 'background:var(--bg-input);' : ''}" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                        <div style="font-weight:700;font-size:15px;color:var(--text);">${isLocked && !isCovered ? '🔒 ' : ''}${esc(c.code)}</div>
+                        ${isCovered ? `<span style="flex-shrink:0;background:var(--success);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px;">✅ COVERED</span>` : ''}
+                    </div>
                     <div style="color:var(--text);font-size:13px;margin-top:4px;font-weight:500;">${esc(c.name)}</div>
-                    ${isLocked ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">${esc(reasonTxt)}.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
+                    ${isCovered ? `<div style="margin-top:8px;font-size:12px;color:var(--success);font-weight:600;">Course covered — ${coveredCount} of ${myCourses.length} completed.</div>` : ''}
+                    ${isLocked && !isCovered ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">${esc(reasonTxt)}.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
                     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;">
-                        ${isLocked ? '' : `<button class="btn btn-outline btn-sm" onclick="_hubNotesPreselect='${c.id}';switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
+                        ${isLocked && !isCovered ? '' : `<button class="btn btn-outline btn-sm" onclick="_hubNotesPreselect='${c.id}';switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
                         <button class="btn btn-outline btn-sm" onclick="hubDropCourse('${c.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);">Drop</button>
                     </div>
                 </div>`;
