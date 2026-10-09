@@ -4246,8 +4246,16 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     if (!parsed.lessonId) return json(res, 400, { error: 'lessonId required' });
                     const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
                     if (!lesson) return json(res, 404, { error: 'Lesson not found' });
-                    const vurl = E.dripLessonVideo(lesson);
-                    if (!E.dripVideoTrackable(vurl)) return json(res, 400, { error: 'This lesson has no trackable video' });
+                    // Videos are tracked individually so Video 2 only opens
+                    // after Video 1 has been watched.
+                    const videos = E.dripLessonVideos(lesson);
+                    const wanted = String(parsed.videoId || '');
+                    const target = videos.find(v => String(v.id) === wanted) || videos[0];
+                    if (!target || !E.dripVideoTrackable(target.url)) return json(res, 400, { error: 'This lesson has no trackable video' });
+                    // Never credit a video that is still locked behind the previous one.
+                    const statesNow = E.dripVideoStates(lesson, db.lessonCompletions.find(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id)));
+                    const targetState = statesNow.find(x => String(x.id) === String(target.id));
+                    if (targetState && targetState.state === 'locked') return json(res, 409, { error: 'Finish the previous video first', videos: statesNow });
                     const add = Math.max(0, Math.min(86400, Math.round(Number(parsed.addSecs) || 0)));
                     const dur = Math.max(0, Math.min(60 * 60 * 12, Math.round(Number(parsed.durationSecs) || 0)));
                     let comp = db.lessonCompletions.find(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id));
@@ -4262,7 +4270,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                         // tolerance for player rounding) so a looping embed cannot
                         // bank unlimited credit.
                         const ceiling = dur > 0 ? dur * 1.25 : 86400;
-                        comp.videoSecs = Math.min((comp.videoSecs || 0) + add, ceiling);
+                        E.dripRecordVideoProgress(comp, target.id, Math.min((comp.videoSecs || 0) + add, ceiling), dur);
                     }
                     if (dur > 0) comp.videoDurationSecs = dur;
                     const evaled = E.dripEvalCompletion(db, sid, lesson);
@@ -4270,6 +4278,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     if (sweepV.changed) persist(['lessonCompletions', 'lessonUnlocks']); else persist('lessonCompletions');
                     result.completion = evaled;
                     result.videoDone = !!evaled.videoDoneAt;
+                    result.videos = evaled.videoStates || E.dripVideoStates(lesson, evaled);
                     result.justCompleted = !!evaled.justCompleted;
                     result.requiredRatio = E.DRIP_VIDEO_RATIO;
                     if (dur > 0) result.videoPct = Math.min(100, Math.round(((evaled.videoSecs || 0) / dur) * 100));
@@ -4288,13 +4297,18 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     result.justCompleted = !!comp.justCompleted;
                     result.videoRequired = !!comp.videoRequired;
                     result.videoDone = !!comp.videoDoneAt;
+                    result.videos = comp.videoStates || E.dripVideoStates(lesson, comp);
+                    result.quiz = E.dripQuizBestForLesson(db, sid, lesson.id);
                     result.next = E.dripNextInfo(db, sid, String(lesson.courseId || ''), lesson.id);
                     result.fee = sweep.fee;
                     const maps = E.dripMapsFor(db, sid);
                     result.unlocks = maps.unlocks;
                     result.completions = maps.completions;
                 } else if (action === 'manual') {
-                    if (user.role === 'student') return json(res, 403, { error: 'Only staff can manage learner drip states' });
+                    // Staff-only, except the learner's own choice to continue past a
+                    // lesson quiz they have not passed.
+                    const learnerOps = { 'quiz-overlook': true };
+                    if (user.role === 'student' && !learnerOps[String(parsed.op)]) return json(res, 403, { error: 'Only staff can manage learner drip states' });
                     if (!parsed.lessonId || !parsed.op) return json(res, 400, { error: 'lessonId and op required' });
                     const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
                     if (!lesson) return json(res, 404, { error: 'Lesson not found' });
@@ -4320,6 +4334,33 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                         db.lessonCompletions = db.lessonCompletions.filter(r => !(String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id)));
                         db.lessonUnlocks = db.lessonUnlocks.filter(r => !(String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id)));
                         persist(['lessonCompletions', 'lessonUnlocks']);
+                    } else if (parsed.op === 'quiz-overlook') {
+                        // A learner who failed this lesson's quiz can choose to
+                        // continue anyway. Recorded on the completion row so the
+                        // attempt is auditable and the next lesson can open.
+                        if (!parsed.allow && user.role === 'student') {
+                            return json(res, 403, { error: 'Overlooking a lesson quiz requires your choice to be recorded' });
+                        }
+                        const comp = E.dripEvalCompletion(db, sid, lesson);
+                        const q = E.dripQuizBestForLesson(db, sid, lesson.id);
+                        if (q.passed) return json(res, 400, { error: 'This quiz is already passed' });
+                        comp.quizSkippedAt = new Date().toISOString();
+                        comp.quizOverlookedBy = 'student';
+                        comp.quizAttemptsAtSkip = q.attemptsUsed || 0;
+                        const sweep2 = E.dripSweep(db, sid, String(lesson.courseId || ''));
+                        if (sweep2.changed) persist(['lessonCompletions', 'lessonUnlocks']); else persist('lessonCompletions');
+                        result.completion = comp;
+                        result.quiz = E.dripQuizBestForLesson(db, sid, lesson.id);
+                        result.next = E.dripNextInfo(db, sid, String(lesson.courseId || ''), lesson.id);
+                        auditLog('overlooked-quiz', 'lessonCompletions', { lessonId: lesson.id, attempts: q.attemptsUsed }, user && user.username);
+                    } else if (parsed.op === 'quiz-retry') {
+                        // Granting a further attempt after the retries ran out.
+                        if (user.role === 'student') return json(res, 403, { error: 'Only staff can grant extra attempts' });
+                        const comp2 = E.dripEvalCompletion(db, sid, lesson);
+                        comp2.quizSkippedAt = null;
+                        comp2.extraAttemptsGranted = (comp2.extraAttemptsGranted || 0) + 1;
+                        persist('lessonCompletions');
+                        result.completion = comp2;
                     } else {
                         return json(res, 400, { error: 'Unknown op' });
                     }

@@ -132,21 +132,114 @@ function dripFeeOk(db, sid) {
 }
 
 function dripQuizBestForLesson(db, sid, lessonId) {
-    if ((db.quizzes || []).length === 0) return { required: false, best: -1 };
-    const qids = new Set(db.quizzes.filter(q => String(q.lessonId) === String(lessonId) && q.published !== false).map(q => String(q.id)));
-    if (!qids.size) return { required: false, best: -1 };
+    const quizzes = (db.quizzes || []).filter(q => q && String(q.lessonId) === String(lessonId) && q.published !== false);
+    if (!quizzes.length) return { required: false, best: -1, attemptsUsed: 0, retriesLeft: 0, maxRetries: 2, passed: false, skipped: false };
+    const qids = new Set(quizzes.map(q => String(q.id)));
     let best = -1;
+    const scores = [];
     (db.submissions || []).forEach(s => {
         if (qids.has(String(s.quizId)) && String(s.studentId) === String(sid) && s.status !== 'pending_review' && typeof s.score === 'number') {
+            scores.push(Number(s.score));
             if (s.score > best) best = s.score;
         }
     });
     (db.grades || []).forEach(g => {
         if (qids.has(String(g.quizId)) && String(g.studentId) === String(sid) && typeof g.score === 'number') {
+            scores.push(Number(g.score));
             if (g.score > best) best = g.score;
         }
     });
-    return { required: true, best };
+    const maxRetries = quizzes.reduce((m, q) => Math.max(m, Number(q.maxRetakes != null ? q.maxRetakes : 2) || 0), 0);
+    const attemptsUsed = scores.length;
+    const retriesLeft = Math.max(0, maxRetries - Math.max(0, attemptsUsed - 1));
+    const comp = (db.lessonCompletions || []).find(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lessonId));
+    const skipped = !!(comp && comp.quizSkippedAt);
+    return { required: true, best, attemptsUsed, retriesLeft, maxRetries, quizIds: Array.from(qids), passed: best >= DRIP_PASS, skipped, quizzes: quizzes.length };
+}
+
+// A lesson's ordered list of videos. Lessons keep working with the single
+// `videoUrl` they already have; staff can add more and they are served in the
+// order shown. Each video gets a stable id so watch progress can be tracked
+// per video rather than per lesson.
+function dripLessonVideos(lesson) {
+    if (!lesson) return [];
+    const list = Array.isArray(lesson.videos) ? lesson.videos : [];
+    const out = [];
+    list.forEach((v, i) => {
+        const url = String((v && (v.url || v.videoUrl || v.link)) || '').trim();
+        if (!url) return;
+        out.push({
+            id: String((v && v.id) || ('V' + (i + 1))),
+            title: String((v && v.title) || ('Video ' + (i + 1))),
+            url,
+            required: v && v.required === false ? false : true
+        });
+    });
+    const legacy = String(lesson.videoUrl || lesson.video || lesson.videoLink || '').trim();
+    if (legacy && !out.some(v => v.url === legacy)) {
+        out.unshift({ id: 'V1', title: 'Video 1', url: legacy, required: true });
+    }
+    out.forEach((v, i) => { v.index = i + 1; });
+    return out;
+}
+
+// Videos that must be watched before the lesson can complete.
+function dripRequiredVideos(lesson) {
+    return dripLessonVideos(lesson).filter(v => v.required !== false && dripVideoTrackable(v.url));
+}
+
+// Watch state for every video of a lesson, in order. A video only opens once
+// the previous one is finished, so they are watched one at a time.
+function dripVideoStates(lesson, comp) {
+    const progress = (comp && comp.videoProgress && typeof comp.videoProgress === 'object') ? comp.videoProgress : {};
+    const list = dripLessonVideos(lesson);
+    const states = [];
+    let prevDone = true;   // the first video is always open once the lesson is
+    list.forEach(v => {
+        const trackable = dripVideoTrackable(v.url);
+        const p = progress[v.id] || {};
+        const dur = Number(p.durationSecs) || 0;
+        const seen = Number(p.secs) || 0;
+        const done = !trackable ? true
+            : !!(p.doneAt || (comp && comp.videoDoneAt && v.id === 'V1'))
+                || (dur > 0 && seen > 0 && seen >= dur * DRIP_VIDEO_RATIO);
+        states.push({
+            id: v.id, title: v.title, url: v.url, index: v.index,
+            trackable, required: v.required !== false,
+            secs: seen, durationSecs: dur,
+            done,
+            state: done ? 'done' : (prevDone ? 'open' : 'locked'),
+            pct: dur > 0 ? Math.min(100, Math.round((seen / dur) * 100)) : (done ? 100 : 0)
+        });
+        // Only a finished video unlocks the next one.
+        prevDone = done;
+    });
+    return states;
+}
+
+// Every required video of the lesson watched.
+function dripVideosDone(lesson, comp) {
+    const req = dripRequiredVideos(lesson);
+    if (!req.length) return true;
+    const states = dripVideoStates(lesson, comp);
+    return req.every(v => { const st = states.find(s => s.id === v.id); return !st || st.done; });
+}
+
+// Record watch progress for one video of a lesson.
+function dripRecordVideoProgress(comp, videoId, secs, durationSecs) {
+    if (!comp || comp.videoProgress == null) comp.videoProgress = {};
+    const key = String(videoId || 'V1');
+    const p = comp.videoProgress[key] || { secs: 0, durationSecs: 0 };
+    const s = Number(secs);
+    const d = Number(durationSecs);
+    if (Number.isFinite(s) && s >= 0) p.secs = Math.max(p.secs || 0, Math.round(s));
+    if (Number.isFinite(d) && d > 0) p.durationSecs = Math.round(d);
+    const dur = p.durationSecs || 0;
+    if (dur > 0 && p.secs >= dur * DRIP_VIDEO_RATIO) {
+        if (!p.doneAt) p.doneAt = new Date().toISOString();
+    }
+    comp.videoProgress[key] = p;
+    return p;
 }
 
 // ---- Lesson video ----------------------------------------------------------
@@ -197,23 +290,38 @@ function dripEvalCompletion(db, sid, lesson, opts) {
     }
     comp.requiredSecs = requiredSecs;
     const readDone = (comp.readSecs || 0) >= requiredSecs;
-    const videoRequired = dripVideoRequired(lesson);
-    const videoDone = !videoRequired || dripVideoDone(comp);
+    const videoStates = dripVideoStates(lesson, comp);
+    const reqVideos = dripRequiredVideos(lesson);
+    const videoRequired = reqVideos.length > 0;
+    const videoDone = !videoRequired || dripVideosDone(lesson, comp);
     const q = dripQuizBestForLesson(db, sid, lesson.id);
-    const quizDone = !q.required || q.best >= DRIP_PASS;
+    // A failed lesson quiz blocks the next lesson, but only until the retries
+    // are used up - or until the learner chooses to continue anyway.
+    const quizPassed = !q.required || q.passed;
+    const quizOverlooked = !!(q.required && q.skipped);
+    const quizDone = quizPassed || quizOverlooked;
     if (q.best >= 0) comp.quizBest = q.best;
+    comp.quizAttemptsUsed = q.attemptsUsed || 0;
+    comp.quizRetriesLeft = q.retriesLeft || 0;
     const now = new Date().toISOString();
     if (readDone && !comp.readDoneAt) comp.readDoneAt = now;
     if (videoRequired) comp.videoRequired = true;
     if (videoDone && videoRequired && !comp.videoDoneAt) comp.videoDoneAt = now;
-    if (quizDone && !comp.quizPassedAt) comp.quizPassedAt = now;
+    if (quizPassed && !comp.quizPassedAt) comp.quizPassedAt = now;
     if (readDone && videoDone && quizDone && !comp.completedAt) comp.completedAt = now;
     comp.justCompleted = !wasComplete && !!comp.completedAt;
     if (opts.resetForRepeat) {
         comp.readSecs = 0; comp.readDoneAt = null; comp.quizPassedAt = null; comp.quizBest = undefined; comp.completedAt = null;
-        comp.videoSecs = 0; comp.videoDurationSecs = undefined; comp.videoDoneAt = null;
+        comp.videoSecs = 0; comp.videoDurationSecs = undefined; comp.videoDoneAt = null; comp.videoProgress = {};
+        comp.quizSkippedAt = null;
         comp.justCompleted = false;
     }
+    // Per-video watch states travel with the completion row so the hub can
+    // show Video 1, Video 2 ... each opening only after the previous is done.
+    comp.videoStates = dripVideoStates(lesson, comp);
+    comp.quizState = q.required
+        ? (q.passed ? 'passed' : (q.skipped ? 'overlooked' : (q.retriesLeft > 0 ? 'retry' : 'failed')))
+        : 'none';
     const idx = db.lessonCompletions.findIndex(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id));
     if (idx >= 0) db.lessonCompletions[idx] = comp; else db.lessonCompletions.push(comp);
     return comp;
@@ -346,6 +454,7 @@ module.exports = {
     dripRecId, dripModeOfLesson, dripReadEstimateSecs, dripLessonContent, dripPaceMs,
     dripGroupOfLesson, dripSameLessonUnit,
     dripLessonVideo, dripVideoTrackable, dripVideoRequired, dripVideoDone,
+    dripLessonVideos, dripRequiredVideos, dripVideoStates, dripVideosDone, dripRecordVideoProgress,
     dripStartOfWeek, dripFeeOk, dripQuizBestForLesson, dripEvalCompletion, dripSweep,
     dripMapsFor, dripNextInfo, dripCourseLessonRollup, dripLessonCoverIndex
 };

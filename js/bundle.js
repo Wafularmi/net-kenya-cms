@@ -5313,7 +5313,7 @@ async function showExamForm(exam = null) {
     <span id="exam-pub-label" style="font-size:13px;font-weight:600;color:${published ? '#22c55e' : '#64748b'};">${published ? 'Published' : 'Draft'}</span>
   </div>
 </div>
-<div class="form-group"><label>Select Questions</label><div id="exam-question-list" style="max-height:220px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="exam-q-count">0</span> questions, <span id="exam-total-pts">0</span> pts</span><span id="exam-marks-status">Total Marks: <span id="exam-total-marks-display">0</span></span></div></div>
+<div class="form-group"><label>Select Questions <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(listed in Question Bank order)</span></label><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;"><input type="number" id="exam-q-random" min="1" placeholder="e.g. 20" style="width:90px;"><button class="btn btn-outline btn-sm" onclick="examPickRandom()">🎲 Select <span id="exam-q-random-count">random</span></button><button class="btn btn-outline btn-sm" onclick="selectNoExamOrQuizChecks('.exam-q-check')">Clear</button></div><div id="exam-question-list" style="max-height:220px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="exam-q-count">0</span> questions, <span id="exam-total-pts">0</span> pts</span><span id="exam-marks-status">Total Marks: <span id="exam-total-marks-display">0</span></span></div></div>
 <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border);">Scheduling &mdash; optional, you can set this later</div>
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="exam-date" value="${fmt(exam ? exam.date : '')}"></div>
@@ -5350,10 +5350,11 @@ async function onExamCourseChange(selectedLessonId, selectedIds) {
     const questions = await dbGetAll('questionBank');
     const filtered = courseId ? lessons.filter(l => l.courseId === courseId) : [];
     document.getElementById('exam-lesson-select').innerHTML = '<option value="">All Lessons</option>' + filtered.map(l => `<option value="${l.id}" ${selectedLessonId === l.id ? 'selected' : ''}>${l.title}</option>`).join('');
-    const qFiltered = questions.filter(q => q.courseId === courseId && (!selectedLessonId || q.lessonId === selectedLessonId));
+    const effLesson = selectedLessonId || '';
+    const qFiltered = orderQuestionsByBank(questions.filter(q => q.courseId === courseId && (!effLesson || q.lessonId === effLesson)));
     const sel = selectedIds || [];
     const typeIcons = { 'mcq': '\u{1F538}', 'truefalse': '\u2705', 'matching': '\u{1F517}', 'fillin': '\u{1F4DD}', 'essay': '\u{1F4DD}' };
-    document.getElementById('exam-question-list').innerHTML = qFiltered.map(q => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;"><input type="checkbox" class="exam-q-check" value="${q.id}" ${sel.includes(q.id) ? 'checked' : ''} onchange="updateExamQCount()"> <span style="font-weight:600;">${typeIcons[q.type] || '\u2753'}</span> ${q.question.substring(0, 80)}${q.question.length > 80 ? '...' : ''} <span class="badge badge-info" style="font-size:9px;">${q.points || 1}pt</span></label>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No questions available for this course</div>';
+    document.getElementById('exam-question-list').innerHTML = qFiltered.map((q, qi) => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;"><input type="checkbox" class="exam-q-check" value="${q.id}" ${sel.includes(q.id) ? 'checked' : ''} onchange="updateExamQCount()"> <span style="font-weight:700;color:var(--accent,#2563eb);min-width:26px;text-align:right;">${qi + 1}.</span> <span style="font-weight:600;">${typeIcons[q.type] || '\u2753'}</span> ${q.question.substring(0, 80)}${q.question.length > 80 ? '...' : ''} <span class="badge badge-info" style="font-size:9px;">${q.points || 1}pt</span></label>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No questions available for this course</div>';
     updateExamQCount();
     if (course) {
         const tm = document.getElementById('exam-total-marks');
@@ -5398,7 +5399,8 @@ async function saveExam() {
     const editId = document.getElementById('exam-edit-id').value;
     const id = editId || 'EXM-' + Date.now();
     const existing = editId ? await dbGet('exams', id) : null;
-    const questionIds = Array.from(document.querySelectorAll('.exam-q-check:checked')).map(c => c.value);
+    const examBank = await dbGetAll('questionBank');
+    const questionIds = orderQuestionIdsByBank(Array.from(document.querySelectorAll('.exam-q-check:checked')).map(c => c.value), examBank);
     if (!questionIds.length) return showToast('Select at least one question!');
     // Setting an exam and scheduling it are two separate steps: a date+time is
     // enough to schedule, the venue may follow. Without them the exam is simply
@@ -5789,7 +5791,7 @@ async function startExam(examId) {
         } catch {}
     }
     const questions = await dbGetAll('questionBank');
-    const examQuestions = (exam.questionIds || []).map(id => questions.find(q => q.id === id)).filter(q => q);
+    const examQuestions = orderQuestionsByBank((exam.questionIds || []).map(id => questions.find(q => String(q.id) === String(id))).filter(q => q));
     if (!examQuestions.length) return showToast('No questions in this exam!');
     const studentLang = (await dbGet('students', studentId))?.langPref || 'en';
     showLangSelectionModal(studentId, studentLang, (chosenLang) => {
@@ -14666,10 +14668,10 @@ async function dripRecordRead(sid, lesson, addSecs) {
 }
 // Report watched-video seconds for a lesson. Only FORWARD playback is credited
 // by the caller, and the server independently re-checks the duration ratio.
-async function dripRecordVideo(sid, lesson, addSecs, durationSecs) {
+async function dripRecordVideo(sid, lesson, addSecs, durationSecs, videoId) {
     if (!sid || !lesson || !lesson.id) return null;
     if (!(addSecs > 0) && !(durationSecs > 0)) return null;
-    const data = await dripApi({ action: 'video', studentId: sid, lessonId: String(lesson.id), addSecs: Math.max(0, Math.round(addSecs || 0)), durationSecs: Math.max(0, Math.round(durationSecs || 0)) });
+    const data = await dripApi({ action: 'video', studentId: sid, lessonId: String(lesson.id), videoId: videoId ? String(videoId) : '', addSecs: Math.max(0, Math.round(addSecs || 0)), durationSecs: Math.max(0, Math.round(durationSecs || 0)) });
     if (data && data.completion) {
         _dripC[lesson.id] = data.completion;
         if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
@@ -14699,7 +14701,7 @@ function _vtFormatSecs(sec) {
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
     return (h ? h + 'h ' : '') + m + 'm ' + r + 's';
 }
-async function bindLessonVideoTracking(lessonId, courseId, root) {
+async function bindLessonVideoTracking(lessonId, courseId, root, videoId) {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (!u || u.role !== 'student') return;            // staff playback is not learner progress
@@ -14717,6 +14719,7 @@ async function bindLessonVideoTracking(lessonId, courseId, root) {
 
         const st = {
             sid, lessonId: String(lessonId), courseId: courseId ? String(courseId) : '',
+            videoId: videoId ? String(videoId) : '',
             pending: 0, duration: 0, last: null, done: false, unsubs: [], timer: null, label: null, totalWatched: 0
         };
         st.flush = async () => {
@@ -14724,7 +14727,7 @@ async function bindLessonVideoTracking(lessonId, courseId, root) {
             const add = st.pending; st.pending = 0;
             st.totalWatched += Math.max(0, add);
             try {
-                const r = await dripRecordVideo(st.sid, { id: st.lessonId, courseId: st.courseId }, add, st.duration);
+                const r = await dripRecordVideo(st.sid, { id: st.lessonId, courseId: st.courseId }, add, st.duration, st.videoId);
                 if (r && r.videoDone && !st.done) {
                     st.done = true;
                     if (typeof showToast === 'function') showToast('🎬 Video watched — lesson video complete!', { type: 'success' });
@@ -14970,7 +14973,9 @@ async function showLessonForm(lesson = null) {
     const isEdit = !!lesson;
     const isPublished = lesson ? lesson.published !== false : false;
     const relMode = lesson ? (lesson.releaseMode || (lesson.publishAt ? 'date' : 'immediate')) : 'immediate';
-    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select" onchange="updateLessonDripHint()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Video URL</label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
+    // Restore any extra videos saved for this lesson (Video 1 stays on videoUrl).
+    try { setTimeout(() => renderLessonVideoRows(lesson), 0); } catch (e) {}
+    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select" onchange="updateLessonDripHint()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Videos <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(played one at a time, in this order)</span></label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div><div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><input type="text" id="lesson-video-extra-title" placeholder="Title for Video 2 (optional)" style="flex:1;min-width:170px;"><input type="url" id="lesson-video-extra" placeholder="Add a second video URL (optional)" style="flex:2;min-width:230px;"><button type="button" class="btn btn-outline btn-sm" onclick="addLessonVideoRow(document.getElementById('lesson-video-extra').value, document.getElementById('lesson-video-extra-title').value);document.getElementById('lesson-video-extra').value='';document.getElementById('lesson-video-extra-title').value='';">+ Add video</button></div><div id="lesson-video-rows" style="margin-top:8px;"></div><div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Video 1 is the main URL above. Extra videos play in the order listed, and each opens only after the previous one is watched.</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
 <div id="lesson-virtual-settings" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-input);">
     <div class="form-row"><div class="form-group"><label>Room Name / URL</label><input type="text" id="lesson-virtual-room" value="${lesson && lesson.virtualRoom ? lesson.virtualRoom : ''}" placeholder="e.g. netcohort or https://meet.jit.si/netcohort" style="width:100%;"></div><div class="form-group"><label>Password</label><input type="text" id="lesson-virtual-password" value="${lesson && lesson.virtualPassword ? lesson.virtualPassword : ''}"></div></div>
     <div class="form-group"><label>Trainer / Instructor</label><input type="text" id="lesson-virtual-trainer" value="${lesson && lesson.virtualTrainer ? lesson.virtualTrainer : ''}" placeholder="e.g. Pastor David" style="width:100%;"></div>
@@ -15012,6 +15017,50 @@ function previewLessonVideo() {
     if (url) { preview.style.display = 'block'; preview.innerHTML = embedVideo(url); }
     else { preview.style.display = 'none'; preview.innerHTML = ''; }
 }
+// Extra videos for a lesson. Row 0 is always the main Lesson Video URL, so
+// existing lessons keep working exactly as before.
+function lessonVideoDrafts() {
+    const main = (document.getElementById('lesson-video') || {}).value || '';
+    const out = [];
+    if (String(main).trim()) out.push({ id: 'V1', title: 'Video 1', url: String(main).trim(), required: true });
+    const host = document.getElementById('lesson-video-rows');
+    if (!host) return out;
+    Array.from(host.querySelectorAll('.lesson-video-row')).forEach(row => {
+        const url = (row.querySelector('.lv-url') || {}).value || '';
+        const title = (row.querySelector('.lv-title') || {}).value || '';
+        const req = row.querySelector('.lv-required');
+        if (!String(url).trim()) return;
+        out.push({ id: 'V' + (out.length + 1), title: String(title).trim() || ('Video ' + (out.length + 1)), url: String(url).trim(), required: !req || req.checked !== false });
+    });
+    return out;
+}
+function collectLessonVideoRows() {
+    const drafts = lessonVideoDrafts();
+    // Only persist the extras; the first video stays on videoUrl.
+    return drafts.slice(1);
+}
+function addLessonVideoRow(url, title) {
+    const host = document.getElementById('lesson-video-rows');
+    if (!host) return;
+    const n = host.querySelectorAll('.lesson-video-row').length + 2;
+    const row = document.createElement('div');
+    row.className = 'lesson-video-row';
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;';
+    row.innerHTML = '<span style="font-weight:700;width:52px;font-size:12px;">Video ' + n + '</span>'
+        + '<input type="text" class="lv-title" placeholder="Title" value="' + esc(title || '') + '" style="flex:1;min-width:150px;">'
+        + '<input type="url" class="lv-url" placeholder="Video URL" value="' + esc(url || '') + '" style="flex:2;min-width:220px;">'
+        + '<label style="font-size:11px;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="lv-required" checked> Required</label>'
+        + '<button type="button" class="btn btn-danger btn-sm" onclick="this.closest(\'.lesson-video-row\').remove()">Remove</button>';
+    host.appendChild(row);
+}
+function renderLessonVideoRows(lesson) {
+    const host = document.getElementById('lesson-video-rows');
+    if (!host) return;
+    host.innerHTML = '';
+    const extras = (lesson && Array.isArray(lesson.videos)) ? lesson.videos : [];
+    extras.forEach(v => addLessonVideoRow(v.url, v.title));
+}
+
 async function saveLesson() {
     const title = document.getElementById('lesson-title').value.trim();
     const courseId = document.getElementById('lesson-course-select').value;
@@ -15026,6 +15075,7 @@ async function saveLesson() {
         order: parseInt(document.getElementById('lesson-order').value) || 1,
         reference: document.getElementById('lesson-reference').value.trim(),
         videoUrl: document.getElementById('lesson-video').value.trim(),
+        videos: collectLessonVideoRows(),
         published: document.getElementById('lesson-published').checked,
         publishAt: (document.getElementById('lesson-publishAt') && document.getElementById('lesson-publishAt').value) || '',
         releaseMode: (document.getElementById('lesson-release') && document.getElementById('lesson-release').value) || 'immediate',
@@ -15499,7 +15549,7 @@ async function renderQuestionBank() {
     let filtered = questions;
     if (courseFilter) filtered = filtered.filter(q => q.courseId === courseFilter);
     if (typeFilter) filtered = filtered.filter(q => q.type === typeFilter);
-    filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    filtered = orderQuestionsByBank(filtered);
     // Drop selections for questions that no longer exist / are filtered away.
     const visibleIds = new Set(filtered.map(q => String(q.id)));
     _qbSelected.forEach(id => { if (!visibleIds.has(id)) _qbSelected.delete(id); });
@@ -15515,8 +15565,8 @@ async function renderQuestionBank() {
         else if (q.type === 'matching') answerPreview = `<span style="color:var(--accent);font-size:11px;">${q.pairs ? q.pairs.length + ' pairs' : 'No pairs'}</span>`;
         else if (q.type === 'fillin') answerPreview = `<span style="color:var(--success);font-size:11px;">${q.blanks ? q.blanks.length + ' blanks' : 'No blanks'}</span>`;
         else answerPreview = `<span style="color:var(--accent);font-size:11px;">Rubric: ${q.rubric ? q.rubric.length + ' criteria' : 'None'}</span>`;
-        return `<tr><td><input type="checkbox" data-qid="${q.id}" ${_qbSelected.has(String(q.id)) ? 'checked' : ''} onclick="this.checked?_qbSelected.add('${q.id}'):_qbSelected.delete('${q.id}');qbSyncSelectionUi()"></td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td>${typeLabel}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${q.question}">${q.question}</td><td>${answerPreview}</td><td><span class="badge badge-info">${q.points || 1} pt${(q.points || 1) !== 1 ? 's' : ''}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuestion('${q.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteQuestion('${q.id}')">Del</button></td></tr>`;
-    }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No questions yet. Click "+ Add Question" to create one.</td></tr>';
+        return `<tr><td><input type="checkbox" data-qid="${q.id}" ${_qbSelected.has(String(q.id)) ? 'checked' : ''} onclick="this.checked?_qbSelected.add('${q.id}'):_qbSelected.delete('${q.id}');qbSyncSelectionUi()"></td><td style="font-weight:700;color:var(--accent,#2563eb);text-align:center;">${questionSeqNumber(q) || ''}</td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td>${typeLabel}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${q.question}">${q.question}</td><td>${answerPreview}</td><td><span class="badge badge-info">${q.points || 1} pt${(q.points || 1) !== 1 ? 's' : ''}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuestion('${q.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteQuestion('${q.id}')">Del</button></td></tr>`;
+    }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No questions yet. Click "+ Add Question" to create one.</td></tr>';
     courseSelect.onchange = renderQuestionBank;
     typeSelect.onchange = renderQuestionBank;
     qbSyncSelectionUi();
@@ -15765,6 +15815,77 @@ function onFillParagraphInput() {
         }
     });
 }
+// ---- Question Bank sequence -------------------------------------------------
+// Every question carries a `seq`: its position in the course's bank, in the
+// order it was added. Students, exam/quiz pickers and the bank list all read
+// the same order, so a paper always reads 1, 2, 3 ... in bank sequence even
+// when the questions were picked at random.
+function questionSeqNumber(q) {
+    const n = Number(q && q.seq);
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+function orderQuestionsByBank(list) {
+    return (list || []).slice().sort((a, b) => {
+        const as = questionSeqNumber(a), bs = questionSeqNumber(b);
+        if (as != null && bs != null && as !== bs) return as - bs;
+        if (as != null && bs == null) return -1;
+        if (as == null && bs != null) return 1;
+        const at = new Date(a.createdAt || 0).getTime() || 0;
+        const bt = new Date(b.createdAt || 0).getTime() || 0;
+        if (at !== bt) return at - bt;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+}
+async function nextQuestionSeq(courseId) {
+    if (!courseId) return 1;
+    const all = await dbGetAll('questionBank').catch(() => []);
+    let max = 0;
+    all.forEach(q => {
+        if (String(q.courseId) !== String(courseId)) return;
+        const n = questionSeqNumber(q);
+        if (n && n > max) max = n;
+    });
+    return max + 1;
+}
+// Sort chosen question ids into bank sequence, so a random pick still saves
+// (and later prints) as 1, 2, 3 ... in the order the questions were added.
+function orderQuestionIdsByBank(ids, questions) {
+    const list = questions || [];
+    const rank = new Map();
+    orderQuestionsByBank(list).forEach((q, i) => rank.set(String(q.id), i + 1));
+    return (ids || []).slice().sort((a, b) => {
+        const ra = rank.get(String(a)), rb = rank.get(String(b));
+        if (ra != null && rb != null) return ra - rb;
+        if (ra != null) return -1;
+        if (rb != null) return 1;
+        return 0;
+    });
+}
+// Tick N random questions in an exam/quiz picker. The picker itself is listed in
+// bank order, so the saved paper is still numbered 1, 2, 3 ... sequentially.
+function _pickerPickRandom(selector, countInput, countLabel) {
+    const boxes = Array.from(document.querySelectorAll(selector));
+    if (!boxes.length) { showToast('No questions to choose from yet.', { type: 'info' }); return; }
+    const nRaw = parseInt((countInput && countInput.value) || '', 10);
+    const n = Number.isFinite(nRaw) && nRaw > 0 ? Math.min(nRaw, boxes.length) : boxes.length;
+    boxes.forEach(b => { b.checked = false; });
+    const pool = boxes.slice();
+    for (let i = 0; i < n; i++) {
+        const pick = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+        if (pick) pick.checked = true;
+    }
+    boxes.forEach(b => { if (b.checked) b.scrollIntoView({ block: 'nearest' }); });
+    if (countLabel) countLabel.textContent = String(n);
+    if (selector === '.exam-q-check') updateExamQCount(); else updateQuizQCount();
+    showToast(`${n} question${n !== 1 ? 's' : ''} selected at random — they stay numbered in bank order.`);
+}
+function examPickRandom() {
+    _pickerPickRandom('.exam-q-check', document.getElementById('exam-q-random'), document.getElementById('exam-q-random-count'));
+}
+function quizPickRandom() {
+    _pickerPickRandom('.quiz-q-check', document.getElementById('quiz-q-random'), document.getElementById('quiz-q-random-count'));
+}
+
 async function saveQuestion() {
     const questionEn = (document.getElementById('q-text-en') || {value:''}).value.trim();
     const questionSw = (document.getElementById('q-text-sw') || {value:''}).value.trim();
@@ -15775,7 +15896,7 @@ async function saveQuestion() {
     const id = editId || generateId('Q');
     const type = document.getElementById('q-type').value;
     const points = parseInt(document.getElementById('q-points').value) || 1;
-    const q = { id, courseId, lessonId: document.getElementById('q-lesson').value, type, question: questionEn || questionSw, questionEn, questionSw, points, createdAt: editId ? (await dbGet('questionBank', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const q = { id, courseId, lessonId: document.getElementById('q-lesson').value, type, question: questionEn || questionSw, questionEn, questionSw, points, seq: editId ? (Number((await dbGet('questionBank', id)).seq) || 0) || await nextQuestionSeq(courseId) : await nextQuestionSeq(courseId), createdAt: editId ? (await dbGet('questionBank', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     if (type === 'mcq') {
         const optionsRaw = document.getElementById('q-options').value.trim();
         const options = optionsRaw.split('\n').map(o => o.trim()).filter(o => o);
@@ -15879,7 +16000,7 @@ async function renderQuizzes() {
         const filter = courseSelect.value;
         const filtered = filter ? filteredQuizzes.filter(q => q.courseId === filter) : filteredQuizzes;
         const filteredEx = filter ? filteredExams.filter(e => e.courseId === filter) : filteredExams;
-        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        filtered = orderQuestionsByBank(filtered);
         filteredEx.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         const tableEl = document.querySelector('#quizzes-body').closest('table');
         if (tableEl) tableEl.style.display = 'none';
@@ -15973,7 +16094,7 @@ async function renderQuizzes() {
         if (currentFilter && courses.some(c => c.id === currentFilter)) courseSelect.value = currentFilter;
         const filter = courseSelect.value;
         const filtered = filter ? quizzes.filter(q => q.courseId === filter) : quizzes;
-        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        filtered = orderQuestionsByBank(filtered);
         document.getElementById('quizzes-body').innerHTML = filtered.map(q => {
             const course = courses.find(c => c.id === q.courseId);
             const lesson = lessons.find(l => l.id === q.lessonId);
@@ -15993,7 +16114,7 @@ async function showQuizForm(quiz = null) {
     const courses = await dbGetAll('courses');
     const questions = await dbGetAll('questionBank');
     const isEdit = !!quiz;
-    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes</label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-group"><label>Select Questions</label><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
+    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes <span style="font-weight:400;font-size:10px;color:var(--text-muted);">(after the first attempt)</span></label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-group"><label>Questions from</label><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><select id="quiz-drip-mode" onchange="onQuizDripModeChange()"><option value="course" ${(quiz ? (quiz.dripMode || 'course') : 'course') === 'course' ? 'selected' : ''}>📚 Whole course (any lesson's questions)</option><option value="lesson" ${quiz && quiz.dripMode === 'lesson' ? 'selected' : ''}>🔗 This lesson only (tied to lesson)</option></select><span style="font-size:11px;color:var(--text-muted);">Lesson quizzes are the last step of a lesson: Notes, then every Video, then this Quiz — then the next lesson unlocks.</span></div></div><div class="form-group"><label>Select Questions <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(listed in Question Bank order)</span></label><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;"><input type="number" id="quiz-q-random" min="1" placeholder="e.g. 10" style="width:90px;"><button class="btn btn-outline btn-sm" onclick="quizPickRandom()">🎲 Select <span id="quiz-q-random-count">random</span></button><button class="btn btn-outline btn-sm" onclick="selectNoExamOrQuizChecks('.quiz-q-check')">Clear</button></div><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
     showModal(isEdit ? 'Edit Quiz' : 'Create Quiz', content, `<button class="btn btn-primary" onclick="saveQuiz()">${isEdit ? 'Update' : 'Create'}</button>`);
     if (quiz) {
         onQuizCourseChange(quiz.lessonId, quiz.questionIds || []);
@@ -16007,12 +16128,32 @@ async function onQuizCourseChange(selectedLessonId, selectedIds) {
     const questions = await dbGetAll('questionBank');
     const filtered = courseId ? lessons.filter(l => l.courseId === courseId) : [];
     document.getElementById('quiz-lesson-select').innerHTML = '<option value="">All Lessons</option>' + filtered.map(l => `<option value="${l.id}" ${selectedLessonId === l.id ? 'selected' : ''}>${l.title}</option>`).join('');
-    const qFiltered = questions.filter(q => q.courseId === courseId && (!selectedLessonId || q.lessonId === selectedLessonId));
+    const effLesson = selectedLessonId || '';
+    const qFiltered = orderQuestionsByBank(questions.filter(q => q.courseId === courseId && (!effLesson || q.lessonId === effLesson)));
     const sel = selectedIds || [];
     const typeIcons = { 'mcq': '🔘', 'truefalse': '✅', 'matching': '🔗', 'fillin': '📝', 'essay': '📝' };
-    document.getElementById('quiz-question-list').innerHTML = qFiltered.map(q => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;"><input type="checkbox" class="quiz-q-check" value="${q.id}" ${sel.includes(q.id) ? 'checked' : ''} onchange="updateQuizQCount()"> <span style="font-weight:600;">${typeIcons[q.type] || '❓'}</span> ${q.question.substring(0, 80)}${q.question.length > 80 ? '...' : ''} <span class="badge badge-info" style="font-size:9px;">${q.points || 1}pt</span></label>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No questions available for this course</div>';
+    document.getElementById('quiz-question-list').innerHTML = qFiltered.map((q, qi) => `<label style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px;"><input type="checkbox" class="quiz-q-check" value="${q.id}" ${sel.includes(q.id) ? 'checked' : ''} onchange="updateQuizQCount()"> <span style="font-weight:700;color:var(--accent,#2563eb);min-width:26px;text-align:right;">${qi + 1}.</span> <span style="font-weight:600;">${typeIcons[q.type] || '❓'}</span> ${q.question.substring(0, 80)}${q.question.length > 80 ? '...' : ''} <span class="badge badge-info" style="font-size:9px;">${q.points || 1}pt</span></label>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No questions available for this course</div>';
     updateQuizQCount();
     document.getElementById('quiz-lesson-select').onchange = () => onQuizCourseChange(document.getElementById('quiz-lesson-select').value, Array.from(document.querySelectorAll('.quiz-q-check:checked')).map(c => c.value));
+}
+// Clear every checkbox in an exam/quiz picker.
+function selectNoExamOrQuizChecks(selector) {
+    document.querySelectorAll(selector).forEach(b => { b.checked = false; });
+    if (selector === '.exam-q-check') { const c = document.getElementById('exam-q-count'); if (c) c.textContent = '0'; updateExamQCount(); }
+    else updateQuizQCount();
+}
+// Switching to "This lesson only" forces a lesson choice and shows just that
+// lesson's questions, in Question Bank order.
+function onQuizDripModeChange() {
+    const mode = (document.getElementById('quiz-drip-mode') || {}).value;
+    const lessonSel = document.getElementById('quiz-lesson-select');
+    if (mode === 'lesson' && lessonSel) {
+        lessonSel.style.borderColor = 'var(--warning, #f59e0b)';
+        if (!lessonSel.value) showToast('Pick the lesson — its questions will be listed and the quiz will unlock at the end of that lesson.', { type: 'info' });
+    } else if (lessonSel) {
+        lessonSel.style.borderColor = '';
+    }
+    if (lessonSel) onQuizCourseChange(lessonSel.value, Array.from(document.querySelectorAll('.quiz-q-check:checked')).map(c => c.value));
 }
 function updateQuizQCount() {
     const checked = Array.from(document.querySelectorAll('.quiz-q-check:checked'));
@@ -16033,12 +16174,21 @@ async function saveQuiz() {
     const title = document.getElementById('quiz-title').value.trim();
     const courseId = document.getElementById('quiz-course-select').value;
     if (!title || !courseId) return showToast('Course and title required!');
-    const questionIds = Array.from(document.querySelectorAll('.quiz-q-check:checked')).map(c => c.value);
+    const bank = await dbGetAll('questionBank');
+    const questionIds = orderQuestionIdsByBank(Array.from(document.querySelectorAll('.quiz-q-check:checked')).map(c => c.value), bank);
     if (!questionIds.length) return showToast('Select at least one question!');
     const editId = document.getElementById('quiz-edit-id').value;
     const id = editId || generateId('QUIZ');
     const assessmentType = document.getElementById('quiz-type-select').value;
-    const quiz = { id, courseId, lessonId: document.getElementById('quiz-lesson-select').value, title, assessmentType, passMark: parseInt(document.getElementById('quiz-pass').value) || 50, timeLimit: parseInt(document.getElementById('quiz-time').value) || 0, ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 1, questionIds, createdAt: editId ? (await dbGet('quizzes', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const lessonSel = document.getElementById('quiz-lesson-select');
+    const lessonId = lessonSel ? lessonSel.value : '';
+    const dripMode = (document.getElementById('quiz-drip-mode') || {}).value === 'lesson' ? 'lesson' : 'course';
+    if (dripMode === 'lesson') {
+        if (!lessonId) return showToast('Choose the lesson this quiz belongs to (Questions from: This lesson only).');
+        const offLesson = questionIds.filter(qid => { const qq = bank.find(x => String(x.id) === String(qid)); return qq && String(qq.lessonId) !== String(lessonId); });
+        if (offLesson.length) return showToast(offLesson.length + ' selected question(s) belong to another lesson. In lesson mode every question must come from the chosen lesson.');
+    }
+    const quiz = { id, courseId, lessonId: dripMode === 'lesson' ? lessonId : '', dripMode, title, assessmentType, passMark: parseInt(document.getElementById('quiz-pass').value) || 50, timeLimit: parseInt(document.getElementById('quiz-time').value) || 0, ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 2, questionIds, createdAt: editId ? (await dbGet('quizzes', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('quizzes', quiz); closeModal(); renderQuizzes(); showToast(editId ? 'Assessment updated!' : `Assessment created with ${questionIds.length} questions!`); logAudit(editId ? 'updated' : 'created', 'quiz', { id, courseId, questions: questionIds.length });
 }
 async function editQuiz(id) {
@@ -16715,7 +16865,7 @@ async function startQuiz(quizId, opts) {
         } catch {}
     }
     const questions = await dbGetAll('questionBank');
-    const quizQuestions = quiz.questionIds.map(id => questions.find(q => q.id === id)).filter(q => q);
+    const quizQuestions = orderQuestionsByBank(quiz.questionIds.map(id => questions.find(q => String(q.id) === String(id))).filter(q => q));
     if (!quizQuestions.length) return showToast('No questions in this assessment!');
     let studentLang = 'en';
     try { studentLang = await getStudentPreferredLang(studentId); } catch (e) { console.error('lang lookup failed (defaulting en):', e); }
@@ -16959,7 +17109,7 @@ async function submitQuiz(quizId) {
         quiz = { ...exam, assessmentType: 'exam', maxRetakes: exam.maxRetakes || 1 };
     }
     const questions = await dbGetAll('questionBank');
-    const quizQuestions = quiz.questionIds.map(id => questions.find(q => q.id === id)).filter(q => q);
+    const quizQuestions = orderQuestionsByBank(quiz.questionIds.map(id => questions.find(q => String(q.id) === String(id))).filter(q => q));
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
     const answers = [];
@@ -17797,7 +17947,7 @@ async function renderNotes() {
     courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
     const filter = courseSelect.value;
     const filtered = filter ? notes.filter(n => n.courseId === filter) : notes;
-    filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    filtered = orderQuestionsByBank(filtered);
     document.getElementById('notes-body').innerHTML = filtered.map(n => {
         const course = courses.find(c => c.id === n.courseId);
         const lesson = lessons.find(l => l.id === n.lessonId);
@@ -18028,7 +18178,7 @@ async function renderNotes() {
     if (savedCourse && courses.some(c => c.id === savedCourse)) courseSelect.value = savedCourse;
     const filter = courseSelect.value;
     const filtered = filter ? notes.filter(n => n.courseId === filter) : notes;
-    filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    filtered = orderQuestionsByBank(filtered);
     document.getElementById('notes-body').innerHTML = filtered.map(n => {
         const course = courses.find(c => c.id === n.courseId);
         const lesson = lessons.find(l => l.id === n.lessonId);
@@ -19273,7 +19423,7 @@ async function renderTickets() {
     const statusColors = { open: 'danger', 'in-progress': 'warning', resolved: 'success', closed: 'info' };
     const priorityColors = { low: 'info', medium: 'warning', high: 'danger', urgent: 'danger' };
     const categoryIcons = { academic: '📚', finance: '💰', hostel: '🏠', it: '💻', general: '📋', spiritual: '⛪', other: '📝' };
-    filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    filtered = orderQuestionsByBank(filtered);
     const openCount = tickets.filter(t => t.status === 'open').length;
     const progressCount = tickets.filter(t => t.status === 'in-progress').length;
     const resolvedCount = tickets.filter(t => t.status === 'resolved').length;

@@ -2269,6 +2269,135 @@ async function submitMediaUpload() {
     }
 }
 
+// ---- Lesson drip: ordered videos + lesson-quiz retry ---------------------
+// Mirrors the server engine (dripLessonVideos / dripVideoStates) so the hub can
+// show Video 1, Video 2 ... with only the first unfinished one playable.
+function hubLessonVideos(lesson) {
+    if (!lesson) return [];
+    const list = Array.isArray(lesson.videos) ? lesson.videos : [];
+    const out = [];
+    list.forEach((v, i) => {
+        const url = String((v && (v.url || v.videoUrl || v.link)) || '').trim();
+        if (!url) return;
+        out.push({ id: String((v && v.id) || ('V' + (i + 1))), title: String((v && v.title) || ('Video ' + (i + 1))), url, required: !(v && v.required === false) });
+    });
+    const legacy = String(lesson.videoUrl || lesson.video || lesson.videoLink || '').trim();
+    if (legacy && !out.some(v => v.url === legacy)) out.unshift({ id: 'V1', title: 'Video 1', url: legacy, required: true });
+    out.forEach((v, i) => { v.index = i + 1; });
+    return out;
+}
+function hubTrackableVideo(url) {
+    const s = String(url || '').trim();
+    if (!s) return false;
+    return /vimeo\.com\/(?:video\/|channels\/[^\/]+\/)?\d+/i.test(s)
+        || /youtube\.com\/(?:watch\?|embed\/|shorts\/)|youtu\.be\//i.test(s)
+        || /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(s);
+}
+function hubVideoStates(lesson, comp) {
+    const progress = (comp && comp.videoProgress && typeof comp.videoProgress === 'object') ? comp.videoProgress : {};
+    const list = hubLessonVideos(lesson);
+    const states = [];
+    let prevDone = true;
+    list.forEach(v => {
+        const trackable = hubTrackableVideo(v.url);
+        const p = progress[v.id] || {};
+        const dur = Number(p.durationSecs) || 0;
+        const seen = Number(p.secs) || 0;
+        const done = !trackable ? true : (!!p.doneAt || (dur > 0 && seen > 0 && seen >= dur * 0.9));
+        states.push({ id: v.id, title: v.title, url: v.url, index: v.index, done, trackable, pct: dur > 0 ? Math.min(100, Math.round((seen / dur) * 100)) : (done ? 100 : 0), state: done ? 'done' : (prevDone ? 'open' : 'locked') });
+        prevDone = done;
+    });
+    return states;
+}
+// Render the lesson's videos in order; only the current one gets a player.
+function hubLessonVideosHtml(lesson, comp, opts) {
+    const states = hubVideoStates(lesson, comp);
+    if (!states.length) return '';
+    const rows = states.map(v => {
+        if (v.state === 'open' && v.trackable) {
+            return `<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg-input);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+                    <div style="font-weight:700;">🎬 ${esc(v.title || 'Video ' + v.index)}</div>
+                    <span style="font-size:11px;color:var(--text-muted);">${v.pct > 0 ? v.pct + '% watched' : 'Watch to continue'}</span>
+                </div>
+                <div style="max-width:720px;margin:0 auto;" data-hub-video-slot="${esc(v.id)}">${typeof embedVideo === 'function' ? embedVideo(v.url, { track: true }) : ''}</div>
+            </div>`;
+        }
+        if (v.state === 'open') {
+            return `<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;">
+                <div style="font-weight:700;margin-bottom:8px;">🎬 ${esc(v.title || 'Video ' + v.index)}</div>
+                <a href="${esc(v.url)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Open video link</a>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Mark it watched from your lesson list once done.</span>
+            </div>`;
+        }
+        if (v.state === 'done') {
+            return `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-radius:10px;background:var(--bg-input);">
+                <span style="color:var(--success);font-weight:700;">✓</span>
+                <span style="font-weight:600;font-size:13px;">${esc(v.title || 'Video ' + v.index)}</span>
+                <span style="font-size:11px;color:var(--success);margin-left:auto;">Watched</span>
+            </div>`;
+        }
+        const prevTitle = (states[v.index - 2] && states[v.index - 2].title) || 'the previous video';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:12px;margin-bottom:8px;border:1px dashed var(--border);border-radius:10px;">
+            <span style="font-size:16px;">🔒</span>
+            <span style="font-weight:600;font-size:13px;color:var(--text-muted);">${esc(v.title || 'Video ' + v.index)}</span>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">Finish ${esc(prevTitle)} first</span>
+        </div>`;
+    }).join('');
+    return `<div style="margin-bottom:18px;">${rows}</div>`;
+}
+// Failed lesson quiz: tell the learner how many attempts are left, offer the
+// same quiz again, and let them continue anyway if they choose.
+function hubLessonQuizAlertHtml(lesson, comp, data) {
+    if (!comp) return '';
+    const state = comp.quizState;
+    if (!state || state === 'passed' || state === 'none') return '';
+    const quizzes = (data.quizzes || []).filter(q => String(q.lessonId) === String(lesson.id) && q.published !== false);
+    if (!quizzes.length) return '';
+    const quiz = quizzes[0];
+    const retries = Number(comp.quizRetriesLeft != null ? comp.quizRetriesLeft : 2);
+    const used = Number(comp.quizAttemptsUsed || 0);
+    if (state === 'overlooked') {
+        return `<div style="border:1px solid var(--border);border-left:4px solid var(--warning,#f59e0b);border-radius:10px;padding:12px 14px;margin-bottom:14px;background:var(--bg-input);">
+            <div style="font-weight:700;color:var(--warning,#f59e0b);">Quiz continued without a pass</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">You used ${used} attempt${used === 1 ? '' : 's'} and chose to continue. The next lesson is open.</div>
+        </div>`;
+    }
+    const canRetry = state === 'retry' && retries > 0;
+    return `<div style="border:1px solid #fca5a5;border-left:4px solid var(--danger,#dc2626);border-radius:10px;padding:14px;margin-bottom:14px;background:#fff5f5;">
+        <div style="font-weight:700;color:var(--danger,#dc2626);">⚠️ You have not passed this lesson's Quiz yet</div>
+        <div style="font-size:13px;margin-top:6px;line-height:1.5;">Your best score is <b>${comp.quizBest != null ? Math.round(comp.quizBest) + '%' : 'not recorded'}</b> (pass mark ${quiz.passMark || 50}%).
+        ${canRetry ? `You have <b>${retries} attempt${retries === 1 ? '' : 's'}</b> remaining — the same questions are available again.` : 'You have used all your attempts.'}</div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+            ${canRetry ? `<button class="btn btn-primary btn-sm" onclick="hubRetryLessonQuiz('${esc(quiz.id)}')">🔁 Retry the Quiz (${retries} left)</button>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="hubOverlookLessonQuiz('${esc(String(lesson.id))}')">Continue to the next lesson anyway</button>
+        </div>
+    </div>`;
+}
+async function hubOverlookLessonQuiz(lessonId) {
+    const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const sid = u.studentId || u.username;
+    const ok = await showConfirm('Continue without passing?',
+        'You can still retry this quiz later from the lesson, but the next lesson will open now. Continue?');
+    if (!ok) return;
+    try {
+        const data = await dripApi({ action: 'manual', studentId: sid, lessonId: String(lessonId), op: 'quiz-overlook', allow: true });
+        if (data && data.completion) { _dripC[String(lessonId)] = data.completion; }
+        if (Array.isArray(data && data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
+        if (Array.isArray(data && data.completions)) { _dripC = {}; data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+        closeModal();
+        showToast('Continuing — the next lesson is now open.', { type: 'success' });
+        invalidateStudentHubCache();
+        const el = document.querySelector('.hub-tab.active');
+        switchHubTab(_hubActiveTab || 'overview', el);
+    } catch (e) { showToast('Could not continue just now: ' + (e && e.message), { type: 'danger' }); }
+}
+function hubRetryLessonQuiz(quizId) {
+    try { closeModal(); } catch (e) {}
+    if (typeof hubGoToQuiz === 'function') hubGoToQuiz(quizId);
+    else location.hash = '#quiz-' + quizId;
+}
+
 function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
     if (!myCourses.length) {
         return '<div class="card" style="text-align:center;padding:60px;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:12px;">📄</div><h3 style="margin-bottom:8px;">No Notes Available</h3><p>Enroll in courses to access study notes.</p></div>';
@@ -2463,10 +2592,15 @@ async function viewHubLessonNote(lessonId, courseId) {
         const safeContent = contentEscaped.replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
         const _videoSrcHub = lesson.videoUrl || lesson.video || lesson.videoLink || '';
         const _isStudentHub = !!(me && (!currentUser || currentUser.role === 'student' || String(currentUser.studentId || '') === String(me.id)));
-        let videoHtml = _videoSrcHub ? `<div style="max-width:720px;margin:0 auto 20px;" id="drip-video-slot">${embedVideo(_videoSrcHub, { track: _isStudentHub })}</div>` : '';
-        if (_videoSrcHub && dripMode && !dripReadDone) videoHtml = `<div id="drip-video-slot" style="max-width:720px;margin:0 auto 20px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video — keep these notes open for the required reading time.</div></div>`;
+        const _comp = (typeof _dripC !== 'undefined' && _dripC && _dripC[lessonId]) ? _dripC[lessonId] : null;
+        // Ordered videos: only the first unfinished one gets a player.
+        let videoHtml = hubLessonVideosHtml(lesson, _comp, { student: _isStudentHub });
+        if (!hubLessonVideos(lesson).length && _videoSrcHub) videoHtml = `<div style="max-width:720px;margin:0 auto 20px;" id="drip-video-slot">${embedVideo(_videoSrcHub, { track: _isStudentHub })}</div>`;
+        if (_videoSrcHub && hubLessonVideos(lesson).length && dripMode && !dripReadDone) videoHtml = `<div id="drip-video-slot" style="max-width:720px;margin:0 auto 20px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video — keep these notes open for the required reading time.</div></div>`;
+        const quizAlertHtml = _isStudentHub && dripMode ? hubLessonQuizAlertHtml(lesson, _comp, data) : '';
         const html = `
             <div style="max-width:760px;margin:0 auto;">
+                ${quizAlertHtml}
                 ${videoHtml}
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">${esc(course?.code || '')} · ${esc(course?.name || '')}</div>
                 <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(lesson.title)}</h2>
@@ -2489,8 +2623,11 @@ async function viewHubLessonNote(lessonId, courseId) {
         const noteId = note ? note.id : null;
         showModal('📖 ' + lesson.title, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> ${noteId ? `<button class="btn btn-outline" onclick="downloadNote('${noteId}','pdf')">⬇ PDF</button>` : `<button class="btn btn-outline" onclick="hubDownloadText(\`${safeContent}\`,'${esc(lesson.title)}')">⬇ PDF</button>`} ${(me && !dripReadDone) ? '<button class="btn btn-outline" onclick="closeModal();">Close (reading timer pauses)</button>' : '<button class="btn btn-success" onclick="closeModal();renderStudentHub();">✓ Marked as Read</button>'}`);
         // Video already visible (not gated behind reading) -> start watch tracking.
-        if (_isStudentHub && _videoSrcHub && !(dripMode && !dripReadDone) && typeof bindLessonVideoTracking === 'function') {
-            try { await bindLessonVideoTracking(lessonId, courseId); } catch (e) {}
+        if (_isStudentHub && !(dripMode && !dripReadDone) && typeof bindLessonVideoTracking === 'function') {
+            // Track whichever video is currently open (the first unfinished one).
+            const _openVideo = hubVideoStates(lesson, _comp).find(v => v.state === 'open' && v.trackable);
+            const _root = _openVideo ? document.querySelector('[data-hub-video-slot="' + _openVideo.id + '"]') : null;
+            if (_openVideo && _root) { try { await bindLessonVideoTracking(lessonId, courseId, _root, _openVideo.id); } catch (e) {} }
         }
         // Drip timed-reading: 5s ticks while this note stays open & visible. Pauses in background.
         try { if (window._dripReadTimer) { clearInterval(window._dripReadTimer); window._dripReadTimer = null; } } catch {}
