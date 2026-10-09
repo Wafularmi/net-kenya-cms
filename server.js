@@ -3357,6 +3357,9 @@ function decodeHtmlEntities(s) {
     // With no key configured the endpoint returns 501 with a clear reason, so
     // the UI can fall back to the English text instead of failing silently.
     if (parts.length === 2 && parts[1] === 'translate' && req.method === 'POST') {
+        // This route answers from an async provider call. Mark the request so the
+        // static /api fall-through at the end of the listener cannot answer first.
+        req._asyncApi = true;
         let body = '';
         req.on('data', c => body += c);
         req.on('end', async () => {
@@ -5162,7 +5165,7 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
     // so the static handler used to race them and its 404 HTML page won before
     // the real JSON arrived. Anything unmatched under /api/ returns JSON 404.
     if (/^\/api(\/|$)/.test(url)) {
-        if (res.headersSent) return;
+        if (res.headersSent || req._asyncApi) return;
         return json(res, 404, { ok: false, error: 'not_found', path: url });
     }
 
