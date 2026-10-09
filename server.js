@@ -1059,6 +1059,67 @@ function isPaymentCounterKey(key) {
 // Write fence for country administrators: creations get stamped with their
 // country; touching another country's tagged records is rejected. Everyone
 // else (admins, regionals, students, others) passes through untouched.
+// ---- Server-side marking -------------------------------------------------
+// Re-marks a stored submission against the answer key. This is the authority
+// for a learner's score: the browser never gets to decide its own marks.
+// Returns null when the attempt cannot be marked automatically (written
+// answers, or questions that no longer exist).
+function scoreSubmissionOnServer(sub) {
+    if (!sub || !Array.isArray(sub.answers)) return null;
+    const quiz = (db.quizzes || []).find(q => q && String(q.id) === String(sub.quizId))
+        || (db.exams || []).find(e => e && String(e.id) === String(sub.quizId));
+    if (!quiz) return null;
+    const byId = new Map((db.questionBank || []).map(q => [String(q.id), q]));
+    let earned = 0, total = 0;
+    for (const a of sub.answers) {
+        if (!a || a.type === 'essay') return null;         // staff-marked
+        const q = byId.get(String(a.questionId));
+        if (!q) return null;                              // question removed
+        const pts = Number(q.points) || 0;
+        total += pts;
+        if (a.type === 'mcq' || a.type === 'truefalse') {
+            const key = Array.isArray(q.correctAnswers) && q.correctAnswers.length ? q.correctAnswers : [q.correctAnswer];
+            const given = Array.isArray(a.answer) ? a.answer : (a.answer != null ? [a.answer] : []);
+            const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
+            const keyN = key.map(norm), givenN = given.map(norm);
+            const ok = keyN.length === givenN.length && keyN.every(k => givenN.includes(k));
+            if (ok) earned += pts;
+        } else if (a.type === 'matching') {
+            const pairs = Array.isArray(q.pairs) ? q.pairs : [];
+            if (!pairs.length) return null;
+            let hits = 0;
+            pairs.forEach((p, i) => {
+                const got = Array.isArray(a.pairs) && a.pairs[i] ? a.pairs[i].userAnswer : '';
+                if (norm(got) === norm(p.right)) hits++;
+            });
+            earned += (hits / pairs.length) * pts;
+        } else if (a.type === 'fillin') {
+            const blanks = Array.isArray(q.blanks) ? q.blanks : [];
+            if (!blanks.length) return null;
+            let hits = 0;
+            blanks.forEach((b, i) => {
+                const got = Array.isArray(a.blankResults) && a.blankResults[i] ? a.blankResults[i].userAnswer : '';
+                if (norm(got) && norm(got) === norm(b.answer)) hits++;
+            });
+            earned += (hits / blanks.length) * pts;
+        } else {
+            return null;
+        }
+    }
+    if (!(total > 0)) return null;
+    return { score: Math.round((earned / total) * 100), pointsEarned: Math.round(earned * 100) / 100, totalPoints: total };
+}
+
+// Grade letters must match the student-facing table in the browser.
+function gradeBandForScore(score) {
+    const s = Number(score) || 0;
+    if (s >= 80) return { grade: 'A', gpa: 4 };
+    if (s >= 70) return { grade: 'B', gpa: 3 };
+    if (s >= 60) return { grade: 'C', gpa: 2 };
+    if (s >= 50) return { grade: 'D', gpa: 1 };
+    return { grade: 'F', gpa: 0 };
+}
+
 function scopeWrite(user, store, rec, existing) {
     // Coordinators (country OR region bound) may write counters ONLY for the
     // payment receipt keys they need while recording payments. This guard runs
@@ -1130,6 +1191,9 @@ function canAccessStore(user, store, method) {
 
     if (user.role === 'student') {
         if (STUDENT_DENY_STORES.has(store)) return false;
+        // A grade is written by the learner only as a request to have their own
+        // submission marked; the server re-marks it and owns the score.
+        if (method !== 'GET' && store === 'grades') return true;
         if (method !== 'GET' && !STUDENT_WRITE_STORES.has(store)) return false;
         if (method === 'GET' && store === 'payments') return true; // filtering happens in the handler
         return true;
@@ -4817,6 +4881,37 @@ const parsed = JSON.parse(body);
                     preserveDocIdentity(store, toStore, _exPut);
                     const _scPut = scopeWrite(user, store, toStore, _exPut);
                     if (_scPut) return json(res, 403, { error: _scPut });
+                    // A student may only record a grade that the SERVER scored.
+                    // The submitted answers are re-marked here against the answer
+                    // key, so a tampered client cannot award itself marks.
+                    if (store === 'grades' && user && user.role === 'student') {
+                        const mySid = String((user.studentId || user.username) || '');
+                        if (!mySid || String(toStore.studentId) !== mySid) {
+                            return json(res, 403, { error: 'You can only record your own grade' });
+                        }
+                        if (toStore.submissionId === undefined || toStore.submissionId === null || toStore.submissionId === '') {
+                            return json(res, 400, { error: 'A grade must reference the submission it was scored from' });
+                        }
+                        const sub = (db.submissions || []).find(x => x && String(x.id) === String(toStore.submissionId));
+                        if (!sub || String(sub.studentId) !== mySid) {
+                            return json(res, 403, { error: 'That submission is not yours' });
+                        }
+                        if (sub.needsReview || (Array.isArray(sub.answers) && sub.answers.some(a => a && a.type === 'essay'))) {
+                            return json(res, 400, { error: 'Written answers are marked by staff, not automatically' });
+                        }
+                        const marked = scoreSubmissionOnServer(sub);
+                        if (marked === null) {
+                            return json(res, 400, { error: 'This attempt cannot be scored automatically' });
+                        }
+                        toStore.score = marked;
+                        toStore.pointsEarned = marked.pointsEarned;
+                        toStore.totalPoints = marked.totalPoints;
+                        toStore.status = marked.score >= Number(sub.passMark || 0) ? 'pass' : 'fail';
+                        const band = gradeBandForScore(marked.score);
+                        toStore.grade = band.grade;
+                        toStore.gpa = band.gpa;
+                        toStore.scoredBy = 'server';
+                    }
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
                         if (_dupCode) return json(res, 400, { error: 'Center code already in use: ' + _dupCode });

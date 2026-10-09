@@ -17199,7 +17199,8 @@ async function submitQuiz(quizId) {
             semester: 1, type: quiz.assessmentType || 'quiz', quizId,
             gradedAt: new Date().toISOString()
         };
-        await dbPut('grades', gradeEntry);
+        try { await dbPut('grades', gradeEntry); }
+        catch (gErr) { console.warn('grade record not written:', gErr && gErr.message); }
     }
     // Drip 50% rule: pass advances the lesson (congrats + invite follow); fail resets it for repeat.
     try {
