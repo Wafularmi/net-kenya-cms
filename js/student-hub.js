@@ -390,7 +390,7 @@ function _hubBuildComputed(data, me) {
         const obj = exam || quiz;
         const course = (data.courses || []).find(c => c.id === g.courseId);
         const sub = allSubs.find(s => s.quizId === g.quizId || (g.examId && s.examId === g.examId));
-        return { submission: sub || { score: g.score, grade: g.grade, submittedAt: g.gradedAt, pointsEarned: sub?.pointsEarned, totalPoints: sub?.totalPoints }, assessment: obj || { title: g.courseId, courseId: g.courseId, passMark: 50 }, course, grade: g, isExam: !!exam };
+        return { submission: sub || { score: g.score, grade: g.grade, submittedAt: g.gradedAt, pointsEarned: g.pointsEarned != null ? g.pointsEarned : sub?.pointsEarned, totalPoints: g.totalPoints != null ? g.totalPoints : sub?.totalPoints }, assessment: obj || { title: g.courseId, courseId: g.courseId, passMark: 50 }, course, grade: g, isExam: !!exam };
     });
     allSubs.forEach(s => {
         const key = (s.quizId || '') + '|' + (s.examId || '');

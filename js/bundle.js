@@ -4982,6 +4982,7 @@ function applyLiveRecord(store, record, action) {
     return true;
 }
 async function renderExams(opts) {
+    try { renderQuizExamManager(); } catch (e) {}
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
     const isCoord = currentUser.role === 'coordinator';
@@ -15961,7 +15962,145 @@ async function deleteQuestion(id) {
     await dbDelete('questionBank', id); renderQuestionBank(); showToast('Question deleted'); logAudit('deleted', 'question', { id });
 }
 
+// ---- Quiz & Exam manager -------------------------------------------------
+// One list of everything you have set (quizzes/CATs AND exams) with edit,
+// reschedule, duplicate and delete. Staff only - students never see it.
+async function renderQuizExamManager() {
+    const card = document.getElementById('qexam-manager-card');
+    if (!card) return;
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!currentUser || currentUser.role === 'student') { card.style.display = 'none'; return; }
+    card.style.display = '';
+    const body = document.getElementById('qexam-manager-body');
+    if (!body) return;
+    let quizzes = [], exams = [], courses = [];
+    try {
+        [quizzes, exams, courses] = await Promise.all([
+            dbGetAll('quizzes').catch(() => []), dbGetAll('exams').catch(() => []), dbGetAll('courses').catch(() => [])
+        ]);
+    } catch (e) { return; }
+
+    const typeFilter = (document.getElementById('qexam-type-filter') || {}).value || '';
+    const term = String((document.getElementById('qexam-search') || {}).value || '').trim().toLowerCase();
+
+    const rows = [];
+    quizzes.forEach(q => rows.push({
+        kind: 'quiz', id: q.id, title: q.title || '(untitled quiz)', courseId: q.courseId,
+        type: q.assessmentType || 'quiz', count: (q.questionIds || []).length,
+        date: q.date || '', time: q.time || '', published: q.published !== false,
+        lessonId: q.lessonId || ''
+    }));
+    exams.forEach(e => rows.push({
+        kind: 'exam', id: e.id, title: e.title || '(untitled exam)', courseId: e.courseId,
+        type: e.type || 'exam', count: (e.questionIds || []).length,
+        date: e.date || '', time: e.time || '', published: e.published !== false,
+        venue: e.venue || ''
+    }));
+
+    let shown = rows.filter(r => {
+        if (typeFilter && r.kind !== typeFilter) return false;
+        if (!term) return true;
+        const course = courses.find(c => String(c.id) === String(r.courseId));
+        return (r.title + ' ' + (course ? course.name + ' ' + (course.code || '') : '')).toLowerCase().includes(term);
+    });
+    // Upcoming first, then by title.
+    const today = new Date().toISOString().slice(0, 10);
+    shown = shown.slice().sort((a, b) => {
+        const ad = a.date || '9999-99-99', bd = b.date || '9999-99-99';
+        const ap = ad >= today ? 0 : 1, bp = bd >= today ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        if (ad !== bd) return ad < bd ? -1 : 1;
+        return a.title.localeCompare(b.title);
+    });
+
+    const cnt = document.getElementById('qexam-count');
+    if (cnt) cnt.textContent = `(${shown.length} of ${rows.length})`;
+
+    body.innerHTML = shown.map(r => {
+        const course = courses.find(c => String(c.id) === String(r.courseId));
+        const kindLabel = r.kind === 'exam' ? '🎓 Exam' : (String(r.type).toUpperCase() === 'QUIZ' ? '📝 Quiz' : '📚 ' + String(r.type).toUpperCase());
+        const when = r.date ? `${escapeHtml(r.date)}${r.time ? ' · ' + escapeHtml(r.time) : ''}` : '<span style="color:var(--text-muted);">Not scheduled</span>';
+        const past = r.date && r.date < today;
+        return `<tr>
+            <td><b>${escapeHtml(r.title)}</b>${r.venue ? `<div style="font-size:11px;color:var(--text-muted);">📍 ${escapeHtml(r.venue)}</div>` : ''}</td>
+            <td><span class="badge ${r.kind === 'exam' ? 'badge-info' : 'badge-success'}">${kindLabel}</span></td>
+            <td>${course ? escapeHtml(course.name) : '--'}</td>
+            <td>${r.count}</td>
+            <td>${when}${past ? ' <span class="badge badge-warning" style="font-size:9px;">PAST</span>' : ''}</td>
+            <td><span class="badge ${r.published ? 'badge-success' : 'badge-warning'}">${r.published ? 'Published' : 'Draft'}</span></td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-outline btn-sm" onclick="${r.kind === 'exam' ? 'editExam' : 'editQuiz'}('${r.id}')">Edit</button>
+                <button class="btn btn-primary btn-sm" onclick="rescheduleQuizExam('${r.kind}','${r.id}')">Reschedule</button>
+                <button class="btn btn-outline btn-sm" onclick="duplicateQuizExam('${r.kind}','${r.id}')">Duplicate</button>
+                <button class="btn btn-danger btn-sm" onclick="${r.kind === 'exam' ? 'deleteExam' : 'deleteQuiz'}('${r.id}')">Delete</button>
+            </td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted);">No quizzes or exams match.</td></tr>';
+}
+
+// Move an assessment to a new date/time without touching its questions.
+async function rescheduleQuizExam(kind, id) {
+    const store = kind === 'exam' ? 'exams' : 'quizzes';
+    const rec = await dbGet(store, id);
+    if (!rec) return showToast('That assessment no longer exists.', { type: 'danger' });
+    const courses = await dbGetAll('courses').catch(() => []);
+    const course = courses.find(c => String(c.id) === String(rec.courseId));
+    const isExam = kind === 'exam';
+    const content = `
+        <div class="form-group"><label>Assessment</label><div style="padding:8px 10px;background:var(--bg-input);border-radius:6px;font-weight:600;">${escapeHtml(rec.title || id)}</div></div>
+        <div class="form-group"><label>Course</label><div style="padding:8px 10px;background:var(--bg-input);border-radius:6px;font-size:12px;">${course ? escapeHtml(course.name) : '--'} · ${(rec.questionIds || []).length} questions</div></div>
+        <div class="form-row">
+            <div class="form-group"><label>Date</label><input type="date" id="rx-date" value="${rec.date || ''}"></div>
+            <div class="form-group"><label>Time</label><input type="text" id="rx-time" value="${rec.time || ''}" placeholder="e.g. 09:00-12:00"></div>
+        </div>
+        ${isExam ? `<div class="form-group"><label>Venue</label><input type="text" id="rx-venue" value="${escapeHtml(rec.venue || '')}" placeholder="e.g. Hall A"></div>` : ''}
+        <div style="font-size:11px;color:var(--text-muted);">Only the schedule changes. The questions, pass mark and every existing submission stay exactly as they are.</div>`;
+    showModal('📅 Reschedule', content, `<button class="btn btn-primary" onclick="saveReschedule('${kind}','${id}')">Save new date</button>`);
+}
+async function saveReschedule(kind, id) {
+    const store = kind === 'exam' ? 'exams' : 'quizzes';
+    const rec = await dbGet(store, id);
+    if (!rec) return showToast('That assessment no longer exists.', { type: 'danger' });
+    const prev = { date: rec.date || '', time: rec.time || '' };
+    rec.date = (document.getElementById('rx-date') || {}).value || '';
+    rec.time = (document.getElementById('rx-time') || {}).value || '';
+    const ven = document.getElementById('rx-venue');
+    if (ven) rec.venue = ven.value.trim();
+    rec.updatedAt = new Date().toISOString();
+    try {
+        await dbPut(store, rec);
+        closeModal();
+        showToast(`Rescheduled to ${rec.date || 'no date'}${rec.time ? ' at ' + rec.time : ''}.`);
+        logAudit('rescheduled', kind, { id, from: prev, to: { date: rec.date, time: rec.time } });
+        await renderQuizExamManager();
+        if (kind === 'exam') renderExams(); else renderQuizzes();
+    } catch (e) { showToast('Could not reschedule: ' + e.message, { type: 'danger' }); }
+}
+// Copy an assessment so a new paper can be built without starting again.
+async function duplicateQuizExam(kind, id) {
+    const store = kind === 'exam' ? 'exams' : 'quizzes';
+    const rec = await dbGet(store, id);
+    if (!rec) return showToast('That assessment no longer exists.', { type: 'danger' });
+    const copy = JSON.parse(JSON.stringify(rec));
+    copy.id = generateId(kind === 'exam' ? 'EXM' : 'QUIZ');
+    copy.title = (rec.title || 'Untitled') + ' (copy)';
+    copy.date = '';
+    copy.time = '';
+    copy.venue = '';
+    copy.published = false;
+    copy.createdAt = new Date().toISOString();
+    copy.updatedAt = copy.createdAt;
+    delete copy._deleted;
+    try {
+        await dbPut(store, copy);
+        showToast('Duplicated as a draft — edit it and set the date.');
+        logAudit('duplicated', kind, { from: id, to: copy.id });
+        await renderQuizExamManager();
+    } catch (e) { showToast('Could not duplicate: ' + e.message, { type: 'danger' }); }
+}
+
 async function renderQuizzes() {
+    try { renderQuizExamManager(); } catch (e) {}
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
     if (isStudentUser) {

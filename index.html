@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=420" as="script">
+    <link rel="preload" href="js/bundle.js?v=421" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -556,6 +556,17 @@
                     <button class="btn btn-primary" onclick="showQuizForm()">+ Create Quiz</button>
                     <div class="lang-switch" title="Quiz language / Lugha ya mjaribio" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;"><button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button><button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button></div>
                 </div></div>
+                <div class="card" id="qexam-manager-card" style="display:none;margin-bottom:16px;">
+                    <div class="screen-header" style="margin-bottom:10px;padding:0;">
+                        <h3 style="margin:0;">📋 All Quiz &amp; Exams <span id="qexam-count" style="color:var(--text-muted);font-weight:400;font-size:12px;"></span></h3>
+                        <div class="screen-actions">
+                            <select id="qexam-type-filter" class="filter-select" onchange="renderQuizExamManager()"><option value="">All Types</option><option value="quiz">Quizzes / CATs</option><option value="exam">Exams</option></select>
+                            <input type="text" id="qexam-search" class="filter-select" placeholder="🔍 Search title or course" oninput="renderQuizExamManager()" style="min-width:200px;">
+                            <button class="btn btn-outline btn-sm" onclick="renderQuizExamManager()">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="table-container"><table class="data-table"><thead><tr><th>Title</th><th>Type</th><th>Course</th><th>Questions</th><th>Date &amp; Time</th><th>Status</th><th>Actions</th></tr></thead><tbody id="qexam-manager-body"></tbody></table></div>
+                </div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Quiz</th><th>Course</th><th>Lesson</th><th>Questions</th><th>Points</th><th>Pass Mark</th><th>Submissions</th><th>Actions</th></tr></thead><tbody id="quizzes-body"></tbody></table></div></div>
             </section>
 
@@ -1404,8 +1415,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=420"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=59"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=421"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=60"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>
