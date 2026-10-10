@@ -16327,14 +16327,39 @@ async function saveQuiz() {
         const offLesson = questionIds.filter(qid => { const qq = bank.find(x => String(x.id) === String(qid)); return qq && String(qq.lessonId) !== String(lessonId); });
         if (offLesson.length) return showToast(offLesson.length + ' selected question(s) belong to another lesson. In lesson mode every question must come from the chosen lesson.');
     }
-    const quiz = { id, courseId, lessonId: dripMode === 'lesson' ? lessonId : '', dripMode, title, assessmentType, passMark: parseInt(document.getElementById('quiz-pass').value) || 50, timeLimit: parseInt(document.getElementById('quiz-time').value) || 0, ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 2, questionIds, createdAt: editId ? (await dbGet('quizzes', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const passMark = parseInt(document.getElementById('quiz-pass').value) || 50;
+    const timeLimit = parseInt(document.getElementById('quiz-time').value) || 0;
+    if (String(assessmentType).toLowerCase() === 'exam') {
+        const prior = editId ? (await dbGet('exams', id).catch(() => null) || await dbGet('quizzes', id).catch(() => null)) : null;
+        const totalPoints = questionIds.reduce((n, qid) => { const qq = bank.find(x => String(x.id) === String(qid)); return n + (Number(qq && qq.points) || 0); }, 0);
+        const exam = {
+            id, courseId, lessonId: '', title, type: 'final',
+            duration: timeLimit || 120, passMark, totalMarks: totalPoints || 100,
+            questionIds, date: (prior && prior.date) || '', time: (prior && prior.time) || '',
+            venue: (prior && prior.venue) || '', invigilatorId: (prior && prior.invigilatorId) || '',
+            studyCenterId: (prior && prior.studyCenterId) || '', semester: (prior && prior.semester) || 4,
+            published: prior ? prior.published !== false : true,
+            createdAt: prior ? prior.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString()
+        };
+        await dbPut('exams', exam);
+        if (editId && prior && prior.assessmentType) { try { await dbDelete('quizzes', id); } catch (e) {} }
+        closeModal(); renderQuizzes(); renderExams();
+        showToast(`Exam created with ${questionIds.length} questions - set the date from the Exams tab.`);
+        logAudit(editId ? 'updated' : 'created', 'exam', { id, courseId, questions: questionIds.length });
+        return;
+    }
+    const quiz = { id, courseId, lessonId: dripMode === 'lesson' ? lessonId : '', dripMode, title, assessmentType, passMark, timeLimit, ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 2, questionIds, createdAt: editId ? ((await dbGet('quizzes', id)) || {}).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('quizzes', quiz); closeModal(); renderQuizzes(); showToast(editId ? 'Assessment updated!' : `Assessment created with ${questionIds.length} questions!`); logAudit(editId ? 'updated' : 'created', 'quiz', { id, courseId, questions: questionIds.length });
 }
 async function editQuiz(id) {
     const quiz = await dbGet('quizzes', id);
-    if (quiz) showQuizForm(quiz);
+    if (quiz) return showQuizForm(quiz);
+    const asExam = await dbGet('exams', id);
+    if (asExam) return showExamForm(asExam);
+    showToast('That assessment no longer exists.', { type: 'danger' });
 }
 async function deleteQuiz(id) {
+    if (!(await dbGet('quizzes', id))) return deleteExam(id);
     if (!await showConfirm('Confirm', 'Delete this quiz and all its submissions?')) return;
     const subs = (await dbGetAll('submissions')).filter(s => s.quizId === id);
     for (const s of subs) await dbDelete('submissions', s.id);

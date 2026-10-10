@@ -377,7 +377,13 @@ function _hubBuildComputed(data, me) {
     } catch {}
     const upcomingAvailableExams = availableExams.filter(e => e.date >= today && !dripIncompleteCourseIds.has(e.courseId));
     const pastAvailableExams = availableExams.filter(e => e.date < today && !missedDroppedIds.has(e.id));
-    const activeQuizzes = (data.quizzes || []).filter(q => enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
+    const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
+    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
+    // Exams filed in the quizzes store still belong on the Exams tab.
+    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && enrolledIds.has(q.courseId));
+    if (examTypedQuizzes.length && typeof availableExams !== 'undefined' && Array.isArray(availableExams)) {
+        examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || 'final' })); });
+    }
     const allGrades = (data.grades || []).filter(g => allStudentIds.has(g.studentId));
     const allSubs = (data.submissions || []).filter(s => allStudentIds.has(s.studentId));
     const submittedQuizIds = new Set(allSubs.map(s => s.quizId));
