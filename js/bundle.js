@@ -14899,6 +14899,8 @@ async function dripCongrats(sid, lesson, best) {
 // Exams are course-level: open only when every drip lesson in the course is complete.
 async function dripExamOpen(sid, exam) {
     try {
+        // Ungated = open regardless of lesson progress (the admin's override).
+        if (exam && exam.ungated === true) return { open: true, ungated: true };
         await loadDripMaps(sid);
         const all = await dbGetAll('lessons');
         const drips = (all || []).filter(l => String(l.courseId) === String(exam.courseId) && lessonMode(l) === 'drip' && l.published !== false);

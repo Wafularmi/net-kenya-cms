@@ -375,7 +375,7 @@ function _hubBuildComputed(data, me) {
             }
         });
     } catch {}
-    const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today).map(e => (e._hubDripLocked = dripIncompleteCourseIds.has(e.courseId), e));
+    const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today).map(e => (e._hubDripLocked = e.ungated !== true && dripIncompleteCourseIds.has(e.courseId), e));
     const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !missedDroppedIds.has(e.id));
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
     const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
@@ -1391,7 +1391,7 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
         ${renderCategory('Past Registered', '📋', pastRegisteredExams, true)}
         ${renderCategory('Available for Registration', '➕', upcomingAvailableExams, false)}
         ${renderCategory('Missed Exams', '⚠️', pastAvailableExams, false, { today: new Date().toISOString().split('T')[0], showHint: true, hint: 'Missed an exam or registered late? Click "Request Exam" to ask for a supplementary session.' })}
-        ${renderCategory('Dropped Exams', '🗑️', droppedExams, false, { today: new Date().toISOString().split('T')[0], showHint: true, hint: 'These exams were hidden from your missed list. Use Register or Request Exam here to re-activate them later.' })}
+        ${(() => { const still = droppedExams.filter(e => !examLinkedSubs.some(x => String(resolveExam(x)) === String(e.id)) && !examRegIds.has(String(e.id))); return still.length ? renderCategory('Dropped Exams', '🗑️', still, false, { today: new Date().toISOString().split('T')[0], showHint: true, hint: 'These exams were hidden from your missed list. Use Register or Request Exam here to re-activate them later.' }) : ''; })()}
 
         ${renderHubRetakeRequests(myRetakeRequests).replace('<div style="margin-top:24px;">', '<div id="hub-retake-section" style="margin-top:24px;">')}
     `;
@@ -1608,10 +1608,27 @@ async function hubSubmitRetakeRequest(examId) {
 
 function renderHubRetakeRequests(data) {
     if (!data || !data.length) return '';
+    const _d = _hubComputed?.data || {};
+    const _subs = _d.submissions || [];
+    const _quizzes = _d.quizzes || [];
+    const _exams = _d.exams || [];
+    // Settled = approved and finished (sat the paper) or the exam was dropped.
+    // Nothing to chase any more, so the badge is not shown.
+    const _settled = r => {
+        if (String(r.status) !== 'approved') return false;
+        const target = String(r.supplementaryExamId || r.examId || '');
+        if (!target) return false;
+        if (r.droppedAt || r.status === 'dropped') return true;
+        const done = _subs.some(s => String(s.quizId) === target || String(s.examId) === target)
+            || _exams.some(e => String(e.id) === target && e.linkedQuizId && _subs.some(s => String(s.quizId) === String(e.linkedQuizId)));
+        return !!done;
+    };
+    const visible = data.filter(r => !_settled(r));
+    if (!visible.length) return '';
     return `
         <div style="margin-top:24px;">
-            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Retake Requests <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${data.length})</span></h3>
-            ${data.map(r => {
+            <h3 style="color:var(--accent);margin-bottom:12px;">📋 Retake Requests <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${visible.length})</span></h3>
+            ${visible.map(r => {
                 const exam = _hubComputed?.data?.exams?.find(e => e.id === r.examId);
                 const statusColors = { pending: 'var(--warning)', approved: 'var(--success)', rejected: 'var(--danger)' };
                 const statusLabels = { pending: '⏳ Pending', approved: '✅ Approved', rejected: '❌ Rejected' };
