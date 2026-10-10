@@ -375,8 +375,8 @@ function _hubBuildComputed(data, me) {
             }
         });
     } catch {}
-    const upcomingAvailableExams = availableExams.filter(e => e.date >= today && !dripIncompleteCourseIds.has(e.courseId));
-    const pastAvailableExams = availableExams.filter(e => e.date < today && !missedDroppedIds.has(e.id));
+    const upcomingAvailableExams = availableExams.filter(e => (!e.date || e.date >= today) && !dripIncompleteCourseIds.has(e.courseId));
+    const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !missedDroppedIds.has(e.id));
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
     const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     // Exams filed in the quizzes store still belong on the Exams tab.
