@@ -17137,7 +17137,13 @@ function showQuizInterface(quiz, questions, lang, opts) {
             // English right-hand item, which is what grading compares against.
             const dispPairs = questionPairs(q, lang);
             const enPairs = q.pairs || [];
-            const shuffledIdx = enPairs.map((_, i) => i).sort(() => Math.random() - 0.5);
+            // Fisher-Yates: every option order is exactly equally likely. The biased
+            // sort(() => Math.random() - 0.5) let patterns leak across sittings.
+            const shuffledIdx = enPairs.map((_, i) => i);
+            for (let _i = shuffledIdx.length - 1; _i > 0; _i--) {
+                const _j = Math.floor(Math.random() * (_i + 1));
+                const _t = shuffledIdx[_i]; shuffledIdx[_i] = shuffledIdx[_j]; shuffledIdx[_j] = _t;
+            }
             const sw = lang === 'sw';
             qHtml += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div><div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">${sw ? 'Vipengele' : 'Items'}</div>`;
