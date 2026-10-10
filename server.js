@@ -4909,10 +4909,13 @@ const parsed = JSON.parse(body);
                         if (marked === null) {
                             return json(res, 400, { error: 'This attempt cannot be scored automatically' });
                         }
-                        toStore.score = marked;
+                        toStore.score = marked.score;
                         toStore.pointsEarned = marked.pointsEarned;
                         toStore.totalPoints = marked.totalPoints;
-                        toStore.status = marked.score >= Number(sub.passMark || 0) ? 'pass' : 'fail';
+                        const quizRec = (db.quizzes || []).find(q => q && String(q.id) === String(sub.quizId))
+                            || (db.exams || []).find(e => e && String(e.id) === String(sub.quizId));
+                        const passMark = Number((quizRec && quizRec.passMark) != null ? quizRec.passMark : 50);
+                        toStore.status = marked.score >= passMark ? 'pass' : 'fail';
                         const band = gradeBandForScore(marked.score);
                         toStore.grade = band.grade;
                         toStore.gpa = band.gpa;
