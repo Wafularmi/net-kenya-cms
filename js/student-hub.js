@@ -417,11 +417,16 @@ function _hubBuildComputed(data, me) {
     allScores.sort((a, b) => (b.submission?.submittedAt || b.grade?.gradedAt || '').localeCompare(a.submission?.submittedAt || a.grade?.gradedAt || ''));
     const myLessons = (data.lessons || []).filter(l => enrolledIds.has(l.courseId) && (typeof lessonVisible === 'function' ? lessonVisible(l) : l.published !== false));
     const myNotes = (data.notes || []).filter(n => enrolledIds.has(n.courseId));
+    const _courseName = cid => (data.courses || []).find(c => String(c.id) === String(cid))?.name || '';
     const todoItems = [
-        ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: (data.courses || []).find(c => c.id === q.courseId)?.name || '', date: q.dueDate || '' })),
-        ...upcomingRegisteredExams.map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: (data.courses || []).find(c => c.id === e.courseId)?.name || '', date: e.date || '' }))
+        // A newly published exam must reach the learner straight away, even
+        // before they register for it.
+        ...upcomingAvailableExams.map(e => ({ type: 'exam-new', id: e.id, title: e.title || 'New exam posted', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '', time: e.time || '', venue: e.venue || '' })),
+        ...upcomingRegisteredExams.map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '' })),
+        ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: _courseName(q.courseId), date: q.dueDate || '' }))
     ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
+    const myUpcomingExams = [...upcomingRegisteredExams, ...upcomingAvailableExams.filter(e => !upcomingRegisteredExams.some(r => String(r.id) === String(e.id)))];
+    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, myUpcomingExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
 }
 
 
@@ -590,7 +595,7 @@ async function renderStudentHub() {
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;">
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('courses')"><div class="stat-label">📚 Enrolled Courses</div><div class="stat-value" style="color:var(--success);">${c.myCourses.length}</div></div>
-                <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('exams')"><div class="stat-label">📝 My Exams</div><div class="stat-value" style="color:var(--accent);">${c.myRegisteredExams.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('exams')"><div class="stat-label">📝 My Exams</div><div class="stat-value" style="color:var(--accent);">${c.myUpcomingExams.length}</div>${c.upcomingAvailableExams.length ? `<div style="font-size:10px;color:var(--warning);margin-top:2px;">${c.upcomingAvailableExams.length} to register</div>` : ''}</div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('quizzes')"><div class="stat-label">📋 Pending Quizzes</div><div class="stat-value" style="color:var(--warning);">${c.pendingQuizzes.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('notes')"><div class="stat-label">📄 Study Notes</div><div class="stat-value">${c.myNotes.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('live')"><div class="stat-label">🎥 Live Classes</div><div class="stat-value" style="color:var(--danger);">${c.myLessons.filter(l => l.virtualEnabled && l.virtualRoom).length}</div></div>
@@ -607,7 +612,7 @@ async function renderStudentHub() {
                 <button class="hub-tab" data-tab="media" onclick="switchHubTab('media',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📸 Media</button>
             </div>
 
-            <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.upcomingRegisteredExams, c.pendingQuizzes, c.completedQuizzes, c.data, c.todoItems)}</div>
+            <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.myUpcomingExams, c.pendingQuizzes, c.completedQuizzes, c.data, c.todoItems, c.upcomingRegisteredExams, c.upcomingAvailableExams)}</div>
             <div id="hub-tab-courses" style="display:none;"></div>
             <div id="hub-tab-exams" style="display:none;"></div>
             <div id="hub-tab-quizzes" style="display:none;"></div>
@@ -717,7 +722,7 @@ async function switchHubTab(tab, btn) {
     if (tab === 'notes') renderHubNotesSearch();
 }
 
-function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data, todoItems) {
+function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data, todoItems, registeredExams, availableOnlyExams) {
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
     const _isTuit2 = (typeof isTuitionPayment === 'function') ? isTuitionPayment : (() => true);
     const myPayments = (data.payments || []).filter(p => p.studentId === me.id && _isTuit2(p));
@@ -743,11 +748,13 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                 <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">📝 Upcoming Exams</h3>
                 ${myExams.length ? myExams.slice(0, 4).map(e => {
                     const course = myCourses.find(c => c.id === e.courseId);
-                    return `<div class="event-item" style="padding:8px 0;">
-                        <div><b>${esc(e.title || course?.code || 'Exam')}</b></div>
+                    const isRegistered = !!(registeredExams || []).some(r => String(r.id) === String(e.id));
+                    return `<div class="event-item" style="padding:8px 0;border-left:3px solid ${isRegistered ? 'var(--success)' : 'var(--warning)'};padding-left:8px;">
+                        <div><b>${esc(e.title || course?.code || 'Exam')}</b>${isRegistered ? '' : ' <span class="badge badge-warning" style="font-size:9px;">NEW</span>'}</div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${course ? esc(course.name) : ''} · ${formatDate(e.date)} ${esc(e.time || '')}</div>
+                        <div style="font-size:10px;margin-top:2px;color:${isRegistered ? 'var(--success)' : 'var(--warning)'};font-weight:600;">${isRegistered ? '✓ Registered' : 'Tap Exams to register'}</div>
                     </div>`;
-                }).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">No exams registered. <a href="#" onclick="switchHubTab(\'exams\', document.querySelector(\'.hub-tab[data-tab=exams]\'));return false;" style="color:var(--accent);">Register →</a></div>'}
+                }).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">No exams posted yet. <a href="#" onclick="switchHubTab(\'exams\', document.querySelector(\'.hub-tab[data-tab=exams]\'));return false;" style="color:var(--accent);">See exams →</a></div>'}
             </div>
 
             <div class="card" style="border-top:3px solid var(--accent);">
@@ -764,9 +771,10 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
             <div class="card" style="border-top:3px solid var(--warning);">
                 <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">📋 To Do</h3>
                 ${todoItems.length ? todoItems.slice(0, 5).map(item => `
-                    <div class="event-item" style="padding:8px 0;">
-                        <div><b>${esc(item.title)}</b> <span style="font-size:10px;color:var(--text-muted);background:var(--bg-input);padding:1px 6px;border-radius:4px;">${item.type === 'quiz' ? 'Quiz' : 'Exam'}</span></div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${esc(item.courseName)}${item.date ? ' · ' + formatDate(item.date) : ''}</div>
+                    <div class="event-item" style="padding:8px 0;${item.type === 'exam-new' ? 'border-left:3px solid var(--warning);padding-left:8px;' : ''}">
+                        <div><b>${esc(item.title)}</b> <span style="font-size:10px;color:${item.type === 'exam-new' ? '#fff' : 'var(--text-muted)'};background:${item.type === 'exam-new' ? 'var(--warning)' : 'var(--bg-input)'};padding:1px 6px;border-radius:4px;">${item.type === 'quiz' ? 'Quiz' : (item.type === 'exam-new' ? 'New exam' : 'Exam')}</span></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${esc(item.courseName)}${item.date ? ' · ' + formatDate(item.date) : ''}${item.time ? ' at ' + esc(item.time) : ''}</div>
+                        ${item.type === 'exam-new' ? '<div style="font-size:10px;margin-top:2px;color:var(--warning);font-weight:600;">Posted — register on the Exams tab</div>' : ''}
                     </div>
                 `).join('') : '<div style="color:var(--text-muted);padding:12px;text-align:center;">🎉 Nothing pending!</div>'}
             </div>
