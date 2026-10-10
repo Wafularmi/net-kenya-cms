@@ -2497,6 +2497,12 @@ const _refreshMap = {
     library: () => { if (isScreenActive('library')) renderLibrary(); },
     attendance: (r) => { refreshPortal('attendance', r); if (isScreenActive('attendance')) populateAttendanceCourses(); },
     events: () => { if (isScreenActive('events')) renderEvents(); },
+    // A new or updated exam reaches the Student Hub without a refresh.
+    exams: () => {
+        if (isScreenActive('exams')) renderExams();
+        try { if (typeof window.refreshHubCoverage === 'function') window.refreshHubCoverage(); } catch (e) {}
+        try { if (typeof window.invalidateStudentHubCache === 'function') { invalidateStudentHubCache(); const el = document.getElementById('hub-tab-overview'); if (el && _hubActiveTab === 'overview') { delete _hubRenderedTabs.overview; renderStudentHub(); } } } catch (e) {}
+    },
     tickets: () => { if (isScreenActive('dashboard')) renderDashboard(); },
     alerts: () => { renderAlertBell(); generateAlerts(); if (isScreenActive('dashboard')) renderDashboard(); },
     payslips: () => { if (isScreenActive('finance')) renderPayrollList(); },

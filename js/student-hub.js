@@ -361,8 +361,8 @@ function _hubBuildComputed(data, me) {
     );
     const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const today = new Date().toISOString().split('T')[0];
-    const upcomingRegisteredExams = myRegisteredExams.filter(e => e.date >= today);
-    const pastRegisteredExams = myRegisteredExams.filter(e => e.date < today);
+    const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today);
+    const pastRegisteredExams = myRegisteredExams.filter(e => !!e.date && e.date < today);
     const availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const missedDroppedIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'dropped').map(r => r.examId));
     // Drip: courses with incomplete drip lessons hide upcoming exam registration until lessons complete.
