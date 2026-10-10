@@ -375,7 +375,7 @@ function _hubBuildComputed(data, me) {
             }
         });
     } catch {}
-    const upcomingAvailableExams = availableExams.filter(e => (!e.date || e.date >= today) && !dripIncompleteCourseIds.has(e.courseId));
+    const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today).map(e => (e._hubDripLocked = dripIncompleteCourseIds.has(e.courseId), e));
     const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !missedDroppedIds.has(e.id));
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
     const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
@@ -1296,7 +1296,9 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
         } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
             actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button><button class="btn btn-outline btn-sm" onclick="hubDropMissedExam('${e.id}','${esc(me.name)}')" style="font-size:11px;border-color:var(--danger);color:var(--danger);padding:5px 10px;">🗑️ Drop</button></div>`;
         } else if (!isRegistered) {
-            actionBtn = `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button>`;
+            actionBtn = e._hubDripLocked
+                ? `<div style="text-align:right;"><span class="badge badge-warning" style="font-size:11px;padding:5px 10px;">🔒 Complete lessons to register</span></div>`
+                : `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button>`;
         }
 
         if (isRegistered && !mySub && !hasActiveSupp) {
