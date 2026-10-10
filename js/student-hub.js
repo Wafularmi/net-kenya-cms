@@ -1612,16 +1612,17 @@ function renderHubRetakeRequests(data) {
     const _subs = _d.submissions || [];
     const _quizzes = _d.quizzes || [];
     const _exams = _d.exams || [];
-    // Settled = approved and finished (sat the paper) or the exam was dropped.
-    // Nothing to chase any more, so the badge is not shown.
+    // An APPROVED request is settled the moment staff approve it - the outcome is
+    // already reflected in the exam itself (registered, dropped or sat), so the
+    // badge is trail-only and is removed. Pending and Rejected stay, because the
+    // student still has to act on those.
     const _settled = r => {
-        if (String(r.status) !== 'approved') return false;
+        const st = String(r.status || '').toLowerCase();
+        if (st === 'approved' || st === 'dropped' || st === 'declined') return true;
+        // A request whose exam has already been sat is finished too.
         const target = String(r.supplementaryExamId || r.examId || '');
         if (!target) return false;
-        if (r.droppedAt || r.status === 'dropped') return true;
-        const done = _subs.some(s => String(s.quizId) === target || String(s.examId) === target)
-            || _exams.some(e => String(e.id) === target && e.linkedQuizId && _subs.some(s => String(s.quizId) === String(e.linkedQuizId)));
-        return !!done;
+        return _subs.some(s => String(s.quizId) === target || String(s.examId) === target);
     };
     const visible = data.filter(r => !_settled(r));
     if (!visible.length) return '';
