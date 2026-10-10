@@ -15551,8 +15551,6 @@ async function renderQuestionBank() {
     courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
     if (savedCourse && courses.some(c => c.id === savedCourse)) courseSelect.value = savedCourse;
     const typeSelect = document.getElementById('qb-type');
-    courseSelect.onchange = renderQuestions;
-    typeSelect.onchange = renderQuestions;
     const courseFilter = courseSelect.value;
     const typeFilter = typeSelect.value;
     let filtered = questions;
