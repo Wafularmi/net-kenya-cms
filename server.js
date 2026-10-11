@@ -1120,6 +1120,20 @@ function gradeBandForScore(score) {
     return { grade: 'F', gpa: 0 };
 }
 
+// ---- Assessment window (server authority) ------------------------------
+const ASSESSMENT_GRACE_DAYS = 4;
+function assessmentWindowServer(a) {
+    if (!a) return { opensAt: '', closesAt: '', closed: false, notYetOpen: false };
+    const opensAt = a.opensAt || a.date || '';
+    let closesAt = a.closesAt || '';
+    if (!closesAt && a.date) {
+        const d = new Date(String(a.date).slice(0, 10) + 'T12:00:00');
+        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS); closesAt = d.toISOString().slice(0, 10); }
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    return { opensAt, closesAt, closed: !!closesAt && today > closesAt, notYetOpen: !!opensAt && today < opensAt };
+}
+
 function scopeWrite(user, store, rec, existing) {
     // Coordinators (country OR region bound) may write counters ONLY for the
     // payment receipt keys they need while recording payments. This guard runs
@@ -4884,6 +4898,16 @@ const parsed = JSON.parse(body);
                     // A student may only record a grade that the SERVER scored.
                     // The submitted answers are re-marked here against the answer
                     // key, so a tampered client cannot award itself marks.
+                    // A submitted paper must fall inside its scheduled window.
+                    if (store === 'submissions') {
+                        const target = (db.exams || []).find(e => e && (String(e.id) === String(toStore.quizId) || String(e.id) === String(toStore.examId)))
+                            || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
+                        if (target) {
+                            const w = assessmentWindowServer(target);
+                            if (w.closed) return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + ' and can no longer be submitted.' });
+                            if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAt + '.' });
+                        }
+                    }
                     if (store === 'grades' && user && user.role === 'student') {
                         // The session may not carry studentId, so resolve it from
                         // the users record before comparing.

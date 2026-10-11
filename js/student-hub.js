@@ -376,6 +376,7 @@ function _hubBuildComputed(data, me) {
         });
     } catch {}
     const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today).map(e => (e._hubDripLocked = e.ungated !== true && dripIncompleteCourseIds.has(e.courseId), e));
+    // A paper past its closing date is gone, not merely past.
     const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !missedDroppedIds.has(e.id));
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
     const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
@@ -425,7 +426,11 @@ function _hubBuildComputed(data, me) {
         ...upcomingRegisteredExams.map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '' })),
         ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: _courseName(q.courseId), date: q.dueDate || '' }))
     ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const myUpcomingExams = [...upcomingRegisteredExams, ...upcomingAvailableExams.filter(e => !upcomingRegisteredExams.some(r => String(r.id) === String(e.id)))];
+    const _winOf = a => (typeof assessmentWindow === 'function' ? assessmentWindow(a) : { closesAt: '', closed: false, notYetOpen: false, opensAt: '' });
+    const _stillVisible = e => !_winOf(e).closed;
+    const _openExams = upcomingRegisteredExams.filter(_stillVisible);
+    const _closedExams = upcomingRegisteredExams.filter(e => !_stillVisible(e));
+    const myUpcomingExams = [..._openExams, ...upcomingAvailableExams.filter(e => _stillVisible(e) && !_openExams.some(r => String(r.id) === String(e.id)))];
     return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, myUpcomingExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
 }
 
@@ -1292,7 +1297,10 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
             actionBtn = `<span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:11px;padding:5px 10px;">${passedIcon} ${passed ? 'Passed' : 'Failed'} — ${mySub.score || 0}%</span>`;
             scorePill = `<div style="margin-top:5px;"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="display:inline-block;width:50px;height:5px;background:var(--bg-input);border-radius:3px;overflow:hidden;"><span style="display:block;height:100%;width:${Math.min(mySub.score || 0, 100)}%;background:${passed ? 'var(--success)' : 'var(--danger)'};border-radius:3px;"></span></span><span style="font-weight:600;color:${passed ? 'var(--success)' : 'var(--danger)'};">${mySub.score || 0}%</span></span></div>`;
         } else if (isRegistered) {
-            actionBtn = `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:11px;padding:6px 14px;">${typeIcon} Take Exam</button>`;
+            const _w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : { notYetOpen: false, opensAt: '' });
+            actionBtn = _w.notYetOpen
+                ? `<span class="badge badge-info" style="font-size:10px;padding:4px 8px;">🔒 Opens ${esc(_w.opensAt)}</span>`
+                : `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:11px;padding:6px 14px;">${typeIcon} Take Exam</button>`;
         } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
             actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button><button class="btn btn-outline btn-sm" onclick="hubDropMissedExam('${e.id}','${esc(me.name)}')" style="font-size:11px;border-color:var(--danger);color:var(--danger);padding:5px 10px;">🗑️ Drop</button></div>`;
         } else if (!isRegistered) {

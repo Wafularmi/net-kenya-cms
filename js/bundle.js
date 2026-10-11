@@ -5325,6 +5325,10 @@ async function showExamForm(exam = null) {
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="exam-date" value="${fmt(exam ? exam.date : '')}"></div>
   <div class="form-group"><label>Time</label><input type="text" id="exam-time" value="${fmt(exam ? exam.time : '')}" placeholder="09:00-12:00"></div>
+  <div class="form-row">
+    <div class="form-group"><label>Opens on</label><input type="date" id="exam-opens" value="${fmt(exam ? (exam.opensAt || exam.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked for students before this day.</div></div>
+    <div class="form-group"><label>Disappears on</label><input type="date" id="exam-closes" value="${fmt(exam ? exam.closesAt : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Blank = closes 4 days after the exam date. Type a date to set your own.</div></div>
+  </div>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Venue</label><input type="text" id="exam-venue" value="${fmt(exam ? exam.venue : '')}" placeholder="Hall A"></div>
@@ -5413,7 +5417,10 @@ async function saveExam() {
     // enough to schedule, the venue may follow. Without them the exam is simply
     // "set" and stays out of student view until it is scheduled.
     const scheduled = !!date && !!time;
-    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time, venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time,
+        opensAt: (document.getElementById('exam-opens') || {}).value || date || '',
+        closesAt: (document.getElementById('exam-closes') || {}).value || '',
+        venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('exams', exam); closeModal(); renderExams();
     showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
     logAudit(editId ? 'updated' : 'created', 'exam', exam);
@@ -5779,6 +5786,10 @@ async function startExam(examId) {
     // A published exam stays open until the staff switch it back to Draft, and an
     // open exam has no time limit - the student may sit it whenever they like.
     if (exam.published === false) return showToast('This exam is not open yet.', { type: 'warning' });
+    // Scheduled window: locked before the opening day, gone after the closing day.
+    const _win = assessmentWindow(exam);
+    if (_win.closed) return showToast('⏰ This exam has closed and is no longer available (closed ' + _win.closesAt + ').', { type: 'warning', duration: 6000 });
+    if (_win.notYetOpen) return showToast('🔒 This exam opens on ' + _win.opensAt + '.', { type: 'warning', duration: 6000 });
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId && r.studentId === studentId);
     // An OPEN exam needs no explicit registration: publishing it is the invitation.
     const openExam = !!exam.openWindow;
@@ -15856,6 +15867,37 @@ async function nextQuestionSeq(courseId) {
 }
 // Sort chosen question ids into bank sequence, so a random pick still saves
 // (and later prints) as 1, 2, 3 ... in the order the questions were added.
+// ---- Assessment window (when a paper opens and disappears) --------------
+// A scheduled assessment is locked until its opening date and disappears after
+// its closing date. The default close is 4 days after the exam date; staff can
+// always type their own closing date, and without one the 4-day rule applies.
+const ASSESSMENT_GRACE_DAYS = 4;
+function assessmentWindow(a) {
+    if (!a) return { opensAt: '', closesAt: '', closed: false, notYetOpen: false, graceDays: ASSESSMENT_GRACE_DAYS };
+    const opensAt = a.opensAt || a.date || '';
+    let closesAt = a.closesAt || '';
+    let autoClose = false;
+    if (!closesAt && a.date) {
+        const d = new Date(String(a.date).slice(0, 10) + 'T12:00:00');
+        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS); closesAt = d.toISOString().slice(0, 10); autoClose = true; }
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+        opensAt, closesAt, autoClose, graceDays: ASSESSMENT_GRACE_DAYS,
+        // The whole closing day is still available.
+        closed: !!closesAt && today > closesAt,
+        notYetOpen: !!opensAt && today < opensAt
+    };
+}
+function assessmentWindowText(a) {
+    const w = assessmentWindow(a);
+    if (!w.opensAt && !w.closesAt) return '';
+    const bits = [];
+    if (w.opensAt) bits.push('Opens ' + w.opensAt);
+    if (w.closesAt) bits.push('Disappears after ' + w.closesAt + (w.autoClose ? ' (' + w.graceDays + '-day default)' : ''));
+    return bits.join(' · ');
+}
+
 function orderQuestionIdsByBank(ids, questions) {
     const list = questions || [];
     const rank = new Map();
@@ -15993,13 +16035,13 @@ async function renderQuizExamManager() {
     quizzes.forEach(q => rows.push({
         kind: 'quiz', id: q.id, title: q.title || '(untitled quiz)', courseId: q.courseId,
         type: q.assessmentType || 'quiz', count: (q.questionIds || []).length,
-        date: q.date || '', time: q.time || '', published: q.published !== false,
+        date: q.date || '', time: q.time || '', opensAt: q.opensAt || '', closesAt: q.closesAt || '', published: q.published !== false,
         lessonId: q.lessonId || ''
     }));
     exams.forEach(e => rows.push({
         kind: 'exam', id: e.id, title: e.title || '(untitled exam)', courseId: e.courseId,
         type: e.type || 'exam', count: (e.questionIds || []).length,
-        date: e.date || '', time: e.time || '', published: e.published !== false,
+        date: e.date || '', time: e.time || '', opensAt: e.opensAt || '', closesAt: e.closesAt || '', published: e.published !== false,
         venue: e.venue || ''
     }));
 
@@ -16025,7 +16067,8 @@ async function renderQuizExamManager() {
     body.innerHTML = shown.map(r => {
         const course = courses.find(c => String(c.id) === String(r.courseId));
         const kindLabel = r.kind === 'exam' ? '🎓 Exam' : (String(r.type).toUpperCase() === 'QUIZ' ? '📝 Quiz' : '📚 ' + String(r.type).toUpperCase());
-        const when = r.date ? `${escapeHtml(r.date)}${r.time ? ' · ' + escapeHtml(r.time) : ''}` : '<span style="color:var(--text-muted);">Not scheduled</span>';
+        const _wr = (typeof assessmentWindow === 'function') ? assessmentWindow({ date: r.date, opensAt: r.opensAt, closesAt: r.closesAt }) : {};
+        const when = r.date ? `${escapeHtml(r.date)}${r.time ? ' · ' + escapeHtml(r.time) : ''}${_wr.closesAt ? `<div style="font-size:10px;color:${_wr.closed ? 'var(--danger)' : 'var(--text-muted)'};margin-top:2px;">${_wr.closed ? '⏰ Closed' : 'Disappears'} ${escapeHtml(_wr.closesAt)}${_wr.autoClose ? ' (4-day default)' : ''}</div>` : ''}` : '<span style="color:var(--text-muted);">Not scheduled</span>';
         const past = r.date && r.date < today;
         return `<tr>
             <td><b>${escapeHtml(r.title)}</b>${r.venue ? `<div style="font-size:11px;color:var(--text-muted);">📍 ${escapeHtml(r.venue)}</div>` : ''}</td>
@@ -16259,7 +16302,11 @@ async function showQuizForm(quiz = null) {
     const courses = await dbGetAll('courses');
     const questions = await dbGetAll('questionBank');
     const isEdit = !!quiz;
-    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes <span style="font-weight:400;font-size:10px;color:var(--text-muted);">(after the first attempt)</span></label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-group"><label>Questions from</label><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><select id="quiz-drip-mode" onchange="onQuizDripModeChange()"><option value="course" ${(quiz ? (quiz.dripMode || 'course') : 'course') === 'course' ? 'selected' : ''}>📚 Whole course (any lesson's questions)</option><option value="lesson" ${quiz && quiz.dripMode === 'lesson' ? 'selected' : ''}>🔗 This lesson only (tied to lesson)</option></select><span style="font-size:11px;color:var(--text-muted);">Lesson quizzes are the last step of a lesson: Notes, then every Video, then this Quiz — then the next lesson unlocks.</span></div></div><div class="form-group"><label>Select Questions <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(listed in Question Bank order)</span></label><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;"><input type="number" id="quiz-q-random" min="1" placeholder="e.g. 10" style="width:90px;"><button class="btn btn-outline btn-sm" onclick="quizPickRandom()">🎲 Select <span id="quiz-q-random-count">random</span></button><button class="btn btn-outline btn-sm" onclick="selectNoExamOrQuizChecks('.quiz-q-check')">Clear</button></div><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
+    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes <span style="font-weight:400;font-size:10px;color:var(--text-muted);">(after the first attempt)</span></label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-row">
+    <div class="form-group"><label>Opens on</label><input type="date" id="quiz-opens" value="${fmt(quiz ? (quiz.opensAt || quiz.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked for students before this day.</div></div>
+    <div class="form-group"><label>Disappears on</label><input type="date" id="quiz-closes" value="${fmt(quiz ? quiz.closesAt : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Blank = closes 4 days after the quiz date. Type a date to set your own.</div></div>
+  </div>
+  <div class="form-group"><label>Questions from</label><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><select id="quiz-drip-mode" onchange="onQuizDripModeChange()"><option value="course" ${(quiz ? (quiz.dripMode || 'course') : 'course') === 'course' ? 'selected' : ''}>📚 Whole course (any lesson's questions)</option><option value="lesson" ${quiz && quiz.dripMode === 'lesson' ? 'selected' : ''}>🔗 This lesson only (tied to lesson)</option></select><span style="font-size:11px;color:var(--text-muted);">Lesson quizzes are the last step of a lesson: Notes, then every Video, then this Quiz — then the next lesson unlocks.</span></div></div><div class="form-group"><label>Select Questions <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(listed in Question Bank order)</span></label><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;"><input type="number" id="quiz-q-random" min="1" placeholder="e.g. 10" style="width:90px;"><button class="btn btn-outline btn-sm" onclick="quizPickRandom()">🎲 Select <span id="quiz-q-random-count">random</span></button><button class="btn btn-outline btn-sm" onclick="selectNoExamOrQuizChecks('.quiz-q-check')">Clear</button></div><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
     showModal(isEdit ? 'Edit Quiz' : 'Create Quiz', content, `<button class="btn btn-primary" onclick="saveQuiz()">${isEdit ? 'Update' : 'Create'}</button>`);
     if (quiz) {
         onQuizCourseChange(quiz.lessonId, quiz.questionIds || []);
@@ -16342,6 +16389,7 @@ async function saveQuiz() {
             id, courseId, lessonId: '', title, type: 'final',
             duration: timeLimit || 120, passMark, totalMarks: totalPoints || 100,
             questionIds, date: (prior && prior.date) || '', time: (prior && prior.time) || '',
+            opensAt: (prior && (prior.opensAt || prior.date)) || '', closesAt: (prior && prior.closesAt) || '',
             venue: (prior && prior.venue) || '', invigilatorId: (prior && prior.invigilatorId) || '',
             studyCenterId: (prior && prior.studyCenterId) || '', semester: (prior && prior.semester) || 4,
             published: prior ? prior.published !== false : true,
@@ -16354,7 +16402,10 @@ async function saveQuiz() {
         logAudit(editId ? 'updated' : 'created', 'exam', { id, courseId, questions: questionIds.length });
         return;
     }
-    const quiz = { id, courseId, lessonId: dripMode === 'lesson' ? lessonId : '', dripMode, title, assessmentType, passMark, timeLimit, ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 2, questionIds, createdAt: editId ? ((await dbGet('quizzes', id)) || {}).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const quiz = { id, courseId, lessonId: dripMode === 'lesson' ? lessonId : '', dripMode, title, assessmentType, passMark, timeLimit,
+        date: (document.getElementById('quiz-date') || {}).value || '',
+        opensAt: (document.getElementById('quiz-opens') || {}).value || '',
+        closesAt: (document.getElementById('quiz-closes') || {}).value || '', ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 2, questionIds, createdAt: editId ? ((await dbGet('quizzes', id)) || {}).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('quizzes', quiz); closeModal(); renderQuizzes(); showToast(editId ? 'Assessment updated!' : `Assessment created with ${questionIds.length} questions!`); logAudit(editId ? 'updated' : 'created', 'quiz', { id, courseId, questions: questionIds.length });
 }
 async function editQuiz(id) {
@@ -17015,6 +17066,12 @@ async function runAutoGen() {
     logAudit('created', 'autogen-set', { courseId, batch, made: summary });
 }
 async function startQuiz(quizId, opts) {
+    const _q0 = await dbGet('quizzes', quizId);
+    if (_q0) {
+        const _w = assessmentWindow(_q0);
+        if (_w.closed) return showToast('⏰ This quiz closed on ' + _w.closesAt + ' and is no longer available.', { type: 'warning', duration: 6000 });
+        if (_w.notYetOpen) return showToast('🔒 This quiz opens on ' + _w.opensAt + '.', { type: 'warning', duration: 6000 });
+    }
     let quiz = null;
     try {
     quiz = await dbGet('quizzes', quizId);
