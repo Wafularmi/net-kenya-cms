@@ -5326,7 +5326,7 @@ async function showExamForm(exam = null) {
   <div class="form-group"><label>Date</label><input type="date" id="exam-date" value="${fmt(exam ? exam.date : '')}"></div>
   <div class="form-group"><label>Time</label><input type="text" id="exam-time" value="${fmt(exam ? exam.time : '')}" placeholder="09:00-12:00"></div>
   <div class="form-row">
-    <div class="form-group"><label>Opens on</label><input type="date" id="exam-opens" value="${fmt(exam ? (exam.opensAt || exam.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked for students before this day.</div></div>
+    <div class="form-group"><label>Opens on</label><input type="date" id="exam-opens" value="${fmt(exam ? (exam.opensAt || exam.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked before this day. The Time field sets the earliest start.</div></div>
     <div class="form-group"><label>Disappears on</label><input type="date" id="exam-closes" value="${fmt(exam ? exam.closesAt : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Blank = closes 4 days after the exam date. Type a date to set your own.</div></div>
   </div>
 </div>
@@ -5788,8 +5788,8 @@ async function startExam(examId) {
     if (exam.published === false) return showToast('This exam is not open yet.', { type: 'warning' });
     // Scheduled window: locked before the opening day, gone after the closing day.
     const _win = assessmentWindow(exam);
-    if (_win.closed) return showToast('⏰ This exam has closed and is no longer available (closed ' + _win.closesAt + ').', { type: 'warning', duration: 6000 });
-    if (_win.notYetOpen) return showToast('🔒 This exam opens on ' + _win.opensAt + '.', { type: 'warning', duration: 6000 });
+    if (_win.closed) return showToast('⏰ This exam closed on ' + _win.closesAt + (_win.closesAtISO ? ' at ' + _win.closesAtISO.slice(11, 16) : '') + ' and is no longer available.', { type: 'warning', duration: 6000 });
+    if (_win.notYetOpen) return showToast('🔒 This exam opens on ' + _win.opensAt + (_win.startTime ? ' at ' + _win.startTime : '') + '.', { type: 'warning', duration: 6000 });
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId && r.studentId === studentId);
     // An OPEN exam needs no explicit registration: publishing it is the invitation.
     const openExam = !!exam.openWindow;
@@ -15868,33 +15868,69 @@ async function nextQuestionSeq(courseId) {
 // Sort chosen question ids into bank sequence, so a random pick still saves
 // (and later prints) as 1, 2, 3 ... in the order the questions were added.
 // ---- Assessment window (when a paper opens and disappears) --------------
-// A scheduled assessment is locked until its opening date and disappears after
-// its closing date. The default close is 4 days after the exam date; staff can
-// always type their own closing date, and without one the 4-day rule applies.
+// Rules, in priority order:
+//   1. "Disappears on" (the manual close date) always wins.
+//   2. Otherwise an end time in the Time field (e.g. 09:00-12:00) closes the
+//      paper at that time on the exam day.
+//   3. Otherwise the default 4-day window closes it 4 days after the date.
+// The Time field also sets the START: nobody begins before it on that day.
 const ASSESSMENT_GRACE_DAYS = 4;
-function assessmentWindow(a) {
-    if (!a) return { opensAt: '', closesAt: '', closed: false, notYetOpen: false, graceDays: ASSESSMENT_GRACE_DAYS };
-    const opensAt = a.opensAt || a.date || '';
-    let closesAt = a.closesAt || '';
-    let autoClose = false;
-    if (!closesAt && a.date) {
-        const d = new Date(String(a.date).slice(0, 10) + 'T12:00:00');
-        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS); closesAt = d.toISOString().slice(0, 10); autoClose = true; }
+function assessmentTimeParts(time) {
+    const raw = String(time || '').trim();
+    if (!raw) return { start: '', end: '' };
+    const range = raw.match(/(\d{1,2}):(\d{2})\s*(?:-|\u2013|to|\u2014)\s*(\d{1,2}):(\d{2})/i);
+    if (range) {
+        const pad = n => String(n).padStart(2, '0');
+        return { start: pad(range[1]) + ':' + pad(range[2]), end: pad(range[3]) + ':' + pad(range[4]) };
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const single = raw.match(/(\d{1,2}):(\d{2})/);
+    if (single) { const p = String(single[1]).padStart(2, '0') + ':' + String(single[2]).padStart(2, '0'); return { start: p, end: '' }; }
+    return { start: '', end: '' };
+}
+function assessmentWindow(a) {
+    const now = new Date();
+    if (!a) return { opensAt: '', opensAtISO: '', closesAt: '', closesAtISO: '', closed: false, notYetOpen: false, autoClose: false, closeReason: '', graceDays: ASSESSMENT_GRACE_DAYS, startTime: '', endTime: '' };
+    const t = assessmentTimeParts(a.time);
+    const baseDay = String(a.opensAt || a.date || '').slice(0, 10);
+    let opensAt = a.opensAt || a.date || '';
+    let opensAtISO = '';
+    if (baseDay) {
+        opensAtISO = baseDay + 'T' + (t.start || '00:00') + ':00';
+        if (!opensAt) opensAt = baseDay;
+    }
+    let closesAt = a.closesAt || '';
+    let closesAtISO = '';
+    let autoClose = false;
+    let closeReason = '';
+    if (closesAt) {
+        closesAtISO = String(closesAt).slice(0, 10) + 'T23:59:59';
+        closeReason = 'manual';
+    } else if (baseDay && t.end) {
+        closesAtISO = baseDay + 'T' + t.end + ':00';
+        closesAt = baseDay;
+        closeReason = 'time';
+    } else if (baseDay) {
+        const d = new Date(baseDay + 'T12:00:00');
+        if (!isNaN(d.getTime())) {
+            d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS);
+            closesAt = d.toISOString().slice(0, 10);
+            closesAtISO = closesAt + 'T23:59:59';
+            autoClose = true;
+            closeReason = 'default';
+        }
+    }
     return {
-        opensAt, closesAt, autoClose, graceDays: ASSESSMENT_GRACE_DAYS,
-        // The whole closing day is still available.
-        closed: !!closesAt && today > closesAt,
-        notYetOpen: !!opensAt && today < opensAt
+        opensAt, opensAtISO, closesAt, closesAtISO, autoClose, closeReason,
+        graceDays: ASSESSMENT_GRACE_DAYS, startTime: t.start, endTime: t.end,
+        closed: !!closesAtISO && now > new Date(closesAtISO),
+        notYetOpen: !!opensAtISO && now < new Date(opensAtISO)
     };
 }
 function assessmentWindowText(a) {
     const w = assessmentWindow(a);
-    if (!w.opensAt && !w.closesAt) return '';
     const bits = [];
-    if (w.opensAt) bits.push('Opens ' + w.opensAt);
-    if (w.closesAt) bits.push('Disappears after ' + w.closesAt + (w.autoClose ? ' (' + w.graceDays + '-day default)' : ''));
+    if (w.opensAt) bits.push('Opens ' + w.opensAt + (w.startTime ? ' at ' + w.startTime : ''));
+    if (w.closesAt) bits.push('Disappears ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + (w.closeReason === 'default' ? ' (4-day default)' : w.closeReason === 'time' ? ' (end time)' : w.closeReason === 'manual' ? ' (your date)' : ''));
     return bits.join(' · ');
 }
 
@@ -16068,7 +16104,7 @@ async function renderQuizExamManager() {
         const course = courses.find(c => String(c.id) === String(r.courseId));
         const kindLabel = r.kind === 'exam' ? '🎓 Exam' : (String(r.type).toUpperCase() === 'QUIZ' ? '📝 Quiz' : '📚 ' + String(r.type).toUpperCase());
         const _wr = (typeof assessmentWindow === 'function') ? assessmentWindow({ date: r.date, opensAt: r.opensAt, closesAt: r.closesAt }) : {};
-        const when = r.date ? `${escapeHtml(r.date)}${r.time ? ' · ' + escapeHtml(r.time) : ''}${_wr.closesAt ? `<div style="font-size:10px;color:${_wr.closed ? 'var(--danger)' : 'var(--text-muted)'};margin-top:2px;">${_wr.closed ? '⏰ Closed' : 'Disappears'} ${escapeHtml(_wr.closesAt)}${_wr.autoClose ? ' (4-day default)' : ''}</div>` : ''}` : '<span style="color:var(--text-muted);">Not scheduled</span>';
+        const when = r.date ? `${escapeHtml(r.date)}${r.time ? ' · ' + escapeHtml(r.time) : ''}${_wr.opensAtISO || _wr.closesAt ? `<div style="font-size:10px;color:${_wr.closed ? 'var(--danger)' : 'var(--text-muted)'};margin-top:2px;">${_wr.closed ? '⏰ Closed' : 'Window'} ${escapeHtml(String(_wr.opensAtISO || _wr.closesAtISO).replace('T', ' ').slice(0, 16))} → ${escapeHtml(String(_wr.closesAtISO || '').replace('T', ' ').slice(0, 16))}${_wr.autoClose ? ' (4-day default)' : _wr.closeReason === 'manual' ? ' (your date)' : ''}</div>` : ''}` : '<span style="color:var(--text-muted);">Not scheduled</span>';
         const past = r.date && r.date < today;
         return `<tr>
             <td><b>${escapeHtml(r.title)}</b>${r.venue ? `<div style="font-size:11px;color:var(--text-muted);">📍 ${escapeHtml(r.venue)}</div>` : ''}</td>
@@ -16303,7 +16339,7 @@ async function showQuizForm(quiz = null) {
     const questions = await dbGetAll('questionBank');
     const isEdit = !!quiz;
     const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes <span style="font-weight:400;font-size:10px;color:var(--text-muted);">(after the first attempt)</span></label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-row">
-    <div class="form-group"><label>Opens on</label><input type="date" id="quiz-opens" value="${fmt(quiz ? (quiz.opensAt || quiz.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked for students before this day.</div></div>
+    <div class="form-group"><label>Opens on</label><input type="date" id="quiz-opens" value="${fmt(quiz ? (quiz.opensAt || quiz.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked before this day. The Time field sets the earliest start.</div></div>
     <div class="form-group"><label>Disappears on</label><input type="date" id="quiz-closes" value="${fmt(quiz ? quiz.closesAt : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Blank = closes 4 days after the quiz date. Type a date to set your own.</div></div>
   </div>
   <div class="form-group"><label>Questions from</label><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><select id="quiz-drip-mode" onchange="onQuizDripModeChange()"><option value="course" ${(quiz ? (quiz.dripMode || 'course') : 'course') === 'course' ? 'selected' : ''}>📚 Whole course (any lesson's questions)</option><option value="lesson" ${quiz && quiz.dripMode === 'lesson' ? 'selected' : ''}>🔗 This lesson only (tied to lesson)</option></select><span style="font-size:11px;color:var(--text-muted);">Lesson quizzes are the last step of a lesson: Notes, then every Video, then this Quiz — then the next lesson unlocks.</span></div></div><div class="form-group"><label>Select Questions <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(listed in Question Bank order)</span></label><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;"><input type="number" id="quiz-q-random" min="1" placeholder="e.g. 10" style="width:90px;"><button class="btn btn-outline btn-sm" onclick="quizPickRandom()">🎲 Select <span id="quiz-q-random-count">random</span></button><button class="btn btn-outline btn-sm" onclick="selectNoExamOrQuizChecks('.quiz-q-check')">Clear</button></div><div id="quiz-question-list" style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:6px;"></div></div><div style="margin-top:8px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>Selected: <span id="quiz-q-count">0</span> questions</span><span>Total: <span id="quiz-total-points">0</span> points</span></div>`;
@@ -17069,8 +17105,8 @@ async function startQuiz(quizId, opts) {
     const _q0 = await dbGet('quizzes', quizId);
     if (_q0) {
         const _w = assessmentWindow(_q0);
-        if (_w.closed) return showToast('⏰ This quiz closed on ' + _w.closesAt + ' and is no longer available.', { type: 'warning', duration: 6000 });
-        if (_w.notYetOpen) return showToast('🔒 This quiz opens on ' + _w.opensAt + '.', { type: 'warning', duration: 6000 });
+        if (_w.closed) return showToast('⏰ This quiz closed on ' + _w.closesAt + (_w.closesAtISO ? ' at ' + _w.closesAtISO.slice(11, 16) : '') + ' and is no longer available.', { type: 'warning', duration: 6000 });
+        if (_w.notYetOpen) return showToast('🔒 This quiz opens on ' + _w.opensAt + (_w.startTime ? ' at ' + _w.startTime : '') + '.', { type: 'warning', duration: 6000 });
     }
     let quiz = null;
     try {

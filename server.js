@@ -1122,16 +1122,40 @@ function gradeBandForScore(score) {
 
 // ---- Assessment window (server authority) ------------------------------
 const ASSESSMENT_GRACE_DAYS = 4;
-function assessmentWindowServer(a) {
-    if (!a) return { opensAt: '', closesAt: '', closed: false, notYetOpen: false };
-    const opensAt = a.opensAt || a.date || '';
-    let closesAt = a.closesAt || '';
-    if (!closesAt && a.date) {
-        const d = new Date(String(a.date).slice(0, 10) + 'T12:00:00');
-        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS); closesAt = d.toISOString().slice(0, 10); }
+function assessmentTimePartsServer(time) {
+    const raw = String(time || '').trim();
+    if (!raw) return { start: '', end: '' };
+    const range = raw.match(/(\d{1,2}):(\d{2})\s*(?:-|\u2013|to|\u2014)\s*(\d{1,2}):(\d{2})/i);
+    if (range) {
+        const pad = n => String(n).padStart(2, '0');
+        return { start: pad(range[1]) + ':' + pad(range[2]), end: pad(range[3]) + ':' + pad(range[4]) };
     }
-    const today = new Date().toISOString().slice(0, 10);
-    return { opensAt, closesAt, closed: !!closesAt && today > closesAt, notYetOpen: !!opensAt && today < opensAt };
+    const single = raw.match(/(\d{1,2}):(\d{2})/);
+    if (single) { const p = String(single[1]).padStart(2, '0') + ':' + String(single[2]).padStart(2, '0'); return { start: p, end: '' }; }
+    return { start: '', end: '' };
+}
+// Manual close date wins; then the end time in the Time field; then the
+// 4-day default. The Time field also sets the earliest start of the day.
+function assessmentWindowServer(a) {
+    const now = new Date();
+    if (!a) return { opensAtISO: '', closesAtISO: '', closesAt: '', closed: false, notYetOpen: false };
+    const t = assessmentTimePartsServer(a.time);
+    const baseDay = String(a.opensAt || a.date || '').slice(0, 10);
+    let opensAtISO = '';
+    if (baseDay) opensAtISO = baseDay + 'T' + (t.start || '00:00') + ':00';
+    let closesAt = a.closesAt || '';
+    let closesAtISO = '';
+    if (closesAt) closesAtISO = String(closesAt).slice(0, 10) + 'T23:59:59';
+    else if (baseDay && t.end) { closesAtISO = baseDay + 'T' + t.end + ':00'; closesAt = baseDay; }
+    else if (baseDay) {
+        const d = new Date(baseDay + 'T12:00:00');
+        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS); closesAt = d.toISOString().slice(0, 10); closesAtISO = closesAt + 'T23:59:59'; }
+    }
+    return {
+        opensAtISO, closesAtISO, closesAt,
+        closed: !!closesAtISO && now > new Date(closesAtISO),
+        notYetOpen: !!opensAtISO && now < new Date(opensAtISO)
+    };
 }
 
 function scopeWrite(user, store, rec, existing) {
@@ -4904,8 +4928,8 @@ const parsed = JSON.parse(body);
                             || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
                         if (target) {
                             const w = assessmentWindowServer(target);
-                            if (w.closed) return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + ' and can no longer be submitted.' });
-                            if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAt + '.' });
+                            if (w.closed) return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + ' and can no longer be submitted.' });
+                            if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAtISO.replace('T', ' at ').slice(0, 16) + '.' });
                         }
                     }
                     if (store === 'grades' && user && user.role === 'student') {

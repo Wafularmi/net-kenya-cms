@@ -1299,7 +1299,7 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
         } else if (isRegistered) {
             const _w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : { notYetOpen: false, opensAt: '' });
             actionBtn = _w.notYetOpen
-                ? `<span class="badge badge-info" style="font-size:10px;padding:4px 8px;">🔒 Opens ${esc(_w.opensAt)}</span>`
+                ? `<span class="badge badge-info" style="font-size:10px;padding:4px 8px;">🔒 Opens ${esc(_w.opensAt)}${_w.startTime ? ' at ' + esc(_w.startTime) : ''}</span>`
                 : `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:11px;padding:6px 14px;">${typeIcon} Take Exam</button>`;
         } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
             actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button><button class="btn btn-outline btn-sm" onclick="hubDropMissedExam('${e.id}','${esc(me.name)}')" style="font-size:11px;border-color:var(--danger);color:var(--danger);padding:5px 10px;">🗑️ Drop</button></div>`;
