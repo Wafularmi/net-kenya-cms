@@ -461,16 +461,25 @@ function hubDripPaceLabel(course) {
 // Parts of the SAME lesson unit (title prefix "Lesson N") unlock back-to-back
 // instantly; the pause sits BETWEEN lesson units only.
 function hubDripGroupKey(l) {
+    // Same tolerance as the server: a hand-typed typo in a lesson title must
+    // not split a lesson from its VIDEO parts (which would gate the video
+    // behind the multi-day course pace).
     try {
-        const m = /^Lesson\s+(\d+)/i.exec(String((l && l.title) || '').trim());
-        if (m) return 'L' + parseInt(m[1], 10);
-    } catch (e) {}
-    return 'T' + String((l && l.id) || '');
+        const raw = String((l && l.title) || '').trim();
+        const m = /^le[a-z]*son\s*(\d+)/i.exec(raw) || /(\d+)/.exec(raw);
+        if (m) return 'lesson' + Number(m[1]);
+        return raw.toLowerCase();
+    } catch (e) { return 'T' + String((l && l.id) || ''); }
 }
 function hubDripSameUnit(a, b) {
     return hubDripGroupKey(a) === hubDripGroupKey(b);
 }
 function hubLessonDripState(l, dripIndex) {
+    // Already finished = never locked, whatever the chain says.
+    try {
+        const _cc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[l.id] : null;
+        if (_cc && _cc.completedAt) return { state: 'done', reason: 'completed' };
+    } catch (e) {}
     if (typeof lessonMode !== 'function' || lessonMode(l) !== 'drip') return null;
     const u = (typeof _dripU !== 'undefined' && _dripU) ? _dripU[l.id] : null;
     const cc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[l.id] : null;
@@ -2343,9 +2352,10 @@ function hubVideoStates(lesson, comp) {
     list.forEach(v => {
         const trackable = hubTrackableVideo(v.url);
         const p = progress[v.id] || {};
-        const dur = Number(p.durationSecs) || 0;
-        const seen = Number(p.secs) || 0;
-        const done = !trackable ? true : (!!p.doneAt || (dur > 0 && seen > 0 && seen >= dur * 0.9));
+        const legacy = (v.id === 'V1') || Object.keys(progress).length === 0;
+        const dur = Number(p.durationSecs) || (legacy ? Number(comp && comp.videoDurationSecs) || 0 : 0);
+        const seen = Number(p.secs) || (legacy ? Number(comp && comp.videoSecs) || 0 : 0);
+        const done = !trackable ? true : (!!p.doneAt || !!(legacy && comp && comp.videoDoneAt) || (dur > 0 && seen > 0 && seen >= dur * 0.9));
         states.push({ id: v.id, title: v.title, url: v.url, index: v.index, done, trackable, pct: dur > 0 ? Math.min(100, Math.round((seen / dur) * 100)) : (done ? 100 : 0), state: done ? 'done' : (prevDone ? 'open' : 'locked') });
         prevDone = done;
     });

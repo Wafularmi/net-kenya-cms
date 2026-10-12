@@ -61,11 +61,14 @@ function dripPaceMs(course) {
 // the course pace gap only applies between UNITS (Lesson 1 -> Lesson 2).
 // Lessons without a "Lesson N" prefix are each their own unit (unchanged).
 function dripGroupOfLesson(l) {
-    try {
-        const m = /^Lesson\s+(\d+)/i.exec(String((l && l.title) || '').trim());
-        if (m) return 'L' + parseInt(m[1], 10);
-    } catch (e) {}
-    return 'T' + String((l && l.id) || '');
+    // A lesson and its VIDEO parts must stay in the same unit so the video
+    // unlocks instantly after the notes. Titles are typed by hand, so accept
+    // common misspellings ("Leeson 4 - VIDEO 1") instead of silently splitting
+    // the unit and applying the multi-day course pace between them.
+    const raw = String((l && l.title) || '').trim();
+    const m = /^le[a-z]*son\s*(\d+)/i.exec(raw) || /(\d+)/.exec(raw);
+    if (!m) return raw.toLowerCase();
+    return 'lesson' + Number(m[1]);
 }
 function dripSameLessonUnit(a, b) {
     return dripGroupOfLesson(a) === dripGroupOfLesson(b);
