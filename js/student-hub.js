@@ -2611,15 +2611,35 @@ async function viewHubLessonNote(lessonId, courseId) {
         const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         const data2 = await loadStudentHubData();
         const me = (data2.students || []).find(s => s.id === currentUser.studentId || s.id === currentUser.username || s.email === currentUser.username || s.phone === currentUser.username);
-        let dripReqSecs = 480, dripStartSecs = 0, dripReadDone = false;
+        let dripReqSecs = 480, dripStartSecs = 0, dripReadDone = false, dripStateKnown = false;
         try { dripReqSecs = (typeof dripRequiredSecs === 'function') ? dripRequiredSecs(lesson, note) : 480; } catch { dripReqSecs = 480; }
         if (me) {
             // Reading is timed and recorded server-side for EVERY lesson, not only
-            // sequenced ones — this is the signal that feeds course coverage.
+            // sequenced ones - this is the signal that feeds course coverage.
             if (typeof loadDripMaps === 'function') {
-                try { await loadDripMaps(me.id); } catch {}
-                try { const dc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[lessonId] : null; dripStartSecs = (dc && dc.readSecs) || 0; dripReadDone = dripStartSecs >= dripReqSecs; } catch {}
+                // Force a fresh read: a cached map could still show reading as
+                // unfinished after the student has already finished it.
+                try { await loadDripMaps(me.id, true); dripStateKnown = true; } catch (e) { dripStateKnown = false; }
             }
+            // Ask the server to re-evaluate THIS lesson so the reading signal (and
+            // therefore the video unlock) is authoritative, not cached.
+            try {
+                if (typeof evalLessonCompletion === 'function' && typeof lessonMode === 'function' && lessonMode(lesson) === 'drip') {
+                    const _c = await evalLessonCompletion(me.id, lesson, { silent: true });
+                    if (_c) dripStateKnown = true;
+                }
+            } catch (e) {}
+            try {
+                const dc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[lessonId] : null;
+                dripStartSecs = (dc && dc.readSecs) || 0;
+                dripReadDone = dripStartSecs >= dripReqSecs;
+            } catch {}
+            // Reading is complete either when the timer is met OR the server
+            // already stamped this lesson's notes as read.
+            try {
+                const _dc2 = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[lessonId] : null;
+                if (_dc2 && _dc2.readDoneAt) dripReadDone = true;
+            } catch {}
             if (!dripReadDone) {
                 // Device-local marker, used only as the pre-existing "read before
                 // video" gate for non-sequenced lessons.
@@ -2638,7 +2658,7 @@ async function viewHubLessonNote(lessonId, courseId) {
         // Ordered videos: only the first unfinished one gets a player.
         let videoHtml = hubLessonVideosHtml(lesson, _comp, { student: _isStudentHub });
         if (!hubLessonVideos(lesson).length && _videoSrcHub) videoHtml = `<div style="max-width:720px;margin:0 auto 20px;" id="drip-video-slot">${embedVideo(_videoSrcHub, { track: _isStudentHub })}</div>`;
-        if (_videoSrcHub && hubLessonVideos(lesson).length && dripMode && !dripReadDone) videoHtml = `<div id="drip-video-slot" style="max-width:720px;margin:0 auto 20px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video — keep these notes open for the required reading time.</div></div>`;
+        if (_videoSrcHub && hubLessonVideos(lesson).length && dripMode && !dripReadDone && dripStateKnown) videoHtml = `<div id="drip-video-slot" style="max-width:720px;margin:0 auto 20px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video — keep these notes open for the required reading time.</div></div>`;
         const quizAlertHtml = _isStudentHub && dripMode ? hubLessonQuizAlertHtml(lesson, _comp, data) : '';
         const html = `
             <div style="max-width:760px;margin:0 auto;">
