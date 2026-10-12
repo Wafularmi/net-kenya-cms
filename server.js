@@ -4929,7 +4929,7 @@ const parsed = JSON.parse(body);
                         if (target) {
                             const w = assessmentWindowServer(target);
                             if (w.closed) return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + ' and can no longer be submitted.' });
-                            if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAtISO.replace('T', ' at ').slice(0, 16) + '.' });
+                            if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAtISO.slice(0, 10) + ' at ' + w.opensAtISO.slice(11, 16) + '.' });
                         }
                     }
                     if (store === 'grades' && user && user.role === 'student') {
