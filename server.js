@@ -4372,7 +4372,15 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                         // tolerance for player rounding) so a looping embed cannot
                         // bank unlimited credit.
                         const ceiling = dur > 0 ? dur * 1.25 : 86400;
-                        E.dripRecordVideoProgress(comp, target.id, Math.min((comp.videoSecs || 0) + add, ceiling), dur);
+                        // Credit accumulates: take the seconds already banked for
+                        // THIS video, add the forward playback reported by the
+                        // player, then cap at the real duration.
+                        const banked = (comp.videoProgress && comp.videoProgress[target.id] && Number(comp.videoProgress[target.id].secs)) || (target.id === 'V1' ? Number(comp.videoSecs) || 0 : 0);
+                        const total = Math.min(banked + add, ceiling);
+                        E.dripRecordVideoProgress(comp, target.id, total, dur);
+                        // Keep the legacy lesson-level fields in step so older
+                        // screens keep reporting the same progress.
+                        if (target.id === 'V1') comp.videoSecs = total;
                     }
                     if (dur > 0) comp.videoDurationSecs = dur;
                     const evaled = E.dripEvalCompletion(db, sid, lesson);
