@@ -726,15 +726,6 @@ function countWorkingDays(startDate, endDate) {
     }
     return count;
 }
-function timeAgo(dateStr) {
-    const now = Date.now();
-    const date = new Date(dateStr).getTime();
-    const diff = now - date;
-    if (diff < 60000) return 'Just now';
-    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-    return Math.floor(diff / 86400000) + 'd ago';
-}
 function resolveRefMaps() {
     if (window.__centerMap && window.__regionMap) return;
     if (!window.__centerMap) window.__centerMap = {};
@@ -8183,11 +8174,6 @@ async function loadChapelAttendance() {
     html += `<div style="margin-top:16px;text-align:right;"><button class="btn btn-primary" onclick="saveChapelAttendance('${date}','${service}')">Save Chapel Attendance</button></div>`;
     document.getElementById('chapel-sheet').innerHTML = html;
 }
-function selectAttendance(label) {
-    const parent = label.closest('.attendance-radio');
-    parent.querySelectorAll('label').forEach(l => l.classList.remove('selected'));
-    label.classList.add('selected');
-}
 async function saveChapelAttendance(date, service) {
     const students = (await dbGetAll('students')).filter(s => s.status === 'active');
     let saved = 0;
@@ -13753,11 +13739,6 @@ async function quickWhatsAppStudent(studentId, templateId) {
     showToast(`Message sent to ${student.name}`);
     renderWhatsAppLog();
 }
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
 async function showTemplateForm() {
     const content = `<div class="form-group"><label>Template Name *</label><input type="text" id="tpl-name" placeholder="e.g., Fee Reminder"></div><div class="form-group"><label>Category</label><select id="tpl-category"><option value="finance">💰 Finance</option><option value="academic">📚 Academic</option><option value="general">📢 General</option></select></div><div class="form-group"><label>Message *</label><textarea id="tpl-message" rows="5"></textarea></div><p style="font-size:11px;color:var(--text-muted);">Variables: {{name}}, {{admission}}, {{program}}, {{center}}, {{centerCode}}, {{region}}, {{school}}, {{balance}}, {{fee}}, {{phone}}, {{login}}, {{email}}, {{year}}, {{requested}}, {{portal}}</p>`;
     showModal('Add Template', content, `<button class="btn btn-primary" onclick="saveTemplate()">Save</button>`);
@@ -18384,45 +18365,6 @@ async function deleteNote(id) {
     if (!await showConfirm('Confirm', 'Delete this note?')) return;
     await dbDelete('notes', id); renderNotes(); showToast('Note deleted'); logAudit('deleted', 'note', { id });
 }
-async function renderPortalNotes(studentId) {
-    if (portalDataCache) {
-        renderPortalNotesCached(studentId, portalDataCache);
-        return;
-    }
-    const notes = await dbGetAll('notes');
-    const lessons = await dbGetAll('lessons');
-    const files = await dbGetAll('lessonFiles');
-    const courses = await dbGetAll('courses');
-    const publishedLessonIds = lessons.filter(lessonVisible).map(l => l.id);
-    const filtered = notes.filter(n => n.courseId && n.lessonId && publishedLessonIds.includes(n.lessonId));
-    const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦' };
-    let html = '';
-    const groupedByLesson = {};
-    filtered.forEach(n => {
-        if (!n.lessonId) return;
-        if (!groupedByLesson[n.lessonId]) groupedByLesson[n.lessonId] = { lesson: lessons.find(l => l.id === n.lessonId), course: courses.find(c => c.id === n.courseId), notes: [], files: [] };
-        groupedByLesson[n.lessonId].notes.push(n);
-    });
-    files.forEach(f => {
-        if (f.lessonId && publishedLessonIds.includes(f.lessonId) && groupedByLesson[f.lessonId]) {
-            groupedByLesson[f.lessonId].files.push(f);
-        }
-    });
-    Object.values(groupedByLesson).forEach(g => {
-        html += `<div style="margin-bottom:10px;"><b style="font-size:12px;">${g.lesson ? g.lesson.title : 'Unknown'}</b><br><span style="font-size:10px;color:var(--text-muted);">${g.course ? g.course.name : ''}</span>`;
-        g.notes.forEach(n => {
-            html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;"><span>${n.title}</span><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="viewNote('${n.id}')">Read</button><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadNote('${n.id}')">⬇</button></div></div>`;
-        });
-        g.files.forEach(f => {
-            const ext = f.fileName.split('.').pop().toLowerCase();
-            const icon = fileIcons[ext] || '📎';
-            html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;"><span>${icon} ${f.fileName}</span><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadLessonFile('${f.id}')">⬇</button></div>`;
-        });
-        html += '</div>';
-    });
-    const portal = document.getElementById('portal-notes');
-    if (portal) portal.innerHTML = html || '<div style="color:var(--text-muted);text-align:center;padding:20px;">No lesson resources available yet — your instructor hasn\'t published any lessons</div>';
-}
 async function renderNotes() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (currentUser.role === 'student') return;
@@ -18556,11 +18498,6 @@ function filterPortalStudents(query) {
     });
     dropdown.innerHTML = sorted.map(s => `<div class="smart-search-item" onmousedown="selectPortalStudent('${s.id}')"><div class="search-item-label">Student</div><div class="search-item-text">${highlightMatch(s.name, query)}</div><div class="search-item-sub">${s.admissionNumber || s.id}${s.program ? ' — ' + s.program : ''}</div></div>`).join('') || '<div class="smart-search-empty">No students found</div>';
     dropdown.classList.add('active');
-}
-function highlightMatch(text, query) {
-    if (!query) return text;
-    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return text.replace(regex, '<mark style="background:var(--accent);color:var(--bg);padding:0 2px;border-radius:2px;">$1</mark>');
 }
 async function selectPortalStudent(studentId) {
     const data = await loadPortalData();
@@ -20684,9 +20621,6 @@ function deleteManual(id) {
             });
         });
     });
-}
-function initManuals() {
-    renderManuals();
 }
 async function loadBranding() {
     const settings = await dbGet('settings', 'branding');
