@@ -5972,7 +5972,6 @@ async function renderFinance() {
     const regionalStudentIds = new Set(students.map(s => s.id));
     const scopeCountry = scopeV.country || '';
     const payments = batch.payments.filter(p => {
-        if (!isTuitionPayment(p)) return false;
         if (regionalStudentIds.has(p.studentId)) return true;
         if (scopeCountry && p.country && p.country === scopeCountry) return true;
         if (!scopeCountry && !p.country) return true;
@@ -5981,19 +5980,22 @@ async function renderFinance() {
     const income = batch.income, expenses = batch.expenses;
     const today = new Date().toISOString().split('T')[0];
     const month = today.substring(0, 7);
-    const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
-    const todayPaid = payments.filter(p => p.date === today).reduce((s, p) => s + p.amount, 0);
-    const monthPaid = payments.filter(p => p.date >= month).reduce((s, p) => s + p.amount, 0);
+    const tuitionPayments = payments.filter(isTuitionPayment);
+    const graduationPayments = payments.filter(p => p.account === 'graduation');
+    const gradTotal = graduationPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const totalPaid = tuitionPayments.reduce((s, p) => s + p.amount, 0);
+    const todayPaid = tuitionPayments.filter(p => p.date === today).reduce((s, p) => s + p.amount, 0);
+    const monthPaid = tuitionPayments.filter(p => p.date >= month).reduce((s, p) => s + p.amount, 0);
     const totalOtherIncome = income.reduce((s, i) => s + i.amount, 0);
     const monthOtherIncome = income.filter(i => i.date >= month).reduce((s, i) => s + i.amount, 0);
     const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
     const monthExpenses = expenses.filter(e => e.date >= month).reduce((s, e) => s + e.amount, 0);
-    const totalIncome = totalPaid + totalOtherIncome;
+    const totalIncome = totalPaid + gradTotal + totalOtherIncome;
     const netBalance = totalIncome - totalExpenses;
     const monthNet = (monthPaid + monthOtherIncome) - monthExpenses;
     const totalFees = students.reduce((s, st) => s + getCachedStudentFee(st), 0);
     const outstanding = totalFees - totalPaid;
-    const gradCollected = batch.payments.filter(p => p.account === 'graduation' && regionalStudentIds.has(p.studentId)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const gradCollected = gradTotal;
     const gradDue = students.reduce((s, st) => s + getGraduationFee(st), 0);
     const gradOut = Math.max(0, gradDue - gradCollected);
     document.getElementById('finance-stats').innerHTML = `
@@ -6024,7 +6026,8 @@ async function renderFinance() {
     document.getElementById('payments-body').innerHTML = payments.map(p => {
         const student = students.find(s => s.id === p.studentId);
         const studentName = student ? escapeHtml(student.name) : escapeHtml(p.studentId);
-        return `<tr><td><b>${escapeHtml(p.receiptNo)}</b></td><td>${formatDate(p.date)}</td><td>${studentName}</td><td style="font-weight:700;color:var(--success);">${formatCurrency(p.amount)}</td><td><span class="badge badge-info">${escapeHtml(p.method)}</span></td><td><button class="btn btn-outline btn-sm" onclick="editPayment('${p.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="printA6Receipt('${p.id}')">A6</button> <button class="btn btn-outline btn-sm" onclick="printThermalReceipt('${p.id}')">58mm</button> <button class="btn btn-outline btn-sm" onclick="deletePayment('${p.id}')">Del</button></td></tr>`;
+        const isGrad = p.account === 'graduation';
+        return `<tr${isGrad ? ' style="background:rgba(16,185,129,0.06);"' : ''}><td><b>${escapeHtml(p.receiptNo)}</b>${isGrad ? ' <span class="badge badge-success" style="font-size:9px;">🎓 Graduation</span>' : ''}</td><td>${formatDate(p.date)}</td><td>${studentName}</td><td style="font-weight:700;color:var(--success);">${formatCurrency(p.amount)}</td><td><span class="badge badge-info">${escapeHtml(p.method)}</span></td><td><button class="btn btn-outline btn-sm" onclick="editPayment('${p.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="printA6Receipt('${p.id}')">A6</button> <button class="btn btn-outline btn-sm" onclick="printThermalReceipt('${p.id}')">58mm</button> <button class="btn btn-outline btn-sm" onclick="deletePayment('${p.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">No payments recorded.</td></tr>';
     renderInstallments();
     renderBalances();
