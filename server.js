@@ -4818,6 +4818,11 @@ const LIVE_PUSH_STORES = new Set([
                 results = results.slice().sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || ''))).slice(0, 500);
             }
             
+            // The audit trail also grows without bound. Show the newest entries;
+            // the full history stays on disk and the prune endpoint still works.
+            if (store === 'audit' && results.length > 800) {
+                results = results.slice().sort((x, y) => String(y.timestamp || y.date || '').localeCompare(String(x.timestamp || x.date || ''))).slice(0, 800);
+            }
             // Students can only see their own payments
             if (user && user.role === 'student' && store === 'payments') {
                 const sid = (user.user || {}).studentId;
