@@ -18212,22 +18212,6 @@ async function renderProgressContent(studentId, selectedCourse, data) {
     }
     document.getElementById('progress-content').innerHTML = html;
 }
-async function renderNotes() {
-    const courses = await dbGetAll('courses');
-    const lessons = await dbGetAll('lessons');
-    const notes = await dbGetAll('notes');
-    const courseSelect = document.getElementById('notes-course');
-    courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
-    const filter = courseSelect.value;
-    const filtered = filter ? notes.filter(n => n.courseId === filter) : notes;
-    filtered = orderQuestionsByBank(filtered);
-    document.getElementById('notes-body').innerHTML = filtered.map(n => {
-        const course = courses.find(c => c.id === n.courseId);
-        const lesson = lessons.find(l => l.id === n.lessonId);
-        return `<tr><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td><b>${n.title}</b></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">${(n.content || '').substring(0, 60)}...</td><td style="font-size:11px;">${formatDate(n.createdAt)}</td><td><button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button> <button class="btn btn-success btn-sm" onclick="sendNoteWhatsApp('${n.id}')">📱</button> <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">Del</button></td></tr>`;
-    }).join('') || '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">No notes yet. Click "+ Add Note" to create one.</td></tr>';
-    courseSelect.onchange = renderNotes;
-}
 async function showNoteForm(note = null) {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
@@ -18442,10 +18426,13 @@ async function renderPortalNotes(studentId) {
 async function renderNotes() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (currentUser.role === 'student') return;
+    const body = document.getElementById('notes-body');
+    try {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
     const notes = await dbGetAll('notes');
     const courseSelect = document.getElementById('notes-course');
+    if (!courseSelect || !body) return;
     const savedCourse = courseSelect.value;
     courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
     if (savedCourse && courses.some(c => c.id === savedCourse)) courseSelect.value = savedCourse;
@@ -18458,6 +18445,10 @@ async function renderNotes() {
         return `<tr><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td><b>${n.title}</b></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">${(n.content || '').substring(0, 60)}...</td><td style="font-size:11px;">${formatDate(n.createdAt)}</td><td><button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button> <button class="btn btn-success btn-sm" onclick="sendNoteWhatsApp('${n.id}')">📱</button> <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">No notes yet. Click "+ Add Note" to create one.</td></tr>';
     courseSelect.onchange = renderNotes;
+    } catch (e) {
+        console.error('renderNotes failed:', e);
+        if (body) body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger);">Could not load notes (' + String(e && e.message || e) + '). <button class="btn btn-outline btn-sm" onclick="renderNotes()" style="margin-left:8px;">Retry</button></td></tr>';
+    }
 }
 
 let portalDataCache = null;
