@@ -1376,6 +1376,18 @@ function filterStoreForUser(user, store, rows) {
         if (store === 'users') {
             return rows.filter(r => r && String(r.username) === uid);
         }
+        // Per-learner records: a student may ONLY ever see their own rows.
+        // Grades, submissions, attendance, enrolments and exam/quiz registrations
+        // are keyed by studentId and were previously readable by any signed-in
+        // student account.
+        const LEARNER_OWNED = ['grades', 'submissions', 'attendance', 'enrollments',
+            'examRegistrations', 'quizRegistrations', 'retakeRequests', 'seating'];
+        if (LEARNER_OWNED.includes(store)) {
+            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+        }
+        // Alerts are staff/system notices (they contain other learners' names and
+        // reasons). Students must not see the alert log at all.
+        if (store === 'alerts' || store === 'lessonFiles') return [];
         if (store === 'courseCompletions') {
             return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
         }
