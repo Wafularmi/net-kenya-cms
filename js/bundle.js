@@ -18437,8 +18437,10 @@ async function renderNotes() {
     courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
     if (savedCourse && courses.some(c => c.id === savedCourse)) courseSelect.value = savedCourse;
     const filter = courseSelect.value;
-    const filtered = filter ? notes.filter(n => n.courseId === filter) : notes;
-    filtered = orderQuestionsByBank(filtered);
+    // Notes have no question sequence, so order them by when they were added.
+    const filtered = orderQuestionsByBank(notes.filter(n => !filter || n.courseId === filter))
+        .slice()
+        .sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')));
     document.getElementById('notes-body').innerHTML = filtered.map(n => {
         const course = courses.find(c => c.id === n.courseId);
         const lesson = lessons.find(l => l.id === n.lessonId);
