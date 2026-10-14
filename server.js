@@ -4811,6 +4811,12 @@ const LIVE_PUSH_STORES = new Set([
         // GET /api/db/:store   â€” return all records (with optional ?index=&value= filter, ?page=&limit=)
         if (req.method === 'GET' && !key) {
             let results = db[store] || [];
+
+            // The alerts store grows continuously. The dashboard only shows the
+            // newest ones, so cap the RESPONSE - the full history stays on disk.
+            if (store === 'alerts' && results.length > 500) {
+                results = results.slice().sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || ''))).slice(0, 500);
+            }
             
             // Students can only see their own payments
             if (user && user.role === 'student' && store === 'payments') {
