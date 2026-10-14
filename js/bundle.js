@@ -19846,7 +19846,10 @@ async function generateAlerts() {
     for (const rule of alertRules) {
         const results = await rule.check();
         for (const result of results) {
-            const existingAlert = existing.find(a => a.ruleId === rule.id && a.entityId === result.entityId && a.status === 'active');
+            // Dedup against ANY existing alert for this rule+entity, not just active
+            // ones. Previously a dismissed alert was re-created on the next scan,
+            // which grew the store by thousands of duplicate rows.
+            const existingAlert = existing.find(a => a.ruleId === rule.id && a.entityId === result.entityId);
             if (!existingAlert) {
                 generatedAlerts.push({
                     id: generateId('ALT'),
