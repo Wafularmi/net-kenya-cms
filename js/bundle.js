@@ -13517,16 +13517,9 @@ async function startQSQueue(templateId) {
     buildBroadcastQueue(targets, template, message, schoolName);
 }
 function buildBroadcastQueue(targets, template, message, schoolName) {
-    waQueue = [];
-    waQueueIndex = 0;
-    waSentCount = 0;
-    waFailedCount = 0;
-    waQueueRunning = false;
-    for (const s of targets) {
-        const payments = (async () => { return await dbGetAll('payments'); })();
-        waQueue.push({ student: s, message, template: template.name });
-    }
-    showBroadcastPanel();
+    // Delegate to the one queue builder so every recipient's message is resolved
+    // and its wa.me link pre-built up front (never from a timer callback).
+    sendWhatsAppBroadcast(targets, template, message, schoolName);
 }
 async function showBroadcastPanel() {
     const total = waQueue.length;
@@ -13561,6 +13554,7 @@ async function showBroadcastPanel() {
             <button class="btn-copy" onclick="copyBroadcastMessage()">📋 Copy</button>
             <button class="btn-send" id="btn-wa-send" onclick="sendNextWhatsApp()">🚀 Send via WhatsApp</button>
         </div>
+        ${(current.url || s.phone) ? '<div style="text-align:center;margin:-4px 0 12px;font-size:11px;">Tab blocked? <a href="' + escapeHtml(current.url || ('https://wa.me/' + formattedPhone)) + '" target="whatsapp-chat" style="color:#25D366;font-weight:700;">Click here to open WhatsApp for ' + escapeHtml(s.name) + '</a></div>' : ''}
         <div class="broadcast-controls">
             <label class="broadcast-auto-label"><input type="checkbox" id="broadcast-auto" onchange="toggleAutoAdvance()"> Auto-Advance</label>
             <select id="broadcast-speed" onchange="changeBroadcastSpeed()" style="padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:11px;"><option value="1000">Fast (1s)</option><option value="2000" selected>Normal (2s)</option><option value="4000">Slow (4s)</option></select>
@@ -13667,7 +13661,7 @@ function sendNextWhatsApp() {
     // blocked we say so instead of recording a message that never opened.
     const msg = current.resolvedMsg || current.message;
     let opened = null;
-    try { opened = window.open(current.url || ('https://wa.me/' + formatWhatsAppPhone(s.phone)), '_blank'); } catch (e) {}
+    try { opened = window.open(current.url || ('https://wa.me/' + formatWhatsAppPhone(s.phone)), 'whatsapp-chat'); } catch (e) {}
     const delivered = !!opened;
     if (delivered) {
         waSentCount++;
@@ -18366,12 +18360,7 @@ async function doSendNoteWhatsApp(id) {
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const fullMessage = `${prefix ? prefix + '\n\n' : ''}📚 *${note.title}*\n\n${note.content}\n\n— ${schoolName}`;
     closeModal();
-    waQueue = targets.map(s => ({ student: s, message: fullMessage, template: 'Note: ' + note.title }));
-    waQueueIndex = 0;
-    waSentCount = 0;
-    waFailedCount = 0;
-    waQueueRunning = true;
-    showBroadcastPanel();
+    sendWhatsAppBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName);
 }
 async function deleteNote(id) {
     if (!await showConfirm('Confirm', 'Delete this note?')) return;
