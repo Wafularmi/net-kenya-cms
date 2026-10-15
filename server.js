@@ -4090,6 +4090,188 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
         return true;
     }
 
+
+    // -----------------------------------------------------------
+    // WhatsApp Cloud API — status / broadcast / template submit
+    // -----------------------------------------------------------
+    // Sender identity lives in settings key \`whatsappCloud\`, never in code.
+    // The access token is encrypted at rest (AES-256-GCM) like M-Pesa/SMS keys.
+    // These routes are inert until an admin saves the credentials; the browser
+    // keeps using the free wa.me flow until then.
+    function waCloudSettings() {
+        const rec = (db.settings || []).find(x => x.key === 'whatsappCloud');
+        const v = rec ? (rec.value || {}) : {};
+        return {
+            phoneNumberId: String(v.phoneNumberId || '').trim(),
+            wabaId: String(v.wabaId || '').trim(),
+            accessToken: decryptSecret(v.accessToken),
+            templateLanguage: String(v.templateLanguage || 'en').trim() || 'en',
+            senderNumber: String(v.senderNumber || '').trim(),
+            apiVersion: String(v.apiVersion || 'v21.0').trim() || 'v21.0'
+        };
+    }
+    function waCloudReady(c) { return c && c.phoneNumberId && c.wabaId && c.accessToken; }
+    function waGraphPost(c, path, body) {
+        return new Promise((resolve, reject) => {
+            const data = JSON.stringify(body);
+            const opts = {
+                hostname: 'graph.facebook.com', port: 443,
+                path: '/' + c.apiVersion + path, method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + c.accessToken,
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(data)
+                }
+            };
+            const rq = https.request(opts, rs => {
+                let out = '';
+                rs.on('data', ch => out += ch);
+                rs.on('end', () => { try { resolve(JSON.parse(out)); } catch { resolve({ _raw: out }); } });
+            });
+            rq.on('error', reject);
+            rq.write(data);
+            rq.end();
+        });
+    }
+    // {{name}} -> {{1}}, {{2}}... in order of first appearance, plus the
+    // variable list the caller must supply in that same order.
+    function waNumberBody(body) {
+        const seen = [], re = /\\{\\{(\\w+)\\}\\}/g;
+        let m; while ((m = re.exec(String(body)))) if (!seen.includes(m[1])) seen.push(m[1]);
+        let out = String(body);
+        seen.forEach((v, i) => { out = out.split('{{' + v + '}}').join('{{' + (i + 1) + '}}'); });
+        return { numbered: out, vars: seen };
+    }
+    // Resolve one {{variable}} for one recipient using live records.
+    function waResolveVar(name, st, ctx) {
+        const p = ctx.payments || [];
+        const tuition = p.filter(x => String(x.studentId) === String(st.id) && (!x.account || x.account === 'tuition'))
+            .reduce((a, b) => a + (Number(b.amount) || 0), 0);
+        const fee = Number(st.feeAmount || 0);
+        switch (name) {
+            case 'name': return st.name || '';
+            case 'balance': return String(Math.max(0, fee - tuition));
+            case 'school': return ctx.schoolName || 'College';
+            case 'admissionNumber':
+            case 'admission': return st.admissionNumber || st.id || '';
+            case 'username':
+            case 'login':
+            case 'phone': return st.phone || '';
+            case 'program': return st.program || 'program';
+            case 'year': return st.year || '1';
+            case 'portal': return 'www.nefoundation.ke';
+            case 'date': return new Date().toISOString().split('T')[0];
+            default: return '';
+        }
+    }
+
+    // GET /api/whatsapp-cloud/status — never returns the token itself.
+    if (parts.length === 3 && parts[1] === 'whatsapp-cloud' && parts[2] === 'status' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        const c = waCloudSettings();
+        return json(res, 200, {
+            configured: waCloudReady(c),
+            senderNumber: c.senderNumber || c.phoneNumberId,
+            templateLanguage: c.templateLanguage,
+            phoneNumberId: c.phoneNumberId,
+            wabaId: c.wabaId,
+            apiVersion: c.apiVersion
+        });
+    }
+
+    // POST /api/whatsapp-cloud/send — send one template message.
+    if (parts.length === 3 && parts[1] === 'whatsapp-cloud' && parts[2] === 'send' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (!canAccessStore(su, 'whatsappLog', 'POST')) return json(res, 403, { error: 'Insufficient permissions' });
+        let body = '';
+        req.on('data', ch => body += ch);
+        req.on('end', async () => {
+            try {
+                const c = waCloudSettings();
+                if (!waCloudReady(c)) return json(res, 400, { configured: false, error: 'WhatsApp Cloud API is not configured.' });
+                const d = JSON.parse(body);
+                const to = String(d.to || '').replace(/[^0-9]/g, '');
+                if (!to) return json(res, 400, { error: 'Recipient number required' });
+                if (to.startsWith('0')) to = '254' + to.substring(1);
+                const payload = {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to: to,
+                    type: 'text',
+                    text: { preview_url: false, body: String(d.message || '') }
+                };
+                if (d.templateName) {
+                    const bd = waNumberBody(d.templateBody || '');
+                    payload.type = 'template';
+                    delete payload.text;
+                    payload.template = {
+                        name: String(d.templateName),
+                        language: { code: c.templateLanguage },
+                        components: (bd.vars || []).length ? [{
+                            type: 'body',
+                            parameters: (d.variables || []).map(v => ({ type: 'text', text: String(v == null ? '' : v) }))
+                        }] : []
+                    };
+                }
+                const r = await waGraphPost(c, '/' + c.phoneNumberId + '/messages', payload);
+                const ok = !!(r && r.messages && r.messages[0] && r.messages[0].id);
+                if (su.user) {
+                    db.whatsappLog = db.whatsappLog || [];
+                    db.whatsappLog.push({
+                        id: 'WA-' + Date.now(), phone: to, name: d.name || '',
+                        message: String(d.message || '').substring(0, 200),
+                        date: new Date().toISOString().split('T')[0],
+                        time: new Date().toLocaleTimeString(), template: d.templateName || '',
+                        status: ok ? 'sent' : 'failed',
+                        sentBy: su.username, createdAt: new Date().toISOString(),
+                        country: su.user.country
+                    });
+                    saveDB();
+                }
+                if (!ok) return json(res, 502, { error: (r && (r.error && r.error.message)) || 'WhatsApp rejected the message' });
+                return json(res, 200, { id: r.messages[0].id });
+            } catch (e) { json(res, 500, { error: e.message || e }); }
+        });
+        return true;
+    }
+
+    if (parts.length === 3 && parts[1] === 'whatsapp-cloud' && parts[2] === 'templates' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (!canAccessStore(su, 'whatsappTemplates', 'POST')) return json(res, 403, { error: 'Insufficient permissions' });
+        let body = '';
+        req.on('data', ch => body += ch);
+        req.on('end', async () => {
+            try {
+                const c = waCloudSettings();
+                if (!waCloudReady(c)) return json(res, 400, { configured: false, error: 'WhatsApp Cloud API is not configured.' });
+                const d = JSON.parse(body);
+                const bd = waNumberBody(d.body || '');
+                const payload = {
+                    name: String(d.name || '').toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+                    language: c.templateLanguage,
+                    category: String(d.category || 'UTILITY').toUpperCase(),
+                    components: [
+                        { type: 'BODY', text: bd.numbered, example: bd.vars.length ? { body_text: [bd.vars.map(() => 'sample')] } : undefined }
+                    ]
+                };
+                if (d.footer) payload.components.push({ type: 'FOOTER', text: String(d.footer).slice(0, 60) });
+                const r = await waGraphPost(c, '/' + c.wabaId + '/message_templates', payload);
+                if (!r || !r.id) return json(res, 502, { error: (r && r.error && r.error.message) || 'Meta rejected the template' });
+                auditLog('whatsapp-template-submit', 'whatsappTemplates', { name: payload.name, id: r.id }, su.username);
+                return json(res, 200, { id: r.id, status: r.status || 'PENDING' });
+            } catch (e) { json(res, 500, { error: e.message || e }); }
+        });
+        return true;
+    }
+
+
 // POST /api/send-sms â€” send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);

@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=436" as="script">
+    <link rel="preload" href="js/bundle.js?v=437" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -410,6 +410,43 @@
                                 <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Test messages will be sent to this number. Use your own number to verify templates before sending to students.</div>
                             </div>
                             <button class="btn btn-primary" onclick="saveTestPhone()" style="margin-bottom:0;">Save</button>
+                        </div>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;"><h3>Cloud API (automatic sending)</h3>
+                        <div id="wa-cloud-status" style="font-size:12px;margin-bottom:10px;">Checking…</div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;align-items:end;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label>Sender number (as the college's official WhatsApp)</label>
+                                <input type="text" id="wa-cloud-sender" placeholder="254723696908" style="width:100%;">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label>Phone Number ID</label>
+                                <input type="text" id="wa-cloud-pnid" placeholder="123456789012345" style="width:100%;">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label>WhatsApp Business Account ID (WABA ID)</label>
+                                <input type="text" id="wa-cloud-waba" placeholder="987654321098765" style="width:100%;">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label>Access token (permanent)</label>
+                                <input type="password" id="wa-cloud-token" placeholder="Paste the EAAG… token" autocomplete="new-password" style="width:100%;">
+                                <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Leave blank to keep the saved one. Stored encrypted on the server, never sent to the browser.</div>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label>Template language</label>
+                                <input type="text" id="wa-cloud-lang" placeholder="en" style="width:100%;">
+                            </div>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn btn-primary" onclick="saveWhatsAppCloud()">Save</button>
+                                <button class="btn btn-outline" onclick="testWhatsAppCloud()">Send test</button>
+                                <button class="btn btn-outline" onclick="forgetWhatsAppCloud()">Clear</button>
+                            </div>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+                            While these are empty, broadcasts open WhatsApp on each device as before. With them saved, the same button sends without opening any tab.
+                            Get the IDs at <b>Meta App Dashboard → WhatsApp → API Setup</b>; the permanent token comes from
+                            <b>Business Manager → Business Settings → System Users → Generate token</b> (permissions
+                            <code>whatsapp_business_messaging</code> + <code>whatsapp_business_management</code>).
                         </div>
                     </div>
                     <div class="card"><h3>Message Templates</h3><div id="whatsapp-templates"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showTemplateForm()">+ Add Template</button></div>
@@ -1416,7 +1453,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=436"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=437"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=73"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

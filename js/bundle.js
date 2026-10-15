@@ -2092,7 +2092,7 @@ function showScreen(id) {
         case 'alumni': renderAlumni(); break;
         case 'certificates': renderDocumentHistory(); refreshDocGenButtons(); break;
         case 'events': renderEvents(); break;
-        case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); break;
+        case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); loadWhatsAppCloud(); break;
         case 'sms': renderSMSTemplates(); renderSMSLog(); break;
         case 'audit': renderAudit(); renderUsers(); break;
         case 'idcards': break;
@@ -5917,13 +5917,8 @@ async function sendExamNotify(examId) {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     let sent = 0, failed = 0;
-    for (const reg of regs) {
-        const student = students.find(s => s.id === reg.studentId);
-        if (!student || !student.phone) { failed++; continue; }
-        const payments = await dbGetAll('payments');
-        const paid = tuitionPaid(payments, student.id);
-        const balance = getCachedStudentFee(student) - paid;
-        let personalized = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
+    const renderFor = (student) => {
+        let personalized = applyTemplateVars(msg, student, schoolName, 0, student.admissionNumber, student.phone);
         if (exam) {
             personalized = personalized
                 .replace(/{{course}}/g, course ? course.name : (exam.title || exam.courseId))
@@ -5934,6 +5929,42 @@ async function sendExamNotify(examId) {
                 .replace(/{{venue}}/g, exam.venue || 'TBA')
                 .replace(/{{min}}/g, String(exam.passMark || 50));
         }
+        return personalized;
+    };
+    // Cloud API: send every registered student from the server in one run.
+    try {
+        const st0 = await waCloudCall('/api/whatsapp-cloud/status');
+        if (st0 && st0.configured) {
+            const withPhone = regs.map(r => students.find(x => x.id === r.studentId)).filter(x => x && x.phone);
+            let cs = 0, cf = 0;
+            const W0 = 6;
+            for (let i = 0; i < withPhone.length; i += W0) {
+                const wave = withPhone.slice(i, i + W0).map(async (st2) => {
+                    try {
+                        await waCloudCall('/api/whatsapp-cloud/send', 'POST', {
+                            to: st2.phone, name: st2.name, studentId: st2.id, country: st2.country || '',
+                            message: renderFor(st2).substring(0, 200)
+                        });
+                        cs++;
+                    } catch (e) { cf++; }
+                });
+                await Promise.all(wave);
+                if (i + W0 < withPhone.length) await new Promise(r => setTimeout(r, 120));
+            }
+            closeModal();
+            renderWhatsAppLog();
+            showToast('Sent ' + cs + ' exam notification(s)' + (cf ? ', failed ' + cf : '') + ' via Cloud API', { type: cf ? 'warning' : 'success', duration: 9000 });
+            logAudit('sent', 'exam-notify', { examId, sent: cs, failed: cf, via: 'cloud' });
+            return;
+        }
+    } catch (e) { /* fall through to the device flow */ }
+    for (const reg of regs) {
+        const student = students.find(s => s.id === reg.studentId);
+        if (!student || !student.phone) { failed++; continue; }
+        const payments = await dbGetAll('payments');
+        const paid = tuitionPaid(payments, student.id);
+        const balance = getCachedStudentFee(student) - paid;
+        let personalized = renderFor(student);
         sendWhatsApp(student.phone, personalized);
         const entry = { id: 'WA-' + Date.now() + '-' + sent, phone: student.phone, name: student.name, message: personalized.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: 'exam-notify', status: 'sent', createdAt: new Date().toISOString() };
         try { await logWhatsApp(entry.phone, entry.message, { student: student, name: student.name, id: entry.id }); } catch (e) {}
@@ -13348,6 +13379,75 @@ async function saveTestPhone() {
     await dbPut('settings', { key: 'whatsappTestPhone', value: phone });
     showToast(phone ? 'Test phone number saved: ' + phone : 'Test phone number cleared', { type: 'success' });
 }
+async function waCloudCall(path, method, body) {
+    const res = await fetch(path, { method: method || 'GET', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(45000) });
+    let d = null; try { d = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error((d && (d.error || d.message)) || ('HTTP ' + res.status));
+    return d || {};
+}
+async function loadWhatsAppCloud() {
+    let st = null, rec = null;
+    try { st = await waCloudCall('/api/whatsapp-cloud/status'); } catch (e) {}
+    try { rec = await dbGet('settings', 'whatsappCloud'); } catch (e) {}
+    const box = document.getElementById('wa-cloud-status');
+    if (!box) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    set('wa-cloud-sender', rec && rec.value ? rec.value.senderNumber : '');
+    set('wa-cloud-pnid', rec && rec.value ? rec.value.phoneNumberId : '');
+    set('wa-cloud-waba', rec && rec.value ? rec.value.wabaId : '');
+    set('wa-cloud-lang', (rec && rec.value && rec.value.templateLanguage) || 'en');
+    const conf = st && st.configured;
+    box.innerHTML = conf
+        ? '<b style="color:var(--success);">Connected</b> — broadcasts from ' + escapeHtml(st.senderNumber || 'the saved sender') + ' open no tabs. Token verified by the server; it stays encrypted there.'
+        : '<b style="color:var(--warning);">Not connected</b> — no credentials saved yet, so broadcasts still open WhatsApp on your device.';
+    box.style.border = '1px solid var(--border)';
+    box.style.borderRadius = '6px';
+    box.style.padding = '8px 10px';
+    box.style.background = 'var(--bg-input)';
+}
+async function saveWhatsAppCloud() {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    let existing = null;
+    try { existing = await dbGet('settings', 'whatsappCloud'); } catch (e) {}
+    const cur = (existing && existing.value) || {};
+    const token = val('wa-cloud-token').trim();
+    const record = {
+        key: 'whatsappCloud',
+        value: {
+            phoneNumberId: val('wa-cloud-pnid').trim(),
+            wabaId: val('wa-cloud-waba').trim(),
+            senderNumber: val('wa-cloud-sender').trim(),
+            templateLanguage: val('wa-cloud-lang').trim() || 'en',
+            // blank token field keeps the previously saved one (encrypted on disk)
+            accessToken: token || cur.accessToken || '',
+            apiVersion: 'v21.0',
+            updatedAt: new Date().toISOString()
+        }
+    };
+    if (!record.value.accessToken) return showToast('Paste the permanent access token first.', { type: 'warning' });
+    await dbPut('settings', record);
+    showToast('Cloud API settings saved.');
+    logAudit('updated', 'whatsapp-cloud', { senderNumber: record.value.senderNumber, phoneNumberId: record.value.phoneNumberId });
+    loadWhatsAppCloud();
+}
+async function forgetWhatsAppCloud() {
+    if (!await showConfirm('Clear Cloud API credentials', 'Bulk messaging will fall back to opening WhatsApp on your device.')) return;
+    await dbPut('settings', { key: 'whatsappCloud', value: { phoneNumberId: '', wabaId: '', senderNumber: '', templateLanguage: 'en', accessToken: '', apiVersion: 'v21.0' } });
+    showToast('Cloud API removed.');
+    loadWhatsAppCloud();
+}
+async function testWhatsAppCloud() {
+    try {
+        const st = await waCloudCall('/api/whatsapp-cloud/status');
+        if (!st.configured) return showToast('Save credentials first.', { type: 'warning' });
+        const tp = await dbGet('settings', 'whatsappTestPhone');
+        const to = tp && tp.value ? String(tp.value) : '';
+        if (!to) return showToast('Set a test phone number in the Test Configuration card first.', { type: 'warning' });
+        showToast('Sending…', { type: 'info', duration: 3000 });
+        const r = await waCloudCall('/api/whatsapp-cloud/send', 'POST', { to, message: 'NET Kenya CMS — Cloud API test message.', name: 'Test' });
+        showToast('Sent! WhatsApp message ID: ' + r.id, { type: 'success', duration: 8000 });
+    } catch (e) { showToast('Test failed: ' + e.message, { type: 'danger', duration: 9000 }); }
+}
 async function openTestSend(templateId) {
     const template = await dbGet('whatsappTemplates', templateId);
     if (!template) return showToast('Template not found!');
@@ -13514,6 +13614,10 @@ async function startQSQueue(templateId) {
     }
     if (!targets.length) return showToast('No recipients with phone numbers!');
     closeModal();
+    try {
+        const st0 = await waCloudCall('/api/whatsapp-cloud/status');
+        if (st0 && st0.configured) return runCloudBroadcast(targets, template, message, schoolName, 'Quick Send');
+    } catch (e) { /* fall through */ }
     buildBroadcastQueue(targets, template, message, schoolName);
 }
 function buildBroadcastQueue(targets, template, message, schoolName) {
@@ -13890,9 +13994,42 @@ async function startBulkBroadcast(target) {
     _bulkSelectedIds = [];
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
+    // Cloud API path: send everything from the server, no tabs, no clicking.
+    try {
+        const st = await waCloudCall('/api/whatsapp-cloud/status');
+        if (st && st.configured) return runCloudBroadcast(targets, template, message, schoolName, 'Broadcast');
+    } catch (e) { /* fall through to the device flow */ }
     sendWhatsAppBroadcast(targets, template, message, schoolName);
 }
 
+async function runCloudBroadcast(targets, template, message, schoolName, label) {
+    const branding = await dbGet('settings', 'branding');
+    const brandName = schoolName || (branding ? branding.schoolName : 'College Management System');
+    const payments = await dbGetAll('payments');
+    const jobs = targets.filter(t => t.phone).map(st => ({
+        to: st.phone,
+        name: st.name,
+        message: applyTemplateVars(message, st, brandName, getCachedStudentFee(st) - tuitionPaid(payments, st.id), st.admissionNumber, st.phone),
+        studentId: st.id, country: st.country || ''
+    }));
+    showToast('Sending ' + jobs.length + ' messages via Cloud API…', { type: 'info', duration: 4000 });
+    let sent = 0, failed = 0; const errors = [];
+    const WAVE = 6, DELAY = 120;
+    for (let i = 0; i < jobs.length; i += WAVE) {
+        const wave = jobs.slice(i, i + WAVE).map(async j => {
+            try { await waCloudCall('/api/whatsapp-cloud/send', 'POST', j); sent++; }
+            catch (e) { failed++; if (errors.length < 3) errors.push(j.name + ': ' + e.message); }
+        });
+        await Promise.all(wave);
+        if (i + WAVE < jobs.length) await new Promise(r => setTimeout(r, DELAY));
+    }
+    renderWhatsAppLog();
+    let msg = (label || 'Broadcast') + ' complete — sent: ' + sent + ', failed: ' + failed + ' of ' + jobs.length;
+    if (errors.length) msg += ' — ' + errors.join(' | ');
+    showToast(msg, { type: failed ? 'warning' : 'success', duration: failed ? 12000 : 8000 });
+    logAudit('whatsapp-cloud-broadcast', 'whatsappLog', { total: jobs.length, sent, failed });
+    return { sent, failed, total: jobs.length };
+}
 async function loadCommunicationPage() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (u.role !== 'admin') return showToast('Admin only.', { type: 'danger' });
@@ -14129,6 +14266,10 @@ async function sendCommBulk() {
     const schoolName = branding ? branding.schoolName : 'College';
     const template = { name: 'Communication Center' };
     closeModal(); // close any open modal
+    try {
+        const st = await waCloudCall('/api/whatsapp-cloud/status');
+        if (st && st.configured) return runCloudBroadcast(students, template, msg, schoolName, 'Communication Center');
+    } catch (e) { /* fall through */ }
     sendWhatsAppBroadcast(students, template, msg, schoolName);
 }
 async function getCoursesForProgram(program) {
@@ -18360,6 +18501,10 @@ async function doSendNoteWhatsApp(id) {
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const fullMessage = `${prefix ? prefix + '\n\n' : ''}📚 *${note.title}*\n\n${note.content}\n\n— ${schoolName}`;
     closeModal();
+    try {
+        const st = await waCloudCall('/api/whatsapp-cloud/status');
+        if (st && st.configured) return runCloudBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName, 'Note sent');
+    } catch (e) { /* fall through */ }
     sendWhatsAppBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName);
 }
 async function deleteNote(id) {
