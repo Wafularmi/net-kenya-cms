@@ -4240,6 +4240,43 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
         return true;
     }
 
+
+    // GET /api/whatsapp-cloud/templates — status of registered templates
+    if (parts.length === 3 && parts[1] === 'whatsapp-cloud' && parts[2] === 'templates' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        (async () => {
+            try {
+                const c = waCloudSettings();
+                if (!waCloudReady(c)) return json(res, 200, { configured: false, templates: [] });
+                const out = await new Promise((resolve, reject) => {
+                    const opts = {
+                        hostname: 'graph.facebook.com', port: 443,
+                        path: '/' + c.apiVersion + '/' + c.wabaId + '/message_templates?limit=100',
+                        method: 'GET',
+                        headers: { 'Authorization': 'Bearer ' + c.accessToken }
+                    };
+                    const rq = https.request(opts, rs => {
+                        let d = ''; rs.on('data', ch => d += ch);
+                        rs.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve({ _raw: d }); } });
+                    });
+                    rq.on('error', reject);
+                    rq.end();
+                });
+                if (!out || !Array.isArray(out.data)) {
+                    return json(res, 200, { configured: true, templates: [], error: (out && out.error && out.error.message) || 'Could not read templates' });
+                }
+                return json(res, 200, {
+                    configured: true, templates: out.data.map(t => ({ name: t.name, status: t.status, category: t.category, language: t.language })),
+                    error: null
+                });
+            } catch (e) { return json(res, 200, { configured: true, templates: [], error: e.message || String(e) }); }
+        })();
+        return true;
+    }
+
     if (parts.length === 3 && parts[1] === 'whatsapp-cloud' && parts[2] === 'templates' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         const su = getRequestUser(req);

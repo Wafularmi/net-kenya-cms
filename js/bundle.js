@@ -13353,6 +13353,7 @@ async function migrateWelcomeTemplate() {
 async function renderWhatsAppTemplates() {
     await seedWhatsAppTemplates();
     await loadTestPhone();
+    await loadMetaTemplates();
     const allTemplates = await dbGetAll('whatsappTemplates');
     const categories = {};
     allTemplates.forEach(t => {
@@ -13363,7 +13364,7 @@ async function renderWhatsAppTemplates() {
     let html = '';
     for (const [cat, temps] of Object.entries(categories)) {
         html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:1px;margin:8px 0 4px;">${cat}</div>`;
-        html += temps.map(t => `<div class="whatsapp-template" onclick="openQuickSend('${t.id}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><div style="flex:1;min-width:0;"><b>${t.name}</b><br><span style="font-size:11px;color:var(--text-muted);">${t.message.substring(0, 70)}...</span></div><div style="display:flex;gap:4px;flex-shrink:0;"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();openTestSend('${t.id}')" title="Send test message to your test phone number">Test</button><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();editTemplate('${t.id}')" title="Edit template">✏</button><button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();deleteTemplate('${t.id}')" title="Delete template">🗑</button></div></div></div>`).join('');
+        html += temps.map(t => `<div class="whatsapp-template" onclick="openQuickSend('${t.id}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><div style="flex:1;min-width:0;"><b>${t.name}</b>${metaStatusBadge(t.name)}<br><span style="font-size:11px;color:var(--text-muted);">${t.message.substring(0, 70)}...</span></div><div style="display:flex;gap:4px;flex-shrink:0;"><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();openTestSend('${t.id}')" title="Send test message to your test phone number">Test</button><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();showMetaTemplateForm('${t.id}')" title="Register this template with the WhatsApp Cloud API">Meta</button><button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();editTemplate('${t.id}')" title="Edit template">✏</button><button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 8px;" onclick="event.stopPropagation();deleteTemplate('${t.id}')" title="Delete template">🗑</button></div></div></div>`).join('');
     }
     document.getElementById('whatsapp-templates').innerHTML = html;
 }
@@ -13447,6 +13448,78 @@ async function testWhatsAppCloud() {
         const r = await waCloudCall('/api/whatsapp-cloud/send', 'POST', { to, message: 'NET Kenya CMS — Cloud API test message.', name: 'Test' });
         showToast('Sent! WhatsApp message ID: ' + r.id, { type: 'success', duration: 8000 });
     } catch (e) { showToast('Test failed: ' + e.message, { type: 'danger', duration: 9000 }); }
+}
+let _metaTemplates = null;
+async function loadMetaTemplates(force) {
+    if (!force && _metaTemplates && Date.now() - _metaTemplates._at < 60000) return _metaTemplates;
+    try {
+        const st = await waCloudCall('/api/whatsapp-cloud/status');
+        if (!st || !st.configured) { _metaTemplates = { _at: Date.now(), configured: false, list: [] }; return _metaTemplates; }
+        const r = await waCloudCall('/api/whatsapp-cloud/templates');
+        _metaTemplates = {
+            _at: Date.now(), configured: true, error: r.error || null,
+            list: (r.templates || []).map(t => ({ name: t.name, status: t.status, category: t.category }))
+        };
+    } catch (e) { _metaTemplates = { _at: Date.now(), configured: false, list: [] }; }
+    return _metaTemplates;
+}
+function metaTemplateSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'template'; }
+function metaTemplateVars(body) {
+    const seen = [], re = /\{\{(\w+)\}\}/g; let m;
+    while ((m = re.exec(String(body || '')))) if (!seen.includes(m[1])) seen.push(m[1]);
+    return seen;
+}
+function metaStatusBadge(tplName) {
+    const m = _metaTemplates;
+    if (!m || !m.configured || !m.list.length) return '';
+    const found = m.list.find(x => x.name === metaTemplateSlug(tplName));
+    if (!found) return '<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:var(--bg-input);color:var(--text-muted);border:1px solid var(--border);margin-left:4px;" title="Not yet submitted to WhatsApp">not registered</span>';
+    const c = found.status === 'APPROVED' ? 'var(--success)' : (found.status === 'PENDING' ? 'var(--warning)' : (found.status === 'REJECTED' ? 'var(--danger)' : 'var(--text-muted)'));
+    return '<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:' + c + '22;color:' + c + ';border:1px solid ' + c + '55;margin-left:4px;" title="WhatsApp template status">' + escapeHtml(found.status) + '</span>';
+}
+function showMetaTemplateForm(id) {
+    (async () => {
+        const tpl = await dbGet('whatsappTemplates', id);
+        if (!tpl) return showToast('Template not found!');
+        const meta = await loadMetaTemplates();
+        if (!meta || !meta.configured) {
+            return showToast('Save the Cloud API credentials first - the Cloud API card at the top of this screen.', { type: 'warning', duration: 8000 });
+        }
+        const vars = metaTemplateVars(tpl.message);
+        const existing = meta.list.find(x => x.name === metaTemplateSlug(tpl.name));
+        const rows = vars.map((v, i) => '<tr><td style="padding:3px 0;"><code>{{' + (i + 1) + '}}</code></td><td style="padding:3px 0;"><code>{{' + escapeHtml(v) + '}}</code></td><td style="padding:3px 0;color:var(--text-muted);">' + escapeHtml(v) + '</td></tr>').join('');
+        const content = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">WhatsApp must approve every template before it can be sent to a student who has not messaged the college in the last 24 hours. Submitting sends it for review - usually minutes, sometimes hours.</div>'
+            + (existing ? '<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:10px;">Already registered as <b>' + escapeHtml(existing.name) + '</b> - status <b>' + escapeHtml(existing.status) + '</b>' + (existing.category ? ' (' + escapeHtml(existing.category) + ')' : '') + '. Submitting again updates it.</div>' : '')
+            + (meta.error ? '<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:10px;">Could not read existing templates from Meta: ' + escapeHtml(meta.error) + '</div>' : '')
+            + '<div class="form-group"><label>Template name (Meta)</label><input type="text" id="mt-name" value="' + escapeHtml(metaTemplateSlug(tpl.name)) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Lowercase letters, numbers and underscores only. Sending references this name.</div></div>'
+            + '<div class="form-group"><label>Category</label><select id="mt-category" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);"><option value="UTILITY">Utility - fee reminders, exam notices, admissions (recommended)</option><option value="MARKETING">Marketing - offers and promotions</option><option value="AUTHENTICATION">Authentication - one-time codes</option></select></div>'
+            + '<div class="form-group"><label>Message body</label><textarea id="mt-body" rows="6">' + escapeHtml(tpl.message) + '</textarea></div>'
+            + '<div class="form-group"><label>Footer (optional, max 60 characters)</label><input type="text" id="mt-footer" maxlength="60" placeholder="NET Kenya"></div>'
+            + (vars.length ? '<div style="font-size:11px;"><b>Variables detected</b> - each becomes a numbered placeholder for WhatsApp:<table style="width:100%;font-size:11px;margin-top:6px;"><tr style="text-align:left;"><th style="padding:3px 0;">WhatsApp</th><th style="padding:3px 0;">Yours</th><th style="padding:3px 0;">Meaning</th></tr>' + rows + '</table></div>'
+                         : '<div style="font-size:11px;color:var(--warning);">No variables detected - this template would send identical text to every student.</div>')
+            + '<div id="mt-error" style="display:none;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;padding:8px;border-radius:4px;font-size:12px;margin-top:8px;"></div>';
+        showModal('Register with WhatsApp - ' + tpl.name, content, '<button class="btn btn-outline" onclick="closeModal()">Cancel</button> <button class="btn btn-primary" onclick="submitTemplateToMeta(\'' + id + '\')">Submit for approval</button>');
+    })();
+}
+async function submitTemplateToMeta(id) {
+    const err = document.getElementById('mt-error');
+    const showErr = (m) => { if (err) { err.textContent = m; err.style.display = 'block'; } };
+    if (err) err.style.display = 'none';
+    const name = (document.getElementById('mt-name') || {}).value || '';
+    const category = (document.getElementById('mt-category') || {}).value || 'UTILITY';
+    const body = (document.getElementById('mt-body') || {}).value || '';
+    const footer = (document.getElementById('mt-footer') || {}).value || '';
+    if (!name.trim() || !body.trim()) return showErr('Name and message body are required.');
+    if (!/^[a-z0-9_]+$/.test(name.trim())) return showErr('Template name may only contain lowercase letters, numbers and underscores.');
+    try {
+        const r = await waCloudCall('/api/whatsapp-cloud/templates', 'POST', { name: name.trim(), category, body, footer });
+        showToast('Submitted - status: ' + (r.status || 'PENDING') + '. Refresh this screen in a minute to see the result.', { type: 'success', duration: 9000 });
+        logAudit('created', 'whatsapp-template-meta', { id, name: name.trim(), category, status: r.status || 'PENDING' });
+        _metaTemplates = null;
+        await loadMetaTemplates(true);
+        closeModal();
+        renderWhatsAppTemplates();
+    } catch (e) { showErr('WhatsApp rejected it: ' + e.message); }
 }
 async function openTestSend(templateId) {
     const template = await dbGet('whatsappTemplates', templateId);
