@@ -13662,30 +13662,36 @@ function sendNextWhatsApp() {
         if (waQueueAutoAdvance) setTimeout(() => sendNextWhatsApp(), waQueueDelay);
         return;
     }
-    dbGet('settings', 'branding').then(async (branding) => {
-        const schoolName = branding ? branding.schoolName : 'College Management System';
-        const payments = await dbGetAll('payments');
-        const paid = tuitionPaid(payments, s.id);
-        const balance = getCachedStudentFee(s) - paid;
-        const msg = applyTemplateVars(current.message, s, schoolName, balance, s.admissionNumber, s.phone);
-        sendWhatsApp(s.phone, msg);
+    // Everything was pre-resolved when the queue was built, so this whole step
+    // runs inside the click handler and the popup is NOT blocked. If it is
+    // blocked we say so instead of recording a message that never opened.
+    const msg = current.resolvedMsg || current.message;
+    let opened = null;
+    try { opened = window.open(current.url || ('https://wa.me/' + formatWhatsAppPhone(s.phone)), '_blank'); } catch (e) {}
+    const delivered = !!opened;
+    if (delivered) {
         waSentCount++;
-        const entry = { id: 'WA-' + Date.now(), phone: s.phone, name: s.name, message: msg.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: current.template, status: 'sent', createdAt: new Date().toISOString() };
-        try { await logWhatsApp(entry.phone, entry.message, { student: s, name: s.name, id: entry.id }); } catch (e) {}
-        waQueueIndex++;
-        if (waQueueIndex >= waQueue.length) {
-            showToast(`Broadcast complete! Sent: ${waSentCount}, Failed: ${waFailedCount}`);
-            stopBroadcast();
-            renderWhatsAppLog();
-            return;
-        }
-        if (waQueueAutoAdvance) {
-            setTimeout(() => showBroadcastPanel(), 500);
-            setTimeout(() => sendNextWhatsApp(), waQueueDelay + 500);
-        } else {
-            showBroadcastPanel();
-        }
-    });
+        try { opened.focus(); } catch (e) {}
+    } else {
+        waFailedCount++;
+        showToast('Popup blocked for ' + s.name + ' \u2014 allow pop-ups for this site, or open the link manually.', { type: 'warning', duration: 6000 });
+    }
+    const entry = { id: 'WA-' + Date.now(), phone: s.phone, name: s.name, message: String(msg).substring(0, 200), date: new Date().toISOString().slice(0, 10), time: new Date().toLocaleTimeString(), template: current.template, status: delivered ? 'sent' : 'blocked', createdAt: new Date().toISOString() };
+    logWhatsApp(entry.phone, entry.message, { student: s, name: s.name, id: entry.id }).catch(() => {});
+    waQueueIndex++;
+    if (waQueueIndex >= waQueue.length) {
+        showToast(`Broadcast complete! Sent: ${waSentCount}, Blocked/failed: ${waFailedCount}`);
+        stopBroadcast();
+        renderWhatsAppLog();
+        return;
+    }
+    if (waQueueAutoAdvance) {
+        // Auto-advance is off by default: pop-ups opened from a timer are
+        // blocked by every browser, which is what broke bulk sending.
+        showBroadcastPanel();
+    } else {
+        showBroadcastPanel();
+    }
 }
 function skipBroadcastRecipient() {
     waQueueIndex++;
@@ -13709,7 +13715,13 @@ function stopBroadcast() {
     renderWhatsAppLog();
 }
 async function sendWhatsAppBroadcast(targets, template, message, schoolName) {
-    waQueue = targets.map(s => ({ student: s, message, template: template.name }));
+    const branding = await dbGet('settings', 'branding');
+    const brandName = schoolName || (branding ? branding.schoolName : 'College Management System');
+    const allPayments = await dbGetAll('payments');
+    waQueue = targets.map(s => {
+        const resolved = applyTemplateVars(message, s, brandName, getCachedStudentFee(s) - tuitionPaid(allPayments, s.id), s.admissionNumber, s.phone);
+        return { student: s, message, template: template.name, resolvedMsg: resolved, url: s.phone ? ('https://wa.me/' + formatWhatsAppPhone(s.phone) + '?text=' + encodeURIComponent(resolved)) : '' };
+    });
     waQueueIndex = 0;
     waSentCount = 0;
     waFailedCount = 0;
