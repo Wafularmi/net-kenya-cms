@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=439" as="script">
+    <link rel="preload" href="js/bundle.js?v=440" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -466,6 +466,10 @@
                             <button class="btn btn-outline" onclick="waAutoLogout()" style="margin-bottom:0;">Unpair</button>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Same order as everything else: Cloud API first if configured, then this sender when paired, then opening WhatsApp on your device. Sends go out a few seconds apart and survive restarts — unsent messages wait in the database.</div>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;"><h3>Bulk runs &amp; delivery</h3>
+                        <div id="wa-runs"><div style="color:var(--text-muted);text-align:center;padding:20px;">Loading…</div></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Every bulk send lands here with live progress. Click a run for per-student delivery — sent, delivered, read, or failed with the reason.</div>
                     </div>
                     <div class="card"><h3>Message Templates</h3><div id="whatsapp-templates"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showTemplateForm()">+ Add Template</button></div>
                     <div class="card"><h3>Message Log</h3><div id="whatsapp-log"></div></div>
@@ -1471,7 +1475,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=439"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=440"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=73"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

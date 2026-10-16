@@ -864,7 +864,7 @@ const STUDENT_DENY_STORES = new Set([
     'staff', 'payroll', 'audit', 'counters',
     'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
-    'invoices', 'installments', 'whatsappTemplates', 'whatsappLog', 'whatsappOutbox',
+    'invoices', 'installments', 'whatsappTemplates', 'whatsappLog', 'whatsappOutbox', 'whatsappRuns',
     'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents'
 ]);
 
@@ -4344,8 +4344,8 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
         req.on('end', async function () {
             try {
                 const d = JSON.parse(body);
-                const nq = waAuto().enqueue(d.jobs, su.username);
-                return json(res, 200, { queued: nq, pending: waAuto().pendingCount() });
+                const r = waAuto().enqueue(d.jobs, su.username, { label: d.label, template: d.template });
+                return json(res, 200, { queued: r.queued, runId: r.runId, pending: waAuto().pendingCount() });
             } catch (e) { json(res, 500, { error: e.message || e }); }
         });
         return true;
@@ -4361,6 +4361,44 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
             return json(res, 200, { ok: true });
         }).catch(function (e) { json(res, 500, { error: e.message || e }); });
         return true;
+    }
+    // GET /api/whatsapp-activity/recent — one small call powers the whole
+    // WhatsApp screen: newest runs, newest log lines (slim), queue depth and
+    // store totals. Reading this instead of the full stores is what keeps bulk
+    // feedback light no matter how many thousands of messages have been sent.
+    if (parts.length === 3 && parts[1] === 'whatsapp-activity' && parts[2] === 'recent' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        const slimLog = function (e) {
+            return {
+                id: e.id, phone: e.phone, name: e.name,
+                message: String(e.message || '').substring(0, 120),
+                date: e.date, time: e.time, template: e.template,
+                status: e.status || 'sent', sentBy: e.sentBy || ''
+            };
+        };
+        const slimRun = function (r) {
+            return {
+                id: r.id, label: r.label, template: r.template, channel: r.channel,
+                total: r.total, sent: r.sent, failed: r.failed,
+                by: r.by, startedAt: r.startedAt, completedAt: r.completedAt, status: r.status
+            };
+        };
+        let runs = [], log = [], outbox = [];
+        try { runs = filterStoreForUser(su, 'whatsappRuns', db.whatsappRuns || []); } catch (e) { runs = []; }
+        try { log = filterStoreForUser(su, 'whatsappLog', db.whatsappLog || []); } catch (e) { log = []; }
+        try { outbox = filterStoreForUser(su, 'whatsappOutbox', db.whatsappOutbox || []); } catch (e) { outbox = []; }
+        runs.sort(function (a, b) { return String(a.startedAt) < String(b.startedAt) ? 1 : -1; });
+        log.sort(function (a, b) { return String(a.createdAt) < String(b.createdAt) ? 1 : -1; });
+        const pending = outbox.filter(function (j) { return j && (j.status === 'queued' || j.status === 'sending'); }).length;
+        return json(res, 200, {
+            runs: runs.slice(0, 20).map(slimRun),
+            log: log.slice(0, 60).map(slimLog),
+            pending: pending,
+            totals: { runs: runs.length, log: log.length, outbox: outbox.length }
+        });
     }
     // POST /api/send-sms - send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {

@@ -2092,7 +2092,7 @@ function showScreen(id) {
         case 'alumni': renderAlumni(); break;
         case 'certificates': renderDocumentHistory(); refreshDocGenButtons(); break;
         case 'events': renderEvents(); break;
-        case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); loadWhatsAppCloud(); loadWaAuto(); break;
+        case 'whatsapp': renderWhatsAppTemplates(); loadTestPhone(); loadWhatsAppCloud(); loadWaAuto(); renderWaActivity(); break;
         case 'sms': renderSMSTemplates(); renderSMSLog(); break;
         case 'audit': renderAudit(); renderUsers(); break;
         case 'idcards': break;
@@ -2495,6 +2495,9 @@ const _refreshMap = {
         try { if (typeof window.invalidateStudentHubCache === 'function') { invalidateStudentHubCache(); const el = document.getElementById('hub-tab-overview'); if (el && _hubActiveTab === 'overview') { delete _hubRenderedTabs.overview; renderStudentHub(); } } } catch (e) {}
     },
     tickets: () => { if (isScreenActive('dashboard')) renderDashboard(); },
+    whatsappRuns: () => { if (isScreenActive('whatsapp')) renderWaActivity(); },
+    whatsappLog: () => { if (isScreenActive('whatsapp')) renderWaActivity(); },
+    whatsappOutbox: () => { if (isScreenActive('whatsapp')) renderWaActivity(); },
     alerts: () => { renderAlertBell(); generateAlerts(); if (isScreenActive('dashboard')) renderDashboard(); },
     payslips: () => { if (isScreenActive('finance')) renderPayrollList(); },
     salaryDeductions: () => { if (isScreenActive('finance')) renderDeductionsSummary(); },
@@ -5964,7 +5967,7 @@ async function sendExamNotify(examId) {
             const autoJobs = regs.map(function (r) { return students.find(function (x) { return x.id === r.studentId; }); }).filter(function (x) { return x && x.phone; }).map(function (st2) {
                 return { to: st2.phone, name: st2.name, studentId: st2.id, country: st2.country || '', template: 'exam-notify', message: renderFor(st2) };
             });
-            if (autoJobs.length && await waAutoEnqueueJobs(autoJobs, 'Exam notifications')) return;
+            if (autoJobs.length && await waAutoEnqueueJobs(autoJobs, 'Exam notifications', 'exam-notify')) return;
         }
     } catch (e) {}
     for (const reg of regs) {
@@ -13458,7 +13461,7 @@ async function loadWaAuto() {
     if (window._waAutoPoll == null) {
         window._waAutoPoll = setInterval(function () {
             const sc = document.getElementById('screen-whatsapp');
-            if (sc && sc.classList.contains('active')) loadWaAuto();
+            if (sc && sc.classList.contains('active')) { loadWaAuto(); renderWaActivity(); }
         }, 25000);
     }
 }
@@ -13487,10 +13490,11 @@ async function waAutoLogout() {
     catch (e) { showToast('Could not unpair: ' + e.message, { type: 'danger' }); }
     loadWaAuto();
 }
-async function waAutoEnqueueJobs(jobs, label) {
-    const r = await waAutoCall('/api/wa-auto/enqueue', 'POST', { jobs: jobs });
+async function waAutoEnqueueJobs(jobs, label, template) {
+    const r = await waAutoCall('/api/wa-auto/enqueue', 'POST', { jobs: jobs, label: label, template: template });
     renderWhatsAppLog();
-    showToast((label || 'Broadcast') + ' queued: ' + r.queued + ' message(s) sending automatically in the background.', { type: 'success', duration: 8000 });
+    renderWaRuns();
+    showToast((label || 'Broadcast') + ' queued: ' + r.queued + ' message(s) sending automatically — watch it live in Bulk runs below.', { type: 'success', duration: 8000 });
     logAudit('whatsapp-auto-enqueue', 'whatsappLog', { total: r.queued, label: label || '' });
     return true;
 }
@@ -13506,7 +13510,7 @@ async function waAutoEnqueueTargets(targets, templateName, message, schoolName, 
             message: applyTemplateVars(message, x, brandName, getCachedStudentFee(x) - tuitionPaid(payments, x.id), x.admissionNumber, x.phone) };
     });
     if (!jobs.length) return false;
-    return waAutoEnqueueJobs(jobs, label);
+    return waAutoEnqueueJobs(jobs, label, templateName);
 }
 async function saveWhatsAppCloud() {
     const val = (id) => (document.getElementById(id) || {}).value || '';
@@ -13931,6 +13935,7 @@ function sendNextWhatsApp() {
     const s = current.student;
     if (!s.phone) {
         waFailedCount++;
+        waRunTick(window._deviceRunId, false, { name: s.name, phone: '', status: 'failed', error: 'no phone number' });
         waQueueIndex++;
         showBroadcastPanel();
         if (waQueueAutoAdvance) setTimeout(() => sendNextWhatsApp(), waQueueDelay);
@@ -13945,9 +13950,11 @@ function sendNextWhatsApp() {
     const delivered = !!opened;
     if (delivered) {
         waSentCount++;
+        waRunTick(window._deviceRunId, true, { name: s.name, phone: s.phone, status: 'sent' });
         try { opened.focus(); } catch (e) {}
     } else {
         waFailedCount++;
+        waRunTick(window._deviceRunId, false, { name: s.name, phone: s.phone, status: 'blocked', error: 'popup blocked' });
         showToast('Popup blocked for ' + s.name + ' \u2014 allow pop-ups for this site, or open the link manually.', { type: 'warning', duration: 6000 });
     }
     const entry = { id: 'WA-' + Date.now(), phone: s.phone, name: s.name, message: String(msg).substring(0, 200), date: new Date().toISOString().slice(0, 10), time: new Date().toLocaleTimeString(), template: current.template, status: delivered ? 'sent' : 'blocked', createdAt: new Date().toISOString() };
@@ -13968,6 +13975,8 @@ function sendNextWhatsApp() {
     }
 }
 function skipBroadcastRecipient() {
+    const skipped = waQueue[waQueueIndex];
+    if (skipped && skipped.student) waRunTick(window._deviceRunId, false, { name: skipped.student.name, phone: skipped.student.phone, status: 'skipped', error: 'skipped by admin' });
     waQueueIndex++;
     if (waQueueIndex >= waQueue.length) {
         showToast(`Broadcast complete! Sent: ${waSentCount}, Failed: ${waFailedCount}`);
@@ -13981,6 +13990,8 @@ function skipBroadcastRecipient() {
 function stopBroadcast() {
     waQueueRunning = false;
     waQueueAutoAdvance = false;
+    try { waRunDone(window._deviceRunId); } catch (e) {}
+    window._deviceRunId = null;
     document.removeEventListener('keydown', handleBroadcastKeydown);
     if (waQueueIndex < waQueue.length) {
         showToast(`Broadcast stopped. Sent: ${waSentCount}, Failed: ${waFailedCount}, Remaining: ${waQueue.length - waQueueIndex}`);
@@ -14000,6 +14011,7 @@ async function sendWhatsAppBroadcast(targets, template, message, schoolName) {
     waSentCount = 0;
     waFailedCount = 0;
     waQueueRunning = true;
+    window._deviceRunId = await waRunStart('Broadcast', template && template.name ? template.name : '', 'device', waQueue.length);
     showBroadcastPanel();
 }
 async function quickWhatsAppStudent(studentId, templateId) {
@@ -14039,10 +14051,156 @@ async function saveTemplate() {
     renderWhatsAppTemplates();
     showToast('Template saved!');
 }
-async function renderWhatsAppLog() {
-    const log = (await dbGetAll('whatsappLog')).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 100);
-    document.getElementById('whatsapp-log').innerHTML = log.length ? log.map(e => `<div class="whatsapp-log-entry"><span style="font-weight:600;">${e.date} ${e.time}</span> <span class="badge badge-success" style="font-size:9px;">${e.template || 'custom'}</span><br>→ ${e.name || e.phone} <span style="font-size:10px;color:var(--text-muted);">(${e.phone})</span><br><span style="font-size:11px;color:var(--text-muted);">${e.message}</span><div style="margin-top:4px;"><button class="btn btn-xs btn-outline" onclick="retryWhatsAppLog('${e.phone}', \`${e.message.replace(/`/g, '\\`')}\`)">↻ Resend</button></div></div>`).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No messages sent yet</div>';
+// ---- Bulk-run feedback + light WhatsApp activity feed --------------------
+// Every bulk send (automatic, Cloud API, or device tabs) owns one run record:
+// live totals plus per-recipient outcomes. The Message Log and runs both read
+// the small /api/whatsapp-activity/recent feed, so a thousand sends never
+// means a thousand-row download.
+async function waRunStart(label, template, channel, total) {
+    let country = '', by = '';
+    try { country = await messageLogCountry(); } catch (e) {}
+    try { by = JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || ''; } catch (e) {}
+    const rec = {
+        id: 'WRN-' + Date.now().toString(36).toUpperCase(),
+        label: label || 'Broadcast', template: template || '', channel: channel || 'device',
+        total: total || 0, sent: 0, failed: 0, results: [],
+        by: by, country: country || '',
+        startedAt: new Date().toISOString(), completedAt: '', status: 'running'
+    };
+    try { await dbPut('whatsappRuns', rec); } catch (e) {}
+    try { renderWaRuns(); } catch (e) {}
+    return rec.id;
 }
+async function waRunTick(id, ok, result) {
+    if (!id) return;
+    try {
+        const run = await dbGet('whatsappRuns', id);
+        if (!run || run.status !== 'running') return;
+        if (ok) run.sent++; else run.failed++;
+        if (result) {
+            run.results = run.results || [];
+            if (run.results.length < 500) run.results.push(result);
+        }
+        await dbPut('whatsappRuns', run);
+        renderWaRuns();
+    } catch (e) {}
+}
+async function waRunDone(id) {
+    if (!id) return;
+    try {
+        const run = await dbGet('whatsappRuns', id);
+        if (!run || run.status !== 'running') return;
+        run.status = 'done';
+        run.completedAt = new Date().toISOString();
+        await dbPut('whatsappRuns', run);
+        renderWaRuns();
+    } catch (e) {}
+}
+function waChannelLabel(c) { return c === 'auto' ? 'Automatic' : (c === 'cloud' ? 'Cloud API' : 'Device'); }
+function waRunPct(r) {
+    const d = (r.sent || 0) + (r.failed || 0);
+    return r.total ? Math.min(100, Math.round(d / r.total * 100)) : 0;
+}
+function paintWaLog(log) {
+    const el = document.getElementById('whatsapp-log');
+    if (!el) return;
+    window._waRecentLog = log || [];
+    el.innerHTML = (log && log.length) ? log.map(function (e) {
+        const st = e.status || 'sent';
+        const chip = (st === 'failed' || st === 'blocked')
+            ? '<span class="badge badge-danger" style="font-size:9px;">' + escapeHtml(st) + '</span>'
+            : (st === 'sent' ? '<span class="badge badge-success" style="font-size:9px;">sent</span>'
+                : '<span class="badge badge-info" style="font-size:9px;">' + escapeHtml(st) + '</span>');
+        return '<div class="whatsapp-log-entry"><span style="font-weight:600;">' + escapeHtml(e.date || '') + ' ' + escapeHtml(e.time || '') + '</span> '
+            + '<span class="badge badge-success" style="font-size:9px;">' + escapeHtml(e.template || 'custom') + '</span> ' + chip
+            + '<br>→ ' + escapeHtml(e.name || e.phone) + ' <span style="font-size:10px;color:var(--text-muted);">(' + escapeHtml(e.phone || '') + ')</span>'
+            + '<br><span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(e.message || '') + '</span>'
+            + '<div style="margin-top:4px;"><button class="btn btn-xs btn-outline" onclick="retryWhatsAppLogById(\'' + e.id + '\')">↻ Resend</button></div></div>';
+    }).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No messages sent yet</div>';
+}
+async function retryWhatsAppLogById(id) {
+    const e = (window._waRecentLog || []).find(function (x) { return x && x.id === id; });
+    if (!e) return showToast('That message has scrolled out of view - reopen the log to resend it.');
+    retryWhatsAppLog(e.phone, e.message);
+}
+function paintWaRuns(runs, totals) {
+    const el = document.getElementById('wa-runs');
+    if (!el) return;
+    runs = (runs || []).slice().sort(function (a, b) { return String(a.startedAt) < String(b.startedAt) ? 1 : -1; });
+    el.innerHTML = (totals ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">History kept: <b>' + totals.log + '</b> messages · <b>' + totals.outbox + '</b> queued jobs · <b>' + totals.runs + '</b> runs. Old rows are pruned automatically so the system stays light.</div>' : '')
+        + (runs.length ? runs.slice(0, 20).map(function (r) {
+            const pct = waRunPct(r);
+            const live = r.status === 'running';
+            return '<div onclick="showWaRunDetail(\'' + r.id + '\')" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:var(--bg-card);">'
+                + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;"><b>' + escapeHtml(r.label || 'Broadcast') + '</b>'
+                + '<span style="font-size:10px;color:var(--text-muted);">' + waChannelLabel(r.channel) + ' · ' + escapeHtml(r.template || 'custom') + ' · ' + escapeHtml(String(r.startedAt || '').slice(0, 16).replace('T', ' ')) + '</span></div>'
+                + '<div style="height:6px;background:var(--bg-input);border-radius:3px;overflow:hidden;margin:8px 0 6px;"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,var(--accent),var(--success));border-radius:3px;"></div></div>'
+                + '<div style="font-size:11px;display:flex;gap:12px;flex-wrap:wrap;"><span style="color:var(--success);font-weight:700;">✓ ' + (r.sent || 0) + ' sent</span>'
+                + ((r.failed || 0) ? '<span style="color:var(--danger);font-weight:700;">✗ ' + r.failed + ' failed</span>' : '')
+                + '<span style="color:var(--text-muted);">' + (live ? 'sending… ' + pct + '%' : 'done · ' + (r.total || 0) + ' total') + '</span></div></div>';
+        }).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No bulk sends yet — they appear here with live progress.</div>');
+}
+async function renderWhatsAppLog() {
+    try {
+        const r = await waAutoCall('/api/whatsapp-activity/recent');
+        paintWaLog(r.log || []);
+        return;
+    } catch (e) {}
+    const log = (await dbGetAll('whatsappLog')).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 100);
+    paintWaLog(log);
+}
+async function renderWaRuns() {
+    try {
+        const r = await waAutoCall('/api/whatsapp-activity/recent');
+        paintWaRuns(r.runs || [], r.totals);
+        return;
+    } catch (e) {}
+    let runs = [];
+    try { runs = await dbGetAll('whatsappRuns'); } catch (e2) {}
+    paintWaRuns(runs, window._waTotals);
+}
+// One small call paints both panels — used by live-update events and the poller.
+async function renderWaActivity() {
+    try {
+        const r = await waAutoCall('/api/whatsapp-activity/recent');
+        window._waTotals = r.totals;
+        paintWaLog(r.log || []);
+        paintWaRuns(r.runs || [], r.totals);
+    } catch (e) {
+        renderWhatsAppLog();
+        renderWaRuns();
+    }
+}
+async function showWaRunDetail(runId) {
+    let run = null;
+    try { run = await dbGet('whatsappRuns', runId); } catch (e) {}
+    if (!run) return showToast('Run not found.');
+    let rows = [];
+    if (run.channel === 'auto') {
+        try {
+            const jobs = await dbGetAll('whatsappOutbox');
+            rows = jobs.filter(function (j) { return j && j.runId === runId; }).map(function (j) {
+                return { name: j.name, phone: j.to, status: j.status === 'sent' ? (j.delivery || 'sent') : j.status, error: j.error };
+            });
+        } catch (e) {}
+    } else { rows = run.results || []; }
+    const chip = function (st) {
+        const c = (st === 'failed' || st === 'blocked') ? 'var(--danger)'
+            : (st === 'read' ? '#047857' : (st === 'delivered' ? '#0284c7' : (st === 'sent' ? 'var(--success)' : (st === 'sending' ? 'var(--warning)' : 'var(--text-muted)'))));
+        return '<span style="font-size:10px;font-weight:700;color:' + c + ';">' + escapeHtml(st || '?') + '</span>';
+    };
+    const body = rows.length
+        ? '<table style="width:100%;font-size:12px;"><tr style="text-align:left;color:var(--text-muted);"><th style="padding:4px 0;">Student</th><th>Phone</th><th>Status</th><th></th></tr>'
+            + rows.map(function (w) {
+                return '<tr style="border-top:1px solid var(--border);"><td style="padding:5px 0;">' + escapeHtml(w.name || '-') + '</td><td>' + escapeHtml(w.phone || '') + '</td><td>' + chip(w.status) + '</td><td style="font-size:10px;color:var(--danger);">' + escapeHtml(w.error || '') + '</td></tr>';
+            }).join('') + '</table>'
+        : '<div style="color:var(--text-muted);padding:12px;">No per-recipient rows for this run yet.</div>';
+    showModal('Bulk send — ' + run.label + ' (' + (run.sent || 0) + '/' + (run.total || 0) + ')',
+        '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' + waChannelLabel(run.channel) + ' · started ' + escapeHtml(String(run.startedAt || '').slice(0, 16).replace('T', ' '))
+        + (run.completedAt ? ' · finished ' + escapeHtml(String(run.completedAt).slice(0, 16).replace('T', ' ')) : ' · still running') + '</div>' + body,
+        '<button class="btn btn-outline" onclick="closeModal()">Close</button>');
+}
+
 async function retryWhatsAppLog(phone, message) {
     if (!phone || !message) return showToast('Invalid log entry');
     sendWhatsApp(phone, message);
@@ -14189,18 +14347,21 @@ async function runCloudBroadcast(targets, template, message, schoolName, label) 
         message: applyTemplateVars(message, st, brandName, getCachedStudentFee(st) - tuitionPaid(payments, st.id), st.admissionNumber, st.phone),
         studentId: st.id, country: st.country || ''
     }));
+    const tplName = template && template.name ? template.name : '';
+    const runId = await waRunStart(label || 'Broadcast', tplName, 'cloud', jobs.length);
     showToast('Sending ' + jobs.length + ' messages via Cloud API…', { type: 'info', duration: 4000 });
     let sent = 0, failed = 0; const errors = [];
     const WAVE = 6, DELAY = 120;
     for (let i = 0; i < jobs.length; i += WAVE) {
         const wave = jobs.slice(i, i + WAVE).map(async j => {
-            try { await waCloudCall('/api/whatsapp-cloud/send', 'POST', j); sent++; }
-            catch (e) { failed++; if (errors.length < 3) errors.push(j.name + ': ' + e.message); }
+            try { await waCloudCall('/api/whatsapp-cloud/send', 'POST', j); sent++; waRunTick(runId, true, { name: j.name, phone: j.to, status: 'sent' }); }
+            catch (e) { failed++; if (errors.length < 3) errors.push(j.name + ': ' + e.message); waRunTick(runId, false, { name: j.name, phone: j.to, status: 'failed', error: e.message }); }
         });
         await Promise.all(wave);
         if (i + WAVE < jobs.length) await new Promise(r => setTimeout(r, DELAY));
     }
     renderWhatsAppLog();
+    await waRunDone(runId);
     let msg = (label || 'Broadcast') + ' complete — sent: ' + sent + ', failed: ' + failed + ' of ' + jobs.length;
     if (errors.length) msg += ' — ' + errors.join(' | ');
     showToast(msg, { type: failed ? 'warning' : 'success', duration: failed ? 12000 : 8000 });

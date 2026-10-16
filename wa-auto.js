@@ -21,6 +21,14 @@ const WORKER_BASE_MS = 5000;
 const WORKER_JITTER_MS = 4000;
 const MAX_ATTEMPTS = 5;
 const MAX_JOBS_PER_REQUEST = 2000;
+// Feedback + lightness caps: the message log never grows past LOG_CAP rows,
+// finished outbox jobs older than OUTBOX_KEEP_DAYS vanish, and only the newest
+// RUNS_CAP bulk runs are kept. The UI reads a small "recent activity" feed, so
+// a thousand sends never means a thousand-row download.
+const LOG_CAP = 2000;
+const OUTBOX_KEEP_DAYS = 7;
+const OUTBOX_CAP = 5000;
+const RUNS_CAP = 50;
 
 function digitsOf(p) { return String(p == null ? '' : p).replace(/\D/g, ''); }
 function normalizeKe(p) {
@@ -48,8 +56,17 @@ module.exports = function createWaAuto(ctx) {
     const S = {
         sock: null, starting: false, connected: false, phone: '',
         qr: '', qrAt: 0, lastError: '', loggedOut: false,
-        busy: false, workerTimer: null, lastSentAt: '', started: false
+        busy: false, workerTimer: null, lastSentAt: '', started: false,
+        receiptTimer: null, receiptsDirty: false
     };
+
+    function userCountry(username) {
+        try {
+            const db = getDb();
+            const u = (db.users || []).find(function (x) { return x && String(x.username) === String(username); });
+            return (u && (u.country || (u.user && u.user.country))) || '';
+        } catch (e) { return ''; }
+    }
 
     function senderNumber() {
         try {
@@ -73,11 +90,119 @@ module.exports = function createWaAuto(ctx) {
         } catch (e) {}
     }
 
+    // ---- Bulk-run feedback -------------------------------------------------
+    // Every automatic bulk send owns one run record: totals move with each
+    // completion and the run closes when its queue drains. The WhatsApp screen
+    // renders these as live progress bars with per-recipient drill-down.
+    function createRun(label, template, total, by) {
+        try {
+            const db = getDb();
+            db.whatsappRuns = db.whatsappRuns || [];
+            const run = {
+                id: 'WRN-' + Date.now().toString(36).toUpperCase(),
+                label: String(label || 'Broadcast'), template: String(template || ''),
+                channel: 'auto', total: total, sent: 0, failed: 0,
+                by: by || '', country: userCountry(by),
+                startedAt: new Date().toISOString(), completedAt: '',
+                status: 'running'
+            };
+            db.whatsappRuns.push(run);
+            return run;
+        } catch (e) { return null; }
+    }
+
+    function tickRun(runId, ok) {
+        try {
+            const db = getDb();
+            const run = (db.whatsappRuns || []).find(function (r) { return r && r.id === runId; });
+            if (!run || run.status !== 'running') return;
+            if (ok) run.sent++; else run.failed++;
+            const done = run.sent + run.failed;
+            if (done >= run.total) { run.status = 'done'; run.completedAt = new Date().toISOString(); }
+            return run.status;
+        } catch (e) { return ''; }
+    }
+
+    // ---- Lightness: prune heavy stores --------------------------------------
+    function pruneWaStores() {
+        try {
+            const db = getDb();
+            if (Array.isArray(db.whatsappLog) && db.whatsappLog.length > LOG_CAP) {
+                db.whatsappLog.sort(function (a, b) { return String(a.createdAt) < String(b.createdAt) ? -1 : 1; });
+                db.whatsappLog = db.whatsappLog.slice(-LOG_CAP);
+            }
+            if (Array.isArray(db.whatsappOutbox) && db.whatsappOutbox.length) {
+                const cutoff = Date.now() - OUTBOX_KEEP_DAYS * 24 * 3600 * 1000;
+                db.whatsappOutbox = db.whatsappOutbox.filter(function (j) {
+                    if (!j || j.status === 'queued' || j.status === 'sending') return true;
+                    const t = Date.parse(j.sentAt || j.createdAt || 0) || 0;
+                    return t >= cutoff;
+                });
+                if (db.whatsappOutbox.length > OUTBOX_CAP) {
+                    const finished = db.whatsappOutbox.filter(function (j) { return j && j.status !== 'queued' && j.status !== 'sending'; });
+                    const drop = db.whatsappOutbox.length - OUTBOX_CAP;
+                    const dropIds = {};
+                    finished.sort(function (a, b) { return String(a.createdAt) < String(b.createdAt) ? -1 : 1; }).slice(0, drop).forEach(function (j) { dropIds[j.id] = 1; });
+                    db.whatsappOutbox = db.whatsappOutbox.filter(function (j) { return !dropIds[j.id]; });
+                }
+            }
+            if (Array.isArray(db.whatsappRuns) && db.whatsappRuns.length > RUNS_CAP) {
+                db.whatsappRuns.sort(function (a, b) { return String(a.startedAt) < String(b.startedAt) ? -1 : 1; });
+                db.whatsappRuns = db.whatsappRuns.slice(-RUNS_CAP);
+            }
+        } catch (e) {}
+    }
+
     function today() { return new Date().toISOString().split('T')[0]; }
+
+    // Delivery feedback: WhatsApp reports SERVER_ACK(2) / DELIVERY_ACK(3) /
+    // READ(4+) per message. We lift log entries sent -> delivered -> read so
+    // the admin sees what actually reached a handset, not just the server.
+    // Receipts arrive in bursts; they are applied in memory and flushed at
+    // most every 10 seconds so a big blast never hammers the disk.
+    function onReceipts(updates) {
+        try {
+            const db = getDb();
+            const jobs = db.whatsappOutbox || [];
+            const logs = db.whatsappLog || [];
+            let touched = false;
+            (updates || []).forEach(function (u) {
+                const id = u && u.key && u.key.id;
+                const ack = u && u.update && u.update.status;
+                if (!id || !(ack >= 3)) return;
+                const want = ack >= 4 ? 'read' : 'delivered';
+                const job = jobs.find(function (j) { return j && j.waId === id && j.status === 'sent'; });
+                if (job) {
+                    const order = { sent: 0, delivered: 1, read: 2 };
+                    if ((order[job.delivery || 'sent'] || 0) < order[want]) { job.delivery = want; touched = true; }
+                }
+                for (let i = logs.length - 1; i >= 0 && i >= logs.length - 400; i--) {
+                    const e = logs[i];
+                    if (e && e.waId === id && (e.status === 'sent' || e.status === 'delivered')) {
+                        const order = { sent: 0, delivered: 1, read: 2 };
+                        if ((order[e.status] || 0) < (want === 'read' ? 2 : 1)) { e.status = want; touched = true; }
+                        break;
+                    }
+                }
+            });
+            if (!touched) return;
+            S.receiptsDirty = true;
+            if (!S.receiptTimer) {
+                S.receiptTimer = setTimeout(function () {
+                    S.receiptTimer = null;
+                    if (!S.receiptsDirty) return;
+                    S.receiptsDirty = false;
+                    try { saveDB(); } catch (e) {}
+                    try { broadcastEvent('db-change', { store: 'whatsappLog' }); } catch (e) {}
+                }, 10000);
+            }
+        } catch (e) {}
+    }
 
     async function boot() {
         if (S.started || !Baileys) return;
         S.started = true;
+        try { pruneWaStores(); } catch (e) {}
         await ensureStarted();
         scheduleWorker(3000);
     }
@@ -103,6 +228,7 @@ module.exports = function createWaAuto(ctx) {
             S.sock = sock;
             sock.ev.on('creds.update', auth.saveCreds);
             sock.ev.on('connection.update', onUpdate);
+            sock.ev.on('messages.update', onReceipts);
         } catch (e) {
             S.lastError = e.message || String(e);
             S.sock = null;
@@ -176,15 +302,16 @@ module.exports = function createWaAuto(ctx) {
                     const iso = new Date().toISOString();
                     try {
                         const waId = await sendDirect(job.to, job.message);
-                        job.status = 'sent'; job.sentAt = iso; job.waId = waId; job.error = '';
+                        job.status = 'sent'; job.sentAt = iso; job.waId = waId; job.error = ''; job.delivery = 'sent';
                         S.lastSentAt = iso;
                         pushLog({
                             id: 'WA-' + Date.now(), phone: job.to, name: job.name || '',
                             message: String(job.message || '').substring(0, 200),
                             date: iso.split('T')[0], time: new Date(iso).toLocaleTimeString(),
-                            template: job.template || 'auto', status: 'sent',
+                            template: job.template || 'auto', status: 'sent', waId: waId,
                             sentBy: 'wa-auto', country: job.country || '', createdAt: iso
                         });
+                        var runState = tickRun(job.runId, true);
                     } catch (e) {
                         job.error = e.message || String(e);
                         if (job.attempts >= MAX_ATTEMPTS) {
@@ -196,12 +323,15 @@ module.exports = function createWaAuto(ctx) {
                                 template: job.template || 'auto', status: 'failed',
                                 sentBy: 'wa-auto', country: job.country || '', createdAt: new Date().toISOString()
                             });
+                            var runState = tickRun(job.runId, false);
                         } else { job.status = 'queued'; }
                     }
+                    try { pruneWaStores(); } catch (e) {}
                     try { saveDB(); } catch (e) {}
                     try {
                         broadcastEvent('db-change', { store: 'whatsappLog' });
-                        broadcastEvent('wa-auto', { queue: pendingCount() });
+                        if (typeof runState !== 'undefined' && runState) broadcastEvent('db-change', { store: 'whatsappRuns' });
+                        else broadcastEvent('wa-auto', { queue: pendingCount() });
                     } catch (e) {}
                     S.busy = false;
                 }
@@ -210,27 +340,37 @@ module.exports = function createWaAuto(ctx) {
         scheduleWorker();
     }
 
-    function enqueue(jobs, by) {
+    function enqueue(jobs, by, opts) {
+        const o = opts || {};
         const db = getDb();
         db.whatsappOutbox = db.whatsappOutbox || [];
-        let n = 0;
-        (jobs || []).slice(0, MAX_JOBS_PER_REQUEST).forEach(function (j) {
+        const valid = (jobs || []).slice(0, MAX_JOBS_PER_REQUEST).filter(function (j) {
             const d = normalizeKe(j && j.to);
-            if (!j || d.length < 9 || d.length > 15 || !String(j.message || '').trim()) return;
+            return j && d.length >= 9 && d.length <= 15 && String(j.message || '').trim();
+        });
+        const run = createRun(o.label || 'Broadcast', o.template || '', valid.length, by);
+        const runId = run ? run.id : '';
+        let n = 0;
+        valid.forEach(function (j) {
+            const d = normalizeKe(j.to);
             db.whatsappOutbox.push({
                 id: 'WAQ-' + Date.now().toString(36).toUpperCase() + '-' + n,
+                runId: runId,
                 to: d, name: String(j.name || ''), message: String(j.message).slice(0, 2000),
-                studentId: j.studentId || '', country: j.country || '', template: j.template || 'auto',
-                status: 'queued', attempts: 0, error: '',
+                studentId: j.studentId || '', country: j.country || '', template: j.template || o.template || 'auto',
+                status: 'queued', attempts: 0, error: '', delivery: '',
                 createdAt: new Date().toISOString(), queuedBy: by || ''
             });
             n++;
         });
         try { saveDB(); } catch (e) {}
-        try { broadcastEvent('wa-auto', { queue: pendingCount() }); } catch (e) {}
+        try {
+            broadcastEvent('db-change', { store: 'whatsappRuns' });
+            broadcastEvent('wa-auto', { queue: pendingCount() });
+        } catch (e) {}
         scheduleWorker(1500);
-        try { auditLog('whatsapp-auto-enqueue', 'whatsappOutbox', { total: n }, by || 'system'); } catch (e) {}
-        return n;
+        try { auditLog('whatsapp-auto-enqueue', 'whatsappOutbox', { total: n, runId: runId }, by || 'system'); } catch (e) {}
+        return { queued: n, runId: runId };
     }
 
     async function logout() {
