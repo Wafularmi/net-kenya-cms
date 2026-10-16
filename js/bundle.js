@@ -5668,6 +5668,10 @@ async function notifyExamStudent(examId, studentId) {
     const student = await dbGet('students', studentId);
     if (!student) return showToast('Student not found', { type: 'danger' });
     if (!student.phone) return showToast('No phone number on file for this student', { type: 'danger' });
+    const examRegs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
+    if (!examRegs.some(r => String(r.studentId) === String(studentId))) return showToast('This student is not registered for this exam - notification blocked.', { type: 'danger', duration: 6000 });
+    const courseEnr = (await dbGetAll('enrollments')).filter(e => String(e.courseId) === String(exam.courseId));
+    if (!courseEnr.some(e => String(e.studentId) === String(studentId))) return showToast('This student is not enrolled in this course - notification blocked.', { type: 'danger', duration: 6000 });
     const course = await dbGet('courses', exam.courseId);
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
@@ -5814,44 +5818,116 @@ async function startExam(examId) {
         showQuizInterface(exam, examQuestions, chosenLang, { openExam });
     });
 }
+// ---- Accurate, eligible-only exam notifications ---------------------------
+// A student receives an exam notice only when ALL of these hold: active,
+// has a phone, registered for THIS exam, and enrolled in the exam's course.
+// Fee balance never blocks (warn-only): it is stated in the message and
+// flagged in the list, but defaulters are still notified.
+function examNotifyEligibility(exam, students, regs, enrollments, payments) {
+    const eligible = [], excluded = [];
+    (students || []).forEach(function (s) {
+        const reasons = [];
+        if (s.status !== 'active') reasons.push('not an active student');
+        if (!s.phone) reasons.push('no phone number');
+        if (!regs.some(function (r) { return String(r.studentId) === String(s.id); })) reasons.push('not registered for this exam');
+        if (!enrollments.some(function (e) { return String(e.studentId) === String(s.id) && String(e.courseId) === String(exam.courseId); })) reasons.push('not enrolled in this course');
+        const paid = tuitionPaid(payments || [], s.id);
+        const balance = Math.max(0, getCachedStudentFee(s) - paid);
+        if (!reasons.length) eligible.push(Object.assign({}, s, { _balance: balance, _owes: balance > 0 }));
+        else excluded.push({ student: s, reasons: reasons, balance: balance });
+    });
+    return { eligible: eligible, excluded: excluded };
+}
+// The message is composed FROM the exam record, so the title, type and date
+// can never be forgotten or mistyped. Resolved per student at send time.
+function examNotifyDefaultMessage() {
+    return 'Dear {{name}},\n\nThis is to notify you of your upcoming {{type}}:\n\nExam: {{event}}\nCourse: {{course}}\nDate: {{date}}\nTime: {{time}}\nVenue: {{venue}}\n\nFee balance: {{balance}}\n\nYour online portal credentials:\nUsername: {{username}}\nPassword: {{password}}\nPortal: {{portal}}\n\n- {{school}}';
+}
+// Single renderer used by preview AND every send path, so what the admin
+// previews is byte-for-byte what the student receives.
+function examNotifyRenderFor(exam, course, msg, student, schoolName, balance) {
+    let personalized = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
+    if (exam) {
+        personalized = personalized
+            .replace(/{{course}}/g, course ? course.name : (exam.title || exam.courseId))
+            .replace(/{{type}}/g, exam.type ? exam.type.charAt(0).toUpperCase() + exam.type.slice(1) : 'Exam')
+            .replace(/{{event}}/g, exam.title || (course ? course.name : ''))
+            .replace(/{{date}}/g, formatDate(exam.date))
+            .replace(/{{time}}/g, exam.time || '')
+            .replace(/{{venue}}/g, exam.venue || 'TBA')
+            .replace(/{{min}}/g, String(exam.passMark || 50));
+    }
+    return personalized;
+}
+async function previewExamNotifyFor(examId, studentId) {
+    const exam = await dbGet('exams', examId);
+    const course = exam ? await dbGet('courses', exam.courseId) : null;
+    const student = await dbGet('students', studentId);
+    if (!exam || !student) return;
+    const msgEl = document.getElementById('exam-notify-msg');
+    const msg = msgEl ? msgEl.value : '';
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding ? branding.schoolName : 'College';
+    const payments = await dbGetAll('payments');
+    const balance = Math.max(0, getCachedStudentFee(student) - tuitionPaid(payments, student.id));
+    const area = document.getElementById('notify-preview');
+    if (!area) return;
+    area.style.display = 'block';
+    area.style.whiteSpace = 'pre-line';
+    area.style.color = 'var(--text)';
+    area.innerHTML = '<b>' + escapeHtml(student.name) + ' - exact message:</b><br><br>' + escapeHtml(examNotifyRenderFor(exam, course, msg, student, schoolName, balance));
+    area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 async function showExamNotify(examId) {
     const exam = await dbGet('exams', examId);
     if (!exam) return;
     const students = await dbGetAll('students');
     const centers = await getCenters();
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
+    const enrollments = (await dbGetAll('enrollments')).filter(e => String(e.courseId) === String(exam.courseId));
+    const payAll = await dbGetAll('payments');
     const course = await dbGet('courses', exam.courseId);
     const center = centers.find(c => c.id === exam.studyCenterId);
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     await seedWhatsAppTemplates();
     const templates = await dbGetAll('whatsappTemplates');
-    const recipients = students.filter(s => s.status === 'active' && regs.some(r => r.studentId === s.id));
+    const check = examNotifyEligibility(exam, students, regs, enrollments, payAll);
+    const eligible = check.eligible, excluded = check.excluded;
+    const recipients = eligible;
+    const fmtBal = function (b) { return b > 0 ? '<b style="color:var(--danger);">' + formatCurrency(b) + ' owed</b>' : '<span style="color:var(--success);">cleared</span>'; };
+    const excludedList = excluded.map(function (x) {
+        const xs = x.student;
+        return '<tr><td><b>' + escapeHtml(xs.name) + '</b><br><span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(xs.admissionNumber || xs.id || '') + '</span></td><td style="font-size:11px;color:var(--danger);">' + escapeHtml(x.reasons.join('; ')) + '</td><td style="font-size:11px;">' + fmtBal(x.balance) + '</td></tr>';
+    }).join('');
     const recipientsList = recipients.map(s => {
         const centerName = s.studyCenterId ? centers.find(c => c.id === s.studyCenterId)?.name : '';
-        return `<tr><td><b>${escapeHtml(s.name)}</b>${s.admissionNumber ? `<br><span style="font-size:10px;color:var(--text-muted);">${escapeHtml(s.admissionNumber)}</span>` : ''}</td><td style="font-size:11px;">${s.phone ? escapeHtml(s.phone) : '<span style="color:var(--danger);">none</span>'}</td><td style="font-size:10px;">${escapeHtml(centerName || '--')}</td><td><button class="btn btn-success btn-sm" onclick="notifyExamStudent('${examId}','${s.id}')" ${!s.phone ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : ''}>📱 Notify</button></td></tr>`;
+        return `<tr><td><b>${escapeHtml(s.name)}</b>${s.admissionNumber ? `<br><span style="font-size:10px;color:var(--text-muted);">${escapeHtml(s.admissionNumber)}</span>` : ''}</td><td style="font-size:11px;">${escapeHtml(s.phone)}<br>${fmtBal(s._balance)}</td><td style="font-size:10px;">${escapeHtml(centerName || '--')}</td><td style="white-space:nowrap;"><button class="btn btn-outline btn-sm" onclick="previewExamNotifyFor('${examId}','${s.id}')">Preview</button> <button class="btn btn-success btn-sm" onclick="notifyExamStudent('${examId}','${s.id}')">📱 Notify</button></td></tr>`;
     }).join('');
-    const content = `<div style="margin-bottom:12px;"><b>${course ? course.name : exam.courseId}</b> — ${formatDate(exam.date)} ${exam.time}${center ? ' | ' + center.name : ''} | ${recipients.length} registered student(s)</div>
+    const examKind = exam.type ? exam.type.charAt(0).toUpperCase() + exam.type.slice(1) : 'Exam';
+    const content = `<div style="margin-bottom:12px;"><b>${escapeHtml(exam.title || '')}</b> (${examKind}) — <b>${formatDate(exam.date)}</b> ${exam.time || ''}${center ? ' | ' + escapeHtml(center.name) : ''}<br><span style="font-size:11px;color:var(--success);">✓ ${eligible.length} will receive</span>${excluded.length ? ` <span style="font-size:11px;color:var(--danger);">· ✗ ${excluded.length} excluded</span>` : ''}</div>
         <div style="display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--border);">
             <button class="btn btn-outline btn-sm" id="tab-bulk" onclick="showNotifyTab('bulk','${examId}')">📣 Bulk Template</button>
             <button class="btn btn-outline btn-sm" id="tab-individual" onclick="showNotifyTab('individual','${examId}')" style="background:var(--accent);color:white;border-color:var(--accent);">👤 Per-Student (${recipients.length})</button>
         </div>
         <div id="notify-tab-bulk">
             <div class="form-group"><label>Message Template</label><select id="exam-notify-tpl" onchange="document.getElementById('exam-notify-msg').value=this.value"><option value="">-- Write your own --</option>${templates.map(t => `<option value="${escapeHtml(t.message)}">${escapeHtml(t.name)}</option>`).join('')}</select></div>
-            <div class="form-group"><label>Message</label><textarea id="exam-notify-msg" rows="5" placeholder="Write your message here. Use {{name}}, {{course}}, {{date}}, {{time}}, {{venue}} as variables."></textarea></div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Recipients: <b>${recipients.length}</b> student(s) — each will receive a personalized copy.</div>
+            <div class="form-group"><label>Message — pre-filled from this exam; edit freely</label><textarea id="exam-notify-msg" rows="6">${escapeHtml(examNotifyDefaultMessage())}</textarea></div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Eligible: <b>${recipients.length}</b> — each receives a personalized copy with exam title, type, date, fee balance and portal credentials.${excluded.length ? ` <b style="color:var(--danger);">${excluded.length} excluded</b> (ineligible — see Per-Student tab).` : ''}</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button class="btn btn-outline btn-sm" onclick="previewExamNotify('${examId}')">Preview</button>
                 <button class="btn btn-outline btn-sm" onclick="copyExamNotify('${examId}')">Copy</button>
             </div>
+            <div id="notify-preview" style="display:none;margin-top:10px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;font-size:12px;"></div>
         </div>
         <div id="notify-tab-individual" style="display:none;">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click 📱 Notify on any student to open WhatsApp with a personalized message. Each send is independent.</div>
-            <div style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
-                <table class="data-table" style="margin:0;"><thead><tr><th>Student</th><th>Phone</th><th>Center</th><th>Action</th></tr></thead><tbody>
-                    ${recipientsList || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted);">No registered students</td></tr>'}
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Preview shows a student's exact message. 📱 Notify messages one student.</div>
+            <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">
+                <table class="data-table" style="margin:0;"><thead><tr><th>Student</th><th>Phone & balance</th><th>Center</th><th>Action</th></tr></thead><tbody>
+                    ${recipientsList || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted);">No eligible students</td></tr>'}
                 </tbody></table>
             </div>
+            ${excluded.length ? `<div style="margin-top:10px;font-size:11px;font-weight:700;color:var(--danger);">✗ Excluded (${excluded.length}) — will NOT be notified</div><div style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-top:4px;"><table class="data-table" style="margin:0;"><thead><tr><th>Student</th><th>Reason</th><th>Balance</th></tr></thead><tbody>${excludedList}</tbody></table></div>` : ''}
         </div>`;
     showModal('Send Exam Notification', content, `<button class="btn btn-outline" onclick="closeModal()">Close</button> <button class="btn btn-success" id="notify-send-btn" onclick="sendExamNotify('${examId}')">📣 Send Bulk</button>`);
 }
@@ -5899,50 +5975,66 @@ async function showExamNotifyForm() {
         </div>` : ''}`;
     showModal('📱 Notify — Pick an Exam', content, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
 }
-function previewExamNotify(examId) {
-    const msg = document.getElementById('exam-notify-msg').value;
+async function previewExamNotify(examId) {
+    const msgEl = document.getElementById('exam-notify-msg');
+    const msg = msgEl ? msgEl.value.trim() : '';
     const area = document.getElementById('notify-preview');
+    if (!area) return;
+    area.style.display = 'block';
     area.style.whiteSpace = 'pre-line';
     area.style.color = 'var(--text)';
-    area.innerHTML = msg || '<span style="color:var(--text-muted);">No message to preview</span>';
+    if (!msg) { area.innerHTML = '<span style="color:var(--text-muted);">No message to preview</span>'; return; }
+    const exam = await dbGet('exams', examId);
+    if (!exam) return;
+    const course = await dbGet('courses', exam.courseId);
+    const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
+    const enrollments = (await dbGetAll('enrollments')).filter(e => String(e.courseId) === String(exam.courseId));
+    const students = await dbGetAll('students');
+    const payments = await dbGetAll('payments');
+    const branding = await dbGet('settings', 'branding');
+    const schoolName = branding ? branding.schoolName : 'College';
+    const check = examNotifyEligibility(exam, students, regs, enrollments, payments);
+    if (!check.eligible.length) { area.innerHTML = '<span style="color:var(--danger);">No eligible recipients for this exam.</span>'; return; }
+    const first = check.eligible[0];
+    area.innerHTML = '<b>Preview for ' + escapeHtml(first.name) + ' (first of ' + check.eligible.length + ' eligible):</b><br><br>' + escapeHtml(examNotifyRenderFor(exam, course, msg, first, schoolName, first._balance));
 }
 function copyExamNotify(examId) {
     const msg = document.getElementById('exam-notify-msg').value;
     if (msg) navigator.clipboard?.writeText(msg) || prompt('Copy this message:', msg);
 }
 async function sendExamNotify(examId) {
-    const msg = document.getElementById('exam-notify-msg').value.trim();
+    const msgEl = document.getElementById('exam-notify-msg');
+    const msg = msgEl ? msgEl.value.trim() : '';
     if (!msg) return showToast('Write a message first!');
     const exam = await dbGet('exams', examId);
-    const course = exam ? await dbGet('courses', exam.courseId) : null;
+    if (!exam) return showToast('Exam not found.');
+    const course = await dbGet('courses', exam.courseId);
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
     const students = await dbGetAll('students');
+    const enrollments = (await dbGetAll('enrollments')).filter(e => String(e.courseId) === String(exam.courseId));
+    const payments = await dbGetAll('payments');
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
+    // Send-time eligibility: only active, exam-registered, course-enrolled
+    // students with phones receive anything. Re-checked here rather than
+    // trusted from render time, so a last-minute change still excludes.
+    const check = examNotifyEligibility(exam, students, regs, enrollments, payments);
+    const list = check.eligible;
+    if (!list.length) return showToast('No eligible recipients for this exam.', { type: 'warning' });
+    if (check.excluded.length) showToast(check.excluded.length + ' student(s) excluded as ineligible - see the list in the form.', { type: 'warning', duration: 6000 });
     let sent = 0, failed = 0;
-    const renderFor = (student) => {
-        let personalized = applyTemplateVars(msg, student, schoolName, 0, student.admissionNumber, student.phone);
-        if (exam) {
-            personalized = personalized
-                .replace(/{{course}}/g, course ? course.name : (exam.title || exam.courseId))
-                .replace(/{{type}}/g, exam.type ? exam.type.charAt(0).toUpperCase() + exam.type.slice(1) : 'Exam')
-                .replace(/{{event}}/g, exam.title || (course ? course.name : ''))
-                .replace(/{{date}}/g, formatDate(exam.date))
-                .replace(/{{time}}/g, exam.time || '')
-                .replace(/{{venue}}/g, exam.venue || 'TBA')
-                .replace(/{{min}}/g, String(exam.passMark || 50));
-        }
-        return personalized;
+    const renderFor = function (student) {
+        const bal = student._balance != null ? student._balance : Math.max(0, getCachedStudentFee(student) - tuitionPaid(payments, student.id));
+        return examNotifyRenderFor(exam, course, msg, student, schoolName, bal);
     };
-    // Cloud API: send every registered student from the server in one run.
+    // Cloud API: send every eligible student from the server in one run.
     try {
         const st0 = await waCloudCall('/api/whatsapp-cloud/status');
         if (st0 && st0.configured) {
-            const withPhone = regs.map(r => students.find(x => x.id === r.studentId)).filter(x => x && x.phone);
             let cs = 0, cf = 0;
             const W0 = 6;
-            for (let i = 0; i < withPhone.length; i += W0) {
-                const wave = withPhone.slice(i, i + W0).map(async (st2) => {
+            for (let i = 0; i < list.length; i += W0) {
+                const wave = list.slice(i, i + W0).map(async (st2) => {
                     try {
                         await waCloudCall('/api/whatsapp-cloud/send', 'POST', {
                             to: st2.phone, name: st2.name, studentId: st2.id, country: st2.country || '',
@@ -5952,39 +6044,36 @@ async function sendExamNotify(examId) {
                     } catch (e) { cf++; }
                 });
                 await Promise.all(wave);
-                if (i + W0 < withPhone.length) await new Promise(r => setTimeout(r, 120));
+                if (i + W0 < list.length) await new Promise(r => setTimeout(r, 120));
             }
             closeModal();
             renderWhatsAppLog();
             showToast('Sent ' + cs + ' exam notification(s)' + (cf ? ', failed ' + cf : '') + ' via Cloud API', { type: cf ? 'warning' : 'success', duration: 9000 });
-            logAudit('sent', 'exam-notify', { examId, sent: cs, failed: cf, via: 'cloud' });
+            logAudit('sent', 'exam-notify', { examId, sent: cs, failed: cf, excluded: check.excluded.length, via: 'cloud' });
             return;
         }
-    } catch (e) { /* fall through to the device flow */ }
+    } catch (e) {}
+    // Automatic sender path.
     try {
         const sta = await waAutoCall('/api/wa-auto/status');
         if (sta && sta.supported && sta.connected) {
-            const autoJobs = regs.map(function (r) { return students.find(function (x) { return x.id === r.studentId; }); }).filter(function (x) { return x && x.phone; }).map(function (st2) {
+            const autoJobs = list.map(function (st2) {
                 return { to: st2.phone, name: st2.name, studentId: st2.id, country: st2.country || '', template: 'exam-notify', message: renderFor(st2) };
             });
             if (autoJobs.length && await waAutoEnqueueJobs(autoJobs, 'Exam notifications', 'exam-notify')) return;
         }
     } catch (e) {}
-    for (const reg of regs) {
-        const student = students.find(s => s.id === reg.studentId);
-        if (!student || !student.phone) { failed++; continue; }
-        const payments = await dbGetAll('payments');
-        const paid = tuitionPaid(payments, student.id);
-        const balance = getCachedStudentFee(student) - paid;
-        let personalized = renderFor(student);
+    // Device path: one tab per eligible student.
+    for (const student of list) {
+        const personalized = renderFor(student);
         sendWhatsApp(student.phone, personalized);
         const entry = { id: 'WA-' + Date.now() + '-' + sent, phone: student.phone, name: student.name, message: personalized.substring(0, 200), date: new Date().toISOString().split('T')[0], time: new Date().toLocaleTimeString(), template: 'exam-notify', status: 'sent', createdAt: new Date().toISOString() };
         try { await logWhatsApp(entry.phone, entry.message, { student: student, name: student.name, id: entry.id }); } catch (e) {}
         sent++;
     }
     closeModal();
-    showToast(`Queued ${sent} personalized message(s)${failed ? ` (${failed} failed - no phone)` : ''} via WhatsApp`);
-    logAudit('sent', 'exam-notify', { examId, message: msg.substring(0, 50), sent, failed });
+    showToast(`Queued ${sent} personalized message(s) via WhatsApp`);
+    logAudit('sent', 'exam-notify', { examId, message: msg.substring(0, 50), sent, failed, excluded: check.excluded.length });
 }
 document.getElementById('exam-semester').addEventListener('change', renderExams);
 document.addEventListener('change', function(e) { if (e.target.id === 'exam-total-marks') e.target.dataset.userSet = 'true'; });
