@@ -8,6 +8,7 @@
     "dev": "node server.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "node-forge": "^1.4.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
@@ -21,7 +22,6 @@
   "directories": {
     "doc": "docs"
   },
-  "devDependencies": {},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Wafularmi/net-kenya-cms.git"

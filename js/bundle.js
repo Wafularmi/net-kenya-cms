@@ -2092,7 +2092,7 @@ function showScreen(id) {
         case 'alumni': renderAlumni(); break;
         case 'certificates': renderDocumentHistory(); refreshDocGenButtons(); break;
         case 'events': renderEvents(); break;
-        case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); loadWhatsAppCloud(); break;
+        case 'whatsapp': renderWhatsAppTemplates(); renderWhatsAppLog(); loadTestPhone(); loadWhatsAppCloud(); loadWaAuto(); break;
         case 'sms': renderSMSTemplates(); renderSMSLog(); break;
         case 'audit': renderAudit(); renderUsers(); break;
         case 'idcards': break;
@@ -5958,6 +5958,15 @@ async function sendExamNotify(examId) {
             return;
         }
     } catch (e) { /* fall through to the device flow */ }
+    try {
+        const sta = await waAutoCall('/api/wa-auto/status');
+        if (sta && sta.supported && sta.connected) {
+            const autoJobs = regs.map(function (r) { return students.find(function (x) { return x.id === r.studentId; }); }).filter(function (x) { return x && x.phone; }).map(function (st2) {
+                return { to: st2.phone, name: st2.name, studentId: st2.id, country: st2.country || '', template: 'exam-notify', message: renderFor(st2) };
+            });
+            if (autoJobs.length && await waAutoEnqueueJobs(autoJobs, 'Exam notifications')) return;
+        }
+    } catch (e) {}
     for (const reg of regs) {
         const student = students.find(s => s.id === reg.studentId);
         if (!student || !student.phone) { failed++; continue; }
@@ -13406,6 +13415,99 @@ async function loadWhatsAppCloud() {
     box.style.padding = '8px 10px';
     box.style.background = 'var(--bg-input)';
 }
+async function waAutoCall(path, method, body) {
+    const res = await fetch(path, { method: method || 'GET', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(45000) });
+    let d = null; try { d = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error((d && (d.error || d.message)) || ('HTTP ' + res.status));
+    return d || {};
+}
+async function loadWaAuto() {
+    const box = document.getElementById('wa-auto-status');
+    if (!box) return;
+    const paint = function (html) {
+        box.innerHTML = html;
+        box.style.border = '1px solid var(--border)';
+        box.style.borderRadius = '6px';
+        box.style.padding = '8px 10px';
+        box.style.background = 'var(--bg-input)';
+    };
+    let st = null;
+    try { st = await waAutoCall('/api/wa-auto/status'); }
+    catch (e) { paint('<b style="color:var(--danger);">Unavailable</b> - ' + escapeHtml(e.message)); return; }
+    const senderInput = document.getElementById('wa-auto-sender');
+    if (senderInput && !senderInput.value) senderInput.value = st.senderNumber || '';
+    const pairNum = document.getElementById('wa-auto-pair-number');
+    if (pairNum) pairNum.textContent = st.senderNumber || '';
+    const wrap = document.getElementById('wa-auto-qr-wrap');
+    if (!st.supported) {
+        paint('<b style="color:var(--danger);">Not available</b> - ' + escapeHtml(st.bootError || 'engine missing'));
+        if (wrap) wrap.style.display = 'none';
+        return;
+    }
+    if (st.connected) {
+        paint('<b style="color:var(--success);">Connected as ' + escapeHtml(st.phone || st.senderNumber || '') + '</b> - broadcasts send automatically in the background.'
+            + (st.queue ? ' <b>' + st.queue + '</b> message(s) waiting.' : ' Queue empty.')
+            + (st.lastSentAt ? ' Last sent ' + escapeHtml(st.lastSentAt) + '.' : ''));
+        if (wrap) wrap.style.display = 'none';
+    } else {
+        paint('<b style="color:var(--warning);">Not paired</b> - scan the code below with the sending line. '
+            + (st.queue ? '<b>' + st.queue + '</b> message(s) will go out once paired.' : 'Broadcasts keep opening WhatsApp on your device until then.')
+            + (st.lastError ? '<br><span style="font-size:11px;">' + escapeHtml(st.lastError) + '</span>' : ''));
+        if (wrap) { wrap.style.display = 'block'; refreshWaAutoQr(); }
+    }
+    if (window._waAutoPoll == null) {
+        window._waAutoPoll = setInterval(function () {
+            const sc = document.getElementById('screen-whatsapp');
+            if (sc && sc.classList.contains('active')) loadWaAuto();
+        }, 25000);
+    }
+}
+async function refreshWaAutoQr() {
+    const img = document.getElementById('wa-auto-qr');
+    if (!img) return;
+    try {
+        const r = await waAutoCall('/api/wa-auto/qr');
+        img.src = r.qr;
+        const wrap = document.getElementById('wa-auto-qr-wrap');
+        if (wrap) wrap.style.display = 'block';
+    } catch (e) {}
+}
+async function saveWaAutoSender() {
+    const el = document.getElementById('wa-auto-sender');
+    const v = el ? el.value.trim() : '';
+    if (!v) return showToast('Enter the sending line first.', { type: 'warning' });
+    await dbPut('settings', { key: 'whatsappAuto', value: { senderNumber: v } });
+    showToast('Sending line saved: ' + v);
+    logAudit('updated', 'whatsapp-auto', { senderNumber: v });
+    loadWaAuto();
+}
+async function waAutoLogout() {
+    if (!await showConfirm('Unpair the sender', 'The server signs out of WhatsApp. Broadcasts fall back to opening tabs until you pair again.')) return;
+    try { await waAutoCall('/api/wa-auto/logout', 'POST'); showToast('Unpaired.'); }
+    catch (e) { showToast('Could not unpair: ' + e.message, { type: 'danger' }); }
+    loadWaAuto();
+}
+async function waAutoEnqueueJobs(jobs, label) {
+    const r = await waAutoCall('/api/wa-auto/enqueue', 'POST', { jobs: jobs });
+    renderWhatsAppLog();
+    showToast((label || 'Broadcast') + ' queued: ' + r.queued + ' message(s) sending automatically in the background.', { type: 'success', duration: 8000 });
+    logAudit('whatsapp-auto-enqueue', 'whatsappLog', { total: r.queued, label: label || '' });
+    return true;
+}
+async function waAutoEnqueueTargets(targets, templateName, message, schoolName, label) {
+    let st = null;
+    try { st = await waAutoCall('/api/wa-auto/status'); } catch (e) { return false; }
+    if (!st || !st.supported || !st.connected) return false;
+    const branding = await dbGet('settings', 'branding');
+    const brandName = schoolName || (branding ? branding.schoolName : 'College Management System');
+    const payments = await dbGetAll('payments');
+    const jobs = targets.filter(function (t) { return t && t.phone; }).map(function (x) {
+        return { to: x.phone, name: x.name, studentId: x.id, country: x.country || '', template: templateName || 'auto',
+            message: applyTemplateVars(message, x, brandName, getCachedStudentFee(x) - tuitionPaid(payments, x.id), x.admissionNumber, x.phone) };
+    });
+    if (!jobs.length) return false;
+    return waAutoEnqueueJobs(jobs, label);
+}
 async function saveWhatsAppCloud() {
     const val = (id) => (document.getElementById(id) || {}).value || '';
     let existing = null;
@@ -13691,6 +13793,7 @@ async function startQSQueue(templateId) {
         const st0 = await waCloudCall('/api/whatsapp-cloud/status');
         if (st0 && st0.configured) return runCloudBroadcast(targets, template, message, schoolName, 'Quick Send');
     } catch (e) { /* fall through */ }
+    if (await waAutoEnqueueTargets(targets, template.name, message, schoolName, 'Quick Send')) return;
     buildBroadcastQueue(targets, template, message, schoolName);
 }
 function buildBroadcastQueue(targets, template, message, schoolName) {
@@ -14072,6 +14175,7 @@ async function startBulkBroadcast(target) {
         const st = await waCloudCall('/api/whatsapp-cloud/status');
         if (st && st.configured) return runCloudBroadcast(targets, template, message, schoolName, 'Broadcast');
     } catch (e) { /* fall through to the device flow */ }
+    if (await waAutoEnqueueTargets(targets, template.name, message, schoolName, 'Broadcast')) return;
     sendWhatsAppBroadcast(targets, template, message, schoolName);
 }
 
@@ -14343,6 +14447,7 @@ async function sendCommBulk() {
         const st = await waCloudCall('/api/whatsapp-cloud/status');
         if (st && st.configured) return runCloudBroadcast(students, template, msg, schoolName, 'Communication Center');
     } catch (e) { /* fall through */ }
+    if (await waAutoEnqueueTargets(students, template.name, msg, schoolName, 'Communication Center')) return;
     sendWhatsAppBroadcast(students, template, msg, schoolName);
 }
 async function getCoursesForProgram(program) {
@@ -18578,6 +18683,7 @@ async function doSendNoteWhatsApp(id) {
         const st = await waCloudCall('/api/whatsapp-cloud/status');
         if (st && st.configured) return runCloudBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName, 'Note sent');
     } catch (e) { /* fall through */ }
+    if (await waAutoEnqueueTargets(targets, 'Note: ' + note.title, fullMessage, schoolName, 'Note sent')) return;
     sendWhatsAppBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName);
 }
 async function deleteNote(id) {

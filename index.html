@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=438" as="script">
+    <link rel="preload" href="js/bundle.js?v=439" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -448,6 +448,24 @@
                             <b>Business Manager → Business Settings → System Users → Generate token</b> (permissions
                             <code>whatsapp_business_messaging</code> + <code>whatsapp_business_management</code>).
                         </div>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;"><h3>Automatic sender (free)</h3>
+                        <div id="wa-auto-status" style="font-size:12px;margin-bottom:10px;">Checking…</div>
+                        <div id="wa-auto-qr-wrap" style="display:none;text-align:center;margin-bottom:10px;">
+                            <img id="wa-auto-qr" alt="Pairing code" style="width:220px;height:220px;border:1px solid var(--border);border-radius:8px;background:#fff;padding:6px;">
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">On <b id="wa-auto-pair-number">0723696908</b>: open WhatsApp → Settings → Linked devices → Link a device, then scan. The code refreshes itself about every minute.</div>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+                            <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0;">
+                                <label>Sending line</label>
+                                <input type="text" id="wa-auto-sender" placeholder="254723696908" style="width:100%;">
+                                <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">The spare line the server sends as. Keep your own number for admin alerts and testing.</div>
+                            </div>
+                            <button class="btn btn-primary" onclick="saveWaAutoSender()" style="margin-bottom:0;">Save</button>
+                            <button class="btn btn-outline" onclick="loadWaAuto()" style="margin-bottom:0;">Refresh</button>
+                            <button class="btn btn-outline" onclick="waAutoLogout()" style="margin-bottom:0;">Unpair</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Same order as everything else: Cloud API first if configured, then this sender when paired, then opening WhatsApp on your device. Sends go out a few seconds apart and survive restarts — unsent messages wait in the database.</div>
                     </div>
                     <div class="card"><h3>Message Templates</h3><div id="whatsapp-templates"></div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showTemplateForm()">+ Add Template</button></div>
                     <div class="card"><h3>Message Log</h3><div id="whatsapp-log"></div></div>
@@ -1453,7 +1471,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=438"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=439"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=73"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

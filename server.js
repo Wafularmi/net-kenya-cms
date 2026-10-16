@@ -864,7 +864,7 @@ const STUDENT_DENY_STORES = new Set([
     'staff', 'payroll', 'audit', 'counters',
     'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
-    'invoices', 'installments', 'whatsappTemplates', 'whatsappLog',
+    'invoices', 'installments', 'whatsappTemplates', 'whatsappLog', 'whatsappOutbox',
     'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents'
 ]);
 
@@ -4310,6 +4310,59 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
 
 
 // POST /api/send-sms â€” send bulk SMS via Africa's Talking
+    // -----------------------------------------------------------
+    // Automatic WhatsApp sender — status / pairing code / queue / unpair
+    // -----------------------------------------------------------
+    // GET /api/wa-auto/status — engine state for the pairing card.
+    if (parts.length === 3 && parts[1] === 'wa-auto' && parts[2] === 'status' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        return json(res, 200, waAuto().status());
+    }
+    // GET /api/wa-auto/qr — fresh pairing code as a data URL, only while unpaired.
+    if (parts.length === 3 && parts[1] === 'wa-auto' && parts[2] === 'qr' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        waAuto().qrDataUrl().then(function (q) {
+            if (!q) return json(res, 404, { error: 'No pairing code right now - already paired or engine starting' });
+            return json(res, 200, { qr: q });
+        }).catch(function (e) { json(res, 500, { error: e.message || e }); });
+        return true;
+    }
+    // POST /api/wa-auto/enqueue — queue resolved messages for automatic sending.
+    if (parts.length === 3 && parts[1] === 'wa-auto' && parts[2] === 'enqueue' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (!canAccessStore(su, 'whatsappLog', 'POST')) return json(res, 403, { error: 'Insufficient permissions' });
+        let body = '';
+        req.on('data', function (ch) { body += ch; });
+        req.on('end', async function () {
+            try {
+                const d = JSON.parse(body);
+                const nq = waAuto().enqueue(d.jobs, su.username);
+                return json(res, 200, { queued: nq, pending: waAuto().pendingCount() });
+            } catch (e) { json(res, 500, { error: e.message || e }); }
+        });
+        return true;
+    }
+    // POST /api/wa-auto/logout — unpair this server from WhatsApp.
+    if (parts.length === 3 && parts[1] === 'wa-auto' && parts[2] === 'logout' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (!canAccessStore(su, 'whatsappLog', 'POST')) return json(res, 403, { error: 'Insufficient permissions' });
+        waAuto().logout().then(function () {
+            auditLog('whatsapp-auto-logout', 'whatsappOutbox', {}, su.username);
+            return json(res, 200, { ok: true });
+        }).catch(function (e) { json(res, 500, { error: e.message || e }); });
+        return true;
+    }
+    // POST /api/send-sms - send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
         const smsUser = getRequestUser(req);
@@ -5686,6 +5739,22 @@ function broadcastDiscussionEvent(courseId, eventType, messageId) {
         }
     });
 }
+
+// Automatic WhatsApp sender ("linked device"). Lazy-loaded so the server always
+// boots even if the engine library is unavailable; inert until paired.
+let _waAuto = null;
+function waAuto() {
+    if (!_waAuto) {
+        try {
+            const mk = require('./wa-auto');
+            _waAuto = mk({ getDb: function () { return db; }, saveDB: function () { saveDB(); }, broadcastEvent: broadcastEvent, auditLog: auditLog, DATA_ROOT: DATA_ROOT });
+        } catch (e) {
+            _waAuto = { _dead: true, status: function () { return { supported: false, bootError: e.message, connected: false, phone: '', hasQr: false, queue: 0, lastError: '', senderNumber: '', lastSentAt: '' }; }, boot: async function () {}, enqueue: function () { return 0; }, logout: async function () {}, qrDataUrl: async function () { return ''; }, pendingCount: function () { return 0; } };
+        }
+    }
+    return _waAuto;
+}
+try { waAuto().boot(); } catch (e) { console.error('wa-auto boot failed:', e.message); }
 
 server.keepAliveTimeout = 30000;
 server.headersTimeout = 31000;
