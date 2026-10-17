@@ -5803,7 +5803,8 @@ async function startExam(examId) {
     if (currentUser.role === 'student' && !ungated) {
         try {
             const gate = await dripExamOpen(studentId, exam);
-            if (!gate.open) return showToast(`🔗 Exam locked — complete ${gate.remaining} more lesson${gate.remaining !== 1 ? 's' : ''} first${gate.next ? ` (next: ${gate.next.title})` : ''}.`, { type: 'warning', duration: 5000 });
+            if (gate.open && gate.manualOverride) showToast('Course marked covered by staff — this exam is open regardless of lessons.', { type: 'success', duration: 5000 });
+            else if (!gate.open) return showToast(`🔗 Exam locked — complete ${gate.remaining} more lesson${gate.remaining !== 1 ? 's' : ''} first${gate.next ? ` (next: ${gate.next.title})` : ''}.`, { type: 'warning', duration: 5000 });
         } catch {}
     }
     const questions = await dbGetAll('questionBank');
@@ -5848,14 +5849,24 @@ function examNotifyDefaultMessage() {
 function examNotifyRenderFor(exam, course, msg, student, schoolName, balance) {
     let personalized = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
     if (exam) {
+        const examDate = formatDate(exam.date);
+        const examTime = (exam.time || '').trim();
+        const examVenue = (exam.venue || '').trim();
+        const examTitle = (exam.title || '').trim() || (course ? course.name : 'Exam');
         personalized = personalized
-            .replace(/{{course}}/g, course ? course.name : (exam.title || exam.courseId))
+            .replace(/{{course}}/g, course ? course.name : examTitle)
             .replace(/{{type}}/g, exam.type ? exam.type.charAt(0).toUpperCase() + exam.type.slice(1) : 'Exam')
-            .replace(/{{event}}/g, exam.title || (course ? course.name : ''))
-            .replace(/{{date}}/g, formatDate(exam.date))
-            .replace(/{{time}}/g, exam.time || '')
-            .replace(/{{venue}}/g, exam.venue || 'TBA')
+            .replace(/{{event}}/g, examTitle)
+            .replace(/{{date}}/g, examDate)
+            .replace(/{{time}}/g, examTime)
+            .replace(/{{venue}}/g, examVenue)
             .replace(/{{min}}/g, String(exam.passMark || 50));
+        // If any header fact is still empty, a student must never receive a
+        // blank line - fill the blank with an explicit phrase and flag it.
+        personalized = personalized
+            .replace(/Date: (?<d>\S.*)$/, 'Date: ' + (examDate && examDate !== 'Invalid Date' && examDate !== '--' ? examDate : 'to be announced'))
+            .replace(/Time: (?<t>\S.*)$/, 'Time: ' + (examTime ? examTime : 'to be announced'))
+            .replace(/Venue: (?<v>\S.*)$/, 'Venue: ' + (examVenue ? examVenue : 'to be announced'));
     }
     return personalized;
 }
@@ -15471,6 +15482,12 @@ async function dripExamOpen(sid, exam) {
     try {
         // Ungated = open regardless of lesson progress (the admin's override).
         if (exam && exam.ungated === true) return { open: true, ungated: true };
+        // Manual course coverage override: once the admin ticks a course covered,
+        // no remaining-lessons demand stands in the way of its exams. The
+        // automatic coverage monitor itself keeps running untouched.
+        const cc = await dbGetAll('courseCompletions');
+        const manual = (cc || []).some(function (c) { return c && String(c.studentId) === String(sid) && String(c.courseId) === String(exam.courseId) && c.covered !== false && c.manual === true; });
+        if (manual) return { open: true, manualOverride: true };
         await loadDripMaps(sid);
         const all = await dbGetAll('lessons');
         const drips = (all || []).filter(l => String(l.courseId) === String(exam.courseId) && lessonMode(l) === 'drip' && l.published !== false);
