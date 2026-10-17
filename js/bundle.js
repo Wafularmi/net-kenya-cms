@@ -15482,14 +15482,26 @@ async function dripExamOpen(sid, exam) {
     try {
         // Ungated = open regardless of lesson progress (the admin's override).
         if (exam && exam.ungated === true) return { open: true, ungated: true };
-        // Manual course coverage override: once the admin ticks a course covered,
-        // no remaining-lessons demand stands in the way of its exams. The
-        // automatic coverage monitor itself keeps running untouched.
-        const cc = await dbGetAll('courseCompletions');
-        const manual = (cc || []).some(function (c) { return c && String(c.studentId) === String(sid) && String(c.courseId) === String(exam.courseId) && c.covered !== false && c.manual === true; });
-        if (manual) return { open: true, manualOverride: true };
+        // Covered = open. This uses the SAME coverage definition the Coverage
+        // tab renders, so a course that reads "covered" there can never have a
+        // locked exam. That definition is: manual override, OR all lessons
+        // complete, OR a passing grade, OR a passed assessment submission. The
+        // drip lesson progression itself keeps running untouched below.
+        const [cc, allLessons, lessonComps, courses, grades, submissions, quizzes, exams] = await Promise.all([
+            dbGetAll('courseCompletions'), dbGetAll('lessons'), dbGetAll('lessonCompletions'),
+            dbGetAll('courses'), dbGetAll('grades'), dbGetAll('submissions'),
+            dbGetAll('quizzes'), dbGetAll('exams')
+        ]);
+        const covData = {
+            lessons: allLessons, lessonCompletions: lessonComps, courseCompletions: cc,
+            courses, grades, submissions, quizzes, exams
+        };
+        if (isCourseCovered(sid, exam.courseId, covData)) {
+            const manual = (cc || []).some(function (c) { return c && String(c.studentId) === String(sid) && String(c.courseId) === String(exam.courseId) && c.covered !== false && c.manual === true; });
+            return { open: true, covered: true, manualOverride: manual };
+        }
         await loadDripMaps(sid);
-        const all = await dbGetAll('lessons');
+        const all = allLessons;
         const drips = (all || []).filter(l => String(l.courseId) === String(exam.courseId) && lessonMode(l) === 'drip' && l.published !== false);
         if (!drips.length) return { open: true };
         const incomplete = drips.filter(l => !(_dripC[l.id] && _dripC[l.id].completedAt)).sort((a, b) => (a.order || 0) - (b.order || 0));
