@@ -499,7 +499,7 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings','reports'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
@@ -509,13 +509,13 @@ function getRolePermissions(role, user) {
     }
     const perms = {
         admin: ADMIN_TABS,
-        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
-        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions','meetings'],
-        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings'],
+        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports'],
+        finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions','meetings','reports'],
+        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports'],
         student: ['student-hub','exams','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','meetings'],
-        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings']
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','meetings','reports'],
+        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings','reports']
     };
     const base = perms[role] ? [...perms[role]] : [];
     if (role !== 'admin') { const gi = base.indexOf('global-viewer'); if (gi !== -1) base.splice(gi, 1); }
@@ -1642,7 +1642,7 @@ function buildNavigation(user) {
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, { id: 'exams', icon: '', text: 'Examinations' }, { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quiz & Exams' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
         { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
-        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'analytics', icon: '', text: '📐 Analytics' }, { id: 'media', icon: '', text: '📸 Media' }, { id: 'global-viewer', icon: '', text: '🌐 Global Viewer' }, { id: 'settings', icon: '', text: 'Settings' }] }
+        { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'reports', icon: '', text: '📈 Reports' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'analytics', icon: '', text: '📐 Analytics' }, { id: 'media', icon: '', text: '📸 Media' }, { id: 'global-viewer', icon: '', text: '🌐 Global Viewer' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
     sections.forEach(section => {
@@ -2117,6 +2117,7 @@ function showScreen(id) {
         case 'fee-gate': renderFeeGateCoordinator(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
+        case 'reports': loadReportScopeOptions(); renderReport(); break;
         case 'compare': renderCompare(); break;
         case 'my-country': renderMyCountry(); break;
     }
@@ -2511,6 +2512,135 @@ const _refreshMap = {
     // as COVERED straight away, without a manual refresh.
     courseCompletions: () => { _coverageCache = null; if (isScreenActive('coverage')) renderCoverage(); if (isScreenActive('graduation') && typeof populateGraduationFilters === 'function') populateGraduationFilters(); if (typeof window.refreshHubCoverage === 'function') { try { window.refreshHubCoverage(); } catch (e) {} } },
 };
+// ---- Institutional Reports -----------------------------------------------
+let _reportData = null;
+async function loadReportScopeOptions() {
+    const scope = document.getElementById('report-scope').value;
+    const sel = document.getElementById('report-entity');
+    sel.innerHTML = '<option value="">All</option>';
+    try {
+        const r = await fetch('/api/report/scope-options', { headers: getAuthHeaders(), signal: AbortSignal.timeout(30000) });
+        const d = await r.json();
+        const list = scope === 'country' ? d.countries : scope === 'region' ? d.regions : d.centers;
+        (list || []).forEach(x => {
+            const o = document.createElement('option');
+            o.value = x.id; o.textContent = x.name;
+            sel.appendChild(o);
+        });
+        if (list && list.length) sel.value = list[0].id;
+    } catch (e) { showToast('Could not load scope options', { type: 'danger' }); }
+}
+function onReportScopeChange() { loadReportScopeOptions(); }
+function fmtDate(iso) { return iso ? String(iso).slice(0, 10) : '—'; }
+function reportMoney(n) { return 'KES ' + Number(n || 0).toLocaleString('en-KE'); }
+function reportBar(pct, color) {
+    const c = color || (pct >= 80 ? 'var(--success)' : pct >= 50 ? 'var(--warning)' : 'var(--danger)');
+    return '<div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;min-width:120px;"><div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + c + ';border-radius:4px;"></div></div>';
+}
+function reportStat(label, value, sub) {
+    return '<div style="padding:10px;background:var(--bg-input);border-radius:8px;"><div style="font-size:11px;color:var(--text-muted);">' + label + '</div><div style="font-size:20px;font-weight:800;color:var(--text);">' + value + '</div>' + (sub ? '<div style="font-size:10px;color:var(--text-muted);">' + sub + '</div>' : '') + '</div>';
+}
+function reportSection(title, body) {
+    return '<div style="margin:18px 0 8px;font-size:13px;font-weight:800;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;">' + title + '</div>' + body;
+}
+function reportList(items, ordered) {
+    if (!items || !items.length) return '<p style="color:var(--text-muted);">None.</p>';
+    const tag = ordered ? 'ol' : 'ul';
+    return '<' + tag + ' style="margin:4px 0 4px 20px;font-size:13px;line-height:1.7;">' + items.map(i => '<li>' + i + '</li>').join('') + '</' + tag + '>';
+}
+function reportRecs(recs) {
+    if (!recs || !recs.length) return '<p style="color:var(--text-muted);">No recommendations.</p>';
+    return recs.map(r => '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">'
+        + '<div style="display:flex;justify-content:space-between;gap:8px;"><b>' + escapeHtml(r.title) + '</b><span class="badge ' + (r.priority === 'High' ? 'badge-danger' : r.priority === 'Medium' ? 'badge-warning' : 'badge-info') + '" style="font-size:9px;">' + escapeHtml(r.priority) + ' · ' + escapeHtml(r.timeline) + '</span></div>'
+        + '<div style="font-size:12px;color:var(--text-muted);margin:4px 0;">' + escapeHtml(r.detail) + '</div>'
+        + '<div style="font-size:12px;"><b>Steps:</b></div><ul style="margin:2px 0 0 18px;font-size:12px;">' + r.steps.map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ul></div>').join('');
+}
+function reportVision(v) {
+    if (!v) return '';
+    const gapRows = (v.gaps || []).map(g => '<tr><td style="padding:5px 0;font-weight:600;">' + escapeHtml(g.goal) + '</td><td style="padding:5px 0;">' + escapeHtml(g.current) + '</td><td style="padding:5px 0;color:var(--text-muted);">' + escapeHtml(g.gap) + '</td></tr>').join('');
+    return reportSection('🎯 Vision Gap Analysis',
+        '<div style="font-size:12px;background:var(--bg-input);border-radius:6px;padding:10px;margin-bottom:8px;"><b>Your vision:</b> ' + escapeHtml(v.vision) + '</div>'
+        + '<div style="font-size:12px;margin-bottom:6px;"><b>Detected directions:</b> ' + (v.directions || []).map(escapeHtml).join(' · ') + '</div>'
+        + '<table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--text-muted);"><th style="padding:5px 0;">Goal</th><th>Where you stand</th><th>Gap</th></tr></thead><tbody>' + gapRows + '</tbody></table>'
+        + '<div style="font-size:12px;margin-top:8px;"><b>Practical steps (timeline ' + escapeHtml(v.timeline || '') + '):</b></div>'
+        + '<ol style="margin:4px 0 0 18px;font-size:12px;">' + (v.steps || []).map(s => '<li>' + escapeHtml(s) + '</li>').join('') + '</ol>');
+}
+function reportSpecialNeeds(needs) {
+    if (!needs || !needs.length) return '';
+    return reportSection('♿ Special Needs & Adjustments',
+        '<table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--text-muted);"><th style="padding:5px 0;">Need</th><th>Adjustment</th><th>Timeline</th></tr></thead><tbody>'
+        + needs.map(n => '<tr><td style="padding:5px 0;font-weight:600;">' + escapeHtml(n.need) + '</td><td style="padding:5px 0;">' + escapeHtml(n.adjustment) + '</td><td style="padding:5px 0;">' + escapeHtml(n.timeline) + '</td></tr>').join('') + '</tbody></table>');
+}
+function renderReportInto(d, detailed) {
+    const st = d.stats, m = d.meta;
+    const detailedTables = detailed ? (
+        reportSection('📋 Detailed — Course Coverage',
+            '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--text-muted);"><th>Course</th><th>Lessons</th><th>Coverage</th><th>Students fully covered</th></tr></thead><tbody>'
+            + st.perCourse.map(c => '<tr><td style="padding:5px 0;">' + escapeHtml(c.name) + '</td><td>' + c.lessonsDone + '/' + c.lessonsTotal + '</td><td>' + reportBar(c.coveragePct) + ' <span style="font-size:11px;">' + c.coveragePct + '%</span></td><td>' + c.studentsCovered + ' (' + c.studentsPct + '%)</td></tr>').join('') + '</tbody></table></div>')
+    ) : '';
+    const vision = reportVision(d.vision);
+    const special = reportSpecialNeeds(d.specialNeeds);
+    document.getElementById('report-out').innerHTML = ''
+        + '<div id="report-doc">'
+        + '<div style="border-bottom:2px solid var(--accent);padding-bottom:10px;margin-bottom:12px;">'
+        + '<div style="font-size:11px;color:var(--text-muted);">NET FOUNDATION — INSTITUTIONAL REPORT</div>'
+        + '<h2 style="margin:4px 0;">' + escapeHtml(m.periodLabel) + ' Report — ' + escapeHtml(m.scopeName) + '</h2>'
+        + '<div style="font-size:12px;color:var(--text-muted);">Period: ' + escapeHtml(m.start) + ' to ' + escapeHtml(m.end) + ' · Scope: ' + escapeHtml(m.scopeType) + ' · Generated ' + escapeHtml(fmtDate(m.generatedAt)) + '</div></div>'
+        + reportSection('📝 Executive Summary', '<p style="font-size:13px;line-height:1.7;margin:0;">' + escapeHtml(d.narrative.summary) + '</p>')
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">'
+        + reportStat('Active Students', st.studentsActive, st.studentsTotal + ' total')
+        + reportStat('New Enrolments', st.newEnrollments, d.growth && d.growth.enrollmentGrowthPct != null ? (d.growth.enrollmentGrowthPct >= 0 ? '+' : '') + d.growth.enrollmentGrowthPct + '% vs prev' : '')
+        + reportStat('Lesson Coverage', st.coveragePct + '%', st.lessonsDone + '/' + st.lessonsTotal + ' lessons')
+        + reportStat('Courses Fully Covered', st.coursesFullyCovered + '/' + st.coursesTotal, '')
+        + reportStat('Attendance', st.attendanceRate + '%', st.attendancePresent + ' of ' + st.attendanceTotal)
+        + reportStat('Pass Rate', st.passRate + '%', 'avg ' + st.avgScore + '% · ' + st.passCount + ' passed')
+        + reportStat('Fees Collected', reportMoney(st.collected), d.growth && d.growth.collectionGrowthPct != null ? (d.growth.collectionGrowthPct >= 0 ? '+' : '') + d.growth.collectionGrowthPct + '% vs prev' : '')
+        + reportStat('Outstanding', reportMoney(st.outstanding), st.collectionRate + '% collected')
+        + '</div>'
+        + reportSection('✅ Strengths', reportList(d.narrative.strengths, false))
+        + reportSection('⚠️ Concerns', reportList(d.narrative.concerns, false))
+        + detailedTables
+        + reportSection('💡 AI Recommendations', reportRecs(d.recommendations))
+        + vision
+        + special
+        + reportSection('📣 Call to Action', '<p style="font-size:13px;line-height:1.6;margin:0;">' + escapeHtml(d.callToAction) + '</p>')
+        + reportSection('🤝 Note to Donors & Stakeholders', '<p style="font-size:13px;line-height:1.6;margin:0;">' + escapeHtml(d.donorNote) + '</p>')
+        + '</div>';
+}
+async function renderReport() {
+    const out = document.getElementById('report-out');
+    out.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">Generating report…</p>';
+    const params = new URLSearchParams({
+        scope: document.getElementById('report-scope').value,
+        id: document.getElementById('report-entity').value,
+        period: document.getElementById('report-period').value,
+        start: document.getElementById('report-start').value,
+        end: document.getElementById('report-end').value,
+        vision: document.getElementById('report-vision').value
+    });
+    try {
+        const r = await fetch('/api/report/data?' + params.toString(), { headers: getAuthHeaders(), signal: AbortSignal.timeout(60000) });
+        const d = await r.json();
+        if (!r.ok) return (out.innerHTML = '<p style="color:var(--danger);text-align:center;padding:40px;">' + escapeHtml(d.error || 'Report failed') + '</p>');
+        _reportData = d;
+        renderReportInto(d, document.getElementById('report-type').value === 'detailed');
+    } catch (e) { out.innerHTML = '<p style="color:var(--danger);text-align:center;padding:40px;">Report request failed: ' + escapeHtml(e.message) + '</p>'; }
+}
+async function printReportPDF() {
+    if (!_reportData) return showToast('Generate the report first.', { type: 'warning' });
+    renderReportInto(_reportData, document.getElementById('report-type').value === 'detailed');
+    const el = document.getElementById('report-doc');
+    showToast('Preparing PDF…', { type: 'info', duration: 4000 });
+    try {
+        const opt = {
+            margin: 8, filename: 'NET_Report_' + _reportData.meta.periodLabel + '_' + _reportData.meta.start + '_' + _reportData.meta.end + '.pdf',
+            image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 1.5, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        await html2pdf().set(opt).from(el).save();
+        showToast('PDF downloaded.', { type: 'success' });
+    } catch (e) { showToast('PDF failed: ' + e.message, { type: 'danger', duration: 8000 }); }
+}
 function onDBChange(store, record, action) {
 const fn = _refreshMap[store];
 if (fn) {

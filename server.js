@@ -4313,6 +4313,57 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
     // -----------------------------------------------------------
     // Automatic WhatsApp sender — status / pairing code / queue / unpair
     // -----------------------------------------------------------
+
+    // -----------------------------------------------------------
+    // GET /api/report — institutional report (scope x period x window)
+    // scope: country | region | center   (id = the entity id)
+    // period: monthly | quarterly | biannual | annual
+    // start/end: YYYY-MM-DD window; vision: optional free-text plan
+    // type: summary | detailed  (controls how much the client renders)
+    // -----------------------------------------------------------
+    if (parts.length === 3 && parts[1] === 'report' && parts[2] === 'data' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        try {
+            const u = new URL(req.url, 'http://localhost');
+            const get = k => (u.searchParams.get(k) || '').trim();
+            let rep;
+            try {
+                rep = require('./report-engine').generateReport(db, {
+                    scope: get('scope') || 'country',
+                    id: get('id'),
+                    period: get('period') || 'annual',
+                    start: get('start'),
+                    end: get('end'),
+                    vision: get('vision')
+                });
+            } catch (e) { return json(res, 500, { error: 'Report failed: ' + (e.message || e) }); }
+            rep.requestedBy = su.username;
+            return json(res, 200, rep);
+        } catch (e) { return json(res, 500, { error: e.message || e }); }
+    }
+
+    // POST /api/report/scope-options — entities the admin may report on,
+    // already filtered to what this user is allowed to see.
+    if (parts.length === 3 && parts[1] === 'report' && parts[2] === 'scope-options' && req.method === 'GET') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (su.role === 'student') return json(res, 403, { error: 'Not available to students' });
+        const countries = ((db.settings || []).find(x => x.key === 'countries') || { value: [] }).value || [];
+        let centers = db.studyCenters || [], regions = db.regions || [];
+        const vsu = su.user || {};
+        if (vsu.country) { centers = centers.filter(c => String(c.country) === String(vsu.country)); regions = regions.filter(r => String(r.country) === String(vsu.country)); }
+        if (vsu.regionId) { centers = centers.filter(c => String(c.regionId) === String(vsu.regionId)); }
+        return json(res, 200, {
+            countries: countries.map(c => ({ id: c.code, name: c.brandName || c.name })),
+            regions: regions.map(r => ({ id: r.id, name: r.name })),
+            centers: centers.map(c => ({ id: c.id, name: c.name, regionId: c.regionId, country: c.country }))
+        });
+    }
+
     // GET /api/wa-auto/status — engine state for the pairing card.
     if (parts.length === 3 && parts[1] === 'wa-auto' && parts[2] === 'status' && req.method === 'GET') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);

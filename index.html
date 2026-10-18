@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=443" as="script">
+    <link rel="preload" href="js/bundle.js?v=444" as="script">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -530,6 +530,38 @@
                     <button class="btn btn-outline" onclick="printFinanceRegionPDF()">🗺 Region Finance PDF</button>
                 </div></div>
                 <div class="card"><div id="coverage-content"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading coverage...</p></div></div>
+            </section>
+
+            <section id="screen-reports" class="screen">
+                <div class="screen-header"><h2>📈 Institutional Reports</h2><div class="screen-actions">
+                    <button class="btn btn-outline" onclick="renderReport()">↻ Refresh</button>
+                    <button class="btn btn-outline" onclick="printReportPDF()">🖨 Print / PDF</button>
+                </div></div>
+                <div class="dashboard-grid">
+                    <div class="card" style="grid-column:1/-1;"><h3>Report Configuration</h3>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end;">
+                            <div class="form-group" style="margin-bottom:0;"><label>Scope</label>
+                                <select id="report-scope" class="filter-select" onchange="onReportScopeChange()" style="width:100%;">
+                                    <option value="country">Country</option><option value="region">Region</option><option value="center">Study Center</option>
+                                </select></div>
+                            <div class="form-group" style="margin-bottom:0;"><label>Entity</label><select id="report-entity" class="filter-select" style="width:100%;"></select></div>
+                            <div class="form-group" style="margin-bottom:0;"><label>Period</label>
+                                <select id="report-period" class="filter-select" style="width:100%;">
+                                    <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="biannual">Half-Yearly (Bi-Annual)</option><option value="annual" selected>Annual</option>
+                                </select></div>
+                            <div class="form-group" style="margin-bottom:0;"><label>From</label><input type="date" id="report-start" class="date-input" style="width:100%;"></div>
+                            <div class="form-group" style="margin-bottom:0;"><label>To</label><input type="date" id="report-end" class="date-input" style="width:100%;"></div>
+                            <div class="form-group" style="margin-bottom:0;"><label>Version</label>
+                                <select id="report-type" class="filter-select" style="width:100%;"><option value="summary">Summary</option><option value="detailed">Detailed</option></select></div>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn btn-primary" onclick="renderReport()" style="margin-bottom:0;">Generate</button>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-top:12px;"><label>Future plan / vision (optional — the AI compares it against this report and drafts steps)</label>
+                            <textarea id="report-vision" rows="3" style="width:100%;" placeholder="e.g. Expand to 2 new centres, raise coverage to 85%, introduce online delivery, grow enrolment by 30%..."></textarea></div>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;"><div id="report-out"><p style="color:var(--text-muted);text-align:center;padding:40px;">Configure and Generate.</p></div></div>
+                </div>
             </section>
 
             <section id="screen-compare" class="screen">
@@ -1475,7 +1507,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=443"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=444"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=73"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
