@@ -2571,8 +2571,72 @@ function reportSpecialNeeds(needs) {
         '<table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--text-muted);"><th style="padding:5px 0;">Need</th><th>Adjustment</th><th>Timeline</th></tr></thead><tbody>'
         + needs.map(n => '<tr><td style="padding:5px 0;font-weight:600;">' + escapeHtml(n.need) + '</td><td style="padding:5px 0;">' + escapeHtml(n.adjustment) + '</td><td style="padding:5px 0;">' + escapeHtml(n.timeline) + '</td></tr>').join('') + '</tbody></table>');
 }
+function buildReportPrintDoc(d, detailed) {
+    const st = d.stats, m = d.meta;
+    const esc = escapeHtml;
+    const row = (k, v) => '<tr><td style="padding:5px 8px;border-bottom:1px solid #e2e8f0;color:#475569;">' + k + '</td><td style="padding:5px 8px;border-bottom:1px solid #e2e8f0;font-weight:600;">' + v + '</td></tr>';
+    const statCell = (label, value, sub) => '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:10px;"><div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;">' + label + '</div><div style="font-size:18px;font-weight:800;color:#1e293b;margin:2px 0;">' + value + '</div>' + (sub ? '<div style="font-size:10px;color:#94a3b8;">' + sub + '</div>' : '') + '</div>';
+    const h2 = (t) => '<h2 style="font-size:15px;color:#1e3a5f;border-bottom:2px solid #2563eb;padding-bottom:5px;margin:22px 0 10px;page-break-after:avoid;">' + t + '</h2>';
+    const p = (t) => '<p style="font-size:12.5px;line-height:1.75;color:#334155;margin:6px 0;">' + t + '</p>';
+    const li = (t) => '<li style="font-size:12.5px;line-height:1.7;color:#334155;margin:3px 0;">' + t + '</li>';
+    const rec = (r) => '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:12px;margin:8px 0;page-break-inside:avoid;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;"><b style="font-size:13px;color:#1e293b;">' + esc(r.title) + '</b>'
+        + '<span style="font-size:10px;color:#fff;background:' + (r.priority === 'High' ? '#dc2626' : r.priority === 'Medium' ? '#d97706' : '#2563eb') + ';padding:2px 8px;border-radius:10px;">' + esc(r.priority) + ' · ' + esc(r.timeline) + '</span></div>'
+        + '<p style="font-size:12px;color:#475569;margin:6px 0;">' + esc(r.detail) + '</p>'
+        + '<div style="font-size:11.5px;color:#475569;"><b>Steps:</b> ' + r.steps.map(esc).join(' → ') + '</div></div>';
+    const gapRow = (g) => '<tr><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-weight:600;">' + esc(g.goal) + '</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">' + esc(g.current) + '</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#64748b;">' + esc(g.gap) + '</td></tr>';
+    const needRow = (n) => '<tr><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-weight:600;">' + esc(n.need) + '</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">' + esc(n.adjustment) + '</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">' + esc(n.timeline) + '</td></tr>';
+    const courseRow = (c) => '<tr><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">' + esc(c.name) + '</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">' + c.lessonsDone + '/' + c.lessonsTotal + '</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">' + c.coveragePct + '%</td><td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;">' + c.studentsCovered + ' (' + c.studentsPct + '%)</td></tr>';
+
+    return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;color:#1e293b;max-width:180mm;margin:0 auto;">'
+        + '<div style="border-bottom:3px solid #2563eb;padding-bottom:14px;margin-bottom:18px;page-break-after:avoid;">'
+        + '<div style="font-size:10px;color:#64748b;letter-spacing:1.5px;text-transform:uppercase;">NET Foundation — Institutional Report</div>'
+        + '<h1 style="font-size:22px;color:#1e3a5f;margin:6px 0 2px;">' + esc(m.periodLabel) + ' Report</h1>'
+        + '<div style="font-size:14px;color:#1e3a5f;font-weight:600;">' + esc(m.scopeName) + '</div>'
+        + '<div style="font-size:11px;color:#64748b;margin-top:6px;">Period: ' + esc(m.start) + ' to ' + esc(m.end) + ' &nbsp;·&nbsp; Scope: ' + esc(m.scopeType) + ' &nbsp;·&nbsp; Generated ' + esc(String(m.generatedAt).slice(0, 10)) + '</div>'
+        + '</div>'
+        + h2('Executive Summary')
+        + p(esc(d.narrative.summary))
+        + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0;">'
+        + statCell('Active Students', st.studentsActive, st.studentsTotal + ' total')
+        + statCell('New Enrolments', st.newEnrollments, d.growth ? ((d.growth.enrollmentGrowthPct >= 0 ? '+' : '') + d.growth.enrollmentGrowthPct + '% vs prev') : '')
+        + statCell('Lesson Coverage', st.coveragePct + '%', st.lessonsDone + '/' + st.lessonsTotal)
+        + statCell('Courses Fully Covered', st.coursesFullyCovered + '/' + st.coursesTotal, '')
+        + statCell('Attendance', st.attendanceRate + '%', st.attendancePresent + ' of ' + st.attendanceTotal)
+        + statCell('Pass Rate', st.passRate + '%', 'avg ' + st.avgScore + '% · ' + st.passCount + ' passed')
+        + statCell('Fees Collected', 'KES ' + Number(st.collected).toLocaleString('en-KE'), d.growth ? ((d.growth.collectionGrowthPct >= 0 ? '+' : '') + d.growth.collectionGrowthPct + '% vs prev') : '')
+        + statCell('Outstanding', 'KES ' + Number(st.outstanding).toLocaleString('en-KE'), st.collectionRate + '% collected')
+        + '</div>'
+        + h2('Strengths')
+        + '<ul style="margin:4px 0 4px 20px;">' + d.narrative.strengths.map(li).join('') + '</ul>'
+        + h2('Concerns')
+        + '<ul style="margin:4px 0 4px 20px;">' + d.narrative.concerns.map(li).join('') + '</ul>'
+        + (detailed ? h2('Detailed — Course Coverage')
+            + '<table style="width:100%;border-collapse:collapse;margin:6px 0;"><thead><tr style="background:#f1f5f9;"><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Course</th><th style="padding:7px 8px;text-align:center;font-size:11px;color:#475569;">Lessons</th><th style="padding:7px 8px;text-align:center;font-size:11px;color:#475569;">Coverage</th><th style="padding:7px 8px;text-align:center;font-size:11px;color:#475569;">Students Fully Covered</th></tr></thead><tbody>'
+            + st.perCourse.map(courseRow).join('') + '</tbody></table>' : '')
+        + h2('AI Recommendations')
+        + d.recommendations.map(rec).join('')
+        + (d.vision ? h2('Vision Gap Analysis')
+            + p('<b>Your vision:</b> ' + esc(d.vision.vision))
+            + '<p style="font-size:11.5px;color:#64748b;">Detected directions: ' + (d.vision.directions || []).map(esc).join(' · ') + '</p>'
+            + '<table style="width:100%;border-collapse:collapse;margin:6px 0;"><thead><tr style="background:#f1f5f9;"><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Goal</th><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Where you stand</th><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Gap</th></tr></thead><tbody>'
+            + (d.vision.gaps || []).map(gapRow).join('') + '</tbody></table>'
+            + '<p style="font-size:12px;color:#475569;"><b>Practical steps (timeline ' + esc(d.vision.timeline || '') + '):</b></p>'
+            + '<ol style="margin:4px 0 4px 20px;">' + (d.vision.steps || []).map(li).join('') + '</ol>' : '')
+        + h2('Special Needs & Adjustments')
+        + '<table style="width:100%;border-collapse:collapse;margin:6px 0;"><thead><tr style="background:#f1f5f9;"><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Need</th><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Adjustment</th><th style="padding:7px 8px;text-align:left;font-size:11px;color:#475569;">Timeline</th></tr></thead><tbody>'
+        + d.specialNeeds.map(needRow).join('') + '</tbody></table>'
+        + h2('Call to Action')
+        + p(esc(d.callToAction))
+        + h2('Note to Donors & Stakeholders')
+        + p(esc(d.donorNote))
+        + '<div style="margin-top:30px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center;">Generated by NET Foundation CMS · ' + esc(m.periodLabel) + ' Report · ' + esc(m.scopeName) + '</div>'
+        + '</div>';
+}
 function renderReportInto(d, detailed) {
     const st = d.stats, m = d.meta;
+    const pr = document.getElementById('report-print-root');
+    if (pr) pr.innerHTML = buildReportPrintDoc(d, detailed);
     const detailedTables = detailed ? (
         reportSection('📋 Detailed — Course Coverage',
             '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="text-align:left;color:var(--text-muted);"><th>Course</th><th>Lessons</th><th>Coverage</th><th>Students fully covered</th></tr></thead><tbody>'
@@ -2629,13 +2693,14 @@ async function renderReport() {
 async function printReportPDF() {
     if (!_reportData) return showToast('Generate the report first.', { type: 'warning' });
     renderReportInto(_reportData, document.getElementById('report-type').value === 'detailed');
-    const el = document.getElementById('report-doc');
+    const el = document.getElementById('report-print-root');
+    if (!el || !el.innerHTML) return showToast('Nothing to print.', { type: 'warning' });
     showToast('Preparing PDF…', { type: 'info', duration: 4000 });
     try {
         const opt = {
-            margin: 8, filename: 'NET_Report_' + _reportData.meta.periodLabel + '_' + _reportData.meta.start + '_' + _reportData.meta.end + '.pdf',
-            image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 1.5, useCORS: true },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            margin: 0, filename: 'NET_Report_' + _reportData.meta.periodLabel + '_' + _reportData.meta.start + '_' + _reportData.meta.end + '.pdf',
+            image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 1.6, useCORS: true, backgroundColor: '#ffffff' },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'] }
         };
         await html2pdf().set(opt).from(el).save();
         showToast('PDF downloaded.', { type: 'success' });

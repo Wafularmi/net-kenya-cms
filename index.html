@@ -11,7 +11,17 @@
     <link rel="stylesheet" href="css/main.146.css?v=148">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=444" as="script">
+    <link rel="preload" href="js/bundle.js?v=445" as="script">
+    <style id="report-print-styles">
+        #report-print-root { display: none; }
+        @media print {
+            body * { visibility: hidden; }
+            #report-print-root, #report-print-root * { visibility: visible; }
+            #report-print-root { display: block; position: absolute; inset: 0; width: 100%; }
+            .app-header, .sidebar, #main-nav, .screen-header, .toast { display: none !important; }
+            @page { size: A4; margin: 16mm 14mm; }
+        }
+    </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -50,8 +60,9 @@
         </div>
     </div>
 
-    <div id="app" style="display:none;">
-        <header id="main-header">
+        <div id="app" style="display:none;">
+            <div id="report-print-root"></div>
+            <header id="main-header">
             <div class="header-main-row">
                 <div class="header-left">
                     <button id="menu-toggle" class="btn-icon menu-toggle" onclick="toggleSidebar()" title="Menu" style="padding:7px 12px;font-size:12px;font-weight:800;">Menu</button>
@@ -1507,7 +1518,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=444"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=445"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=73"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
