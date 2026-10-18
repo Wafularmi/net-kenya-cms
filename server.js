@@ -5360,6 +5360,31 @@ const parsed = JSON.parse(body);
                         toStore.grade = band.grade;
                         toStore.gpa = band.gpa;
                         toStore.scoredBy = 'server';
+                        // The server owns the score, so it also owns the grade
+                        // record: upsert into the grades store so every marked
+                        // attempt is reflected in the learner's transcript.
+                        try {
+                            const gRec = (db.exams || []).find(e => e && String(e.id) === String(toStore.quizId))
+                                || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
+                            const gCourse = gRec ? String(gRec.courseId) : String(toStore.courseId || '');
+                            const gExisting = (db.grades || []).find(x => x && String(x.studentId) === String(toStore.studentId) && String(x.quizId) === String(toStore.quizId));
+                            const gId = gExisting ? gExisting.id : 'GRADE-' + Date.now().toString(36).toUpperCase();
+                            const gEntry = {
+                                id: gId,
+                                studentId: toStore.studentId,
+                                submissionId: toStore.id,
+                                courseId: gCourse,
+                                score: marked.score,
+                                grade: band.grade,
+                                gpa: band.gpa,
+                                type: (gRec && gRec.assessmentType) || 'exam',
+                                quizId: String(toStore.quizId),
+                                gradedAt: new Date().toISOString(),
+                                scoredBy: 'server'
+                            };
+                            const gi = (db.grades || []).findIndex(x => x && x.id === gId);
+                            if (gi >= 0) db.grades[gi] = gEntry; else db.grades.push(gEntry);
+                        } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
