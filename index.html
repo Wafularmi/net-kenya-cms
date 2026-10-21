@@ -1307,6 +1307,26 @@
                         <div style="font-size:11px;color:var(--text-muted);margin:8px 0 8px;">No country toggled = ON (default).</div>
                         <button class="btn btn-primary" onclick="saveDocGenFlags()">Save Document Generation</button>
                     </div>
+                    <div class="card" id="owner-access-card" style="display:none;"><h3>🔐 Owner — Administrator Tab Access</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">You are the owner (the author) of this system. These switches decide which tabs the overall administrator may open. A tab that is OFF disappears from the administrator's sidebar and the server refuses writes to the data behind it. Only the owner can change this. Default is ON for every tab.</div>
+                        <div id="admin-access-toggles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;max-height:320px;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"></div>
+                        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                            <button class="btn btn-outline btn-sm" onclick="setAdminAccessAll(true)">Enable All</button>
+                            <button class="btn btn-outline btn-sm" onclick="setAdminAccessAll(false)">Disable All</button>
+                            <button class="btn btn-primary" onclick="saveAdminAccess()">Save Administrator Access</button>
+                        </div>
+                        <div id="admin-access-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+                    </div>
+                    <div class="card" id="owner-security-card" style="display:none;"><h3>🛡 Owner — Security Actions</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Owner-only actions. Use them after a security event (a leaked database or a leaked sign-in link) to close the doors behind you.</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-outline btn-sm" onclick="ownerRevokeSessions()">Sign out all sessions</button>
+                            <button class="btn btn-outline btn-sm" onclick="ownerRequirePasswordReset('students')">Require new passwords — students</button>
+                            <button class="btn btn-outline btn-sm" onclick="ownerRequirePasswordReset('staff')">Require new passwords — staff</button>
+                            <button class="btn btn-outline btn-sm" onclick="ownerEncryptSecrets()">Encrypt stored secrets</button>
+                        </div>
+                        <div id="owner-security-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+                    </div>
                     <div class="card" id="assistant-access-card" style="display:none;"><h3>Assistant Admin Access</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Toggle every admin sidebar tab for the Assistant Admin role. When OFF, the tab is hidden and the screen is blocked. Only admins can change this. Default is ON for all.</div>
                         <div id="assistant-access-toggles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;max-height:320px;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"></div>

@@ -282,6 +282,8 @@ function showPrompt(title, message, defaultValue = '') {
 }
 function closeModal(e) {
     if (e && e.target !== e.currentTarget) return;
+    // A mandatory password change cannot be dismissed.
+    if (typeof _mandatoryPasswordChange !== 'undefined' && _mandatoryPasswordChange) return;
     const overlay = document.getElementById('modal-overlay');
     if (!overlay) return;
     overlay.style.display = 'none';
@@ -399,6 +401,15 @@ async function initCoordinatorAccessCache() {
 async function initAssistantAccessCache() {
     const rec = await dbGet('settings', 'assistantAccess');
     _assistantAccessCache = rec ? (rec.value || rec) : null;
+}
+// The owner (the author of the system) decides which tabs the overall admin
+// may open. The owner is never limited by it.
+let _adminAccessCache = null;
+async function initAdminAccessCache() {
+    try {
+        const rec = await dbGet('settings', 'adminAccess');
+        _adminAccessCache = rec ? (rec.value || rec) : null;
+    } catch (e) { _adminAccessCache = null; }
 }
 async function initAcademicCache() {
     _academicCache = await dbGet('settings', 'academic');
@@ -568,6 +579,14 @@ function getRolePermissions(role, user) {
         // Filter admin tabs by per-tab toggle (false = hidden)
         const filtered = base.filter(tab => _assistantAccessCache[tab] !== false);
         return filtered;
+    }
+    if (role === 'admin' && _adminAccessCache) {
+        // The owner decides which tabs the overall admin may open. The owner
+        // signs in with the admin role but is never limited by this.
+        if (!(user && user.isOwner)) {
+            const filtered = base.filter(tab => _adminAccessCache[tab] !== false);
+            return filtered;
+        }
     }
     return base;
 }
@@ -1231,6 +1250,11 @@ async function initAuth() {
                         return;
                     }
                 }
+                // A forced password change stops the app until it is done.
+                if (effUser.mustChangePassword) {
+                    showForcedPasswordChange(effUser);
+                    return;
+                }
                 try { if (typeof startAutoRefresh === 'function') startAutoRefresh(); } catch {}
                 try { if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect(); } catch {}
                 return showApp(effUser);
@@ -1384,6 +1408,11 @@ async function login() {
                 return;
             }
         }
+        // A forced password change stops the sign-in until it is done.
+        if (user.mustChangePassword) {
+            showForcedPasswordChange(user);
+            return;
+        }
         showApp(user);
         logAudit('login', 'user', { username: user.username });
         // Live updates (SSE + polling) are skipped on the login screen, so start
@@ -1443,6 +1472,31 @@ function showPublicVerifyModal() {
         <div id="login-verify-result" style="margin-top:12px;"></div>`,
         `<button class="btn btn-primary" onclick="verifyDocumentPublic()">Verify</button>`);
 }
+// A password change that the user cannot skip: the modal has no close
+// button, the backdrop does not dismiss it, and the app stays closed until
+// the password has actually been changed.
+let _mandatoryPasswordChange = false;
+function showForcedPasswordChange(user) {
+    _mandatoryPasswordChange = true;
+    window._forcedUser = user;
+    const overlay = document.getElementById('modal-overlay');
+    const modal = document.getElementById('modal-content');
+    if (!overlay || !modal) { location.reload(); return; }
+    const who = escapeHtml((user && (user.name || user.username)) || '');
+    modal.innerHTML = `
+        <div class="modal-header"><h3>🔐 Set a new password</h3></div>
+        <div class="modal-body">
+            <p style="font-size:13px;margin:0 0 12px;">Hello ${who} — for the security of your account you must set a new password before you can use the system.</p>
+            <div class="form-group"><label>Current Password</label><input type="password" id="cp-current" style="width:100%;" autocomplete="current-password"></div>
+            <div class="form-group"><label>New Password (min 6 characters)</label><input type="password" id="cp-new" style="width:100%;" autocomplete="new-password"></div>
+            <div class="form-group"><label>Confirm New Password</label><input type="password" id="cp-confirm" style="width:100%;" autocomplete="new-password"></div>
+            <div id="cp-status" style="font-size:12px;margin-top:4px;"></div>
+        </div>
+        <div class="modal-actions"><button class="btn btn-primary" onclick="submitChangePassword()">Update Password</button></div>`;
+    overlay.style.display = 'flex';
+    overlay.classList.add('active');
+    try { const el = document.getElementById('cp-current'); if (el) el.focus(); } catch (e) {}
+}
 function showChangePasswordModal() {
     showModal('🔑 Change Password',
         `<div class="form-group"><label>Current Password</label><input type="password" id="cp-current" style="width:100%;" autocomplete="current-password"></div>
@@ -1463,7 +1517,20 @@ async function submitChangePassword() {
         const res = await fetch('/api/change-password', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ currentPw: cur, newPw: nw }) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Password change failed');
+        const mandatory = typeof _mandatoryPasswordChange !== 'undefined' && _mandatoryPasswordChange;
+        _mandatoryPasswordChange = false;
+        try {
+            const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+            delete u.mustChangePassword;
+            sessionStorage.setItem('currentUser', JSON.stringify(u));
+        } catch (e) {}
         closeModal();
+        if (mandatory) {
+            showToast('Password updated. Welcome back!', { type: 'success' });
+            const u = window._forcedUser || JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+            try { if (typeof showApp === 'function') showApp(u); } catch (e) { location.reload(); }
+            return;
+        }
         showToast('Password updated! Use it next time you log in.', { type: 'success' });
     } catch (e) {
         if (status) { status.textContent = e.message; status.style.color = 'var(--danger)'; }
@@ -1582,13 +1649,17 @@ async function showApp(user) {
     } catch {}
     initCoordinatorAccessCache();
     initAssistantAccessCache();
-    // For assistant AND coordinator, navigation must wait for the access cache,
-    // which is loaded asynchronously — rebuild after load so their tabs reflect
-    // the real permissions immediately instead of a stale default.
+    initAdminAccessCache();
+    // For assistant AND coordinator AND the overall admin, navigation must wait
+    // for the access cache, which is loaded asynchronously — rebuild after load
+    // so their tabs reflect the real permissions immediately instead of a stale
+    // default.
     if (user.role === 'assistant') {
         initAssistantAccessCache().then(() => buildNavigation(user));
     } else if (user.role === 'coordinator') {
         initCoordinatorAccessCache().then(() => buildNavigation(user));
+    } else if (user.role === 'admin') {
+        initAdminAccessCache().then(() => buildNavigation(user));
     }
     buildNavigation(user);
     const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
@@ -2208,7 +2279,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -22422,6 +22493,117 @@ async function saveAssistantAccess() {
     if (status) { status.textContent = '✓ Saved'; status.style.color = 'var(--success)'; setTimeout(() => status.textContent = '', 2000); }
     showToast('Assistant access saved!'); logAudit('updated', 'assistant-access', s);
 }
+// ---- Owner controls ------------------------------------------------------
+// The owner is the author of the system. Two cards are shown to the owner
+// only: the switches that decide which tabs the overall administrator may
+// open, and the owner-only security actions.
+const ADMIN_ACCESS_TABS = ADMIN_TABS;
+function isOwnerUser() {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        return !!u.isOwner;
+    } catch (e) { return false; }
+}
+function renderAdminAccessToggles() {
+    const container = document.getElementById('admin-access-toggles');
+    if (!container) return;
+    const access = _adminAccessCache || {};
+    container.innerHTML = ADMIN_ACCESS_TABS.map(tab => {
+        const checked = access[tab] !== false;
+        const label = tab.charAt(0).toUpperCase() + tab.slice(1);
+        return `<label style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;">
+            <span>${label}</span>
+            <input type="checkbox" data-tab="${tab}" ${checked ? 'checked' : ''} style="width:18px;height:18px;">
+        </label>`;
+    }).join('');
+}
+function setAdminAccessAll(on) {
+    document.querySelectorAll('#admin-access-toggles input[type="checkbox"]').forEach(cb => cb.checked = on);
+}
+async function saveAdminAccess() {
+    const status = document.getElementById('admin-access-status');
+    const toggles = document.querySelectorAll('#admin-access-toggles input[type="checkbox"]');
+    const s = { key: 'adminAccess' };
+    toggles.forEach(cb => { s[cb.dataset.tab] = cb.checked; });
+    ADMIN_ACCESS_TABS.forEach(tab => { if (s[tab] === undefined) s[tab] = true; });
+    try {
+        await dbPut('settings', s);
+        _adminAccessCache = s;
+        if (status) { status.textContent = '✓ Saved'; status.style.color = 'var(--success)'; setTimeout(() => status.textContent = '', 2000); }
+        showToast('Administrator access saved!');
+        logAudit('updated', 'admin-access', { tabs: Object.keys(s).length });
+    } catch (e) {
+        if (status) { status.textContent = (e && e.message) || 'Could not save'; status.style.color = 'var(--danger)'; }
+        showToast('Could not save administrator access', { type: 'error' });
+    }
+}
+async function loadAdminAccess() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const owner = !!currentUser.isOwner;
+    const card = document.getElementById('owner-access-card');
+    const secCard = document.getElementById('owner-security-card');
+    if (card) card.style.display = owner ? '' : 'none';
+    if (secCard) secCard.style.display = owner ? '' : 'none';
+    if (!owner) return;
+    try {
+        const rec = await dbGet('settings', 'adminAccess');
+        const s = rec ? (rec.value || rec) : null;
+        if (s) _adminAccessCache = s;
+    } catch (e) { /* the owner may still render an empty grid */ }
+    renderAdminAccessToggles();
+    const access = _adminAccessCache || {};
+    ADMIN_ACCESS_TABS.forEach(tab => {
+        const cb = document.querySelector(`#admin-access-toggles input[data-tab="${tab}"]`);
+        if (cb) cb.checked = access[tab] !== false;
+    });
+}
+function ownerSecurityStatus(msg, ok) {
+    const el = document.getElementById('owner-security-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? 'var(--success)' : 'var(--danger)';
+}
+async function ownerRevokeSessions() {
+    const ok = await showConfirm('Sign out all sessions', 'Every signed-in user, including you, will be signed out and must sign in again. Continue?');
+    if (!ok) return;
+    try {
+        const res = await fetch('/api/owner/revoke-sessions', { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not revoke sessions');
+        ownerSecurityStatus('✓ ' + (data.revoked || 0) + ' session(s) revoked. Signing you out…', true);
+        showToast('All sessions revoked');
+        setTimeout(() => { try { sessionStorage.clear(); } catch (e) {} location.reload(); }, 1200);
+    } catch (e) {
+        ownerSecurityStatus((e && e.message) || 'Could not revoke sessions', false);
+    }
+}
+async function ownerRequirePasswordReset(scope) {
+    const who = scope === 'staff' ? 'all staff accounts' : 'all student accounts';
+    const ok = await showConfirm('Require a new password', 'Every one of ' + who + ' must set a new password at their next sign-in. Continue?');
+    if (!ok) return;
+    try {
+        const res = await fetch('/api/owner/require-password-reset', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ scope: scope || 'students' }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not set the password requirement');
+        ownerSecurityStatus('✓ ' + (data.count || 0) + ' account(s) will be asked for a new password at their next sign-in.', true);
+        showToast('Password reset required for ' + (data.count || 0) + ' account(s)');
+    } catch (e) {
+        ownerSecurityStatus((e && e.message) || 'Could not set the password requirement', false);
+    }
+}
+async function ownerEncryptSecrets() {
+    const ok = await showConfirm('Encrypt stored secrets', 'Re-encrypt every stored secret (M-Pesa, SMS) with DATA_ENCRYPTION_KEY. Continue?');
+    if (!ok) return;
+    try {
+        const res = await fetch('/api/owner/encrypt-secrets', { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not encrypt the secrets');
+        ownerSecurityStatus('✓ ' + (data.changed || 0) + ' secret(s) encrypted.', true);
+        showToast('Secrets encrypted');
+    } catch (e) {
+        ownerSecurityStatus((e && e.message) || 'Could not encrypt the secrets', false);
+    }
+}
 async function loadAssistantAccess() {
     const rec = await dbGet('settings', 'assistantAccess');
     const s = rec ? (rec.value || rec) : null;
@@ -23011,13 +23193,17 @@ async function changePassword() {
     if (newPw.length < 6) { status.textContent = 'Password must be at least 6 characters'; status.style.color = 'var(--danger)'; return; }
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (!currentUser.username) { status.textContent = 'Not logged in'; status.style.color = 'var(--danger)'; return; }
-    const user = await dbGet('users', currentUser.username);
-    if (!user) { status.textContent = 'User not found'; status.style.color = 'var(--danger)'; return; }
-    const currentHash = await hashPassword(currentPw);
-    if (user.password !== currentHash && user.password !== currentPw) { status.textContent = 'Current password is incorrect'; status.style.color = 'var(--danger)'; return; }
-    user.password = await hashPassword(newPw);
-    await dbPut('users', user);
-    sessionStorage.setItem('currentUser', JSON.stringify({ ...currentUser, password: user.password }));
+    // The password is changed by the server, which stores it salted and
+    // encrypted-at-rest — the browser never sees or writes the hash.
+    let res;
+    try {
+        res = await fetch('/api/change-password', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ currentPw: currentPw, newPw: newPw }) });
+    } catch (e) {
+        status.textContent = 'Could not reach the server'; status.style.color = 'var(--danger)'; return;
+    }
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) { status.textContent = (data && data.error) || 'Password change failed'; status.style.color = 'var(--danger)'; return; }
     document.getElementById('settings-current-pw').value = '';
     document.getElementById('settings-new-pw').value = '';
     document.getElementById('settings-confirm-pw').value = '';

@@ -10,6 +10,39 @@ const QRCode = require('qrcode');
 const WebSocket = require('ws');
 const dripEngine = require('./drip-engine');
 
+// ---- Password hashing --------------------------------------------------
+// New and changed passwords are stored as PBKDF2-HMAC-SHA256 with a random
+// per-user salt, never as a bare digest. Accounts that predate this change
+// still hold a bare sha256 digest: they keep working, and are upgraded to
+// PBKDF2 the first time their owner signs in successfully.
+const PBKDF2_ITERATIONS = 120000;
+const PBKDF2_KEYLEN = 32;
+function hashPassword(pw) {
+    const salt = crypto.randomBytes(16);
+    const dk = crypto.pbkdf2Sync(String(pw), salt, PBKDF2_ITERATIONS, PBKDF2_KEYLEN, 'sha256');
+    return 'pbkdf2$' + PBKDF2_ITERATIONS + '$' + salt.toString('base64') + '$' + dk.toString('base64');
+}
+function verifyPassword(pw, stored) {
+    if (!stored) return false;
+    const v = String(stored);
+    if (v.startsWith('pbkdf2$')) {
+        const p = v.split('$');
+        const iter = parseInt(p[1], 10) || PBKDF2_ITERATIONS;
+        let salt, want;
+        try { salt = Buffer.from(p[2] || '', 'base64'); want = Buffer.from(p[3] || '', 'base64'); } catch { return false; }
+        if (!salt.length || !want.length) return false;
+        const dk = crypto.pbkdf2Sync(String(pw), salt, iter, want.length, 'sha256');
+        return dk.length === want.length && crypto.timingSafeEqual(dk, want);
+    }
+    // Legacy: a bare sha256 digest.
+    if (/^[0-9a-f]{64}$/i.test(v)) {
+        const legacy = Buffer.from(crypto.createHash('sha256').update(String(pw), 'utf8').digest('hex'), 'hex');
+        const storedBuf = Buffer.from(v, 'hex');
+        return storedBuf.length === legacy.length && crypto.timingSafeEqual(storedBuf, legacy);
+    }
+    return false;
+}
+
 process.on('uncaughtException', e => { try { process.stderr.write('UNCAUGHT: ' + (e && e.stack || e) + '\n'); } catch {} });
 process.on('unhandledRejection', (reason) => { try { process.stderr.write('UNHANDLED: ' + (reason && reason.stack || reason) + '\n'); } catch {} });
 process.stderr.write('SERVER_STARTING\n');
@@ -779,6 +812,114 @@ setInterval(cleanOnlineUsers, 30000);
 
 let db = loadDB();
 
+// ---- The owner (the author of the system) --------------------------------
+// One account, created from the environment so that no credential is ever
+// stored in the repository. The owner IS an admin, with two extra powers:
+// deciding which tabs the overall admin may open, and running the owner-only
+// security actions. Authorisation always sees the role 'admin', so no
+// existing admin check has to change; the extra powers travel with isOwner.
+function ownerUsername() {
+    const env = String(process.env.OWNER_USERNAME || '').trim();
+    if (env) return env;
+    const rec = (db.settings || []).find(s => s.key === 'owner');
+    const v = rec ? (rec.value || rec) : null;
+    return v && v.username ? String(v.username) : '';
+}
+function isOwnerUser(user) {
+    if (!user) return false;
+    const u = user.user || user;
+    if (u.role === 'owner' || u.isOwner) return true;
+    const name = ownerUsername();
+    return !!name && String(u.username || '').toLowerCase() === name.toLowerCase();
+}
+function asAuthorisedUser(u) {
+    if (!u) return u;
+    if (u.role === 'owner') return Object.assign({}, u, { role: 'admin', isOwner: true });
+    return u;
+}
+function mustChangePassword(user) {
+    if (!user) return false;
+    const u = user.user || user;
+    return !!u.mustChangePassword;
+}
+
+// Which tab owns which store. This is the app's own store->tab mapping (the
+// one the assistant access control already used) plus the extra stores the
+// overall admin's tabs own. The owner uses it to decide which tabs the admin
+// may open: a tab that is switched off removes the WRITE access behind it on
+// the server. Reads stay available so features that depend on them (the
+// login screen, the grade scale, the transcript) keep working.
+const STORE_TO_TAB = {
+    students: 'students', courses: 'courses', lessons: 'lessons', attendance: 'attendance',
+    grades: 'grades', exams: 'exams', manuals: 'manuals', staff: 'staff',
+    payments: 'finance', income: 'finance', expenses: 'finance', fees: 'finance', invoices: 'finance',
+    hostel: 'hostel', hostels: 'hostel', borrows: 'hostel',
+    library: 'library', inventory: 'inventory', alumni: 'alumni',
+    certificates: 'certificates', events: 'events', whatsapp: 'whatsapp', whatsappTemplates: 'whatsapp', whatsappLog: 'whatsapp',
+    audit: 'audit', idcards: 'idcards', idCards: 'idcards', questions: 'questions', quizzes: 'quizzes',
+    submissions: 'submissions', notes: 'notes', portal: 'portal', pending: 'pending',
+    tickets: 'tickets', progress: 'progress', settings: 'settings', verify: 'verify', reprint: 'reprint',
+    discussions: 'discussions', regions: 'regions', communication: 'communication', messages: 'messages',
+    sms: 'sms', smsLog: 'sms', smsSettings: 'sms', chapel: 'chapel', graduation: 'graduation',
+    users: 'users', counters: 'counters', studyCenters: 'regions', studyCenter: 'regions'
+};
+// The admin's own tabs own a few stores the assistant's list does not cover.
+const ADMIN_STORE_TO_TAB = Object.assign({}, STORE_TO_TAB, {
+    media: 'media', mediaUploads: 'media', lessonFiles: 'media',
+    books: 'library', library: 'library',
+    meetings: 'meetings', meeting: 'meetings',
+    examRegistrations: 'exams', quizRegistrations: 'quizzes',
+    questionBank: 'questions', courseCompletions: 'certificates',
+    analyticsEvents: 'analytics', notifications: 'messages',
+    whatsappOutbox: 'whatsapp', whatsappRuns: 'whatsapp',
+    smsTemplates: 'sms', transcriptVerifications: 'verify',
+    lessonCompletions: 'progress', pendingRegistrations: 'pending',
+    hostels: 'hostel', auditTrail: 'audit'
+});
+function adminTabBlocked(store) {
+    const rec = (db.settings || []).find(s => s.key === 'adminAccess');
+    const acc = rec ? (rec.value || rec) : null;
+    if (!acc || typeof acc !== 'object') return false;
+    const tab = ADMIN_STORE_TO_TAB[store];
+    if (tab && acc[tab] === false) return true;
+    if (FINANCIAL_STORES.has(store) && acc['finance'] === false) return true;
+    return false;
+}
+
+// The owner account is created once, from the environment.
+function bootstrapOwner() {
+    const uname = String(process.env.OWNER_USERNAME || '').trim();
+    const upw = String(process.env.OWNER_BOOTSTRAP_PASSWORD || '');
+    const disp = String(process.env.OWNER_DISPLAY_NAME || '').trim() || 'Owner';
+    if (!uname || !upw) return;
+    const users = db.users || (db.users = []);
+    const owner = users.find(u => u.role === 'owner');
+    if (owner) {
+        // The owner already exists: the bootstrap password is only used when
+        // that owner has no password yet.
+        if (!owner.password && String(owner.username || '').toLowerCase() === uname.toLowerCase()) {
+            owner.password = hashPassword(upw);
+            saveDB();
+            process.stderr.write('OWNER_BOOTSTRAP: first password set for ' + uname + '\n');
+        }
+        return;
+    }
+    const existing = users.find(u => String(u.username || '').toLowerCase() === uname.toLowerCase());
+    if (existing) {
+        existing.role = 'owner';
+        existing.status = 'active';
+        saveDB();
+        process.stderr.write('OWNER_BOOTSTRAP: promoted "' + uname + '" to owner\n');
+        return;
+    }
+    users.push({
+        username: uname, password: hashPassword(upw), name: disp, role: 'owner',
+        status: 'active', createdAt: new Date().toISOString()
+    });
+    saveDB();
+    process.stderr.write('OWNER_BOOTSTRAP: created the owner account "' + uname + '". Remove OWNER_BOOTSTRAP_PASSWORD from the environment now.\n');
+}
+
 let _saveTimer = null;
 function saveDB() {
     if (_saveTimer) clearTimeout(_saveTimer);
@@ -957,12 +1098,18 @@ const GLOBAL_SHARED_STORES = new Set([
 // cookie are also accepted (that cookie is itself server-verified).
 function getRequestUser(req) {
     const sessionUser = getSessionUser(req);
-    if (sessionUser) return { role: sessionUser.role, username: sessionUser.username, user: sessionUser };
+    if (sessionUser) {
+        const u = asAuthorisedUser(sessionUser);
+        return { role: u.role, username: u.username, user: u, isOwner: !!u.isOwner };
+    }
     if (hasMaintenanceBypass(req)) {
         const token = parseCookies(req).mt_bypass;
         const entry = token && maintenanceBypassTokens.get(token);
         const user = entry && (db.users || []).find(u => u.username === entry.username);
-        if (user) return { role: user.role, username: user.username, user };
+        if (user) {
+            const u = asAuthorisedUser(user);
+            return { role: u.role, username: u.username, user: u, isOwner: !!u.isOwner };
+        }
     }
     return null;
 }
@@ -1408,8 +1555,20 @@ function canAccessStore(user, store, method) {
     // credential- or PII-bearing records of those stores.
     if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
+    // A user who must change their password may only read their own record
+    // and the settings the login screen needs; everything else waits.
+    if (mustChangePassword(user)) {
+        if (store === 'users' && method === 'GET') return true;
+        if (store === 'settings' && method === 'GET') return true;
+        return false;
+    }
     // The overall admin is never limited — full view and full write on every
     // store, checked before any role/country/assistant rule below can apply.
+    // The one exception: the owner decides which tabs the admin may open, and
+    // a tab that is switched off removes the write access behind it.
+    if (user.role === 'admin' && !user.isOwner) {
+        if (method !== 'GET' && adminTabBlocked(store)) return false;
+    }
     if (user.role === 'admin') return true;
     // Students store: only admin and assistant (if enabled) may create/update/delete
     if (store === 'students' && method !== 'GET') {
@@ -1484,21 +1643,7 @@ function canAccessStore(user, store, method) {
         const access = rec ? (rec.value || rec) : null;
         // If no config yet, default to allow all (so new assistant isn't locked out)
         if (!access) return true;
-        const storeToTab = {
-            students: 'students', courses: 'courses', lessons: 'lessons', attendance: 'attendance',
-            grades: 'grades', exams: 'exams', manuals: 'manuals', staff: 'staff',
-            payments: 'finance', income: 'finance', expenses: 'finance', fees: 'finance', invoices: 'finance',
-            hostel: 'hostel', hostels: 'hostel', borrows: 'hostel',
-            library: 'library', inventory: 'inventory', alumni: 'alumni',
-            certificates: 'certificates', events: 'events', whatsapp: 'whatsapp', whatsappTemplates: 'whatsapp', whatsappLog: 'whatsapp',
-            audit: 'audit', idcards: 'idcards', idCards: 'idcards', questions: 'questions', quizzes: 'quizzes',
-            submissions: 'submissions', notes: 'notes', portal: 'portal', pending: 'pending',
-            tickets: 'tickets', progress: 'progress', settings: 'settings', verify: 'verify', reprint: 'reprint',
-            discussions: 'discussions', regions: 'regions', communication: 'communication', messages: 'messages',
-            sms: 'sms', smsLog: 'sms', smsSettings: 'sms', chapel: 'chapel', graduation: 'graduation',
-            users: 'users', counters: 'counters', studyCenters: 'regions', studyCenter: 'regions'
-        };
-        const tab = storeToTab[store];
+        const tab = STORE_TO_TAB[store];
         if (tab) {
             if (access[tab] === false) return false;
             // Also deny financial stores if finance tab disabled
@@ -2405,6 +2550,21 @@ function decryptSecret(stored) {
         return Buffer.concat([decipher.update(Buffer.from(parts[2], 'base64')), decipher.final()]).toString('utf8');
     } catch { return stored; }
 }
+
+// Create the owner account (once) and warn about secrets stored in the
+// clear. Both run before the server accepts traffic.
+try { bootstrapOwner(); } catch (e) { process.stderr.write('OWNER_BOOTSTRAP failed: ' + (e && e.message) + '\n'); }
+if (!ENC_KEY) {
+    const plain = [];
+    for (const rec of (db.settings || [])) {
+        const v = rec ? (rec.value || rec) : null;
+        if (v && typeof v === 'object' && (v.consumerSecret || v.passkey || v.apiKey)) plain.push(rec.key);
+    }
+    if (plain.length) {
+        process.stderr.write('SECURITY_WARNING: DATA_ENCRYPTION_KEY is not set, so these settings hold secrets in the clear: ' + plain.join(', ') + '\n');
+    }
+}
+
 
 function mpesaSettingsPlain() {
     const s = db.mpesaSettings || {};
@@ -3403,7 +3563,7 @@ const { input, password, country } = JSON.parse(body);
                     if (candidate) {
                         const pwHash = hash(candidate.admissionNumber);
                         if (pwHash === hash(password) || candidate.admissionNumber === password) {
-user = { username: candidate.phone, password: pwHash, name: candidate.name, role: 'student', status: 'active', studentId: candidate.id, createdAt: new Date().toISOString() };
+user = { username: candidate.phone, password: hashPassword(candidate.admissionNumber), name: candidate.name, role: 'student', status: 'active', studentId: candidate.id, createdAt: new Date().toISOString() };
                             db.users.push(user);
                             saveDB();
                         }
@@ -3412,17 +3572,24 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
 
                 if (!user) { loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
-                const pwHash = hash(password);
-                let pwMatch = user.password === pwHash || user.password === password;
+                // The owner is authorised as an admin; the stored record keeps role 'owner'.
+                if (user.role === 'owner') user = Object.assign({}, user, { role: 'admin', isOwner: true });
+                const storedUser = (db.users || []).find(u => u.username === user.username) || user;
+
+                let pwMatch = verifyPassword(password, user.password) || user.password === password;
 
                 if (!pwMatch && user.role === 'student') {
                     const s = students.find(s => s.id === user.studentId || s.phone === user.username || s.email === user.username || (user.name && s.name === user.name));
-                    if (s && s.admissionNumber) pwMatch = hash(s.admissionNumber) === pwHash || s.admissionNumber === password;
+                    if (s && s.admissionNumber) pwMatch = verifyPassword(s.admissionNumber, user.password) || s.admissionNumber === password;
                 }
 
                 if (!pwMatch) { process.stderr.write('LOGIN_FAIL_PW input=' + String(input).slice(0, 40) + '\n'); loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
-                if (user.password !== pwHash) { user.password = pwHash; saveDB(); }
+                // Upgrade a legacy digest to PBKDF2 the first time the owner signs in.
+                if (!String(storedUser.password || '').startsWith('pbkdf2$')) {
+                    storedUser.password = hashPassword(password);
+                    saveDB();
+                }
                 if (user.status === 'locked') return json(res, 403, { error: 'Account locked due to inactivity. Contact administration to reactivate.' });
                 if (user.status === 'inactive') return json(res, 403, { error: 'Account is inactive. Contact administration.' });
                 if (user.status === 'pending') return json(res, 403, { error: 'Account pending approval. Please wait for admin confirmation.' });
@@ -3446,6 +3613,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                         }
 
                 user.lastLogin = new Date().toISOString();
+                storedUser.lastLogin = user.lastLogin;
                 // Main admin stays global — never set/overwrite country. Others get country from login.
                 if (user.role !== 'admin' && country) {
                     if (!user.country) user.country = country;
@@ -3595,11 +3763,11 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                 if (String(newPw).length < 6) return json(res, 400, { error: 'New password must be at least 6 characters' });
                 const user = (db.users || []).find(u => u.username === authUser.username);
                 if (!user) return json(res, 404, { error: 'Account not found' });
-                const hash = pw => crypto.createHash('sha256').update(pw, 'utf8').digest('hex');
-                const okCurrent = user.password === hash(currentPw) || user.password === currentPw;
+                const okCurrent = verifyPassword(currentPw, user.password) || user.password === currentPw;
                 if (!okCurrent) return json(res, 403, { error: 'Current password is incorrect' });
                 if (currentPw === newPw) return json(res, 400, { error: 'New password must differ from current' });
-                user.password = hash(newPw);
+                user.password = hashPassword(newPw);
+                delete user.mustChangePassword;
                 saveDB();
                 auditLog('change-password', 'user', { username: user.username }, user.username);
                 return json(res, 200, { ok: true });
@@ -3608,6 +3776,77 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         return true;
     }
 
+    // ---- Owner-only security actions -------------------------------------
+    // The owner (the author of the system) is the only account that can run
+    // these. They exist because the whole database was once downloadable by
+    // anyone, which also exposed the live session tokens.
+    if (parts.length === 3 && parts[1] === 'owner' && parts[2] === 'revoke-sessions' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!isOwnerUser(authUser)) return json(res, 403, { error: 'Only the owner can do this' });
+        let count = 0;
+        try {
+            count = sessions.size;
+            sessions.clear();
+            for (const f of [SESSION_FILE, '/data/sessions.json']) {
+                try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
+            }
+            auditLog('revoke-sessions', 'security', { revoked: count }, authUser.username);
+            return json(res, 200, { ok: true, revoked: count, message: count + ' session(s) revoked. Everyone must sign in again.' });
+        } catch (e) {
+            return json(res, 500, { error: e.message || 'Could not revoke sessions' });
+        }
+    }
+    if (parts.length === 3 && parts[1] === 'owner' && parts[2] === 'require-password-reset' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!isOwnerUser(authUser)) return json(res, 403, { error: 'Only the owner can do this' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body || '{}');
+                const scope = String(parsed.scope || 'students');
+                const only = String(parsed.username || '').trim();
+                const users = db.users || [];
+                let n = 0;
+                for (const u of users) {
+                    if (scope === 'students' && u.role !== 'student') continue;
+                    if (scope === 'staff' && u.role === 'student') continue;
+                    if (only && String(u.username || '').toLowerCase() !== only.toLowerCase()) continue;
+                    u.mustChangePassword = true;
+                    n++;
+                }
+                saveDB();
+                auditLog('require-password-reset', 'user', { scope, only, count: n }, authUser.username);
+                return json(res, 200, { ok: true, count: n });
+            } catch { return json(res, 400, { error: 'Invalid request' }); }
+        });
+        return true;
+    }
+    if (parts.length === 3 && parts[1] === 'owner' && parts[2] === 'encrypt-secrets' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!isOwnerUser(authUser)) return json(res, 403, { error: 'Only the owner can do this' });
+        if (!ENC_KEY) return json(res, 400, { error: 'Set DATA_ENCRYPTION_KEY in the environment first, then run this.' });
+        let changed = 0;
+        const SECRET_RE = /^(consumerKey|consumerSecret|passkey|apiKey|secret|password|token|passcode|pin)$/i;
+        const walk = (o) => {
+            if (!o || typeof o !== 'object') return;
+            for (const k of Object.keys(o)) {
+                const v = o[k];
+                if (typeof v === 'string' && SECRET_RE.test(k) && v && !v.startsWith('enc:')) {
+                    o[k] = encryptSecret(v);
+                    changed++;
+                } else if (v && typeof v === 'object') walk(v);
+            }
+        };
+        for (const rec of (db.settings || [])) {
+            if (!rec) continue;
+            const v = rec.value || rec;
+            if (v && typeof v === 'object') walk(v);
+        }
+        saveDB();
+        auditLog('encrypt-secrets', 'settings', { changed }, authUser.username);
+        return json(res, 200, { ok: true, changed });
+    }
     // POST /api/reset-password — decentralized, country-aware password reset.
     //   - Overall admin: may reset ANY user's password (coordinator or student).
     //   - Country coordinator: may reset their OWN password, and the password of
@@ -3650,7 +3889,8 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
                     if (!student || !student.admissionNumber) return json(res, 400, { error: 'Student has no admission number to reset to' });
                     finalPw = String(student.admissionNumber);
                 }
-                target.password = hash(finalPw);
+                target.password = hashPassword(finalPw);
+                delete target.mustChangePassword;
                 target.status = 'active';
                 saveDB();
                 auditLog('reset-password', 'user', { username: target.username, method: resetToAdmission ? 'to-admission' : 'custom' }, authUser.username);
@@ -5574,6 +5814,12 @@ const parsed = JSON.parse(body);
                     if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
                     }
+                    if (store === 'settings' && value.key === 'adminAccess' && !isOwnerUser(user)) {
+                        return json(res, 403, { error: 'Only the owner can change which tabs the administrator may open' });
+                    }
+                    if (store === 'settings' && value.key === 'owner' && !isOwnerUser(user)) {
+                        return json(res, 403, { error: 'Only the owner can change the owner account' });
+                    }
                     // One attempt has ONE grade record. If the browser sends a
                     // fresh id for an attempt that already has one, the existing
                     // record is reused - otherwise a retry would leave two
@@ -5758,6 +6004,12 @@ const isDocStore = store === 'certificates' || store === 'idCards' || store === 
                     }
 if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
+                    }
+                    if (store === 'settings' && value.key === 'adminAccess' && !isOwnerUser(user)) {
+                        return json(res, 403, { error: 'Only the owner can change which tabs the administrator may open' });
+                    }
+                    if (store === 'settings' && value.key === 'owner' && !isOwnerUser(user)) {
+                        return json(res, 403, { error: 'Only the owner can change the owner account' });
                     }
                     // Students updating only their own terms acceptance (allowed past the gate above)
                     if (store === 'users' && user && user.role === 'student') {
