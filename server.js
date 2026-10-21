@@ -1157,14 +1157,112 @@ function scoreSubmissionOnServer(sub) {
     return { score: Math.round((earned / total) * 100), pointsEarned: Math.round(earned * 100) / 100, totalPoints: total };
 }
 
+// ---- THE GRADING SCALE (one table, shared with the browser) -------------
+// The browser renders the same bands (js/bundle.js GRADE_SCALES). The active
+// scale is the one the institution selected in Settings > Academic
+// (settings.academic.grading). Both sides MUST use the same table, otherwise
+// the letter printed on a transcript disagrees with the letter stored for the
+// same score.
+const GRADE_SCALES = {
+    gpa4: { label: '4.0', bands: [
+        { min: 90, grade: 'A', gpa: 4.0 }, { min: 80, grade: 'B+', gpa: 3.5 },
+        { min: 75, grade: 'B', gpa: 3.0 }, { min: 70, grade: 'B-', gpa: 2.7 },
+        { min: 65, grade: 'C+', gpa: 2.3 }, { min: 60, grade: 'C', gpa: 2.0 },
+        { min: 50, grade: 'D', gpa: 1.0 }, { min: 0, grade: 'F', gpa: 0.0 }] },
+    gpa5: { label: '5.0', bands: [
+        { min: 90, grade: 'A', gpa: 5.0 }, { min: 80, grade: 'B+', gpa: 4.5 },
+        { min: 75, grade: 'B', gpa: 4.0 }, { min: 70, grade: 'B-', gpa: 3.5 },
+        { min: 65, grade: 'C+', gpa: 3.0 }, { min: 60, grade: 'C', gpa: 2.5 },
+        { min: 55, grade: 'C-', gpa: 2.0 }, { min: 50, grade: 'D', gpa: 1.0 },
+        { min: 0, grade: 'F', gpa: 0.0 }] },
+    ects: { label: 'ECTS', bands: [
+        { min: 90, grade: 'A', gpa: 4.0 }, { min: 80, grade: 'B', gpa: 3.0 },
+        { min: 70, grade: 'C', gpa: 2.0 }, { min: 60, grade: 'D', gpa: 1.0 },
+        { min: 50, grade: 'E', gpa: 0.5 }, { min: 0, grade: 'F', gpa: 0.0 }] },
+    percent: { label: 'Percentage', bands: [
+        { min: 70, grade: 'A', gpa: 4.0 }, { min: 60, grade: 'B', gpa: 3.0 },
+        { min: 50, grade: 'C', gpa: 2.0 }, { min: 40, grade: 'D', gpa: 1.0 },
+        { min: 0, grade: 'F', gpa: 0.0 }] },
+    standard: { label: '4.0', bands: [
+        { min: 75, grade: 'A', gpa: 4.0 }, { min: 70, grade: 'B+', gpa: 3.5 },
+        { min: 65, grade: 'B', gpa: 3.0 }, { min: 60, grade: 'B-', gpa: 2.7 },
+        { min: 55, grade: 'C+', gpa: 2.3 }, { min: 50, grade: 'C', gpa: 2.0 },
+        { min: 45, grade: 'D+', gpa: 1.5 }, { min: 40, grade: 'D', gpa: 1.0 },
+        { min: 0, grade: 'F', gpa: 0.0 }] }
+};
+function activeGradeScaleServer() {
+    let key = '';
+    try {
+        const rec = (db.settings || []).find(s => s && s.key === 'academic');
+        key = String((rec && rec.grading) || '');
+    } catch {}
+    return GRADE_SCALES[key] || GRADE_SCALES.standard;
+}
 // Grade letters must match the student-facing table in the browser.
 function gradeBandForScore(score) {
     const s = Number(score) || 0;
-    if (s >= 80) return { grade: 'A', gpa: 4 };
-    if (s >= 70) return { grade: 'B', gpa: 3 };
-    if (s >= 60) return { grade: 'C', gpa: 2 };
-    if (s >= 50) return { grade: 'D', gpa: 1 };
-    return { grade: 'F', gpa: 0 };
+    const bands = activeGradeScaleServer().bands;
+    for (const b of bands) { if (s >= b.min) return { grade: b.grade, gpa: b.gpa }; }
+    return { grade: 'F', gpa: 0.0 };
+}
+// The identifiers a learner may answer to: the student id, the username and
+// the admission number. A session may carry any one of them.
+function studentAliases(user) {
+    if (!user) return new Set();
+    const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username));
+    const stuId = String(user.studentId || '');
+    const myStu = (db.students || []).find(s => s && String(s.id) === String(stuId || (uRec && uRec.studentId) || ''));
+    return new Set([stuId, String((uRec && uRec.studentId) || ''), String(user.username || ''), String((myStu && myStu.admissionNumber) || '')].filter(Boolean));
+}
+// WHICH student a session belongs to. The server decides this - the browser
+// never says whose paper it is.
+function serverStudentId(user) {
+    if (!user) return '';
+    const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username));
+    const direct = String(user.studentId || (uRec && uRec.studentId) || '');
+    const students = db.students || [];
+    if (direct && students.some(s => s && String(s.id) === direct)) return direct;
+    const login = String(user.username || '');
+    const byLogin = students.find(s => s && (
+        String(s.id || '') === login ||
+        String(s.id || '') === 'STU-' + login ||
+        String(s.admissionNumber || '') === login ||
+        String(s.email || '') === login
+    ));
+    return byLogin ? String(byLogin.id) : '';
+}
+// A stable id for the grade of one attempt, so the server and the browser
+// always write the SAME record (no duplicates when both write it).
+function assessmentGradeId(studentId, quizId) {
+    const clean = v => String(v == null ? '' : v).replace(/[^A-Za-z0-9_-]/g, '_');
+    return 'GRADE-' + clean(studentId) + '-' + clean(quizId);
+}
+// Create (or refresh) the grade record that belongs to a marked submission.
+// Returns { id, created } so the caller can tell a fresh record from an
+// updated one.
+function upsertGradeFromSubmission(sub, marked, band, assessment) {
+    const studentId = String(sub.studentId || '');
+    const quizId = String(sub.quizId || sub.examId || '');
+    const courseId = String((assessment && assessment.courseId) || sub.courseId || '');
+    const existing = (db.grades || []).find(x => x && String(x.studentId) === studentId && String(x.quizId) === quizId);
+    const id = existing ? existing.id : assessmentGradeId(studentId, quizId);
+    const entry = {
+        id: id,
+        studentId: studentId,
+        submissionId: sub.id,
+        courseId: courseId,
+        score: marked.score,
+        grade: band.grade,
+        gpa: band.gpa,
+        type: (assessment && assessment.assessmentType) || 'exam',
+        quizId: quizId,
+        semester: Number(sub.semester != null ? sub.semester : ((assessment && assessment.semester) != null ? assessment.semester : 1)) || 1,
+        gradedAt: new Date().toISOString(),
+        scoredBy: 'server'
+    };
+    const gi = (db.grades || []).findIndex(x => x && x.id === id);
+    if (gi >= 0) db.grades[gi] = entry; else db.grades.push(entry);
+    return { id: id, created: gi < 0 };
 }
 
 // ---- Assessment window (server authority) ------------------------------
@@ -2328,6 +2426,33 @@ function getMaintenanceSetting() {
     return rec && rec.value && typeof rec.value === 'object' ? rec.value : { active: false, message: '' };
 }
 
+// The college's public contact number. One place decides what the login
+// screen, the public-contact endpoint and every other surface show, so the
+// screens can never disagree with each other.
+function getContactPhone() {
+    const settings = db.settings || [];
+    const branding = settings.find(s => s.key === 'branding');
+    const bVal = branding && (branding.value && typeof branding.value === 'object' ? branding.value : branding);
+    let raw = bVal && bVal.phone ? String(bVal.phone) : '';
+    if (!raw.trim()) {
+        const wa = settings.find(s => s.key === 'whatsapp');
+        const wVal = wa && (wa.value && typeof wa.value === 'object' ? wa.value : wa);
+        raw = wVal && (wVal.adminNumber || wVal.phone) ? String(wVal.adminNumber || wVal.phone) : '';
+    }
+    return normaliseContactPhone(raw);
+}
+// 0713824567 -> +254713824567 (same rule the client applies)
+function normaliseContactPhone(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    const digits = s.replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    if (s.startsWith('+')) return '+' + digits;
+    if (digits.startsWith('254')) return '+' + digits;
+    if (digits.startsWith('0')) return '+254' + digits.substring(1);
+    return '+' + digits;
+}
+
 function isMaintenanceActive() {
     return getMaintenanceSetting().active === true;
 }
@@ -3362,9 +3487,12 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
         req.on('data', c => body += c);
         req.on('end', () => {
             try {
-                const { password } = JSON.parse(body);
-                if (!password) return json(res, 400, { error: 'Missing password' });
-                const hash = crypto.createHash('sha256').update(password, 'utf8').digest('hex');
+                const parsed = JSON.parse(body);
+                // "password" is the original field name; "value" is accepted as
+                // well so that any string can be hashed (document hashes).
+                const input = parsed && parsed.value !== undefined ? parsed.value : (parsed ? parsed.password : undefined);
+                if (input === undefined || input === null) return json(res, 400, { error: 'Missing password' });
+                const hash = crypto.createHash('sha256').update(String(input), 'utf8').digest('hex');
                 json(res, 200, { hash });
             } catch { json(res, 400, { error: 'Invalid JSON' }); }
         });
@@ -3560,10 +3688,7 @@ user = { username: candidate.phone, password: pwHash, name: candidate.name, role
     // GET /api/public-contact — admin phone for login screen (public, no secrets)
     if (parts.length === 2 && parts[1] === 'public-contact' && req.method === 'GET') {
         try {
-            const rec = (db.settings || []).find(s => s.key === 'whatsapp');
-            const val = rec ? (rec.value || rec) : null;
-            const phone = (val && (val.adminNumber || val.phone)) || '';
-            return json(res, 200, { phone: String(phone || '') });
+            return json(res, 200, { phone: getContactPhone() });
         } catch { return json(res, 200, { phone: '' }); }
     }
 
@@ -5449,6 +5574,16 @@ const parsed = JSON.parse(body);
                     if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
                     }
+                    // One attempt has ONE grade record. If the browser sends a
+                    // fresh id for an attempt that already has one, the existing
+                    // record is reused - otherwise a retry would leave two
+                    // grades for the same paper.
+                    if (store === 'grades' && user && user.role === 'student' && toStore.quizId) {
+                        try {
+                            const priorRec = (db.grades || []).find(x => x && String(x.studentId) === String(toStore.studentId) && String(x.quizId) === String(toStore.quizId));
+                            if (priorRec && priorRec.id && String(priorRec.id) !== String(toStore.id)) toStore.id = priorRec.id;
+                        } catch {}
+                    }
                     const pk = toStore[keyPath];
                     if (pk === undefined || pk === null) {
                         console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(toStore));
@@ -5462,6 +5597,7 @@ const parsed = JSON.parse(body);
                     // The submitted answers are re-marked here against the answer
                     // key, so a tampered client cannot award itself marks.
                     // A submitted paper must fall inside its scheduled window.
+                    let subMark = null;
                     if (store === 'submissions') {
                         const target = (db.exams || []).find(e => e && (String(e.id) === String(toStore.quizId) || String(e.id) === String(toStore.examId)))
                             || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
@@ -5470,13 +5606,52 @@ const parsed = JSON.parse(body);
                             if (w.closed) return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + ' and can no longer be submitted.' });
                             if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAtISO.slice(0, 10) + ' at ' + w.opensAtISO.slice(11, 16) + '.' });
                         }
+                        // A learner's own paper is marked HERE, not in the browser:
+                        // the server re-marks the answers against the answer key,
+                        // writes the authoritative score onto the submission and
+                        // creates the grade record, so a submitted exam reaches
+                        // the transcript in ONE write (a lost second write can no
+                        // longer leave the score out of the results).
+                        if (user && user.role === 'student') {
+                            const sid = serverStudentId(user);
+                            if (!sid) {
+                                return json(res, 403, { error: 'Your session is not linked to a student record - please sign in again' });
+                            }
+                            // The server owns the identity of the paper.
+                            toStore.studentId = sid;
+                            const quizId = String(toStore.quizId || toStore.examId || '');
+                            const assessment = (db.quizzes || []).find(q => q && String(q.id) === quizId)
+                                || (db.exams || []).find(e => e && String(e.id) === quizId);
+                            // Re-sending the SAME paper is always allowed (that is
+                            // a retry after a dropped connection); a NEW attempt is
+                            // capped by the assessment's retake allowance.
+                            const samePaper = (db.submissions || []).find(x => x && String(x.id) === String(toStore.id));
+                            const myAttempts = (db.submissions || []).filter(x => x && String(x.quizId || x.examId || '') === quizId && String(x.studentId || '') === sid);
+                            if (!samePaper && assessment) {
+                                const allowed = Math.max(1, Number(assessment.maxRetakes || 1));
+                                if (myAttempts.length >= allowed) {
+                                    return json(res, 409, { error: 'You have already used all ' + allowed + ' attempt' + (allowed === 1 ? '' : 's') + ' for this assessment.' });
+                                }
+                            }
+                            const marked = scoreSubmissionOnServer(toStore);
+                            if (marked) {
+                                const band = gradeBandForScore(marked.score);
+                                const passMark = Number(assessment && assessment.passMark != null ? assessment.passMark : 50);
+                                toStore.score = marked.score;
+                                toStore.pointsEarned = marked.pointsEarned;
+                                toStore.totalPoints = marked.totalPoints;
+                                toStore.grade = band.grade;
+                                toStore.gpa = band.gpa;
+                                toStore.status = marked.score >= passMark ? 'pass' : 'fail';
+                                toStore.scoredBy = 'server';
+                                subMark = { marked: marked, band: band, assessment: assessment };
+                            }
+                        }
                     }
                     if (store === 'grades' && user && user.role === 'student') {
                         // The session may not carry studentId, so resolve it from
                         // the users record before comparing.
-                        const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username));
-                        const myStu = (db.students || []).find(s => s && String(s.id) === String((user.studentId || (uRec && uRec.studentId) || '')));
-                        const myAliases = new Set([String(user.studentId || ''), String((uRec && uRec.studentId) || ''), String(user.username || ''), String((myStu && myStu.admissionNumber) || '')].filter(Boolean));
+                        const myAliases = studentAliases(user);
                         const claimed = String(toStore.studentId || '');
                         if (!myAliases.size || !myAliases.has(claimed)) {
                             return json(res, 403, { error: 'You can only record your own grade' });
@@ -5513,24 +5688,7 @@ const parsed = JSON.parse(body);
                         try {
                             const gRec = (db.exams || []).find(e => e && String(e.id) === String(toStore.quizId))
                                 || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
-                            const gCourse = gRec ? String(gRec.courseId) : String(toStore.courseId || '');
-                            const gExisting = (db.grades || []).find(x => x && String(x.studentId) === String(toStore.studentId) && String(x.quizId) === String(toStore.quizId));
-                            const gId = gExisting ? gExisting.id : 'GRADE-' + Date.now().toString(36).toUpperCase();
-                            const gEntry = {
-                                id: gId,
-                                studentId: toStore.studentId,
-                                submissionId: toStore.id,
-                                courseId: gCourse,
-                                score: marked.score,
-                                grade: band.grade,
-                                gpa: band.gpa,
-                                type: (gRec && gRec.assessmentType) || 'exam',
-                                quizId: String(toStore.quizId),
-                                gradedAt: new Date().toISOString(),
-                                scoredBy: 'server'
-                            };
-                            const gi = (db.grades || []).findIndex(x => x && x.id === gId);
-                            if (gi >= 0) db.grades[gi] = gEntry; else db.grades.push(gEntry);
+                            upsertGradeFromSubmission(Object.assign({}, sub || toStore, { id: sub ? sub.id : toStore.submissionId }), marked, band, gRec);
                         } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
                     if (store === 'studyCenters') {
@@ -5558,7 +5716,16 @@ const parsed = JSON.parse(body);
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }
-                    json(res, 200, { ok: true, key: pk });
+                    // A marked paper also creates its grade record here, so the
+                    // exam is on the transcript after this single write.
+                    let gradeId = null, gradeCreated = false;
+                    if (store === 'submissions' && subMark) {
+                        try {
+                            const g = upsertGradeFromSubmission(toStore, subMark.marked, subMark.band, subMark.assessment);
+                            gradeId = g.id; gradeCreated = g.created;
+                        } catch (ge) { console.error('server grade upsert failed:', ge.message); }
+                    }
+                    json(res, 200, { ok: true, key: pk, gradeId: gradeId, gradeCreated: gradeCreated });
                 } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
             });
             return true;
@@ -5897,7 +6064,19 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
             const maintMsg = maintSetting.message && String(maintSetting.message).trim()
                 ? String(maintSetting.message).trim()
                 : 'We are carrying out scheduled maintenance and improvements. The system will be back shortly. Thank you for your patience.';
-            html = html.replace(/\{\{SCHOOL_NAME\}\}/g, schoolName)
+            // The contact number is part of the branding configuration, so it is
+            // rendered into the login screen with the rest of the branding. The
+            // page therefore shows the number immediately, even if the client
+            // cannot reach /api/public-contact.
+            const contactPhone = getContactPhone();
+            const contactPhoneHtml = contactPhone
+                ? '\uD83D\uDCDE <a href="tel:' + contactPhone + '" style="color:var(--accent);font-weight:600;text-decoration:none;">' + contactPhone.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</a>'
+                : '';
+            html = html.replace(/\{\{CONTACT_PHONE_STYLE\}\}/g, contactPhone
+                ? 'display:block;text-align:center;margin-top:10px;font-size:13px;'
+                : 'display:none;text-align:center;margin-top:10px;font-size:13px;')
+                       .replace(/\{\{CONTACT_PHONE\}\}/g, () => contactPhoneHtml)
+                       .replace(/\{\{SCHOOL_NAME\}\}/g, schoolName)
                        .replace(/\{\{INITIALS\}\}/g, initials)
                        .replace(/\{\{LOGO_CSS\}\}/g, logoCss)
                        .replace(/\{\{LOGO_DATA\}\}/g, logoData)

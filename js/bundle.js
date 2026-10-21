@@ -66,13 +66,44 @@ async function dbGet(store, key) {
     if (!res.ok) { noteAuthFailure(res); throw new Error(`dbGet ${store}:${key} failed: ${res.status}`); }
     return res.json();
 }
-async function dbPut(store, data) {
+// ---- A request that survives a weak or busy connection -------------------
+// Low bandwidth and heavy traffic both show up as a dropped or slow request.
+// fetchWithRetry gives the request a deadline and a few patient attempts.
+// Safe for writes: the payload always carries the same record id and the
+// server upserts by that id, so a retry can never create a duplicate.
+async function fetchWithRetry(url, options, cfg) {
+    const conf = cfg || {};
+    const attempts = Math.max(1, Number(conf.attempts) || 3);
+    const timeoutMs = Number(conf.timeoutMs) || 20000;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch {} }, timeoutMs) : null;
+        try {
+            const opts = Object.assign({}, options || {});
+            if (ctrl) opts.signal = ctrl.signal;
+            const res = await fetch(url, opts);
+            // A 4xx is the caller's own mistake - repeating it changes nothing.
+            if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) return res;
+            if (res.ok) return res;
+            lastErr = new Error('HTTP ' + res.status);
+            if (res.status < 500 && res.status !== 408 && res.status !== 429) return res;
+        } catch (e) {
+            lastErr = e;
+            if (attempt >= attempts) break;
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+        // wait a little longer before each new attempt
+        await new Promise(r => setTimeout(r, Math.min(8000, 600 * Math.pow(2, attempt - 1))));
+    }
+    throw lastErr || new Error('Request failed');
+}
+async function dbPut(store, data, cfg) {
     console.log('dbPut:', store, 'data:', JSON.stringify(data));
-    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ value: data })
-    });
+    const opts = { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ value: data }) };
+    const res = cfg ? await fetchWithRetry(`${API_BASE}/${encodeURIComponent(store)}`, opts, cfg)
+                    : await fetch(`${API_BASE}/${encodeURIComponent(store)}`, opts);
     if (!res.ok) { noteAuthFailure(res); throw new Error(`dbPut ${store} failed: ${res.status}`); }
     return res.json();
 }
@@ -787,9 +818,28 @@ function applyTemplateVars(message, student, schoolName, balance, admissionNumbe
         .replace(/{{min}}/g, '75');
 }
 async function sha256(str) {
-    const buf = new TextEncoder().encode(str);
-    const hash = await crypto.subtle.digest('SHA-256', buf);
-    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    // crypto.subtle only exists in a secure context (https) and is missing on
+    // some phones. The server can always do it, so the document hash never
+    // fails because of the browser.
+    try {
+        if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+            const buf = new TextEncoder().encode(str);
+            const hash = await crypto.subtle.digest('SHA-256', buf);
+            return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+    } catch (e) {}
+    try {
+        const res = await fetch('/api/hash', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: String(str) })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.hash) return data.hash;
+        }
+    } catch (e) {}
+    throw new Error('SHA-256 is unavailable');
 }
 function playBell() {
     try {
@@ -1034,16 +1084,48 @@ try { Object.defineProperty(document, 'onselectstart', { get: function() { retur
 (function() {
     var devtoolsOpen = false;
     var threshold = 160;
+    var _baseDpr = window.devicePixelRatio || 1;
+    var _devtoolsOverlay = null;
+    // The block is an overlay, never a replacement of the page: a false
+    // positive (zoomed page, full-screen window, some mobile browsers) must
+    // not destroy the login screen or the running application.
+    var showDevtoolsOverlay = function() {
+        if (_devtoolsOverlay && _devtoolsOverlay.parentNode) return;
+        var el = document.createElement('div');
+        el.setAttribute('data-net-protection', 'devtools');
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#fff;';
+        el.innerHTML = '<div style="text-align:center;padding:40px;"><div style="font-size:64px;margin-bottom:16px;">🔒</div><h2>Developer Tools Detected</h2><p style="color:#64748b;margin-top:8px;">Please close Developer Tools to continue using this system.</p></div>';
+        document.body.appendChild(el);
+        _devtoolsOverlay = el;
+    };
+    var hideDevtoolsOverlay = function() {
+        if (_devtoolsOverlay && _devtoolsOverlay.parentNode) _devtoolsOverlay.parentNode.removeChild(_devtoolsOverlay);
+        _devtoolsOverlay = null;
+    };
     var check = function() {
-        if (!_protectionEnabled) { devtoolsOpen = false; return; }
+        if (!_protectionEnabled) { devtoolsOpen = false; hideDevtoolsOverlay(); return; }
         var w = window.outerWidth - window.innerWidth;
         var h = window.outerHeight - window.innerHeight;
-        var detected = w > threshold || h > threshold || (w === 0 && h === 0 && window.outerWidth > 0);
+        // A zoomed page shrinks the viewport without any devtools being open,
+        // and a full-screen window reports outer == inner. Neither is a devtools
+        // signal, so neither may lock the user out of the system.
+        var zoomed = false;
+        try { zoomed = Math.abs((window.devicePixelRatio || 1) - _baseDpr) > 0.01; } catch (e) {}
+        // On phones the window is taller than the viewport because of the
+        // browser chrome, so the size difference is not a devtools signal
+        // there either.
+        var touchDevice = false;
+        try {
+            touchDevice = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent || '')
+                || (navigator.maxTouchPoints > 0 && /Macintosh/i.test(navigator.userAgent || ''));
+        } catch (e) {}
+        var detected = !zoomed && !touchDevice && (w > threshold || h > threshold);
         if (detected && !devtoolsOpen) {
             devtoolsOpen = true;
-            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#fff;"><div style="text-align:center;padding:40px;"><div style="font-size:64px;margin-bottom:16px;">🔒</div><h2>Developer Tools Detected</h2><p style="color:#64748b;margin-top:8px;">Please close Developer Tools to continue using this system.</p></div></div>';
+            showDevtoolsOverlay();
         } else if (!detected) {
             devtoolsOpen = false;
+            hideDevtoolsOverlay();
         }
     };
     _devtoolsInterval = setInterval(check, 1000);
@@ -1321,11 +1403,24 @@ function showLoginError(msg) {
     if (msg) { el.textContent = msg; el.style.display = 'block'; } else { el.style.display = 'none'; }
 }
 async function loadPublicContact() {
+    // The number is rendered into the login screen by the server together with
+    // the rest of the branding, so it is already on screen before this runs.
+    // This only refreshes it - and if the endpoint is unreachable the number
+    // that the server rendered stays visible.
     try {
         const res = await fetch('/api/public-contact');
         if (!res.ok) return;
         const data = await res.json();
         let phone = (data && data.phone ? String(data.phone).trim() : '');
+        if (!phone) {
+            // Fall back to the branding configuration - the same value the
+            // server renders - so the screen always shows a number.
+            try {
+                const rec = await dbGet('settings', 'branding');
+                const b = rec && (rec.value && typeof rec.value === 'object' ? rec.value : rec);
+                phone = b && b.phone ? String(b.phone).trim() : '';
+            } catch (e) {}
+        }
         if (phone) {
             const digits = phone.replace(/[^0-9]/g, '');
             if (phone.trim().startsWith('+')) phone = '+' + digits;
@@ -1457,6 +1552,9 @@ function adjustHeaderPadding() {
 async function showApp(user) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
+    // Warm the diploma template for the signed-in session (it is also loaded
+    // when the Settings screen is opened).
+    try { if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); } catch (e) {}
     // Header badge removed — guard so stale/missing nodes never crash login flow
     try {
         const nameEl = document.getElementById('user-name-display');
@@ -3677,7 +3775,9 @@ async function viewStudent(id) {
         '<div class="card" style="padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;color:' + (attendance.length ? 'var(--success)' : 'var(--danger)') + '">' + attendance.length + '</div><div style="font-size:11px;color:var(--text-muted);">Attendance records</div></div>' +
         '</div>';
     if (payments.length) html += '<h4 style="color:var(--accent);margin-bottom:6px;">Recent Payments</h4><table class="data-table"><thead><tr><th>Date</th><th>Receipt</th><th>Amount</th><th>Method</th></tr></thead><tbody>' + payments.slice(-5).map((p) => '<tr><td>' + formatDate(p.date) + '</td><td>' + (p.receiptNo || '--') + '</td><td>' + formatCurrency(p.amount) + '</td><td>' + (p.method || '--') + '</td></tr>').join('') + '</tbody></table>';
-    if (grades.length) html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Latest Grades</h4><table class="data-table"><thead><tr><th>Course</th><th>Score</th><th>Grade</th></tr></thead><tbody>' + grades.slice(-5).map((g) => { const c = courses.find((c) => c.id === g.courseId); return '<tr><td>' + (c ? c.name : g.courseId) + '</td><td>' + (g.score || 0) + '</td><td>' + getGrade(g.score || 0).grade + '</td></tr>'; }).join('') + '</tbody></table>';
+    // Course results only (results of record) - the same rows the transcript prints.
+    const studentResults = resolveStudentResults(grades, id, { semester: 'all', courses: courses }).rows;
+    if (studentResults.length) html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Latest Grades</h4><table class="data-table"><thead><tr><th>Course</th><th>Sem</th><th>Score</th><th>Grade</th></tr></thead><tbody>' + studentResults.slice(-5).map((r) => '<tr><td>' + (r.course ? r.course.name : r.courseId) + '</td><td>' + (r.semester || '--') + '</td><td>' + (r.score || 0) + '</td><td>' + r.grade + '</td></tr>').join('') + '</tbody></table>';
     html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Documents & Accountability</h4><p style="font-size:12px;color:var(--text-muted);">Media uploads: <strong>' + mediaUploads.length + '</strong> • Retake requests: <strong>' + retakeRequests.length + '</strong> • Certificates/documents: <strong>' + certificates.length + '</strong></p>';
     if (recentAudits.length) html += '<h4 style="color:var(--accent);margin:12px 0 6px;">Recent Audit Actions</h4><ul style="font-size:12px;line-height:1.6;list-style:none;padding-left:0;">' + recentAudits.map((a) => '<li>• ' + escapeHtml(a.action || a.entityId || 'update') + ' — ' + escapeHtml((a.details || '').substring(0, 80)) + ((a.details || '').length > 80 ? '...' : '') + '</li>').join('') + '</ul>';
     html += '<div style="margin-top:12px;padding:10px 12px;background:var(--bg-input);border-radius:8px;font-size:11px;color:var(--text-muted);">Passport photo is stored under the student form. It is optional/recommended and can appear on certificates later.</div>';
@@ -4910,6 +5010,7 @@ async function printAttendanceWindow() {
 }
 
 async function loadGrades() {
+    await ensureGradeScaleLoaded();
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
     const courseId = document.getElementById('grades-course').value;
@@ -4924,10 +5025,13 @@ async function loadGrades() {
     const attendance = await dbGetAll('attendance');
     const enrollments = await dbGetAll('enrollments');
     const users = await dbGetAll('users');
+    const allGrades = await dbGetAll('grades');
+    const allCourses = await dbGetAll('courses');
     if (isStudentUser) {
         const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
         const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users);
-        const storedGrade = (await dbGetAll('grades')).find(g => g.studentId === studentId && g.courseId === courseId && g.semester == semester);
+        const results = resolveStudentResults(allGrades, studentId, { semester: semester, courses: allCourses });
+        const storedGrade = results.byCourse.get(courseId) || null;
         document.getElementById('grades-sheet').innerHTML = renderGradeBreakdown(result, course, storedGrade);
         return;
     }
@@ -4945,26 +5049,50 @@ async function loadGrades() {
     for (const w of wt) html += `<span>${w.label}: <b>${w.value}%</b></span>`;
     if (wtTotal < 100) html += `<span style="color:var(--text-muted);">Other: <b>${100 - wtTotal}%</b></span>`;
     html += `</div>`;
+    html += `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;padding:6px 8px;border-left:3px solid var(--accent);background:var(--bg-input);">
+        <b>Final (0-100)</b> is the <b>recorded result</b> for this course and semester - the same number printed on the official transcript.
+        The component columns show the recomputed mark; where it differs from the recorded result the row says so.
+        Saving stores the value as a manual entry (never overwritten by "Compute Weighted").
+    </div>`;
     const icons = { exam: '📄', quiz: '🧠', cat: '📋', attendance: '📋' };
     const getAvg = (type, r) => type === 'exam' ? r.examAvg : type === 'quiz' ? r.quizAvg : type === 'cat' ? r.catAvg : r.attPct;
+    // One grid row: student | components | final | grade | save | record note
+    const rowStyle = `grid-template-columns: 2fr repeat(${wt.length}, minmax(52px,1fr)) 86px 56px 46px minmax(130px,220px);`;
     let headerHtml = '<span>Student</span>';
     for (const w of wt) headerHtml += `<span>${icons[w.type] || ''} ${w.label}</span>`;
-    headerHtml += '<span>Final (0-100)</span><span>Grade</span>';
-    html += `<div class="grade-row grade-header">${headerHtml}</div>`;
+    headerHtml += '<span>Final (0-100)</span><span>Grade</span><span></span><span>Record</span>';
+    html += `<div class="grade-row grade-header" style="${rowStyle}">${headerHtml}</div>`;
     for (const s of courseStudents) {
         const result = computeWeightedGrade(s.id, courseId, course, quizzes, submissions, attendance, users);
-        html += `<div class="grade-row">`;
+        html += `<div class="grade-row" style="${rowStyle}">`;
         html += `<span><b>${s.name}</b></span>`;
         for (const w of wt) {
             const avg = getAvg(w.type, result);
-            const good = w.type === 'attendance' ? avg >= 75 : avg >= 70;
             html += `<span style="font-size:11px;color:${avg >= 70 ? 'var(--success)' : avg > 0 ? 'var(--warning)' : 'var(--text-muted)'};">${avg > 0 ? Math.round(avg) + '%' : '--'}</span>`;
         }
-        const weightedScore = Math.round(result.weightedScore);
-        const gradeInfo = getGrade(weightedScore);
-        html += `<input type="number" class="grade-input" id="grade-${s.id}" min="0" max="100" value="${weightedScore || ''}" onchange="updateGradeDisplay('${s.id}')" style="width:80px;">`;
-        html += `<span id="grade-display-${s.id}" style="font-weight:700;color:var(--accent);">${weightedScore > 0 ? gradeInfo.grade : '--'}</span>`;
+        const computedScore = Math.round(result.weightedScore);
+        const results = resolveStudentResults(allGrades, s.id, { semester: semester, courses: allCourses });
+        const recorded = results.byCourse.get(courseId) || null;
+        // The score of record wins: it is what the transcript prints.
+        const finalScore = recorded ? recorded.score : computedScore;
+        const gradeInfo = getGrade(finalScore);
+        // A recorded result is always shown - including a recorded 0, which the
+        // transcript prints as 0 / F.
+        const hasScore = recorded ? true : computedScore > 0;
+        html += `<input type="number" class="grade-input" id="grade-${s.id}" min="0" max="100" value="${hasScore ? finalScore : ''}" onchange="updateGradeDisplay('${s.id}')" style="width:80px;">`;
+        html += `<span id="grade-display-${s.id}" style="font-weight:700;color:var(--accent);">${hasScore ? gradeInfo.grade : '--'}</span>`;
         html += `<button class="btn btn-sm btn-primary" onclick="saveGradeRow('${s.id}')" style="padding:2px 8px;font-size:11px;">Save</button>`;
+        // provenance of the number shown
+        const notes = [];
+        if (recorded) {
+            notes.push(recorded.manual === true ? 'manual' : 'recorded');
+            if (computedScore > 0 && computedScore !== recorded.score) notes.push(`recomputed ${computedScore}`);
+            const complete = resolveStudentResults(allGrades, s.id, { semester: 'all', courses: allCourses }).byCourse.get(courseId);
+            if (complete && String(complete.semester) !== String(semester)) notes.push(`transcript prints Sem ${complete.semester} · ${complete.score}`);
+        } else {
+            notes.push('not recorded');
+        }
+        if (notes.length) html += `<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">${notes.join(' · ')}</span>`;
         html += `</div>`;
     }
     document.getElementById('grades-sheet').innerHTML = html;
@@ -5019,11 +5147,18 @@ function computeWeightedGrade(studentId, courseId, course, quizzes, submissions,
     result.weightage = wt;
     return result;
 }
-function renderGradeBreakdown(result, course, storedGrade) {
-    const weightedScore = Math.round(result.weightedScore);
-    const gradeInfo = getGrade(weightedScore);
+function renderGradeBreakdown(result, course, storedGrade, storedNote) {
+    const computedScore = Math.round(result.weightedScore);
+    // The RECORDED result is the score of record - it is the number printed on
+    // the official transcript. The recomputed value is advisory only.
+    const recorded = storedGrade ? Number(storedGrade.score) : null;
+    const hasRecorded = recorded !== null && Number.isFinite(recorded);
+    const headline = hasRecorded ? recorded : computedScore;
+    const gradeInfo = getGrade(headline);
+    const computedInfo = getGrade(computedScore);
+    const differs = hasRecorded && computedScore > 0 && computedScore !== recorded;
     const wt = result.weightage || [];
-    const icons = { exam: '📄', quiz: '🧠', cat: '📋', attendance: '📋' };
+    const icons = { exam: '\U0001F4C4', quiz: '\U0001F9E0', cat: '\U0001F4CB', attendance: '\U0001F4CB' };
     const getAvg = (type) => type === 'exam' ? result.examAvg : type === 'quiz' ? result.quizAvg : type === 'cat' ? result.catAvg : result.attPct;
     const getCount = (type) => type === 'exam' ? result.examCount : type === 'quiz' ? result.quizCount : type === 'cat' ? result.catCount : result.attTotal;
     const getWeight = (type) => type === 'exam' ? result.examWeight : type === 'quiz' ? result.quizWeight : type === 'cat' ? result.catWeight : result.attWeight;
@@ -5036,34 +5171,39 @@ function renderGradeBreakdown(result, course, storedGrade) {
         const contrib = avg * (weight / 100);
         if (count > 0 || w.type === 'attendance') {
             breakdownHtml += `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--bg-input);border-radius:6px;font-size:13px;">
-                <span>${icons[w.type] || '📋'} ${w.label} (${Math.round(weight)}%)</span>
-                <span><b>${Math.round(avg)}%</b> <span style="color:var(--text-muted);font-size:11px;">→ +${Math.round(contrib)}%</span></span>
+                <span>${icons[w.type] || '\U0001F4CB'} ${w.label} (${Math.round(weight)}%)</span>
+                <span><b>${Math.round(avg)}%</b> <span style="color:var(--text-muted);font-size:11px;">\u2192 +${Math.round(contrib)}%</span></span>
             </div>`;
-            calcHtml += `${w.label} avg (${Math.round(avg)}%) × ${Math.round(weight)}% weight = ${Math.round(contrib)}%<br>`;
+            calcHtml += `${w.label} avg (${Math.round(avg)}%) \u00d7 ${Math.round(weight)}% weight = ${Math.round(contrib)}%<br>`;
         }
     }
+    const scoreColour = headline >= 70 ? 'var(--success)' : headline >= 50 ? 'var(--warning)' : 'var(--danger)';
     return `<div style="padding:20px;">
         <div style="margin-bottom:16px;padding:12px;background:var(--bg-input);border-radius:var(--radius);text-align:center;">
-            <b style="font-size:16px;">${course ? course.name : courseId}</b> — Weighted Score
+            <b style="font-size:16px;">${course ? (course.name || course.id) : 'Course'}</b> \u2014 ${hasRecorded ? 'Recorded Result' : 'Weighted Score'}
         </div>
-        <div style="font-size:36px;font-weight:800;text-align:center;color:${weightedScore >= 70 ? 'var(--success)' : weightedScore >= 50 ? 'var(--warning)' : 'var(--danger)'};">${weightedScore}%</div>
-        <div style="font-size:18px;text-align:center;color:var(--accent);margin-top:4px;">Grade: ${gradeInfo.grade}</div>
-        ${storedGrade ? `<div style="font-size:12px;text-align:center;color:var(--text-muted);margin-top:4px;">Saved: ${storedGrade.score}% (${storedGrade.grade})</div>` : ''}
+        <div style="font-size:36px;font-weight:800;text-align:center;color:${scoreColour};">${headline}%</div>
+        <div style="font-size:18px;text-align:center;color:var(--accent);margin-top:4px;">Grade: ${gradeInfo.grade} (${gradeInfo.gpa.toFixed(2)})</div>
+        ${hasRecorded
+            ? `<div style="font-size:12px;text-align:center;color:var(--text-muted);margin-top:4px;">Recorded result${storedNote ? ' \u00b7 ' + storedNote : ''} \u2014 this is the score printed on your transcript.</div>`
+            : `<div style="font-size:12px;text-align:center;color:var(--text-muted);margin-top:4px;">No result recorded yet for this course.</div>`}
+        ${differs ? `<div style="font-size:11px;text-align:center;color:var(--text-muted);margin-top:4px;">Recomputed from current assessment data: ${computedScore}% (${computedInfo.grade}) \u2014 for reference only.</div>` : ''}
         <div style="margin-top:20px;">
             <h4 style="color:var(--accent);margin-bottom:8px;">Component Breakdown</h4>
             <div style="display:grid;gap:8px;">${breakdownHtml}</div>
             <div style="margin-top:12px;padding:10px;border-top:2px solid var(--accent);display:flex;justify-content:space-between;font-size:15px;font-weight:700;">
-                <span>Final Weighted Score</span>
-                <span style="color:${weightedScore >= 70 ? 'var(--success)' : weightedScore >= 50 ? 'var(--warning)' : 'var(--danger)'};">${weightedScore}% (${gradeInfo.grade})</span>
+                <span>${hasRecorded ? 'Recorded Result' : 'Final Weighted Score'}</span>
+                <span style="color:${scoreColour};">${headline}% (${gradeInfo.grade})</span>
             </div>
+            ${differs ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted);text-align:right;">Recomputed: ${computedScore}% (${computedInfo.grade})</div>` : ''}
         </div>
         <div style="margin-top:16px;padding:10px;background:var(--bg-input);border-radius:6px;font-size:11px;color:var(--text-muted);">
-            <b>How it's calculated:</b><br>${calcHtml}<b>= ${weightedScore}%</b>
+            <b>How it's calculated:</b><br>${calcHtml}<b>= ${computedScore}%</b>${hasRecorded ? `<br><b>Recorded result of record: ${recorded}%</b>` : ''}
         </div>
     </div>`;
 }
+
 async function computeAndSaveAllGrades() {
-    if (!await showConfirm('Confirm', 'Compute and save weighted grades for all students in this course? This will overwrite existing grades.')) return;
     const courseId = document.getElementById('grades-course').value;
     const semester = document.getElementById('grades-semester').value;
     if (!courseId) return showToast('Select a course!');
@@ -5073,22 +5213,47 @@ async function computeAndSaveAllGrades() {
     const attendance = await dbGetAll('attendance');
     const enrollments = await dbGetAll('enrollments');
     const users = await dbGetAll('users');
-    const studentIds = enrollments.filter(e => e.courseId === courseId).map(e => e.studentId);
-    let saved = 0;
+    const allGrades = await dbGetAll('grades');
+    const studentIds = [...new Set(enrollments.filter(e => e.courseId === courseId).map(e => e.studentId))];
+    // PLAN FIRST. A manually entered mark is never overwritten by a bulk
+    // compute, and the confirmation states exactly what will change.
+    const plan = [];
+    let keptManual = 0, keptSame = 0, noData = 0;
     for (const studentId of studentIds) {
+        const existing = allGrades.find(g => g && g.studentId === studentId && g.courseId === courseId
+            && String(g.semester) === String(semester) && isCourseLevelGrade(g));
+        if (existing && existing.manual === true) { keptManual++; continue; }
         const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users);
         const weightedScore = Math.round(result.weightedScore);
-        if (weightedScore > 0) {
-            const gradeInfo = getGrade(weightedScore);
-            const grade = { id: `GRD-${studentId}-${courseId}-${semester}`, studentId, courseId, semester: parseInt(semester), score: weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa, weighted: true, gradedAt: new Date().toISOString() };
-            await dbPut('grades', grade);
-            saved++;
-        }
+        if (!(weightedScore > 0)) { noData++; continue; }
+        if (existing && Number(existing.score) === weightedScore) { keptSame++; continue; }
+        plan.push({ studentId, weightedScore, replacing: !!existing });
+    }
+    const willCreate = plan.filter(p => !p.replacing).length;
+    const willUpdate = plan.length - willCreate;
+    if (!plan.length) {
+        showToast(`Nothing to compute: ${keptManual} manual entr${keptManual === 1 ? 'y was' : 'ies were'} kept, ${keptSame} already up to date${noData ? `, ${noData} without assessment data` : ''}.`, { type: 'warning', duration: 7000 });
+        return;
+    }
+    const summary = `<b>${course.name || courseId} \u2014 Semester ${semester}</b><br>`
+        + `\u2022 ${willCreate} new result(s) will be saved<br>`
+        + (willUpdate ? `\u26a0 <b>${willUpdate} existing result(s) will be OVERWRITTEN</b> with the recomputed value<br>` : '')
+        + `\u2022 ${keptManual} manual entr${keptManual === 1 ? 'y' : 'ies'} kept unchanged`
+        + (noData ? `<br>\u2022 ${noData} student(s) have no assessment data and will be skipped` : '')
+        + (keptSame ? `<br>\u2022 ${keptSame} already up to date` : '');
+    if (!await showConfirm('Compute weighted grades', summary)) return;
+    let saved = 0;
+    for (const p of plan) {
+        const gradeInfo = getGrade(p.weightedScore);
+        const grade = { id: `GRD-${p.studentId}-${courseId}-${semester}`, studentId: p.studentId, courseId, semester: parseInt(semester), score: p.weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa, weighted: true, gradedAt: new Date().toISOString() };
+        await dbPut('grades', grade);
+        saved++;
     }
     loadGrades();
-    showToast(`Saved weighted grades for ${saved} students!`);
-    logAudit('computed', 'weighted-grades', { courseId, semester, count: saved });
+    showToast(`Saved ${saved} weighted grade(s).${keptManual ? ` ${keptManual} manual entr${keptManual === 1 ? 'y' : 'ies'} kept.` : ''}`, { duration: 6000 });
+    logAudit('computed', 'weighted-grades', { courseId, semester, count: saved, keptManual });
 }
+
 function updateGradeDisplay(studentId) {
     const input = document.getElementById(`grade-${studentId}`);
     const display = document.getElementById(`grade-display-${studentId}`);
@@ -5106,54 +5271,294 @@ async function saveGrade(studentId, courseId, semester) {
     const score = parseFloat(input.value);
     if (isNaN(score) || score < 0 || score > 100) return showToast('Enter valid score (0-100)!');
     const gradeInfo = getGrade(score);
-    const grade = { id: `GRD-${studentId}-${courseId}-${semester}`, studentId, courseId, semester: parseInt(semester), score, grade: gradeInfo.grade, gpa: gradeInfo.gpa, gradedAt: new Date().toISOString() };
+    // A manually entered mark is flagged so it is never silently overwritten
+    // by "Compute Weighted" - the recorded result wins over a recomputation.
+    const grade = { id: `GRD-${studentId}-${courseId}-${semester}`, studentId, courseId, semester: parseInt(semester), score, grade: gradeInfo.grade, gpa: gradeInfo.gpa, manual: true, gradedAt: new Date().toISOString() };
     await dbPut('grades', grade); showToast('Grade saved!'); logAudit('saved', 'grade', { studentId, courseId, score });
 }
 let _gradeScale = 'standard';
-function setGradeScale(scale) { _gradeScale = scale || 'standard'; }
+function setGradeScale(scale) { _gradeScale = scale || 'standard'; _gradeScaleLoaded = true; }
+let _gradeScaleLoaded = false;
+// The grading scale is an institutional setting. It must be known before any
+// letter grade is derived, so it is loaded once and then remembered - the
+// printed scale table, the grid and a submitted exam all use the same one.
+async function ensureGradeScaleLoaded() {
+    if (_gradeScaleLoaded) return;
+    try {
+        const settings = await dbGet('settings', 'academic');
+        setGradeScale(settings && settings.grading ? settings.grading : 'standard');
+    } catch (e) { console.warn('grade scale unavailable:', e && e.message); }
+}
+
+// ---- Exam answers kept on the device ------------------------------------
+// A long paper on a weak connection must never be lost to a dropped request,
+// a closed tab or a phone that sleeps. The answers are written to this device
+// as the student works and are restored if the assessment is opened again.
+const QUIZ_DRAFT_PREFIX = 'nkcms:quizdraft:';
+function quizDraftKey(quizId, studentId) {
+    return QUIZ_DRAFT_PREFIX + String(studentId || '') + ':' + String(quizId || '');
+}
+function saveQuizDraft(quizId, studentId, answers, submissionId) {
+    try {
+        localStorage.setItem(quizDraftKey(quizId, studentId), JSON.stringify({ at: Date.now(), answers: answers || [], submissionId: submissionId || '' }));
+    } catch (e) { /* no storage - the paper is still in the page */ }
+}
+function readQuizDraft(quizId, studentId) {
+    try {
+        const raw = localStorage.getItem(quizDraftKey(quizId, studentId));
+        if (!raw) return null;
+        const d = JSON.parse(raw);
+        return (d && d.answers && d.answers.length) ? d : null;
+    } catch { return null; }
+}
+function clearQuizDraft(quizId, studentId) {
+    try { localStorage.removeItem(quizDraftKey(quizId, studentId)); } catch {}
+}
+// Put the saved answers back on the page.
+function restoreQuizDraftIntoDom(quizId, studentId, questions) {
+    const draft = readQuizDraft(quizId, studentId);
+    if (!draft) return 0;
+    let restored = 0;
+    const esc = v => String(v == null ? '' : v).replace(/"/g, '\\"');
+    for (const a of (draft.answers || [])) {
+        if (a.type === 'mcq' || a.type === 'truefalse') {
+            for (const v of (a.answer || [])) {
+                const el = document.querySelector('input[name="q-' + a.questionId + '"][value="' + esc(v) + '"]');
+                if (el) { el.checked = true; restored++; }
+            }
+        } else if (a.type === 'matching') {
+            (a.pairs || []).forEach((p, pi) => {
+                const el = document.getElementById('match-' + a.questionId + '-' + pi);
+                if (el && p.userAnswer) { el.value = p.userAnswer; restored++; }
+            });
+        } else if (a.type === 'fillin') {
+            (a.blankResults || []).forEach((b, bi) => {
+                const el = document.getElementById('fill-' + a.questionId + '-' + bi);
+                if (el && b.userAnswer) { el.value = b.userAnswer; restored++; }
+            });
+        } else if (a.type === 'essay') {
+            const el = document.getElementById('essay-' + a.questionId);
+            if (el && a.answer) { el.value = a.answer; restored++; }
+        }
+    }
+    return restored;
+}
+function quizDraftStudentId() {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        return u.studentId || u.username || '';
+    } catch { return ''; }
+}
+
+/* ============================================================================
+ * CANONICAL GRADING SCALE
+ * ---------------------------------------------------------------------------
+ * One definition of every scale the institution can use. getGrade() reads it
+ * and the transcript prints it, so a letter grade / grade point printed on a
+ * document can never contradict the scale printed on the same document.
+ * ========================================================================== */
+const GRADE_SCALES = {
+    gpa4: {
+        label: '4.0',
+        bands: [
+            { min: 90, grade: 'A',  gpa: 4.00 },
+            { min: 80, grade: 'B+', gpa: 3.50 },
+            { min: 75, grade: 'B',  gpa: 3.00 },
+            { min: 70, grade: 'B-', gpa: 2.70 },
+            { min: 65, grade: 'C+', gpa: 2.30 },
+            { min: 60, grade: 'C',  gpa: 2.00 },
+            { min: 50, grade: 'D',  gpa: 1.00 },
+            { min: 0,  grade: 'F',  gpa: 0.00 }
+        ]
+    },
+    gpa5: {
+        label: '5.0',
+        bands: [
+            { min: 90, grade: 'A',  gpa: 5.00 },
+            { min: 80, grade: 'B+', gpa: 4.50 },
+            { min: 75, grade: 'B',  gpa: 4.00 },
+            { min: 70, grade: 'B-', gpa: 3.50 },
+            { min: 65, grade: 'C+', gpa: 3.00 },
+            { min: 60, grade: 'C',  gpa: 2.50 },
+            { min: 55, grade: 'C-', gpa: 2.00 },
+            { min: 50, grade: 'D',  gpa: 1.00 },
+            { min: 0,  grade: 'F',  gpa: 0.00 }
+        ]
+    },
+    ects: {
+        label: 'ECTS',
+        bands: [
+            { min: 90, grade: 'A', gpa: 4.00 },
+            { min: 80, grade: 'B', gpa: 3.00 },
+            { min: 70, grade: 'C', gpa: 2.00 },
+            { min: 60, grade: 'D', gpa: 1.00 },
+            { min: 50, grade: 'E', gpa: 0.50 },
+            { min: 0,  grade: 'F', gpa: 0.00 }
+        ]
+    },
+    percent: {
+        label: 'Percentage',
+        bands: [
+            { min: 70, grade: 'A', gpa: 4.00 },
+            { min: 60, grade: 'B', gpa: 3.00 },
+            { min: 50, grade: 'C', gpa: 2.00 },
+            { min: 40, grade: 'D', gpa: 1.00 },
+            { min: 0,  grade: 'F', gpa: 0.00 }
+        ]
+    },
+    standard: {
+        label: '4.0',
+        bands: [
+            { min: 75, grade: 'A',  gpa: 4.00 },
+            { min: 70, grade: 'B+', gpa: 3.50 },
+            { min: 65, grade: 'B',  gpa: 3.00 },
+            { min: 60, grade: 'B-', gpa: 2.70 },
+            { min: 55, grade: 'C+', gpa: 2.30 },
+            { min: 50, grade: 'C',  gpa: 2.00 },
+            { min: 45, grade: 'D+', gpa: 1.50 },
+            { min: 40, grade: 'D',  gpa: 1.00 },
+            { min: 0,  grade: 'F',  gpa: 0.00 }
+        ]
+    }
+};
+function activeGradeScale() { return GRADE_SCALES[_gradeScale] || GRADE_SCALES.standard; }
+function gradeStanding(gpa) {
+    if (gpa >= 3.70) return 'Distinction';
+    if (gpa >= 3.00) return 'Upper Credit';
+    if (gpa >= 2.00) return 'Lower Credit';
+    if (gpa >= 1.00) return 'Pass';
+    return 'Fail';
+}
 function getGrade(score) {
-    if (_gradeScale === 'gpa4') {
-        if (score >= 90) return { grade: 'A', gpa: 4.0 };
-        if (score >= 80) return { grade: 'B+', gpa: 3.5 };
-        if (score >= 75) return { grade: 'B', gpa: 3.0 };
-        if (score >= 70) return { grade: 'B-', gpa: 2.7 };
-        if (score >= 65) return { grade: 'C+', gpa: 2.3 };
-        if (score >= 60) return { grade: 'C', gpa: 2.0 };
-        if (score >= 50) return { grade: 'D', gpa: 1.0 };
-        return { grade: 'F', gpa: 0.0 };
-    }
-    if (_gradeScale === 'gpa5') {
-        if (score >= 90) return { grade: 'A', gpa: 5.0 };
-        if (score >= 80) return { grade: 'B+', gpa: 4.5 };
-        if (score >= 75) return { grade: 'B', gpa: 4.0 };
-        if (score >= 70) return { grade: 'B-', gpa: 3.5 };
-        if (score >= 65) return { grade: 'C+', gpa: 3.0 };
-        if (score >= 60) return { grade: 'C', gpa: 2.5 };
-        if (score >= 55) return { grade: 'C-', gpa: 2.0 };
-        if (score >= 50) return { grade: 'D', gpa: 1.0 };
-        return { grade: 'F', gpa: 0.0 };
-    }
-    if (_gradeScale === 'ects') {
-        if (score >= 90) return { grade: 'A', gpa: 4.0 };
-        if (score >= 80) return { grade: 'B', gpa: 3.0 };
-        if (score >= 70) return { grade: 'C', gpa: 2.0 };
-        if (score >= 60) return { grade: 'D', gpa: 1.0 };
-        if (score >= 50) return { grade: 'E', gpa: 0.5 };
-        return { grade: 'F', gpa: 0.0 };
-    }
-    if (_gradeScale === 'percent') {
-        const gpa = score >= 70 ? 4.0 : score >= 60 ? 3.0 : score >= 50 ? 2.0 : score >= 40 ? 1.0 : 0.0;
-        return { grade: score >= 70 ? 'A' : score >= 60 ? 'B' : score >= 50 ? 'C' : score >= 40 ? 'D' : 'F', gpa };
-    }
-    if (score >= 75) return { grade: 'A', gpa: 4.0 };
-    if (score >= 70) return { grade: 'B+', gpa: 3.5 };
-    if (score >= 65) return { grade: 'B', gpa: 3.0 };
-    if (score >= 60) return { grade: 'B-', gpa: 2.7 };
-    if (score >= 55) return { grade: 'C+', gpa: 2.3 };
-    if (score >= 50) return { grade: 'C', gpa: 2.0 };
-    if (score >= 45) return { grade: 'D+', gpa: 1.5 };
-    if (score >= 40) return { grade: 'D', gpa: 1.0 };
+    const n = Number(score);
+    if (!Number.isFinite(n)) return { grade: 'F', gpa: 0.0 };
+    const bands = activeGradeScale().bands;
+    for (const b of bands) { if (n >= b.min) return { grade: b.grade, gpa: b.gpa }; }
     return { grade: 'F', gpa: 0.0 };
+}
+// The scale table printed on a transcript - generated from the ACTIVE scale so
+// the printed bands always match the letters and points used on that document.
+function getGradeScaleTableHTML() {
+    const bands = activeGradeScale().bands;
+    let body = '';
+    bands.forEach((b, i) => {
+        const upper = i === 0 ? 100 : bands[i - 1].min - 1;
+        body += `<tr><td>${b.min} \u2013 ${upper}</td><td>${b.grade}</td><td>${b.gpa.toFixed(2)}</td><td>${gradeStanding(b.gpa)}</td></tr>`;
+    });
+    return `
+        <table class="grade-scale-table">
+            <thead><tr><th>Score Range</th><th>Grade</th><th>GPA (${activeGradeScale().label})</th><th>Standing</th></tr></thead>
+            <tbody>${body}</tbody>
+        </table>`;
+}
+
+/* ============================================================================
+ * CANONICAL COURSE RESULT RESOLUTION  (single source of truth)
+ * ---------------------------------------------------------------------------
+ * The `grades` store mixes two kinds of records:
+ *   * COURSE-LEVEL result : id GRD-<student>-<course>-<semester> (or weighted:true)
+ *                           -> a result of record; the only thing an official
+ *                              document may print.
+ *   * ASSESSMENT mark    : type 'quiz'|'exam'|'cat', id GRADE-xxxx
+ *                           -> one component of a course grade. Never the grade.
+ * Every screen that shows a score resolves through resolveStudentResults(), so
+ * the number a user sees is always the number that gets printed.
+ * ========================================================================== */
+function isCourseLevelGrade(g) {
+    if (!g || !g.courseId) return false;
+    if (g.weighted === true) return true;
+    return /^GRD-/.test(String(g.id || ''));
+}
+function isAssessmentGrade(g) {
+    if (!g || isCourseLevelGrade(g)) return false;
+    return !!(g.type || g.quizId || g.examId || g.submissionId);
+}
+function gradeRecordPriority(g) {
+    return {
+        manual: g && g.manual === true ? 1 : 0,
+        weighted: g && g.weighted === true ? 1 : 0,
+        ts: Date.parse((g && (g.gradedAt || g.createdAt || g.updatedAt)) || '') || 0,
+        score: Number(g && g.score) || 0
+    };
+}
+// When two records describe the same result the most authoritative wins:
+// a manually entered mark first, then a computed one, then the most recent.
+function pickAuthoritativeGrade(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    const pa = gradeRecordPriority(a), pb = gradeRecordPriority(b);
+    if (pa.manual !== pb.manual) return pa.manual > pb.manual ? a : b;
+    if (pa.weighted !== pb.weighted) return pa.weighted > pb.weighted ? a : b;
+    if (pa.ts !== pb.ts) return pa.ts > pb.ts ? a : b;
+    return pa.score >= pb.score ? a : b;
+}
+/**
+ * The RESULT OF RECORD for a student.
+ * @param {Array}  allGrades every grade record in the store
+ * @param {string} studentId
+ * @param {Object} opts { semester: '1'..'4' | 'all', courses: [] }
+ * @returns {{rows:Array, byCourse:Map, cgpa:number, totalCredits:number, totalCourses:number}}
+ *   row = { courseId, course, credits, score, grade, gpa, semester, record, source:'recorded' }
+ */
+function resolveStudentResults(allGrades, studentId, opts) {
+    const options = opts || {};
+    const courses = options.courses || [];
+    const courseById = new Map();
+    courses.forEach(c => { if (c && c.id) courseById.set(c.id, c); });
+    const semester = (options.semester === undefined || options.semester === null || options.semester === '' || String(options.semester) === 'all') ? 'all' : String(options.semester);
+    const mine = (allGrades || []).filter(g => g && g.studentId === studentId && isCourseLevelGrade(g));
+    const eligible = semester === 'all' ? mine : mine.filter(g => String(g.semester) === semester);
+    // one authoritative record per course + semester
+    const perCourseSem = new Map();
+    eligible.forEach(g => {
+        const key = g.courseId + '|' + (g.semester === undefined || g.semester === null ? '' : g.semester);
+        const cur = perCourseSem.get(key);
+        perCourseSem.set(key, cur ? pickAuthoritativeGrade(cur, g) : g);
+    });
+    // one row per course: for a single semester that is the only candidate; for
+    // the complete record the best saved attempt for the course is used.
+    const chosen = new Map();
+    perCourseSem.forEach(g => {
+        const cur = chosen.get(g.courseId);
+        if (!cur) { chosen.set(g.courseId, g); return; }
+        const better = (Number(g.score) || 0) > (Number(cur.score) || 0) ? g
+            : ((Number(g.score) || 0) === (Number(cur.score) || 0) && (Number(g.semester) || 0) > (Number(cur.semester) || 0)) ? g : cur;
+        chosen.set(g.courseId, better);
+    });
+    // emit the rows in the order the records appear in the store
+    const rows = [];
+    const seen = new Set();
+    eligible.forEach(g => {
+        if (chosen.get(g.courseId) !== g) return;
+        if (seen.has(g.courseId)) return;
+        seen.add(g.courseId);
+        const course = courseById.get(g.courseId) || null;
+        const score = Number(g.score);
+        const safe = Number.isFinite(score) ? score : 0;
+        const gi = getGrade(safe);
+        rows.push({
+            courseId: g.courseId,
+            course: course,
+            credits: course ? (course.credits || 3) : 3,
+            score: safe,
+            grade: gi.grade,
+            gpa: gi.gpa,
+            semester: g.semester,
+            record: g,
+            storedGrade: g.grade,
+            storedGpa: g.gpa,
+            source: 'recorded'
+        });
+    });
+    let totalPoints = 0, totalCredits = 0;
+    rows.forEach(r => { totalPoints += r.gpa * r.credits; totalCredits += r.credits; });
+    return {
+        rows: rows,
+        byCourse: new Map(rows.map(r => [r.courseId, r])),
+        cgpa: totalCredits > 0 ? totalPoints / totalCredits : 0,
+        totalCredits: totalCredits,
+        totalCourses: rows.length
+    };
 }
 
 // Live cache for the Exams screen. renderExams() fills this on its first run
@@ -8977,6 +9382,9 @@ async function generateTranscript() {
     const centers = await getCenters();
     const branding = await dbGet('settings', 'branding');
     const academic = await dbGet('settings', 'academic');
+    // The printed scale table and every letter on the document come from the
+    // scale the institution selected.
+    setGradeScale(academic && academic.grading ? academic.grading : 'standard');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const tagline = branding ? branding.tagline : 'Academic Excellence';
     const initials = branding ? branding.initials : 'CM';
@@ -8984,6 +9392,10 @@ async function generateTranscript() {
     const accentColor = branding ? branding.accentColor : '#f59e0b';
     const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;
     const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
+    // RESULTS OF RECORD - the rows this document prints. Resolved once here and
+    // reused by the document, the summary and the verification record so they
+    // can never disagree with each other.
+    const results = resolveStudentResults(allGrades, studentId, { semester: semester, courses: courses });
     const totalPaid = tuitionPaid(payments, studentId);
     const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
     const studentAttendance = attendance.filter(a => a.studentId === studentId);
@@ -8993,26 +9405,20 @@ async function generateTranscript() {
     const vCode = generateVerificationCode();
     const generatedDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
     const generatedTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const cgpa = allGrades.length > 0 ? (() => {
-        let points = 0, credits = 0;
-        allGrades.forEach(g => {
-            const c = courses.find(c => c.id === g.courseId);
-            const cr = c ? c.credits : 3;
-            points += (g.gpa || 0) * cr;
-            credits += cr;
-        });
-        return credits > 0 ? (points / credits) : 0;
-    })() : 0;
+    const cgpa = results.cgpa;
     const html = buildProfessionalTranscript({
         student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, college_stamp: branding.college_stamp },
         docType, semester, year, docId, generatedDate, generatedTime, center, vCode,
         financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
         academic: { chapel: studentChapel, attendancePct },
-        allGrades, academicSettings: academic
+        allGrades, academicSettings: academic,
+        resultRows: results.rows
     });
     const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
     await dbPut('certificates', cert);
-    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: allGrades.length ? allGrades.reduce((s,g)=>{const c=courses.find(c=>c.id===g.courseId);return s+(c?c.credits:3);},0) : 0, generatedAt: new Date().toISOString(), courseHash: '' };
+    // The verification record must describe the SAME document: same rows, same
+    // credits, same CGPA - otherwise /api/verify contradicts the printed page.
+    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: results.totalCredits, generatedAt: new Date().toISOString(), courseHash: '' };
     await dbPut('transcriptVerifications', verification);
     showModal('Official Transcript — ' + student.name, `<div id="transcript-print-area">${html}</div>`, `<button class="btn btn-primary" onclick="printTranscript()">🖨️ Print / PDF</button> <button class="btn btn-outline" onclick="downloadTranscriptPDF()">Download PDF</button>`);
     logAudit('generated', 'transcript', { studentId, docId, docType });
@@ -9028,43 +9434,29 @@ function buildProfessionalTranscript(data) {
     const addressHTML = addrParts.length ? `<p class="school-address">${addrParts.join(' &nbsp;|&nbsp; ')}</p>` : '';
     const isOfficial = docType === 'official';
     const isSummary = docType === 'summary';
-    const gradeScaleHTML = `
-        <table class="grade-scale-table">
-            <thead><tr><th>Score Range</th><th>Grade</th><th>GPA (4.0)</th><th>Standing</th></tr></thead>
-            <tbody>
-                <tr><td>90 – 100</td><td>A</td><td>4.00</td><td>Distinction</td></tr>
-                <tr><td>80 – 89</td><td>B+</td><td>3.50</td><td>Upper Credit</td></tr>
-                <tr><td>75 – 79</td><td>B</td><td>3.00</td><td>Upper Credit</td></tr>
-                <tr><td>70 – 74</td><td>B−</td><td>2.50</td><td>Upper Credit</td></tr>
-                <tr><td>65 – 69</td><td>C+</td><td>2.00</td><td>Lower Credit</td></tr>
-                <tr><td>60 – 64</td><td>C</td><td>1.50</td><td>Lower Credit</td></tr>
-                <tr><td>55 – 59</td><td>C−</td><td>1.00</td><td>Pass</td></tr>
-                <tr><td>50 – 54</td><td>D</td><td>0.50</td><td>Pass</td></tr>
-                <tr><td>0 – 49</td><td>F</td><td>0.00</td><td>Fail</td></tr>
-            </tbody>
-        </table>`;
-    // One row per course: use highest score across all attempts (handles retakes)
-    const courseMap = new Map();
-    (allGrades || grades || []).forEach(g => {
-        const existing = courseMap.get(g.courseId);
-        if (!existing || (g.score || 0) > (existing.score || 0)) {
-            courseMap.set(g.courseId, g);
-        }
-    });
-    const uniqueGrades = Array.from(courseMap.values());
+    // The grading scale printed on the document is generated from the ACTIVE
+    // scale, so the printed bands always match the letters/points used below.
+    const gradeScaleHTML = getGradeScaleTableHTML();
+    // RESULTS OF RECORD - course-level results only (a per-assessment mark is a
+    // component of a course grade, never the grade). The caller resolves them
+    // so every screen and every document print exactly the same numbers.
+    const resultRows = Array.isArray(data.resultRows)
+        ? data.resultRows
+        : resolveStudentResults(allGrades || grades || [], student && student.id, { semester: semester, courses: courses }).rows;
     let totalPoints = 0, totalCredits = 0;
-    let coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
-    uniqueGrades.forEach((g, idx) => {
-        const c = courses.find(c => c.id === g.courseId);
-        const credits = c ? c.credits : 3;
-        const gpa = parseFloat(g.gpa) || 0;
+    const rowsHTML = resultRows.map((r, idx) => {
+        const c = r.course || courses.find(c => c.id === r.courseId);
+        const credits = r.credits || (c ? (c.credits || 3) : 3);
+        const gpa = Number(r.gpa) || 0;
         totalPoints += gpa * credits;
         totalCredits += credits;
-        const gradeClass = getGradeClass(g.grade);
-        coursesTableHTML += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? c.code : g.courseId}</td><td class="col-title">${c ? c.name : g.courseId}</td><td class="col-credits">${credits}</td><td class="col-score">${g.score}</td><td class="col-grade ${gradeClass}">${g.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
-    });
+        const gradeClass = getGradeClass(r.grade);
+        return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">${r.semester ? 'Sem ' + r.semester : '--'}</td><td class="col-credits">${credits}</td><td class="col-score">${r.score}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
+    }).join('');
     const cgpa = totalCredits > 0 ? (totalPoints / totalCredits) : 0;
-    coursesTableHTML += `</tbody><tfoot><tr><td colspan="3" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table>`;
+    let coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
+    coursesTableHTML += rowsHTML || `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course results recorded</td></tr>`;
+    coursesTableHTML += `</tbody><tfoot><tr><td colspan="4" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table>`;
     const classification = getClassification(cgpa);
     const balance = (financial.feeAmount || 0) - financial.totalPaid;
     const feeStatus = balance <= 0 ? 'CLEARED' : 'OUTSTANDING';
@@ -9072,7 +9464,7 @@ function buildProfessionalTranscript(data) {
         <div class="summary-panel">
             <div class="summary-title">Academic Summary</div>
             <div class="summary-grid">
-                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${uniqueGrades.length}</span></div>
+                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${resultRows.length}</span></div>
                 <div class="summary-item"><span class="summary-label">Total Credits</span><span class="summary-value">${totalCredits}</span></div>
                 <div class="summary-item"><span class="summary-label">Cumulative GPA</span><span class="summary-value cgpa-value">${cgpa.toFixed(2)}</span></div>
                 <div class="summary-item"><span class="summary-label">Classification</span><span class="summary-value class-badge ${classification.cssClass}">${classification.label}</span></div>
@@ -9089,16 +9481,16 @@ function buildProfessionalTranscript(data) {
             <div class="workflow-arrow">↓</div>
             <div class="workflow-row"><div class="workflow-box workflow-best"><div class="workflow-box-title">2. Best Score per Assessment</div><div class="workflow-box-desc">Retakes → highest score used</div></div></div>
             <div class="workflow-arrow">↓</div>
-            <div class="workflow-row"><div class="workflow-box workflow-weight"><div class="workflow-box-title">3. Apply Weightages</div><div class="workflow-box-desc">Essay×25% · Quiz×15% · Exam×50% · Attendance×10%</div></div></div>
+            <div class="workflow-row"><div class="workflow-box workflow-weight"><div class="workflow-box-title">3. Apply Weightages</div><div class="workflow-box-desc">Each component weighted per the course weightage</div></div></div>
             <div class="workflow-arrow">↓</div>
             <div class="workflow-row"><div class="workflow-box workflow-final"><div class="workflow-box-title">4. Final Weighted Score</div><div class="workflow-box-desc">0 – 100 scale</div></div></div>
             <div class="workflow-arrow">↓</div>
-            <div class="workflow-row"><div class="workflow-box workflow-grade"><div class="workflow-box-title">5. Letter Grade + GPA</div><div class="workflow-box-desc">A = 4.0 · B+ = 3.5 · B = 3.0 …</div></div></div>
+            <div class="workflow-row"><div class="workflow-box workflow-grade"><div class="workflow-box-title">5. Letter Grade + GPA</div><div class="workflow-box-desc">${activeGradeScale().bands.slice(0, 3).map(b => b.grade + ' = ' + b.gpa.toFixed(1)).join(' · ')} …</div></div></div>
         </div>`;
     const narrativeHTML = `
         <div class="narrative-section">
             <div class="section-title">How Final Grades Are Computed</div>
-            <p class="narrative-text">Each course is assessed through multiple components (e.g., Essay, Quiz, Examination, Attendance), each carrying a defined weightage that reflects its contribution to the overall course grade. When a student retakes any assessment component, the <strong>highest score</strong> across all attempts is used — ensuring that retakes can only improve the final outcome. The best score for each component is multiplied by its respective weightage, and the results are summed to produce a <strong>Final Weighted Score</strong> on a 0–100 scale. This score is then mapped to a letter grade and GPA value according to the institution's grading scale. The Cumulative GPA (CGPA) is computed as the weighted average of all course GPAs, using credit hours as weights, and determines the final classification (Distinction, Upper Credit, Lower Credit, Pass, or Fail).</p>
+            <p class="narrative-text">Each course is assessed through multiple components (e.g., Essay, Quiz, Examination, Attendance), each carrying a defined weightage that reflects its contribution to the overall course grade. When a student retakes any assessment component, the <strong>highest score</strong> across all attempts is used — ensuring that retakes can only improve the final outcome. The best score for each component is multiplied by its respective weightage, and the results are summed to produce a <strong>Final Weighted Score</strong> on a 0–100 scale. This score is then mapped to a letter grade and GPA value according to the institution's grading scale. The score printed below is the <strong>recorded course result</strong>; individual assessment marks are components of that result and are not printed separately. The Cumulative GPA (CGPA) is computed as the weighted average of all course GPAs, using credit hours as weights, and determines the final classification (Distinction, Upper Credit, Lower Credit, Pass, or Fail).</p>
         </div>`;
     return `
     <div class="transcript-document" style="--accent: ${accentColor};">
@@ -9141,7 +9533,7 @@ function buildProfessionalTranscript(data) {
             </div>
             <div class="page-main">
                 <div class="wavy-bg">${wavyBgHTML(schoolName, accentColor)}</div>
-                <div class="semester-block"><div class="semester-header"><span class="semester-title">Academic Results</span></div>${coursesTableHTML}</div>
+                <div class="semester-block"><div class="semester-header"><span class="semester-title">${semester && String(semester) !== 'all' ? 'Semester ' + semester + ' Results' : 'Complete Academic Record — All Courses'}</span></div>${coursesTableHTML}</div>
                 ${summaryBlock}
                 <div class="signatures-section">
                     ${sig_registrar ? `<div class="signature-block"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
@@ -9471,6 +9863,7 @@ function buildProfessionalTranscript(data) {
         .transcript-document .col-no { width: 35px; text-align: center; }
         .transcript-document .col-code { width: 90px; font-weight: 600; color: #3b82f6; }
         .transcript-document .col-title { flex: 1; }
+        .transcript-document .col-sem { width: 45px; text-align: center; }
         .transcript-document .col-credits { width: 55px; text-align: center; }
         .transcript-document .col-score { width: 55px; text-align: center; }
         .transcript-document .col-grade { width: 55px; text-align: center; font-weight: 700; }
@@ -9855,6 +10248,7 @@ async function generateFinalTranscript() {
     const allGrades = await dbGetAll('grades');
     const branding = await dbGet('settings', 'branding');
     const academic = await dbGet('settings', 'academic');
+    setGradeScale(academic && academic.grading ? academic.grading : 'standard');
     const centers = await getCenters();
     const payments = await dbGetAll('payments');
     const fromEnrollments = enrollments.filter(e => e.studentId === studentId).map(e => e.courseId);
@@ -9881,24 +10275,36 @@ async function generateFinalTranscript() {
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
     });
     if (!studentCourses.length) return showToast('No courses found for this student!');
+    // RESULTS OF RECORD - resolved exactly as the Official Transcript resolves
+    // them, so both documents print the same score, letter and grade point for
+    // every course that has a recorded result.
+    const recordedResults = resolveStudentResults(allGrades, studentId, { semester: 'all', courses: courses });
+    const recordedByCourse = recordedResults.byCourse;
     let courseResults = [];
-    let totalCredits = 0;
+    let totalCredits = 0;          // credits of RECORDED results (these drive the CGPA)
     let totalGPAPoints = 0;
+    let autoCount = 0;
     for (const course of studentCourses) {
         const result = computeWeightedGrade(studentId, course.id, course, quizzes, submissions, attendance, users);
-        let weightedScore = Math.round(result.weightedScore);
+        const recorded = recordedByCourse.get(course.id);
         const credits = course.credits || 3;
-        totalCredits += credits;
-        if (weightedScore === 0) {
-            const saved = savedGrades.find(g => g.courseId === course.id);
-            if (saved && saved.score) weightedScore = Math.round(saved.score);
+        let weightedScore, gradeInfo = null, source, semester = null;
+        if (recorded) {
+            weightedScore = recorded.score;
+            gradeInfo = { grade: recorded.grade, gpa: recorded.gpa };
+            source = 'recorded';
+            semester = recorded.semester;
+            totalCredits += credits;
+            totalGPAPoints += (gradeInfo ? gradeInfo.gpa * credits : 0);
+        } else {
+            // No recorded result for this course: fall back to the recomputed
+            // mark, clearly marked on the document as not recorded.
+            weightedScore = Math.round(result.weightedScore);
+            if (weightedScore > 0) gradeInfo = getGrade(weightedScore);
+            source = 'auto';
+            autoCount++;
         }
-        let gradeInfo = null;
-        if (weightedScore > 0) {
-            gradeInfo = getGrade(weightedScore);
-            totalGPAPoints += gradeInfo.gpa * credits;
-        }
-        courseResults.push({ course, result, weightedScore, credits, gradeInfo });
+        courseResults.push({ course, result, weightedScore, credits, gradeInfo, source, semester });
     }
     const cgpa = totalCredits > 0 ? totalGPAPoints / totalCredits : 0;
     const classification = getClassification(cgpa);
@@ -9957,13 +10363,18 @@ function buildFinalTranscriptDocument(data) {
         const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
         const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
         const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
-        const scoreDisplay = score > 0 ? score : '--';
+        // Same rendering as the Official Transcript: the bare score (a recorded
+        // 0 is printed as 0), and '--' only when there is no score at all.
+        const hasScore = cr.source === 'recorded' || score > 0;
+        const scoreDisplay = hasScore ? score : '--';
+        const isAuto = cr.source === 'auto';
         rowsHtml += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}">
             <td class="col-no">${idx + 1}</td>
             <td class="col-code">${c.code || '--'}</td>
-            <td class="col-title">${c.name || c.id}</td>
+            <td class="col-title">${c.name || c.id}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
+            <td class="col-sem" style="text-align:center;">${cr.semester ? 'Sem ' + cr.semester : '--'}</td>
             <td class="col-credits" style="text-align:center;">${cr.credits}</td>
-            <td class="col-score" style="text-align:center;"><b>${scoreDisplay}${score > 0 ? '%' : ''}</b></td>
+            <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
             <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
             <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
         </tr>`;
@@ -10023,20 +10434,24 @@ function buildFinalTranscriptDocument(data) {
                             <th class="col-no">#</th>
                             <th class="col-code">Code</th>
                             <th class="col-title">Course Title</th>
+                            <th class="col-sem" style="text-align:center;width:45px;">Sem</th>
                             <th class="col-credits" style="text-align:center;width:55px;">Credits</th>
                             <th class="col-score" style="text-align:center;width:65px;">Score</th>
                             <th class="col-grade" style="text-align:center;width:55px;">Grade</th>
-                            <th class="col-gpa" style="text-align:center;width:55px;">GPA</th>
+                            <th class="col-gpa" style="text-align:center;width:55px;">Grade Pt</th>
                         </tr>
                     </thead>
-                    <tbody>${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">No course records found</td></tr>'}</tbody>
+                    <tbody>${rowsHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course records found</td></tr>'}</tbody>
                 </table>
+                <div style="padding:6px 10px;font-size:9px;color:#64748b;border-top:1px solid #e2e8f0;">
+                    Scores above are the recorded course results, identical to those printed on the Official Transcript. A course marked <em>(auto)</em> has no recorded result: its mark was recomputed from the available assessment data and is excluded from the Cumulative GPA and Recorded Credits.
+                </div>
             </div>
             <div class="summary-panel" style="margin:8px 25px;">
                 <div class="summary-title">Academic Summary</div>
                 <div class="summary-grid">
                     <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${courseResults.length}</span></div>
-                    <div class="summary-item"><span class="summary-label">Total Credits</span><span class="summary-value">${totalCredits}</span></div>
+                    <div class="summary-item"><span class="summary-label">Recorded Credits</span><span class="summary-value">${totalCredits}</span></div>
                     <div class="summary-item"><span class="summary-label">Cumulative GPA</span><span class="summary-value cgpa-value">${cgpa.toFixed(2)}</span></div>
                     <div class="summary-item"><span class="summary-label">Classification</span><span class="summary-value class-badge ${classificationClass}">${classificationLabel}</span></div>
                     <div class="summary-item"><span class="summary-label">Fee Status</span><span class="summary-value ${feeBalance <= 0 ? 'status-clear' : 'status-outstanding'}">${feeStatus}</span></div>
@@ -17945,6 +18360,9 @@ function showQuizInterface(quiz, questions, lang, opts) {
                 <button onclick="confirmQuizSubmit('${quiz.id}')" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='var(--accent,#2563eb)'" style="background:var(--accent,#2563eb);color:#fff;border:none;padding:8px 24px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;transition:background 0.15s;">Submit</button>
             </div>
         </div>
+        <div id="quiz-net" style="display:none;padding:8px 24px;background:#fef3c7;border-bottom:1px solid #fcd34d;font-size:12px;color:#92400e;flex-shrink:0;">
+            📡 No connection - your answers are saved on this device and will be sent when you are back online.
+        </div>
         <div style="padding:0 24px;background:#fff;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
             <div style="display:flex;align-items:center;gap:8px;padding:8px 0;">
                 <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;">
@@ -18085,6 +18503,38 @@ function showQuizInterface(quiz, questions, lang, opts) {
     }
     document.getElementById('quiz-prev-btn').style.visibility = 'hidden';
     updateProgress();
+    // ---- answers kept on this device ------------------------------------
+    const draftStudent = quizDraftStudentId();
+    const restored = restoreQuizDraftIntoDom(quiz.id, draftStudent, questions);
+    if (restored) {
+        showToast('Your earlier answers were restored from this device.', { duration: 5000 });
+        updateProgress();
+    }
+    let draftTimer = null;
+    const rememberAnswers = () => {
+        if (draftTimer) clearTimeout(draftTimer);
+        draftTimer = setTimeout(() => {
+            if (!overlay.isConnected) return;
+            saveQuizDraft(quiz.id, draftStudent, readQuizAnswers(questions));
+        }, 700);
+    };
+    overlay.addEventListener('input', rememberAnswers);
+    overlay.addEventListener('change', rememberAnswers);
+    // ---- connection state ----------------------------------------------
+    const netEl = document.getElementById('quiz-net');
+    const paintNet = () => {
+        if (!netEl) return;
+        if (!overlay.isConnected) {
+            window.removeEventListener('online', paintNet);
+            window.removeEventListener('offline', paintNet);
+            return;
+        }
+        const offline = (typeof navigator !== 'undefined' && navigator.onLine === false);
+        netEl.style.display = offline ? 'block' : 'none';
+    };
+    window.addEventListener('online', paintNet);
+    window.addEventListener('offline', paintNet);
+    paintNet();
 }
 window.goToQuestion = function(idx) {
     if (!currentQuizState) return;
@@ -18151,26 +18601,12 @@ function formatTime(seconds) {
     const s = seconds % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
-async function submitQuiz(quizId) {
-    if (quizTimerInterval) { clearInterval(quizTimerInterval); quizTimerInterval = null; }
-    try {
-    let quiz = await dbGet('quizzes', quizId);
-    if (!quiz) {
-        const exam = await dbGet('exams', quizId);
-        if (!exam) return showToast('Assessment not found!');
-        quiz = { ...exam, assessmentType: 'exam', maxRetakes: exam.maxRetakes || 1 };
-    }
-    const questions = await dbGetAll('questionBank');
-    const quizQuestions = orderQuestionsByBank(quiz.questionIds.map(id => questions.find(q => String(q.id) === String(id))).filter(q => q));
-    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
+// Read what the learner answered on the page. Used by the submission and by
+// the on-device autosave, so the two can never disagree.
+function readQuizAnswers(quizQuestions) {
     const answers = [];
-    let pointsEarned = 0;
-    let totalPoints = 0;
-    let essayResults = [];
     for (const q of quizQuestions) {
         const qPoints = q.points || 1;
-        totalPoints += qPoints;
         if (q.type === 'mcq' || q.type === 'truefalse') {
             let userAnswers = [];
             if (q.type === 'mcq' && q.correctAnswers && q.correctAnswers.length > 1) {
@@ -18179,57 +18615,124 @@ async function submitQuiz(quizId) {
                 const selected = document.querySelector(`input[name="q-${q.id}"]:checked`);
                 if (selected) userAnswers = [selected.value];
             }
-            const correctAnswers = q.correctAnswers || [q.correctAnswer];
-            const isCorrect = userAnswers.length === correctAnswers.length && userAnswers.every(a => correctAnswers.includes(a));
-            if (isCorrect) pointsEarned += qPoints;
-            answers.push({ questionId: q.id, type: q.type, answer: userAnswers, correct: isCorrect, points: qPoints, earned: isCorrect ? qPoints : 0 });
+            answers.push({ questionId: q.id, type: q.type, answer: userAnswers, points: qPoints, earned: 0 });
         } else if (q.type === 'matching') {
-            let correctMatches = 0;
             const pairResults = [];
-            q.pairs.forEach((pair, pi) => {
-                const selectEl = document.getElementById(`match-${q.id}-${pi}`);
-                const userChoice = selectEl ? selectEl.value : '';
-                const isCorrect = userChoice === pair.right;
-                if (isCorrect) correctMatches++;
-                pairResults.push({ left: pair.left, correct: pair.right, userAnswer: userChoice, isCorrect });
+            (q.pairs || []).forEach((pair, pi) => {
+                const sel = document.getElementById(`match-${q.id}-${pi}`);
+                pairResults.push({ left: pair.left, correct: pair.right, userAnswer: sel ? sel.value : '', isCorrect: false });
             });
-            const matchPoints = (correctMatches / q.pairs.length) * qPoints;
-            pointsEarned += matchPoints;
-            answers.push({ questionId: q.id, type: 'matching', pairs: pairResults, correctMatches, totalPairs: q.pairs.length, points: qPoints, earned: matchPoints });
+            answers.push({ questionId: q.id, type: 'matching', pairs: pairResults, points: qPoints, earned: 0 });
         } else if (q.type === 'fillin') {
-            let fillCorrect = 0;
-            const blanks = q.blanks || [];
             const blankResults = [];
-            blanks.forEach((b, bi) => {
+            (q.blanks || []).forEach((b, bi) => {
                 const sel = document.getElementById(`fill-${q.id}-${bi}`);
-                const userAnswer = sel ? sel.value : '';
-                // Forgiving mark: ignores case, extra spaces, leading/trailing gaps.
-                const normFill = s => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
-                const isCorrect = !!normFill(userAnswer) && normFill(userAnswer) === normFill(b.answer);
-                if (isCorrect) fillCorrect++;
-                blankResults.push({ blankIndex: bi, correct: b.answer, userAnswer, isCorrect });
+                blankResults.push({ blankIndex: bi, correct: b.answer, userAnswer: sel ? sel.value : '', isCorrect: false });
             });
-            const fillPoints = blanks.length > 0 ? (fillCorrect / blanks.length) * qPoints : 0;
-            pointsEarned += fillPoints;
-            answers.push({ questionId: q.id, type: 'fillin', blankResults, correctBlanks: fillCorrect, totalBlanks: blanks.length, points: qPoints, earned: fillPoints });
+            answers.push({ questionId: q.id, type: 'fillin', blankResults, points: qPoints, earned: 0 });
         } else {
             const essayText = document.getElementById(`essay-${q.id}`) ? document.getElementById(`essay-${q.id}`).value.trim() : '';
             answers.push({ questionId: q.id, type: 'essay', answer: essayText, points: qPoints, earned: 0 });
-            if (essayText) {
-                const analysis = await analyzeEssay(essayText, q);
-                essayResults.push({ questionId: q.id, analysis });
-                pointsEarned += (analysis.score / 100) * qPoints;
-            }
         }
     }
+    return answers;
+}
+// Mark the answers that were read. The server re-marks them again against the
+// same answer key, so this is the learner's immediate feedback, never the
+// record of truth.
+async function markQuizAnswers(answers, quizQuestions) {
+    let pointsEarned = 0;
+    let totalPoints = 0;
+    const essayResults = [];
+    for (const a of answers) {
+        const q = quizQuestions.find(x => String(x.id) === String(a.questionId)) || {};
+        const qPoints = a.points || 1;
+        totalPoints += qPoints;
+        if (a.type === 'mcq' || a.type === 'truefalse') {
+            const correctAnswers = (q.correctAnswers && q.correctAnswers.length ? q.correctAnswers : (q.correctAnswer != null ? [q.correctAnswer] : []));
+            const given = Array.isArray(a.answer) ? a.answer : [];
+            const isCorrect = given.length === correctAnswers.length && given.every(x => correctAnswers.includes(x));
+            a.correct = isCorrect;
+            a.earned = isCorrect ? qPoints : 0;
+            pointsEarned += a.earned;
+        } else if (a.type === 'matching') {
+            const pairs = q.pairs || [];
+            let hits = 0;
+            pairs.forEach((pair, pi) => {
+                const got = a.pairs && a.pairs[pi] ? a.pairs[pi].userAnswer : '';
+                if (got === pair.right) { hits++; if (a.pairs[pi]) a.pairs[pi].isCorrect = true; }
+            });
+            const matchPoints = pairs.length ? (hits / pairs.length) * qPoints : 0;
+            a.correctMatches = hits;
+            a.totalPairs = pairs.length;
+            a.earned = matchPoints;
+            pointsEarned += matchPoints;
+        } else if (a.type === 'fillin') {
+            const blanks = q.blanks || [];
+            const normFill = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
+            let hits = 0;
+            blanks.forEach((b, bi) => {
+                const got = a.blankResults && a.blankResults[bi] ? a.blankResults[bi].userAnswer : '';
+                const ok = !!normFill(got) && normFill(got) === normFill(b.answer);
+                if (ok) { hits++; if (a.blankResults[bi]) a.blankResults[bi].isCorrect = true; }
+            });
+            const fillPoints = blanks.length ? (hits / blanks.length) * qPoints : 0;
+            a.correctBlanks = hits;
+            a.totalBlanks = blanks.length;
+            a.earned = fillPoints;
+            pointsEarned += fillPoints;
+        } else if (a.answer) {
+            const analysis = await analyzeEssay(a.answer, q);
+            essayResults.push({ questionId: a.questionId, analysis });
+            pointsEarned += (analysis.score / 100) * qPoints;
+        }
+    }
+    return { pointsEarned, totalPoints, essayResults };
+}
+async function submitQuiz(quizId) {
+    // One paper, one submission: a second click while the first is still on the
+    // wire must not create a second attempt.
+    if (window.__quizSubmitting) {
+        showToast('Your paper is still being sent - please wait.', { duration: 4000 });
+        return;
+    }
+    window.__quizSubmitting = true;
+    try {
+    let quiz = await dbGet('quizzes', quizId);
+    if (!quiz) {
+        const exam = await dbGet('exams', quizId);
+        if (!exam) return showToast('Assessment not found!');
+        quiz = { ...exam, assessmentType: 'exam', maxRetakes: exam.maxRetakes || 1 };
+    }
+    const questions = await dbGetAll('questionBank');
+    const quizQuestions = orderQuestionsByBank((quiz.questionIds || []).map(id => questions.find(q => String(q.id) === String(id))).filter(q => q));
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
+    await ensureGradeScaleLoaded();
+    const answers = readQuizAnswers(quizQuestions);
+    const marked = await markQuizAnswers(answers, quizQuestions);
+    const pointsEarned = marked.pointsEarned;
+    const totalPoints = marked.totalPoints;
+    const essayResults = marked.essayResults;
     const totalScore = totalPoints > 0 ? Math.round((pointsEarned / totalPoints) * 100) : 0;
     const hasEssays = answers.some(a => a.type === 'essay');
     const passed = totalScore >= quiz.passMark;
     const grade = getGrade(totalScore).grade;
-    const existingSubs = (await dbGetAll('submissions')).filter(s => s.quizId === quizId && s.studentId === studentId);
-    const attempts = existingSubs.length + 1;
+    // How many attempts has this learner already used? A failed read must
+    // never cost them their paper, so it only ever lowers the count.
+    let attempts = 1;
+    try {
+        const existingSubs = (await dbGetAll('submissions')).filter(s => s.quizId === quizId && s.studentId === studentId);
+        attempts = existingSubs.length + 1;
+    } catch (e) {
+        console.warn('attempt count unavailable:', e && e.message);
+    }
+    // The SAME attempt id is used for every try, so a retry after a dropped
+    // connection updates the paper instead of adding a second attempt.
+    const draft = readQuizDraft(quizId, studentId);
+    const submissionId = (draft && draft.submissionId) ? draft.submissionId : generateId('SUB');
     const submission = {
-        id: generateId('SUB'), quizId, studentId,
+        id: submissionId, quizId, studentId,
         answers, score: totalScore, grade,
         status: hasEssays ? 'pending_review' : (passed ? 'pass' : 'fail'),
         needsReview: hasEssays,
@@ -18238,22 +18741,50 @@ async function submitQuiz(quizId) {
         essayAnalyses: essayResults,
         submittedAt: new Date().toISOString()
     };
-    await dbPut('submissions', submission);
+    // The answers go to this device BEFORE the first attempt goes out.
+    saveQuizDraft(quizId, studentId, answers, submissionId);
+    // The paper goes out with patience: a dropped request or a busy server is
+    // retried with the SAME record id, so the server upserts it instead of
+    // storing a second attempt.
+    let saved = null;
+    try {
+        saved = await dbPut('submissions', submission, { attempts: 4, timeoutMs: 25000 });
+    } catch (e) {
+        // The answers are already on this device - the learner can retry
+        // without losing a single mark.
+        const timedOut = quizTimeRemaining <= 0;
+        showModal('Could not send your paper',
+            `<div style="font-size:14px;margin-bottom:8px;">Your answers are <b>saved on this device</b> and are still on the screen.</div>`
+            + `<div style="font-size:12px;color:var(--text-muted);">Check your connection and press Send again${timedOut ? ' - the time is up, so keep this page open until it goes through' : ''}.</div>`,
+            `<button class="btn btn-primary" onclick="closeModal();submitQuiz('${quizId}')">Send again</button><button class="btn btn-outline" onclick="closeModal()">Stay on this page</button>`);
+        showToast('Not sent yet - your answers are safe on this device.', { type: 'danger', duration: 10000 });
+        console.error('submitQuiz send failed:', e);
+        return;
+    }
+    // The paper is safely on the server: the countdown can stop now.
+    if (quizTimerInterval) { clearInterval(quizTimerInterval); quizTimerInterval = null; }
     invalidatePortalCache();
     invalidateProgressCache();
     const course = await dbGet('courses', quiz.courseId);
     if (!hasEssays) {
         const gradeInfo = getGrade(totalScore);
         const gradeEntry = {
-            id: generateId('GRADE'), studentId, submissionId: submission.id,
+            // The same id the server uses, so both sides write ONE record.
+            id: 'GRADE-' + String(studentId).replace(/[^A-Za-z0-9_-]/g, '_') + '-' + String(quizId).replace(/[^A-Za-z0-9_-]/g, '_'),
+            studentId, submissionId: submission.id,
             courseId: quiz.courseId, score: totalScore, grade: gradeInfo.grade,
             gpa: gradeInfo.gpa,
-            semester: 1, type: quiz.assessmentType || 'quiz', quizId,
+            semester: Number(quiz.semester) || 1, type: quiz.assessmentType || 'quiz', quizId,
             gradedAt: new Date().toISOString()
         };
-        try { await dbPut('grades', gradeEntry); }
-        catch (gErr) { console.warn('grade record not written:', gErr && gErr.message); }
+        // The server normally creates the grade with the paper itself; this
+        // write is the safety net for the rare case where it could not.
+        if (!saved || !saved.gradeId) {
+            try { await dbPut('grades', gradeEntry, { attempts: 3, timeoutMs: 20000 }); }
+            catch (gErr) { console.warn('grade record not written:', gErr && gErr.message); }
+        }
     }
+    clearQuizDraft(quizId, studentId);
     // Drip 50% rule: pass advances the lesson (congrats + invite follow); fail resets it for repeat.
     try {
         if (!hasEssays && currentUser.role === 'student') {
@@ -18340,6 +18871,8 @@ async function submitQuiz(quizId) {
     } catch (e) {
         console.error('submitQuiz failed:', e);
         showToast('Could not save submission: ' + (e && e.message ? e.message : e), { type: 'danger', duration: 10000 });
+    } finally {
+        window.__quizSubmitting = false;
     }
 }
 const SW_WORDS = ['ni','na','ya','wa','kwa','za','la','cha','vya','li','lo','yo','po','ko','mo','huu','hii','hizi','hizo','watu','kitu','sana','pia','kama','basi','lakini','ingawa','kwamba','baada','kabla','hata','zaidi','ndiyo','siyo','ambao','ambayo','ambacho','ambavyo','ambalo','mara','hiyo','hivyo','hivyo','vivyo',' vile','kabisa','tena','kweli','jinsi','miongoni','kupitia','kutoka','mpaka','hadi','katika','kwa','kwenye','kutokana','kuhusu','pamoja','bila','kila','pekee','mengine','baadhi','wote','mimi','wewe','yeye','sisi','nyinyi','wao','yangu','yako','yake','yetu','wenu','yao','angu','ako','ake','etu','enu','etu','mimi','mwenyewe','wenyewe','nini','nani','gani','lini','wapi','kwanini','vipi','kidogo','kubwa','ndogo','refu','fupi','zuri','baya','ingine','mbalimbali','sawa','tofauti','halafu','ndipo','ndio','zaidi','huo','hicho','hizo','hiyo','zile','wale','kile','kile','yule','hao'];
@@ -19343,12 +19876,15 @@ function renderPortalContent(studentId, data, isStudentUser) {
     }
     const studentPayments = data.payments.filter(p => p.studentId === studentId && isTuitionPayment(p));
     const studentGrades = data.grades.filter(g => g.studentId === studentId);
+    // Average grade is taken over the course results (results of record), not over
+    // individual assessment marks.
+    const portalAvgSource = resolveStudentResults(data.grades, studentId, { semester: 'all', courses: data.courses }).rows;
     const studentAttendance = data.attendance.filter(a => a.studentId === studentId);
     const studentSubmissions = data.submissions.filter(s => s.studentId === studentId);
     const totalPaid = studentPayments.reduce((s, p) => s + p.amount, 0);
     const studentFee = getCachedStudentFee(student);
     const balance = studentFee - totalPaid;
-    const avgGrade = studentGrades.length ? Math.round(studentGrades.reduce((s, g) => s + g.score, 0) / studentGrades.length) : 0;
+    const avgGrade = portalAvgSource.length ? Math.round(portalAvgSource.reduce((s, g) => s + g.score, 0) / portalAvgSource.length) : 0;
     const attendancePct = studentAttendance.length ? Math.round((studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100) : 0;
     const quizzesPassed = studentSubmissions.filter(s => s.status === 'pass').length;
     const quizzesFailed = studentSubmissions.filter(s => s.status === 'fail').length;
@@ -19442,10 +19978,21 @@ function renderPortalContent(studentId, data, isStudentUser) {
         return `<div style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;"><div><b style="font-size:12px;">${typeIcon} ${q.title}</b> <span class="badge badge-info" style="font-size:8px;">${typeLabel}</span>${isTableExam ? `<br><span style="font-size:10px;color:var(--text-muted);">${course ? course.name : ''} — ${q.date} ${q.time || ''}</span>` : `<br><span style="font-size:10px;color:var(--text-muted);">${course ? course.name : ''}${bestScore !== null ? ` — Best: ${bestScore}%` : ''}</span>`}</div><div>${actionHtml}</div></div>`;
     }).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No assessments available</div>';
     renderPortalNotesCached(studentId, data);
-    document.getElementById('portal-grades').innerHTML = studentGrades.length ? studentGrades.slice(0, 10).map(g => {
-        const course = data.courses.find(c => c.id === g.courseId);
-        return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;"><span>${g.type === 'quiz' ? '📝 Quiz' : '📊 Exam'} — ${course ? course.name : g.courseId}</span><span style="font-weight:700;color:${g.score >= 70 ? 'var(--success)' : 'var(--warning)'};">${g.score}% (${g.grade})</span></div>`;
-    }).join('') : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No grades recorded</div>';
+    // COURSE RESULTS (the results of record - the same numbers printed on the
+    // official transcript) and ASSESSMENT MARKS (components of a course result)
+    // are shown separately, so a component mark can never be read as the
+    // student's course result.
+    const portalCourseResults = resolveStudentResults(data.grades, studentId, { semester: 'all', courses: data.courses }).rows;
+    const portalAssessments = studentGrades.filter(g => isAssessmentGrade(g)).slice(0, 10);
+    const portalGradesHtml =
+        (portalCourseResults.length
+            ? portalCourseResults.map(r => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;"><span>F4CA ${r.course ? r.course.name : r.courseId}${r.semester ? ' · Sem ' + r.semester : ''}</span><span style="font-weight:700;color:${r.score >= 70 ? 'var(--success)' : r.score >= 50 ? 'var(--warning)' : 'var(--danger)'};">${r.score}% (${r.grade})</span></div>`).join('')
+            : '<div style="color:var(--text-muted);text-align:center;padding:12px;">No course results recorded</div>')
+        + (portalAssessments.length
+            ? `<div style="margin-top:10px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;color:var(--text-muted);">Assessment marks — components of the course result above:</div>`
+                + portalAssessments.map(g => { const c = data.courses.find(cc => cc.id === g.courseId); return `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:11px;color:var(--text-muted);"><span>✏️ ${g.type === 'quiz' ? 'Quiz' : g.type === 'cat' ? 'CAT' : 'Exam'} — ${c ? c.name : g.courseId}</span><span>${g.score}%</span></div>`; }).join('')
+            : '');
+    document.getElementById('portal-grades').innerHTML = portalGradesHtml;
     const statementHtml = studentPayments.length ? `<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--text-muted);">Last payment: ${formatDate(studentPayments[studentPayments.length - 1].date)} — ${formatCurrency(studentPayments[studentPayments.length - 1].amount)}<br>Total transactions: ${studentPayments.length}</div>` : '';
     document.getElementById('portal-finance').innerHTML = `<div style="padding:12px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Total Fees:</span><b>${formatCurrency(studentFee)}</b></div><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Paid:</span><b style="color:var(--success);">${formatCurrency(totalPaid)}</b></div><div style="display:flex;justify-content:space-between;padding-top:8px;border-top:2px solid var(--accent);"><span><b>Balance:</b></span><b style="color:${balance <= 0 ? 'var(--success)' : 'var(--danger)'};font-size:16px;">${formatCurrency(balance)}</b></div>${statementHtml}<div style="margin-top:8px;"><button class="btn btn-outline btn-sm" style="width:100%;font-size:10px;" onclick="viewPortalFeeStatement('${studentId}')">📄 View Full Statement</button></div></div>`;
     document.getElementById('portal-attendance').innerHTML = studentAttendance.length ? `<div style="padding:12px;"><div style="font-size:24px;font-weight:800;text-align:center;color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div><div style="font-size:11px;text-align:center;color:var(--text-muted);margin-top:4px;">${studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length} of ${studentAttendance.length} sessions</div></div>` : '<div style="color:var(--text-muted);text-align:center;padding:20px;">No attendance recorded</div>';
@@ -23284,22 +23831,27 @@ async function exportGradesPDF() {
     let html = `<html><head><title>Grades Report</title><style>body{font-family:Arial,sans-serif;padding:40px;}h1{color:#1e40af;margin-bottom:4px;}.subtitle{color:#64748b;margin-bottom:20px;}table{width:100%;border-collapse:collapse;margin:16px 0;font-size:12px;}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;}th{background:#020617;color:#f59e0b;}.section{margin:20px 0;}h2{font-size:14px;color:#1e40af;border-bottom:2px solid #f59e0b;padding-bottom:4px;}@media print{body{padding:0;}}</style></head><body>`;
     html += `<div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:8px;">${logoUrl ? `<img src="${logoUrl}" style="width:60px;height:60px;object-fit:contain;" alt="Logo">` : `<div style="width:60px;height:60px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;flex-shrink:0;">${initials}</div>`}<h1 style="margin:0;">${schoolName}</h1></div>
     <p class="subtitle" style="text-align:center;">Grades Report - Generated ${new Date().toLocaleDateString()}</p>`;
-    const grouped = {};
-    grades.forEach(g => { const key = `${g.studentId}-S${g.semester}`; if (!grouped[key]) grouped[key] = { studentId: g.studentId, semester: g.semester, grades: [] }; grouped[key].grades.push(g); });
-    for (const key in grouped) {
-        const group = grouped[key];
+    // Grouped by student + semester using the SAME resolution the transcript
+    // uses: course results only, one row per course, letter and grade point
+    // derived from the score under the active grading scale.
+    const grouped = [];
+    const studentIds = [...new Set(grades.map(g => g.studentId).filter(Boolean))];
+    for (const sid of studentIds) {
+        const semesters = [...new Set(grades.filter(g => g.studentId === sid && isCourseLevelGrade(g)).map(g => String(g.semester)))];
+        for (const sem of semesters) {
+            const res = resolveStudentResults(grades, sid, { semester: sem, courses: courses });
+            if (!res.rows.length) continue;
+            grouped.push({ studentId: sid, semester: sem, rows: res.rows, cgpa: res.cgpa, totalCredits: res.totalCredits });
+        }
+    }
+    for (const group of grouped) {
         const student = students.find(s => s.id === group.studentId);
         html += `<div class="section"><h2>${student ? student.name : group.studentId} - Semester ${group.semester}</h2>`;
         html += `<table><thead><tr><th>Course</th><th>Code</th><th>Credits</th><th>Score</th><th>Grade</th><th>GPA</th></tr></thead><tbody>`;
-        let totalPoints = 0, totalCredits = 0;
-        group.grades.forEach(g => {
-            const c = courses.find(c => c.id === g.courseId);
-            const credits = c ? c.credits : 3;
-            totalPoints += g.gpa * credits; totalCredits += credits;
-            html += `<tr><td>${c ? c.name : g.courseId}</td><td>${c ? c.code : ''}</td><td>${credits}</td><td>${g.score}</td><td><b>${g.grade}</b></td><td>${g.gpa}</td></tr>`;
-        });
-        const cgpa = totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : '0.00';
-        html += `</tbody></table><p style="text-align:right;"><b>GPA: ${cgpa}</b></p></div>`;
+        for (const r of group.rows) {
+            html += `<tr><td>${r.course ? r.course.name : r.courseId}</td><td>${r.course ? (r.course.code || '') : ''}</td><td>${r.credits}</td><td>${r.score}</td><td><b>${r.grade}</b></td><td>${r.gpa.toFixed(2)}</td></tr>`;
+        }
+        html += `</tbody></table><p style="text-align:right;"><b>GPA: ${group.cgpa.toFixed(2)}</b></p></div>`;
     }
     html += '</body></html>';
     const w = window.open('', '', 'width=800,height=600');
@@ -26015,12 +26567,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { clearLoginForm(); } catch {}
     window.addEventListener('pageshow', () => { try { clearLoginForm(); } catch {} });
     try { startMaintenanceLiveSync(); } catch {}
+    // The contact number must not wait for any other download - it is shown on
+    // the login screen and the server already rendered it.
     try {
-        await loadDiplomaPdfConfig();
+        if (typeof loadPublicContact === 'function') loadPublicContact();
+    } catch (e) {}
+    // The diploma template is a ~1MB download that the login screen does not
+    // need. It is loaded when the Settings screen is opened, so only warm it
+    // up for a signed-in session.
+    try {
+        if (sessionStorage.getItem('currentUser')) await loadDiplomaPdfConfig();
     } catch (e) {
         console.error('Failed to load diploma PDF config:', e);
     }
-    try {
-        if (typeof loadPublicContact === 'function') await loadPublicContact();
-    } catch (e) {}
 });

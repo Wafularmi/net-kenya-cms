@@ -53,7 +53,7 @@
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <button class="btn btn-full" id="login-btn" onclick="login()" style="background:var(--accent);border-color:var(--accent);color:#fff;">Sign In</button>
                 <p id="login-error" class="login-error" style="display:none;"></p>
-                <p id="login-admin-phone" style="display:none;text-align:center;margin-top:10px;font-size:13px;"></p>
+                <p id="login-admin-phone" style="{{CONTACT_PHONE_STYLE}}">{{CONTACT_PHONE}}</p>
                 <p class="login-hint" style="margin-top:12px;font-size:11px;color:var(--text-muted);">Don't have an account? <a href="#" onclick="showSignupForm(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">Request Registration</a></p>
                 <p class="login-hint" style="margin-top:8px;font-size:11px;color:var(--text-muted);">Have a certificate? <a href="#" onclick="showPublicVerifyModal(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">🔍 Verify a document</a></p>
             </div>
