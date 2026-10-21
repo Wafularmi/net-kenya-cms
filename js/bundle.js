@@ -2919,7 +2919,7 @@ async function renderServerHealth() {
         if (!el) return;
         const [health, net] = await Promise.all([
             fetch('/api/health').then(r => r.json()).catch(() => null),
-            fetch('/api/network').then(r => r.json()).catch(() => null)
+            fetch('/api/network', { headers: getAuthHeaders() }).then(r => r.json()).catch(() => null)
         ]);
         const uptime = health ? Math.floor(health.uptime) : 0;
         const days = Math.floor(uptime / 86400);

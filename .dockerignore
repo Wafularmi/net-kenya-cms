@@ -6,3 +6,10 @@ node_modules
 *.gz
 server-data.backup.json
 server-data-backups
+# The live database and its runtime state must never be baked into an image.
+server-data.json
+integrity.json
+sessions.json
+# Runtime document store and local TLS material.
+docs
+certs

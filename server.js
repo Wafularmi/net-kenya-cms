@@ -614,6 +614,53 @@ const MIME = {
 
 const COMPRESSIBLE = ['.html', '.css', '.js', '.json', '.svg', '.txt', '.xml'];
 
+// ---------------------------------------------------------------------------
+// Static file allowlist
+//
+// The app directory is also the HTTP document root, so every file that ships
+// with the deployment used to be downloadable by anyone: server.js, the live
+// database (server-data.json), package.json, railway.json, the Dockerfile and
+// so on. Nothing outside this allowlist is served any more - an unknown path
+// is a 404, exactly as if the file did not exist.
+// ---------------------------------------------------------------------------
+
+// Top-level documents the browser may fetch.
+const PUBLIC_HTML_FILES = new Set([
+    '/index.html',
+    '/maintenance.html',
+    '/student-manual.html',
+    '/coordinator-manual.html',
+    '/admin-manual.html',
+    '/assistant-admin-manual.html',
+    '/staff-manual.html'
+]);
+
+// Asset directories whose contents are public. Only the listed file types are
+// served from them.
+const PUBLIC_ASSET_DIRS = [
+    { prefix: '/css/', exts: ['.css'] },
+    { prefix: '/js/', exts: ['.js'] },
+    { prefix: '/manual-screenshots/', exts: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'] }
+];
+
+function isPublicStaticAsset(url) {
+    if (!url) return false;
+    // Normalise: no query string, no traversal, single leading slash.
+    let p = String(url).split('?')[0].split('#')[0];
+    try { p = decodeURIComponent(p); } catch { return false; }
+    if (p.indexOf('..') !== -1) return false;
+    if (p[0] !== '/') return false;
+    if (PUBLIC_HTML_FILES.has(p)) return true;
+    for (const dir of PUBLIC_ASSET_DIRS) {
+        if (p.indexOf(dir.prefix) !== 0) continue;
+        const rel = p.slice(dir.prefix.length);
+        if (!rel || rel.indexOf('/') !== -1) continue; // no nested directories
+        const ext = path.extname(rel).toLowerCase();
+        if (dir.exts.indexOf(ext) !== -1) return true;
+    }
+    return false;
+}
+
 function compress(res, data, contentType) {
     const accept = res.getHeader('Accept-Encoding') || '';
     if (accept.includes('gzip') && data.length > 512) {
@@ -1190,13 +1237,77 @@ function studyCenterCodeConflict(rec) {
     } catch (e) { return null; }
 }
 
+// ---------------------------------------------------------------------------
+// Public (unauthenticated) surface allowlists
+//
+// The login screen and the public registration form have to work for a
+// visitor with no session, so a small, explicit slice of the data stays
+// readable anonymously. Everything else - M-Pesa/SMS credentials, the
+// WhatsApp sender, fee rules, admission-sequence state, PDF templates,
+// signature images and the whole student database - is staff-only and must
+// never be handed to an anonymous caller.
+//
+// These lists are the ONLY thing an anonymous visitor can read. A store that
+// is not listed here stays fully private; a listed store is filtered row by
+// row through the projections below.
+// ---------------------------------------------------------------------------
+
+// Settings records an anonymous visitor may read.
+//   branding   - school identity shown on the login screen (public fields only)
+//   academic   - programme list used by the registration form
+//   maintenance- on/off flag shown on the login screen
+const PUBLIC_SETTING_KEYS = new Set(['branding', 'academic', 'maintenance']);
+
+// Branding fields that must never leave the server for an anonymous visitor:
+// the registrar/dean/director signature images, the college stamp and the
+// tax PIN. They are used on transcripts, diplomas and receipts - staff only.
+const PRIVATE_BRANDING_FIELDS = new Set([
+    'sig_registrar', 'sig_dean', 'sig_director', 'college_stamp', 'collegeStamp',
+    'kraPin', 'paidSignature', 'receivedSignature', 'stamp', 'sig_stamp'
+]);
+
+// Study-centre and region rows are needed by the public registration form.
+// Only these columns are exposed; anything added to those records later stays
+// server-side by default.
+const PUBLIC_CENTER_FIELDS = ['id', 'name', 'code', 'country', 'regionId', 'address'];
+const PUBLIC_REGION_FIELDS = ['id', 'name', 'country'];
+
+// Copy a record keeping only the listed columns.
+function projectRecord(rec, fields) {
+    if (!rec || typeof rec !== 'object') return rec;
+    const out = {};
+    for (const f of fields) if (rec[f] !== undefined) out[f] = rec[f];
+    return out;
+}
+
+// Drop the private fields from a branding record (no-op for other records).
+function stripPrivateBranding(rec) {
+    if (!rec || rec.key !== 'branding') return rec;
+    const out = {};
+    for (const k of Object.keys(rec)) {
+        if (PRIVATE_BRANDING_FIELDS.has(k)) continue;
+        out[k] = rec[k];
+    }
+    return out;
+}
+
+// The anonymous view of the settings store: only the public keys, and for
+// branding only the public fields. Applied AFTER blob injection so an
+// injected blob can never re-add a signature.
+function publicSettingsView(rows) {
+    return (rows || []).filter(r => r && PUBLIC_SETTING_KEYS.has(r.key)).map(stripPrivateBranding);
+}
+
 // Check if user can access a store
 function canAccessStore(user, store, method) {
     // Sensitive internal stores - admin only, never via API
     if (store === 'sessions' || store === 'maintenanceBypassTokens') {
         return user && user.role === 'admin';
     }
-    // Allow unauthenticated reads for login screen / registration
+    // Allow unauthenticated reads for login screen / registration.
+    // The ROWS that come back are filtered by the public allowlists above
+    // (publicSettingsView / projectRecord), so this grant never exposes the
+    // credential- or PII-bearing records of those stores.
     if (!user && method === 'GET' && (store === 'settings' || store === 'studyCenters' || store === 'regions')) return true;
     if (!user) return false;
     // The overall admin is never limited — full view and full write on every
@@ -2394,15 +2505,22 @@ function handleAPI(req, res) {
     if (parts.length === 2 && parts[1] === 'health') {
         const s = db.mpesaSettings || {};
         const mpesaConfigured = !!(s.shortcode && s.consumerKey && s.consumerSecret && s.passkey);
-        // `sse`/`lastBroadcast` are diagnostics for the live-update stream.
-        return json(res, 200, {
+        // The health probe is public (Railway healthcheck + the client's
+        // "server reachable" check), so it only ever carries the liveness
+        // facts. Stream diagnostics are for signed-in staff only.
+        const payload = {
             status: 'ok',
             uptime: process.uptime(),
-            mpesaConfigured,
-            sse: sseClients.length,
-            sseWritable: sseClients.filter(c => c.res && !c.res.writableEnded && !c.res.destroyed).length,
-            lastBroadcast: __lastBroadcast
-        });
+            mpesaConfigured
+        };
+        const hUser = getRequestUser(req);
+        if (hUser) {
+            // `sse`/`lastBroadcast` are diagnostics for the live-update stream.
+            payload.sse = sseClients.length;
+            payload.sseWritable = sseClients.filter(c => c.res && !c.res.writableEnded && !c.res.destroyed).length;
+            payload.lastBroadcast = __lastBroadcast;
+        }
+        return json(res, 200, payload);
     }
 
     // GET /api/session — session health: who the server thinks you are.
@@ -2780,6 +2898,11 @@ res.write('\n');
 
     // GET /api/network  — list available network interfaces
     if (parts.length === 2 && parts[1] === 'network' && req.method === 'GET') {
+        // Staff only: this exposes the container's internal IP and port, which
+        // is useless on a hosted deployment and only useful to an attacker.
+        const netUser = getRequestUser(req);
+        if (!netUser) return json(res, 401, { error: 'Not authenticated' });
+        if (netUser.role === 'student') return json(res, 403, { error: 'Not permitted' });
         const ifaces = os.networkInterfaces();
         const list = [];
         for (const name of Object.keys(ifaces)) {
@@ -2794,6 +2917,9 @@ res.write('\n');
 
     // GET /api/network-info â€” get IPs and URLs for device connection
     if (parts.length === 2 && parts[1] === 'network-info' && req.method === 'GET') {
+        const niUser = getRequestUser(req);
+        if (!niUser) return json(res, 401, { error: 'Not authenticated' });
+        if (niUser.role === 'student') return json(res, 403, { error: 'Not permitted' });
         const ips = getNetworkIPs();
         const urls = ips.flatMap(ip => buildUrls(ip.address));
         console.log('network-info request, ips:', ips);
@@ -5017,6 +5143,12 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
             if (name === 'settings' && (!user || user.role !== 'admin')) {
                 rows = rows.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
             }
+            // Anonymous callers only ever see the public slice of these stores.
+            if (!user) {
+                if (name === 'settings') rows = publicSettingsView(rows);
+                else if (name === 'studyCenters') rows = rows.map(r => projectRecord(r, PUBLIC_CENTER_FIELDS));
+                else if (name === 'regions') rows = rows.map(r => projectRecord(r, PUBLIC_REGION_FIELDS));
+            }
             result[name] = rows;
         }
 return json(res, 200, result);
@@ -5230,6 +5362,12 @@ const LIVE_PUSH_STORES = new Set([
             if (store === 'settings' && (!user || user.role !== 'admin')) {
                 results = results.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
             }
+            // Anonymous callers only ever see the public slice of these stores.
+            if (!user) {
+                if (store === 'settings') results = publicSettingsView(results);
+                else if (store === 'studyCenters') results = results.map(r => projectRecord(r, PUBLIC_CENTER_FIELDS));
+                else if (store === 'regions') results = results.map(r => projectRecord(r, PUBLIC_REGION_FIELDS));
+            }
             if (limit > 0 && page > 0) {
                 const start = (page - 1) * limit;
                 const total = results.length;
@@ -5242,6 +5380,12 @@ const LIVE_PUSH_STORES = new Set([
         // GET /api/db/:store/:key  â€” return single record or null
         if (req.method === 'GET' && key) {
             let item = db[store].find(r => String(r[keyPath]) === key) || null;
+            // Anonymous callers may only read the public settings keys. Every
+            // other settings record (M-Pesa/SMS credentials, WhatsApp sender,
+            // fee rules, admission sequence, PDF templates, ...) is staff-only.
+            if (!user && store === 'settings' && !PUBLIC_SETTING_KEYS.has(key)) {
+                return json(res, 401, { error: 'Not authenticated' });
+            }
             const previewC = (user && user.role === 'admin') ? (urlObj.searchParams.get('preview') || '') : '';
             if (previewC) { try { console.log('[preview] admin ' + user.username + ' viewing as ' + previewC + ' store=' + store); } catch {} }
             if (item && ((user && user.role !== 'admin') || previewC)) {
@@ -5260,6 +5404,9 @@ const LIVE_PUSH_STORES = new Set([
                 const list = externalizeStoreRecords(store, [item]);
                 item = list[0] || null;
                 if (store === 'settings') item = injectSettingsBlobs(item);
+                // Anonymous callers never receive the signature images, the
+                // college stamp or the tax PIN from the branding record.
+                if (!user && store === 'settings' && item) item = stripPrivateBranding(item);
                 if (item && store === 'settings' && key === 'mpesa' && (!user || user.role !== 'admin')) {
                     item = { key: 'mpesa', payButtonEnabled: !!((item.value || item).payButtonEnabled) };
                 }
@@ -5777,6 +5924,15 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
     if (/^\/api(\/|$)/.test(url)) {
         if (res.headersSent || req._asyncApi) return;
         return json(res, 404, { ok: false, error: 'not_found', path: url });
+    }
+
+    // Only the files on the static allowlist are downloadable. The app
+    // directory also holds the server source, the live database, dependency
+    // manifests and the deployment config - none of those may be served.
+    // An unknown path answers 404 exactly as if the file did not exist.
+    if (!isPublicStaticAsset(url)) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end('404 Not Found');
     }
 
     serveCachedFile(res, filePath, url, req);
