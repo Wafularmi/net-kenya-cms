@@ -416,7 +416,16 @@ function broadcastMaintenance(active) {
 let wss = null;
 const wsClients = new Map(); // courseId -> Set of { ws, userId, userName, userRole }
 
-// ---- Crash-safe data layer with auto-backup ----
+// ---- Crash-safe data layer with auto-backup -------------------------------
+// The database lives as ONE FILE PER STORE under db-stores/, with append-only
+// JSON Lines archives for the log stores. It used to be a single 33 MB
+// server-data.json that was re-serialised, rewritten, copied to the volume and
+// copied AGAIN as a backup on every save: roughly 600 ms of blocked event
+// loop and ~100 MB of I/O per change. That is what makes a busy exam hall
+// crawl. Per-store files mean a change rewrites only the store that changed,
+// so a submitted paper costs a few kilobytes instead of megabytes.
+//
+// DB_STORAGE=single restores the old single-file behaviour (kill switch).
 const DB_FILE = path.join(DATA_ROOT, 'server-data.json');
 const DB_VOLUME_PATH = '/data/server-data.json'; // Railway volume path
 const DB_TEMP = DB_FILE + '.tmp';
@@ -424,24 +433,397 @@ const DB_BACKUP = path.join(DATA_ROOT, 'server-data.backup.json');
 const DB_BACKUP_DIR = path.join(DATA_ROOT, 'server-data-backups');
 const MAX_BACKUPS = 20;
 
-function ensureBackupDir() {
-    try { if (!fs.existsSync(DB_BACKUP_DIR)) fs.mkdirSync(DB_BACKUP_DIR, { recursive: true }); } catch {}
+// ---- Per-store persistence -------------------------------------------------
+const STORE_DIR = path.join(DATA_ROOT, 'db-stores');
+const VOLUME_STORE_DIR = '/data/db-stores';
+const LOG_DIR = path.join(DATA_ROOT, 'db-logs');
+const VOLUME_LOG_DIR = '/data/db-logs';
+const DB_STORAGE_MODE = String(process.env.DB_STORAGE || 'files').toLowerCase() === 'single' ? 'single' : 'files';
+// A log store only ever grows and is read as a "recent window". The window is
+// kept in the store file; everything that rolls out of it is kept FOREVER in
+// an append-only archive, so the audit trail is never truncated by a restart.
+const LOG_STORES = {
+    audit:           { window: 1000, archive: 'audit' },
+    alerts:          { window: 1000, archive: 'alerts' },
+    whatsappLog:     { window: 500,  archive: 'whatsapp-log' },
+    analyticsEvents: { window: 500,  archive: 'analytics-events' },
+    smsLog:          { window: 500,  archive: 'sms-log' }
+};
+// Runtime-only keys are rebuilt on boot and must never reach the disk.
+const RUNTIME_DB_KEYS = ['__countryIndex'];
+
+function ensureDir(dir) {
+    try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch {}
+}
+function ensureBackupDir() { ensureDir(DB_BACKUP_DIR); }
+
+function readJSON(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
+
+// Atomic write: write to temp file, then rename (atomic on same filesystem).
+function atomicWriteFile(file, content) {
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, content, 'utf8');
+    for (let retries = 0; retries < 15; retries++) {
+        try { fs.renameSync(tmp, file); return true; }
+        catch (e) {
+            if (e.code !== 'EPERM' && e.code !== 'EBUSY') throw e;
+            if (retries < 14) { const start = Date.now(); while (Date.now() - start < 200) { /* spin */ } }
+        }
+    }
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+    console.error('atomicWriteFile: rename failed after 15 retries: ' + file);
+    return false;
 }
 
-function readJSON(file) {
-    try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+// Always mirror the live data back to the Railway volume so it never goes stale.
+const _volumeMirrorWarned = {};
+function mirrorFileToVolume(file, volumeDir) {
+    try {
+        ensureDir(volumeDir);
+        fs.copyFileSync(file, path.join(volumeDir, path.basename(file)));
+    } catch (e) {
+        // A missing/unwritable volume must not be noisy: warn once per
+        // directory, then carry on writing to the local copy.
+        if (!_volumeMirrorWarned[volumeDir]) {
+            _volumeMirrorWarned[volumeDir] = true;
+            process.stderr.write('DB_VOLUME_SYNC_FAILED: ' + e.message + '\n');
+        }
+    }
 }
-
-// Always mirror the live DB back to the Railway volume so it never goes stale.
 function syncToVolume() {
     try {
-        if (fs.existsSync(DB_FILE)) {
-            fs.copyFileSync(DB_FILE, DB_VOLUME_PATH);
-        }
+        if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, DB_VOLUME_PATH);
     } catch (e) { process.stderr.write('DB_VOLUME_SYNC_FAILED: ' + e.message + '\n'); }
 }
 
-// Atomic write: write to temp file, then rename (atomic on same filesystem)
+// ---- Store files -----------------------------------------------------------
+// The store name is encoded so it survives the filesystem untouched and can
+// always be read back exactly as it was written.
+function storeFileName(store) { return encodeURIComponent(String(store)) + '.json'; }
+function storeNameFromFile(file) {
+    const raw = file.replace(/\.json$/, '');
+    try { return decodeURIComponent(raw); } catch { return raw; }
+}
+function storeFilePath(store) { return path.join(STORE_DIR, storeFileName(store)); }
+function isLogStore(store) { return Object.prototype.hasOwnProperty.call(LOG_STORES, store); }
+
+// Write ONE store to its own file and mirror it to the volume.
+function writeStoreFile(store, value) {
+    if (DB_STORAGE_MODE !== 'files') return false;
+    try {
+        ensureDir(STORE_DIR);
+        const file = storeFilePath(store);
+        const ok = atomicWriteFile(file, JSON.stringify(value));
+        if (ok) mirrorFileToVolume(file, VOLUME_STORE_DIR);
+        return ok;
+    } catch (e) { console.error('writeStoreFile failed (' + store + '): ' + e.message); return false; }
+}
+
+// ---- Append-only archive for the log stores --------------------------------
+// The archive is the durable home of the entries that rolled out of the
+// recent window. It is only ever appended to, never rewritten, and it is split
+// into ordered segments so the history always reads oldest -> newest.
+const MAX_LOG_SEGMENT_BYTES = 8 * 1024 * 1024;
+function logArchiveDir(store) { return path.join(LOG_DIR, LOG_STORES[store].archive); }
+function logArchiveSegments(store) {
+    try {
+        return fs.readdirSync(logArchiveDir(store)).filter(f => f.endsWith('.jsonl')).sort();
+    } catch { return []; }
+}
+function appendLogArchive(store, records) {
+    if (DB_STORAGE_MODE !== 'files' || !records || !records.length) return;
+    try {
+        const dir = logArchiveDir(store);
+        ensureDir(dir);
+        const segs = logArchiveSegments(store);
+        let name = segs.length ? segs[segs.length - 1] : '0001.jsonl';
+        // Start a new segment when the current one has grown large, so a
+        // segment is never rewritten and the order is never disturbed.
+        try {
+            if (segs.length && fs.statSync(path.join(dir, name)).size > MAX_LOG_SEGMENT_BYTES) {
+                name = String(segs.length + 1).padStart(4, '0') + '.jsonl';
+            }
+        } catch {}
+        const target = path.join(dir, name);
+        fs.appendFileSync(target, records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+        mirrorFileToVolume(target, path.join(VOLUME_LOG_DIR, LOG_STORES[store].archive));
+    } catch (e) { console.error('log archive append failed (' + store + '): ' + e.message); }
+}
+// A deleted record is recorded as a tombstone so it cannot come back when the
+// archive is replayed at boot.
+function tombstoneLogArchive(store, record) {
+    if (DB_STORAGE_MODE !== 'files' || !record) return;
+    try { appendLogArchive(store, [{ __tombstone: true, id: record.id || null, at: Date.now() }]); }
+    catch (e) { /* keep going - the record is still gone from the window */ }
+}
+// Remove every archived entry of a log store (an explicit instruction).
+function clearLogArchive(store) {
+    if (DB_STORAGE_MODE !== 'files') return;
+    try {
+        const dir = logArchiveDir(store);
+        for (const f of logArchiveSegments(store)) {
+            try { fs.unlinkSync(path.join(dir, f)); } catch {}
+            try { fs.unlinkSync(path.join(VOLUME_LOG_DIR, LOG_STORES[store].archive, f)); } catch {}
+        }
+    } catch {}
+}
+// The newest `want` entries of a log archive, with tombstoned ids removed.
+function readLogArchiveTail(store, want) {
+    const dir = logArchiveDir(store);
+    const entries = [];
+    const dead = new Set();
+    for (const seg of logArchiveSegments(store)) {
+        let raw = '';
+        try { raw = fs.readFileSync(path.join(dir, seg), 'utf8'); } catch { continue; }
+        for (const line of raw.split('\n')) {
+            const t = line.trim();
+            if (!t) continue;
+            let rec = null;
+            try { rec = JSON.parse(t); } catch { continue; }
+            if (!rec || typeof rec !== 'object') continue;
+            if (rec.__tombstone) { if (rec.id) dead.add(String(rec.id)); continue; }
+            entries.push(rec);
+        }
+    }
+    const alive = entries.filter(r => !(r && r.id && dead.has(String(r.id))));
+    return want > 0 ? alive.slice(Math.max(0, alive.length - want)) : alive;
+}
+
+// ---- Dirty-store tracking --------------------------------------------------
+// Every write to a store is tracked automatically, so a save can never miss a
+// change and can never rewrite a store that did not change.
+const _dirtyStores = new Set();
+function markStoreDirty(store) {
+    const s = String(store || '');
+    if (!s || RUNTIME_DB_KEYS.indexOf(s) >= 0) return;
+    _dirtyStores.add(s);
+}
+// A record can also be edited in place (rec.field = x) without replacing the
+// array element, so the records themselves are tracked too. The proxies are
+// created lazily - only for the records that are actually read.
+const _recordProxyCache = new WeakMap();   // raw record -> proxy
+const _recordRaw = new WeakMap();          // proxy -> raw record
+function wrapRecord(rec, store) {
+    if (!rec || typeof rec !== 'object') return rec;
+    if (_recordRaw.has(rec)) return rec;                 // already a proxy
+    const cached = _recordProxyCache.get(rec);
+    if (cached) return cached;
+    const proxy = new Proxy(rec, {
+        set(t, k, v) { markStoreDirty(store); t[k] = v; return true; },
+        deleteProperty(t, k) { markStoreDirty(store); delete t[k]; return true; }
+    });
+    _recordProxyCache.set(rec, proxy);
+    _recordRaw.set(proxy, rec);
+    return proxy;
+}
+function wrapStoreValue(store, value) {
+    if (!Array.isArray(value)) return value;
+    return new Proxy(value, {
+        get(target, prop) {
+            const v = Reflect.get(target, prop);
+            // Element access hands out the tracked record.
+            if (typeof prop === 'string' && /^(0|[1-9][0-9]*)$/.test(prop)) return wrapRecord(v, store);
+            return v;
+        },
+        set(target, prop, val) {
+            markStoreDirty(store);
+            // Keep the raw record in the array so it is never wrapped twice.
+            const raw = (val && typeof val === 'object' && _recordRaw.has(val)) ? _recordRaw.get(val) : val;
+            return Reflect.set(target, prop, raw);
+        },
+        deleteProperty(target, prop) { markStoreDirty(store); return Reflect.deleteProperty(target, prop); }
+    });
+}
+function wrapDBObject(raw) {
+    const target = {};
+    if (raw && typeof raw === 'object') {
+        Object.keys(raw).forEach(k => { target[k] = wrapStoreValue(k, raw[k]); });
+    }
+    return new Proxy(target, {
+        set(t, k, v) { markStoreDirty(k); t[k] = wrapStoreValue(k, v); return true; },
+        deleteProperty(t, k) { markStoreDirty(k); delete t[k]; return true; }
+    });
+}
+
+// The database as it should be written to disk (runtime caches removed).
+function persistableDB() {
+    const out = {};
+    for (const k of Object.keys(db)) {
+        if (RUNTIME_DB_KEYS.indexOf(k) >= 0) continue;
+        out[k] = db[k];
+    }
+    return out;
+}
+
+// Keep only the most recent entries of a log store in memory; the rest is
+// moved into the append-only archive.
+function trimLogStore(store) {
+    const cfg = LOG_STORES[store];
+    if (!cfg) return;
+    const rows = db[store];
+    if (!Array.isArray(rows) || rows.length <= cfg.window) return;
+    const overflow = rows.slice(0, rows.length - cfg.window);
+    db[store] = rows.slice(rows.length - cfg.window);
+    appendLogArchive(store, overflow);
+}
+
+// ---- Backups ----------------------------------------------------------------
+// A full backup used to be written on every save (another 33 MB). It is now
+// written on a timer and on shutdown, which is what a backup is for.
+const FULL_BACKUP_INTERVAL_MS = 15 * 60 * 1000;
+let _lastFullBackup = 0;
+function pruneBackups() {
+    try {
+        const files = fs.readdirSync(DB_BACKUP_DIR)
+            .filter(f => f.startsWith('server-data.') && f.endsWith('.json'))
+            .sort().reverse();
+        if (files.length > MAX_BACKUPS) {
+            files.slice(MAX_BACKUPS).forEach(f => {
+                try { fs.unlinkSync(path.join(DB_BACKUP_DIR, f)); } catch {}
+            });
+        }
+    } catch {}
+}
+// The backup is assembled from the store files instead of from one huge
+// in-memory string, so building it never blocks the event loop. It is written
+// as a stream, so even a very large database never needs a second copy in
+// memory.
+function listStoreEntries() {
+    const entries = [];
+    let files = [];
+    try { files = fs.readdirSync(STORE_DIR).filter(f => f.endsWith('.json')).sort(); } catch {}
+    for (const f of files) {
+        const name = storeNameFromFile(f);
+        if (RUNTIME_DB_KEYS.indexOf(name) >= 0) continue;
+        entries.push([name, path.join(STORE_DIR, f)]);
+    }
+    return entries;
+}
+function writeChunk(stream, chunk) {
+    return new Promise((resolve, reject) => {
+        const onError = err => { stream.off('drain', onDrain); reject(err); };
+        const onDrain = () => { stream.off('error', onError); resolve(); };
+        stream.once('error', onError);
+        if (stream.write(chunk)) { stream.off('error', onError); resolve(); }
+        else stream.once('drain', onDrain);
+    });
+}
+async function writeFullBackup() {
+    let out = null;
+    try {
+        ensureBackupDir();
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = path.join(DB_BACKUP_DIR, 'server-data.' + stamp + '.json');
+        const tmpPath = backupPath + '.tmp';
+        out = fs.createWriteStream(tmpPath, { encoding: 'utf8' });
+        await writeChunk(out, '{');
+        let first = true;
+        for (const [name, file] of listStoreEntries()) {
+            let content = '';
+            try { content = await fs.promises.readFile(file, 'utf8'); } catch { continue; }
+            await writeChunk(out, (first ? '' : ',') + JSON.stringify(name) + ':' + content);
+            first = false;
+        }
+        await writeChunk(out, '}');
+        await new Promise((resolve, reject) => {
+            out.once('error', reject);
+            out.end(err => (err ? reject(err) : resolve()));
+        });
+        out = null;
+        try { fs.renameSync(tmpPath, backupPath); } catch { /* keep the tmp copy */ }
+        // The single "latest good" copy the boot fallback reads.
+        await fs.promises.copyFile(backupPath, DB_BACKUP);
+        pruneBackups();
+    } catch (e) {
+        console.error('full backup failed: ' + e.message);
+        try { if (out) out.destroy(); } catch {}
+    }
+}
+function scheduleFullBackup() {
+    if (DB_STORAGE_MODE === 'single') return;   // single mode backs up on every save
+    const now = Date.now();
+    if (now - _lastFullBackup < FULL_BACKUP_INTERVAL_MS) return;
+    _lastFullBackup = now;
+    setTimeout(() => { try { writeFullBackup(); } catch (e) { /* logged inside */ } }, 1500);
+}
+
+// ---- Reading the store files ----------------------------------------------
+// The Railway volume is the durable copy, so it wins - exactly as the old boot
+// copied /data/server-data.json over the local file.
+function prepareFileStorage() {
+    ensureDir(STORE_DIR);
+    ensureDir(LOG_DIR);
+    try {
+        if (fs.existsSync(VOLUME_STORE_DIR)) {
+            for (const f of fs.readdirSync(VOLUME_STORE_DIR)) {
+                if (!f.endsWith('.json')) continue;
+                try { fs.copyFileSync(path.join(VOLUME_STORE_DIR, f), path.join(STORE_DIR, f)); } catch {}
+            }
+        }
+    } catch {}
+    try {
+        if (fs.existsSync(VOLUME_LOG_DIR)) {
+            for (const store of Object.keys(LOG_STORES)) {
+                const archive = LOG_STORES[store].archive;
+                const volDir = path.join(VOLUME_LOG_DIR, archive);
+                if (!fs.existsSync(volDir)) continue;
+                ensureDir(path.join(LOG_DIR, archive));
+                for (const f of fs.readdirSync(volDir)) {
+                    if (!f.endsWith('.jsonl')) continue;
+                    try { fs.copyFileSync(path.join(volDir, f), path.join(LOG_DIR, archive, f)); } catch {}
+                }
+            }
+        }
+    } catch {}
+}
+function loadStoresFromDisk() {
+    const out = {};
+    let files = [];
+    try { files = fs.readdirSync(STORE_DIR).filter(f => f.endsWith('.json')); } catch {}
+    for (const f of files) {
+        const data = readJSON(path.join(STORE_DIR, f));
+        // A store may hold any JSON value (most hold a list, some a settings
+        // object). Only an unreadable file is skipped.
+        if (data === null || data === undefined) continue;
+        const name = storeNameFromFile(f);
+        // Runtime caches are rebuilt on boot and must never be read back.
+        if (RUNTIME_DB_KEYS.indexOf(name) >= 0) continue;
+        out[name] = data;
+    }
+    // A log store keeps its recent window in the store file; the older entries
+    // live in the append-only archive and are NOT loaded back into memory -
+    // the screens read the recent window, exactly as before.
+    for (const store of Object.keys(LOG_STORES)) {
+        if (!Object.prototype.hasOwnProperty.call(out, store)) {
+            // No window file (fresh or recovered): take the newest entries from
+            // the archive so the history is not lost.
+            out[store] = readLogArchiveTail(store, LOG_STORES[store].window);
+        }
+    }
+    return out;
+}
+// One-off: split the old single-file database into store files.
+function migrateLegacyToStores(legacy) {
+    const written = [];
+    for (const store of Object.keys(legacy)) {
+        if (RUNTIME_DB_KEYS.indexOf(store) >= 0) continue;
+        const value = legacy[store];
+        if (isLogStore(store)) {
+            const cfg = LOG_STORES[store];
+            const rows = Array.isArray(value) ? value : [];
+            const overflow = rows.length > cfg.window ? rows.slice(0, rows.length - cfg.window) : [];
+            const window = rows.length > cfg.window ? rows.slice(rows.length - cfg.window) : rows;
+            if (overflow.length) appendLogArchive(store, overflow);
+            writeStoreFile(store, window);
+        } else {
+            writeStoreFile(store, value);
+        }
+        written.push(store);
+    }
+    return written;
+}
+
+// Atomic write (legacy single-file mode): write to temp file, then rename.
 function safeWriteJSON(data) {
     const json = JSON.stringify(data);
     try {
@@ -466,18 +848,7 @@ function safeWriteJSON(data) {
         const backupPath = path.join(DB_BACKUP_DIR, 'server-data.' + stamp + '.json');
         fs.writeFile(backupPath, json, 'utf8', err => {
             if (err) console.error('Backup write error:', err);
-            // Prune old backups (keep MAX_BACKUPS)
-            try {
-                const files = fs.readdirSync(DB_BACKUP_DIR)
-                    .filter(f => f.startsWith('server-data.') && f.endsWith('.json'))
-                    .sort()
-                    .reverse();
-                if (files.length > MAX_BACKUPS) {
-                    files.slice(MAX_BACKUPS).forEach(f => {
-                        try { fs.unlinkSync(path.join(DB_BACKUP_DIR, f)); } catch {}
-                    });
-                }
-            } catch {}
+            pruneBackups();
         });
         return true;
     } catch (e) {
@@ -498,7 +869,9 @@ function purgeRuntimeCaches(obj) {
         try { delete obj.__countryIndex; } catch {}
     }
 }
-function loadDB() {
+// The old single-file reader. It stays as the migration source and as the
+// fallback chain for a database that has never been split.
+function loadLegacyDB() {
     const sources = [
         { file: DB_VOLUME_PATH, label: 'volume' },
         { file: DB_FILE, label: 'main' },
@@ -558,6 +931,54 @@ function loadDB() {
     console.error('All data sources corrupted! Starting with empty DB.');
     return { mpesaSettings: {}, mpesaTransactions: [] };
 }
+
+// The database is read from the store files. When they do not exist yet the
+// old single file is migrated into them, once.
+// One-off: split the old single-file database into store files. The legacy
+// object is released as soon as the files are written, so the migration never
+// needs two copies of the database in memory at the same time.
+function migrateLegacyFileToStores() {
+    let legacy = null;
+    try {
+        legacy = loadLegacyDB();
+        if (!legacy || typeof legacy !== 'object') return 0;
+        const written = migrateLegacyToStores(legacy);
+        process.stderr.write('DB_MIGRATED_TO_STORE_FILES: ' + written.length + ' stores\n');
+        // Keep the old file for forensics, but never read it again.
+        try { if (fs.existsSync(DB_FILE)) fs.renameSync(DB_FILE, DB_FILE + '.pre-split'); } catch {}
+        return written.length;
+    } finally {
+        legacy = null;   // let the garbage collector reclaim it before the read back
+    }
+}
+function loadDB() {
+    if (DB_STORAGE_MODE === 'files') {
+        try {
+            prepareFileStorage();
+            // The database is only "present" when a store file exists. An
+            // empty store directory means this is a first run and the old
+            // single file has to be migrated.
+            let storeFiles = [];
+            try { storeFiles = fs.readdirSync(STORE_DIR).filter(f => f.endsWith('.json')); } catch {}
+            if (storeFiles.length) {
+                const stores = loadStoresFromDisk();
+                if (Object.keys(stores).length) return stores;
+            }
+        } catch (e) {
+            process.stderr.write('DB_STORE_LOAD_FAILED: ' + e.message + ' - falling back to the single-file database\n');
+        }
+        try {
+            if (migrateLegacyFileToStores()) {
+                const stores = loadStoresFromDisk();
+                if (Object.keys(stores).length) return stores;
+            }
+        } catch (e) {
+            process.stderr.write('DB_STORE_MIGRATION_FAILED: ' + e.message + ' - using the single-file database\n');
+        }
+        return loadLegacyDB() || { mpesaSettings: {}, mpesaTransactions: [] };
+    }
+    return loadLegacyDB() || { mpesaSettings: {}, mpesaTransactions: [] };
+}
 // Adopt a fallback as the new main file ONLY when it cannot destroy newer
 // data: main missing, or fallback genuinely newer. Seed templates (empty by
 // design) never overwrite an existing main file.
@@ -571,8 +992,23 @@ function shouldAdoptFallback(mainFile, fallbackFile, label) {
     } catch { return false; }
 }
 
-// Copy database from volume before first load
-try { if (fs.existsSync(DB_VOLUME_PATH)) { fs.copyFileSync(DB_VOLUME_PATH, DB_FILE); process.stderr.write('DB_COPIED_FROM_VOLUME\n'); } } catch (e) { process.stderr.write('DB_VOLUME_COPY_FAILED: ' + e.message + '\n'); }
+// Copy database from volume before first load. In per-store mode the volume
+// already holds the store files (prepareFileStorage copies them), so the
+// single-file copy is only needed as the migration source.
+try {
+    if (DB_STORAGE_MODE === 'files') {
+        prepareFileStorage();
+        let hasStores = false;
+        try { hasStores = fs.readdirSync(STORE_DIR).some(f => f.endsWith('.json')); } catch {}
+        if (!hasStores && fs.existsSync(DB_VOLUME_PATH)) {
+            fs.copyFileSync(DB_VOLUME_PATH, DB_FILE);
+            process.stderr.write('DB_COPIED_FROM_VOLUME\n');
+        }
+    } else if (fs.existsSync(DB_VOLUME_PATH)) {
+        fs.copyFileSync(DB_VOLUME_PATH, DB_FILE);
+        process.stderr.write('DB_COPIED_FROM_VOLUME\n');
+    }
+} catch (e) { process.stderr.write('DB_VOLUME_COPY_FAILED: ' + e.message + '\n'); }
 // On startup, create a safety backup of whatever file exists
 try {
     ensureBackupDir();
@@ -810,7 +1246,7 @@ function cleanOnlineUsers() {
 }
 setInterval(cleanOnlineUsers, 30000);
 
-let db = loadDB();
+let db = wrapDBObject(loadDB());
 
 // ---- The owner (the author of the system) --------------------------------
 // One account, created from the environment so that no credential is ever
@@ -924,13 +1360,26 @@ let _saveTimer = null;
 function saveDB() {
     if (_saveTimer) clearTimeout(_saveTimer);
     _saveTimer = setTimeout(() => {
-        safeWriteJSON(db);
         _saveTimer = null;
+        flushStores();
     }, 500);
 }
 function flushDB() {
     if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-    safeWriteJSON(db);
+    flushStores();
+}
+// Write the stores that changed - and only those.
+function flushStores() {
+    if (DB_STORAGE_MODE === 'single') { safeWriteJSON(db); return; }
+    const stores = Array.from(_dirtyStores);
+    for (const store of stores) {
+        if (RUNTIME_DB_KEYS.indexOf(store) >= 0) continue;
+        if (isLogStore(store)) { try { trimLogStore(store); } catch (e) { console.error('trimLogStore failed: ' + e.message); } }
+        writeStoreFile(store, db[store]);
+    }
+    // Cleared AFTER the writes so a change made during the flush is not lost.
+    _dirtyStores.clear();
+    scheduleFullBackup();
 }
 process.on('exit', flushDB);
 process.on('SIGINT', () => { flushDB(); process.exit(); });
@@ -3235,7 +3684,9 @@ res.write('\n');
         if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
         const authUser = getRequestUser(req);
         if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
-        const backup = JSON.stringify(db);
+        // The runtime caches are not part of the data, so they stay out of the
+        // download as well.
+        const backup = JSON.stringify(persistableDB());
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         auditLog('backup-download', 'database', { bytes: backup.length }, authUser.username);
         res.writeHead(200, {
@@ -3509,9 +3960,17 @@ ${verified ? `<a class="btn sec" href="/#verify">✓ Verify this document</a>` :
                 const data = readJSON(backupPath);
                 if (!data || typeof data !== 'object') return json(res, 400, { error: 'Corrupted backup file' });
                 // Also ensure main backup is updated
-                fs.writeFileSync(DB_BACKUP, JSON.stringify(data), 'utf8');
-                db = data;
-                saveDB();
+                try { fs.writeFileSync(DB_BACKUP, JSON.stringify(data), 'utf8'); } catch {}
+                db = wrapDBObject(data);
+                if (DB_STORAGE_MODE === 'files') {
+                    // A restore replaces EVERYTHING: mark all stores dirty and
+                    // drop the log archives, so nothing older survives.
+                    Object.keys(db).forEach(k => markStoreDirty(k));
+                    Object.keys(LOG_STORES).forEach(k => clearLogArchive(k));
+                    flushStores();
+                } else {
+                    saveDB();
+                }
                 auditLog('restore-from-backup', 'database', { name }, authUser.username);
                 console.log('Database restored from backup:', name);
                 broadcastEvent('db-restored', { stores: Object.keys(data).length });
@@ -5585,6 +6044,8 @@ return json(res, 200, result);
         } else {
             db.audit = [];
         }
+        // Pruning is an explicit instruction, so the archive goes with it.
+        clearLogArchive('audit');
         saveDB();
         broadcastEvent('db-change', { store: 'audit' });
         return json(res, 200, { ok: true, remaining: db.audit.length });
@@ -6050,6 +6511,7 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
             if (!user || user.role !== 'admin') return json(res, 403, { error: 'Admin only' });
             const before = db[store].length;
             db[store] = [];
+            if (isLogStore(store)) clearLogArchive(store);
             mutate({ _cleared: true });
             auditLog('clear-store', store, { records: before }, user && user.username);
             return json(res, 200, { ok: true });
@@ -6061,7 +6523,12 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
             const doomed = idx >= 0 ? db[store][idx] : null;
             const _scDel = scopeWrite(user, store, doomed, doomed);
             if (_scDel) return json(res, 403, { error: _scDel });
-            if (idx >= 0) db[store].splice(idx, 1);
+            if (idx >= 0) {
+                db[store].splice(idx, 1);
+                // A log store is append-only, so a deletion is recorded as a
+                // tombstone; otherwise the record would come back on restart.
+                if (isLogStore(store) && doomed) tombstoneLogArchive(store, doomed);
+            }
             // Remove orphaned doc files for deleted certificates/idCards (docs + volume).
             if (doomed && (store === 'certificates' || store === 'idCards' || store === 'idcards')) {
                 try {

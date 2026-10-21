@@ -71,3 +71,6 @@ deploy-ssh/
 # Word/design assets & exports at repo root (data, not code)
 /*.pdf
 /*.png
+db-stores/
+db-logs/
+server-data.json.pre-split
