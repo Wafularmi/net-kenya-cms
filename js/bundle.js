@@ -5971,6 +5971,7 @@ async function showExamForm(exam = null) {
 <div class="form-group"><label>Exam Title</label><input type="text" id="exam-title" value="${fmt(exam ? exam.title : '')}" placeholder="e.g., Midterm Exam"></div>
 <div class="form-row">
   <div class="form-group"><label>Pass Mark (%)</label><input type="number" id="exam-pass" value="${exam && exam.passMark ? exam.passMark : 50}" min="0" max="100" style="width:80px;"></div>
+  <div class="form-group"><label>Maximum Attempts</label><input type="number" id="exam-attempts" value="${exam && exam.maxRetakes ? exam.maxRetakes : 1}" min="1" max="10" style="width:80px;"><div style="font-size:10px;color:var(--text-muted);">Total tries, including the first</div></div>
   <div class="form-group"><label>Duration (min)</label><input type="number" id="exam-duration" value="${exam && exam.duration ? exam.duration : 180}" style="width:80px;"></div>
   <div class="form-group"><label>Total Marks</label><input type="number" id="exam-total-marks" value="${totalMarks}" min="1" style="width:80px;"><div style="font-size:10px;color:var(--text-muted);">Auto-filled from course settings</div></div>
 </div>
@@ -6085,7 +6086,7 @@ async function saveExam() {
     const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time,
         opensAt: (document.getElementById('exam-opens') || {}).value || date || '',
         closesAt: (document.getElementById('exam-closes') || {}).value || '',
-        venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+        venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, duration: parseInt(document.getElementById('exam-duration').value) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, maxRetakes: Math.max(1, Math.min(10, parseInt((document.getElementById('exam-attempts') || {}).value) || 1)), totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('exams', exam); closeModal(); renderExams();
     showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
     logAudit(editId ? 'updated' : 'created', 'exam', exam);
@@ -17607,7 +17608,7 @@ async function showQuizForm(quiz = null) {
     const courses = await dbGetAll('courses');
     const questions = await dbGetAll('questionBank');
     const isEdit = !!quiz;
-    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Max Retakes <span style="font-weight:400;font-size:10px;color:var(--text-muted);">(after the first attempt)</span></label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="0"></div></div><div class="form-row">
+    const content = `<input type="hidden" id="quiz-edit-id" value="${quiz ? quiz.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="quiz-course-select" onchange="onQuizCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${quiz && quiz.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="quiz-lesson-select"><option value="">All Lessons</option></select></div></div><div class="form-group"><label>Assessment Title *</label><input type="text" id="quiz-title" value="${quiz ? quiz.title : ''}" required></div><div class="form-row"><div class="form-group"><label>Type</label><select id="quiz-type-select"><option value="quiz" ${quiz && (quiz.assessmentType === 'quiz' || !quiz.assessmentType) ? 'selected' : ''}>🧠 Quiz</option><option value="cat" ${quiz && quiz.assessmentType === 'cat' ? 'selected' : ''}>📋 Class Assessment Test (CAT)</option><option value="exam" ${quiz && quiz.assessmentType === 'exam' ? 'selected' : ''}>📄 Exam</option></select></div><div class="form-group"><label>Pass Mark (%)</label><input type="number" id="quiz-pass" value="${quiz ? quiz.passMark || 50 : 50}" min="0" max="100"></div></div><div class="form-row"><div class="form-group"><label>Time Limit (minutes, 0=no limit)</label><input type="number" id="quiz-time" value="${quiz ? quiz.timeLimit || 0 : 0}" min="0"></div><div class="form-group"><label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><input type="checkbox" id="quiz-ungated" ${quiz && quiz.ungated ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;"><span><b>Ungated</b><br><span style="font-size:11px;color:var(--text-muted);">Students may attempt this assessment even if drip lessons or the content gate would otherwise lock it.</span></span></label></div><div class="form-group"><label>Maximum Attempts <span style="font-weight:400;font-size:10px;color:var(--text-muted);">(total tries, including the first)</span></label><input type="number" id="quiz-retakes" value="${quiz ? quiz.maxRetakes || 1 : 1}" min="1" max="10"></div></div><div class="form-row">
     <div class="form-group"><label>Opens on</label><input type="date" id="quiz-opens" value="${fmt(quiz ? (quiz.opensAt || quiz.date) : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Locked before this day. The Time field sets the earliest start.</div></div>
     <div class="form-group"><label>Disappears on</label><input type="date" id="quiz-closes" value="${fmt(quiz ? quiz.closesAt : '')}"><div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Blank = closes 4 days after the quiz date. Type a date to set your own.</div></div>
   </div>
@@ -17710,7 +17711,7 @@ async function saveQuiz() {
     const quiz = { id, courseId, lessonId: dripMode === 'lesson' ? lessonId : '', dripMode, title, assessmentType, passMark, timeLimit,
         date: (document.getElementById('quiz-date') || {}).value || '',
         opensAt: (document.getElementById('quiz-opens') || {}).value || '',
-        closesAt: (document.getElementById('quiz-closes') || {}).value || '', ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: parseInt(document.getElementById('quiz-retakes').value) || 2, questionIds, createdAt: editId ? ((await dbGet('quizzes', id)) || {}).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+        closesAt: (document.getElementById('quiz-closes') || {}).value || '', ungated: !!(document.getElementById('quiz-ungated') || {}).checked, maxRetakes: Math.max(1, Math.min(10, parseInt(document.getElementById('quiz-retakes').value) || 1)), questionIds, createdAt: editId ? ((await dbGet('quizzes', id)) || {}).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('quizzes', quiz); closeModal(); renderQuizzes(); showToast(editId ? 'Assessment updated!' : `Assessment created with ${questionIds.length} questions!`); logAudit(editId ? 'updated' : 'created', 'quiz', { id, courseId, questions: questionIds.length });
 }
 async function editQuiz(id) {
@@ -18038,16 +18039,9 @@ async function saveEssayReview(submissionId) {
     sub.needsReview = false;
     sub.reviewedAt = sub.notifiedAt;
     await dbPut('submissions', sub);
-    const course = await dbGet('courses', quiz ? quiz.courseId : '');
-    const gradeEntry = {
-        id: `GRD-${sub.studentId}-${quiz ? quiz.courseId : ''}-1`,
-        studentId: sub.studentId,
-        courseId: quiz ? quiz.courseId : '',
-        score: newTotalScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa,
-        semester: 1, type: quiz ? (quiz.assessmentType || 'quiz') : 'quiz',
-        quizId: sub.quizId, reviewed: true, gradedAt: new Date().toISOString()
-    };
-    await dbPut('grades', gradeEntry);
+    // The reviewer's marks go on the paper; the SERVER records the result
+    // (the letter, the points and the semester come from the assessment and
+    // the active scale). The browser never writes a grade record itself.
     closeModal();
     renderSubmissions();
     invalidatePortalCache();
@@ -18837,23 +18831,14 @@ async function submitQuiz(quizId) {
     invalidatePortalCache();
     invalidateProgressCache();
     const course = await dbGet('courses', quiz.courseId);
-    if (!hasEssays) {
-        const gradeInfo = getGrade(totalScore);
-        const gradeEntry = {
-            // The same id the server uses, so both sides write ONE record.
-            id: 'GRADE-' + String(studentId).replace(/[^A-Za-z0-9_-]/g, '_') + '-' + String(quizId).replace(/[^A-Za-z0-9_-]/g, '_'),
-            studentId, submissionId: submission.id,
-            courseId: quiz.courseId, score: totalScore, grade: gradeInfo.grade,
-            gpa: gradeInfo.gpa,
-            semester: Number(quiz.semester) || 1, type: quiz.assessmentType || 'quiz', quizId,
-            gradedAt: new Date().toISOString()
-        };
-        // The server normally creates the grade with the paper itself; this
-        // write is the safety net for the rare case where it could not.
-        if (!saved || !saved.gradeId) {
-            try { await dbPut('grades', gradeEntry, { attempts: 3, timeoutMs: 20000 }); }
-            catch (gErr) { console.warn('grade record not written:', gErr && gErr.message); }
-        }
+    // The SERVER is the only writer of a grade record: it re-marks the paper
+    // and creates the result in the SAME write. The browser never writes a
+    // second copy - if the server could not confirm the result, the learner
+    // is told it is still being recorded instead of being given a mark that
+    // is not on the transcript.
+    const gradePending = !hasEssays && !(saved && saved.gradeId);
+    if (gradePending) {
+        console.warn('the server did not confirm the grade record for this paper');
     }
     clearQuizDraft(quizId, studentId);
     // Drip 50% rule: pass advances the lesson (congrats + invite follow); fail resets it for repeat.
@@ -18927,6 +18912,7 @@ async function submitQuiz(quizId) {
         <div style="font-size:13px;margin-bottom:4px;">Auto-graded: ${autoGradedCount} questions — ${Math.round(autoGradedEarned * 10) / 10}/${autoGradedTotal} pts</div>
         ${essayResults.length > 0 ? `<div style="font-size:13px;margin-bottom:4px;">Essay (AI-graded): ${essayResults[0].analysis.score}%</div>` : ''}
         ${isPending ? `<div style="margin-top:8px;padding:8px;background:#fef3c7;border-radius:6px;font-size:12px;color:#92400e;">⏳ Your essay answers are pending review by a lecturer. Your final score may change after review.</div>` : ''}
+        ${gradePending ? `<div style="margin-top:8px;padding:8px;background:#fef3c7;border-radius:6px;font-size:12px;color:#92400e;">⏳ Your paper was received. Your result is still being recorded and will appear on your transcript shortly.</div>` : ''}
         <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">Attempt ${attempts} of ${quiz.maxRetakes || 1}</div>
         ${!passed && !isPending && attempts < (quiz.maxRetakes || 1) ? `<div style="margin-top:12px;color:var(--warning);font-weight:600;">You can retake this assessment (${quiz.maxRetakes - attempts} attempts remaining)</div>` : ''}
         ${essayResults.length > 0 && essayResults[0].analysis ? `<div style="margin-top:16px;padding:12px;background:var(--bg-input);border-radius:8px;text-align:left;"><b>AI Essay Analysis:</b><br><span style="font-size:12px;">Understanding: <b>${essayResults[0].analysis.level}</b> — Coverage: ${essayResults[0].analysis.conceptCoverage}%</span></div>` : ''}

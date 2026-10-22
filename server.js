@@ -1382,6 +1382,9 @@ function flushStores() {
     scheduleFullBackup();
 }
 process.on('exit', flushDB);
+// Railway (and every sane supervisor) stops a container with SIGTERM. Without
+// this handler the last few hundred milliseconds of writes would be lost.
+process.on('SIGTERM', () => { try { flushDB(); } catch {} process.exit(0); });
 process.on('SIGINT', () => { flushDB(); process.exit(); });
 
 // One-time boot stamp: every stored document record must already carry its
@@ -1413,6 +1416,36 @@ function docStoreNames() {
     return ['certificates', 'idCards', 'idcards'];
 }
 try { stampDocIdentifiersAtBoot(); } catch (e) { console.error('boot doc-id stamp failed:', e); }
+
+// ---- Stored results follow the ACTIVE grading scale ----------------------
+// A stored result keeps its score; the letter and the grade points are
+// re-derived from that score under the scale the institution uses now. The
+// run happens once at boot, it is idempotent (a second run finds nothing to
+// change) and it is recorded in the audit trail. A mark that is not a plain
+// letter (a competency mark such as "PASS") is left exactly as it is.
+function normaliseStoredGradeScale() {
+    try {
+        const scale = activeGradeScaleServer();
+        const changed = [];
+        for (const g of (db.grades || [])) {
+            if (!g || typeof g !== 'object') continue;
+            const score = Number(g.score);
+            if (!Number.isFinite(score) || score < 0 || score > 100) continue;
+            const letter = String(g.grade == null ? '' : g.grade).trim();
+            if (!/^[A-F][+-]?$/i.test(letter)) continue;   // not a scale letter
+            const band = gradeBandForScore(score);
+            if (letter === band.grade && Number(g.gpa) === band.gpa) continue;
+            g.grade = band.grade;
+            g.gpa = band.gpa;
+            changed.push({ id: g.id, score: score, grade: band.grade });
+        }
+        if (!changed.length) return 0;
+        auditLog('normalised', 'grades', { count: changed.length, scale: scale.label }, 'system');
+        try { flushDB(); } catch (e) { console.error('grade normalisation save failed:', e); }
+        process.stderr.write('GRADE_SCALE_NORMALISED: ' + changed.length + ' stored result(s) re-derived from the active scale\n');
+        return changed.length;
+    } catch (e) { console.error('normaliseStoredGradeScale failed:', e.message); return 0; }
+}
 
 function json(res, code, data) {
     res.writeHead(code, {
@@ -1801,6 +1834,9 @@ function gradeBandForScore(score) {
     for (const b of bands) { if (s >= b.min) return { grade: b.grade, gpa: b.gpa }; }
     return { grade: 'F', gpa: 0.0 };
 }
+// The stored results are brought in line with the ACTIVE scale once the scale
+// itself is available (the tables above are declared before this point).
+try { normaliseStoredGradeScale(); } catch (e) { console.error('boot grade normalisation failed:', e); }
 // The identifiers a learner may answer to: the student id, the username and
 // the admission number. A session may carry any one of them.
 function studentAliases(user) {
@@ -1834,12 +1870,16 @@ function assessmentGradeId(studentId, quizId) {
     return 'GRADE-' + clean(studentId) + '-' + clean(quizId);
 }
 // Create (or refresh) the grade record that belongs to a marked submission.
+// The SERVER is the only writer of a grade record that comes from a paper, so
+// there can never be two copies of the same mark.
 // Returns { id, created } so the caller can tell a fresh record from an
 // updated one.
-function upsertGradeFromSubmission(sub, marked, band, assessment) {
+function upsertGradeFromSubmission(sub, marked, band, assessment, scoredBy) {
     const studentId = String(sub.studentId || '');
     const quizId = String(sub.quizId || sub.examId || '');
     const courseId = String((assessment && assessment.courseId) || sub.courseId || '');
+    // A grade always belongs to a learner and an assessment.
+    if (!studentId || !quizId) return null;
     const existing = (db.grades || []).find(x => x && String(x.studentId) === studentId && String(x.quizId) === quizId);
     const id = existing ? existing.id : assessmentGradeId(studentId, quizId);
     const entry = {
@@ -1854,7 +1894,7 @@ function upsertGradeFromSubmission(sub, marked, band, assessment) {
         quizId: quizId,
         semester: Number(sub.semester != null ? sub.semester : ((assessment && assessment.semester) != null ? assessment.semester : 1)) || 1,
         gradedAt: new Date().toISOString(),
-        scoredBy: 'server'
+        scoredBy: scoredBy || 'server'
     };
     const gi = (db.grades || []).findIndex(x => x && x.id === id);
     if (gi >= 0) db.grades[gi] = entry; else db.grades.push(entry);
@@ -6351,7 +6391,47 @@ const parsed = JSON.parse(body);
                                 toStore.gpa = band.gpa;
                                 toStore.status = marked.score >= passMark ? 'pass' : 'fail';
                                 toStore.scoredBy = 'server';
-                                subMark = { marked: marked, band: band, assessment: assessment };
+                                subMark = { marked: marked, band: band, assessment: assessment, scoredBy: 'server' };
+                            } else {
+                                // The server could not mark this paper: a written
+                                // answer is marked by staff, and a question that
+                                // no longer exists cannot be marked at all.
+                                // NO marks are awarded here - the paper goes to
+                                // review and the score the browser claimed is
+                                // dropped, so a tampered client cannot mark
+                                // itself.
+                                toStore.status = 'pending_review';
+                                toStore.needsReview = true;
+                                delete toStore.score;
+                                delete toStore.grade;
+                                delete toStore.gpa;
+                                delete toStore.pointsEarned;
+                                delete toStore.totalPoints;
+                                delete toStore.scoredBy;
+                            }
+                        } else if (user) {
+                            // Staff write: a reviewer marking a paper. The marks
+                            // are the reviewer's, the letter and the grade
+                            // record are the server's.
+                            const a2 = (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId))
+                                || (db.exams || []).find(e => e && String(e.id) === String(toStore.quizId));
+                            const reviewScore = Number(toStore.score);
+                            const reviewDone = toStore.needsReview === false && Number.isFinite(reviewScore)
+                                && !!toStore.studentId && !!a2;
+                            if (reviewDone) {
+                                const band = gradeBandForScore(reviewScore);
+                                const passMark = Number(a2.passMark != null ? a2.passMark : 50);
+                                toStore.grade = band.grade;
+                                toStore.gpa = band.gpa;
+                                toStore.status = reviewScore >= passMark ? 'pass' : 'fail';
+                                toStore.needsReview = false;
+                                subMark = { marked: { score: reviewScore }, band: band, assessment: a2, scoredBy: 'staff' };
+                            } else if (toStore.needsReview === true) {
+                                // Still waiting for a reviewer: no letter and no
+                                // marks on the paper.
+                                toStore.status = 'pending_review';
+                                delete toStore.grade;
+                                delete toStore.gpa;
                             }
                         }
                     }
@@ -6398,6 +6478,20 @@ const parsed = JSON.parse(body);
                             upsertGradeFromSubmission(Object.assign({}, sub || toStore, { id: sub ? sub.id : toStore.submissionId }), marked, band, gRec);
                         } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
+                    if (store === 'grades') {
+                        // The SERVER owns the letter. The score is the fact; the
+                        // letter and the grade points follow the institution's
+                        // ACTIVE scale. A browser that still carries an old
+                        // grading table can never store a letter that
+                        // disagrees with the scale the transcripts are printed
+                        // from. The score itself is never touched.
+                        const score = Number(toStore.score);
+                        if (Number.isFinite(score) && score >= 0 && score <= 100) {
+                            const band = gradeBandForScore(score);
+                            toStore.grade = band.grade;
+                            toStore.gpa = band.gpa;
+                        }
+                    }
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
                         if (_dupCode) return json(res, 400, { error: 'Center code already in use: ' + _dupCode });
@@ -6428,8 +6522,8 @@ const parsed = JSON.parse(body);
                     let gradeId = null, gradeCreated = false;
                     if (store === 'submissions' && subMark) {
                         try {
-                            const g = upsertGradeFromSubmission(toStore, subMark.marked, subMark.band, subMark.assessment);
-                            gradeId = g.id; gradeCreated = g.created;
+                            const g = upsertGradeFromSubmission(toStore, subMark.marked, subMark.band, subMark.assessment, subMark.scoredBy);
+                            if (g) { gradeId = g.id; gradeCreated = g.created; }
                         } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
                     json(res, 200, { ok: true, key: pk, gradeId: gradeId, gradeCreated: gradeCreated });
