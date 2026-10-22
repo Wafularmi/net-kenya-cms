@@ -1248,6 +1248,28 @@ setInterval(cleanOnlineUsers, 30000);
 
 let db = wrapDBObject(loadDB());
 
+// ---- Settings record cache -------------------------------------------------
+// Authorisation reads the same handful of settings records on every API call
+// (the admin tab switches, the assistant switches, the active grading scale).
+// A linear scan of the store per check is wasted work, so those records are
+// cached and the cache is dropped whenever the settings store is written.
+const settingsRecordCache = new Map();
+let _activeGradeScaleKey = null;
+function settingRecord(key) {
+    if (settingsRecordCache.has(key)) return settingsRecordCache.get(key);
+    const rec = (db.settings || []).find(s => s && s.key === key) || null;
+    settingsRecordCache.set(key, rec);
+    return rec;
+}
+function settingValue(key) {
+    const rec = settingRecord(key);
+    return rec ? (rec.value !== undefined ? rec.value : rec) : null;
+}
+function invalidateSettingsCache() {
+    settingsRecordCache.clear();
+    _activeGradeScaleKey = null;
+}
+
 // ---- The owner (the author of the system) --------------------------------
 // One account, created from the environment so that no credential is ever
 // stored in the repository. The owner IS an admin, with two extra powers:
@@ -1313,8 +1335,7 @@ const ADMIN_STORE_TO_TAB = Object.assign({}, STORE_TO_TAB, {
     hostels: 'hostel', auditTrail: 'audit'
 });
 function adminTabBlocked(store) {
-    const rec = (db.settings || []).find(s => s.key === 'adminAccess');
-    const acc = rec ? (rec.value || rec) : null;
+    const acc = settingValue('adminAccess');
     if (!acc || typeof acc !== 'object') return false;
     const tab = ADMIN_STORE_TO_TAB[store];
     if (tab && acc[tab] === false) return true;
@@ -1447,17 +1468,42 @@ function normaliseStoredGradeScale() {
     } catch (e) { console.error('normaliseStoredGradeScale failed:', e.message); return 0; }
 }
 
+// ---- CORS ------------------------------------------------------------------
+// Only trusted origins may call the API from a browser. The live site is
+// same-origin (browsers send no Origin header for it); the development app
+// runs on http://localhost:8080. Extra origins can be added with the
+// CORS_ALLOWED_ORIGINS environment variable (comma separated). A request from
+// any other origin simply receives no CORS grant, so the browser blocks it.
+const CORS_ALLOWED = String(process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:8080,http://127.0.0.1:8080')
+    .split(',').map(o => o.trim().replace(/\/$/, '')).filter(Boolean);
+function allowedOrigin(req) {
+    const origin = String((req && req.headers && req.headers.origin) || '').replace(/\/$/, '');
+    if (!origin) return '';
+    if (CORS_ALLOWED.includes(origin)) return origin;
+    // The page may be served from the very host that is answering (behind a
+    // proxy the scheme can differ), which is always same-origin as far as the
+    // browser is concerned.
+    try {
+        const host = String((req.headers && req.headers.host) || '');
+        if (host && new URL(origin).host === host) return origin;
+    } catch {}
+    return '';
+}
 function json(res, code, data) {
-    res.writeHead(code, {
+    const headers = {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Cache-Control': 'no-store, max-age=0'
-    });
+    };
+    if (res && res.__corsOrigin) {
+        headers['Access-Control-Allow-Origin'] = res.__corsOrigin;
+        headers['Vary'] = 'Origin';
+    }
+    res.writeHead(code, headers);
     res.end(JSON.stringify(data));
     return true;
 }
@@ -1820,12 +1866,13 @@ const GRADE_SCALES = {
         { min: 0, grade: 'F', gpa: 0.0 }] }
 };
 function activeGradeScaleServer() {
-    let key = '';
-    try {
-        const rec = (db.settings || []).find(s => s && s.key === 'academic');
-        key = String((rec && rec.grading) || '');
-    } catch {}
-    return GRADE_SCALES[key] || GRADE_SCALES.standard;
+    if (_activeGradeScaleKey === null) {
+        try {
+            const rec = settingRecord('academic');
+            _activeGradeScaleKey = String((rec && rec.grading) || '');
+        } catch { _activeGradeScaleKey = ''; }
+    }
+    return GRADE_SCALES[_activeGradeScaleKey] || GRADE_SCALES.standard;
 }
 // Grade letters must match the student-facing table in the browser.
 function gradeBandForScore(score) {
@@ -2063,8 +2110,7 @@ function canAccessStore(user, store, method) {
     if (store === 'students' && method !== 'GET') {
         if (user.role === 'admin' || countryScopeOf(user)) return true;
         if (user.role === 'assistant') {
-            const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
-            const access = rec ? (rec.value || rec) : null;
+            const access = settingValue('assistantAccess');
             if (!access || access['students'] !== false) return true;
             return false;
         }
@@ -2075,8 +2121,7 @@ function canAccessStore(user, store, method) {
         if (method === 'GET') return true;
         if (user.role === 'admin' || user.role === 'finance' || user.role === 'registrar' || countryScopeOf(user)) return true;
         if (user.role === 'assistant') {
-            const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
-            const access = rec ? (rec.value || rec) : null;
+            const access = settingValue('assistantAccess');
             if (!access || access['finance'] !== false) return true;
             return false;
         }
@@ -2124,12 +2169,10 @@ function canAccessStore(user, store, method) {
             // We need the parsed body to check key, but here we only have store/method.
             // Allow PUT to settings only if the tab 'settings' is enabled; the
             // specific 'assistantAccess' key check is done in the PUT handler.
-            const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
-            const access = rec ? (rec.value || rec) : null;
+            const access = settingValue('assistantAccess');
             if (store === 'settings' && access && access['settings'] === false) return false;
         }
-        const rec = (db.settings || []).find(s => s.key === 'assistantAccess');
-        const access = rec ? (rec.value || rec) : null;
+        const access = settingValue('assistantAccess');
         // If no config yet, default to allow all (so new assistant isn't locked out)
         if (!access) return true;
         const tab = STORE_TO_TAB[store];
@@ -2341,6 +2384,30 @@ function issueSession(username) {
     const token = crypto.randomBytes(32).toString('hex');
     sessions.set(token, { username, expires: Date.now() + SESSION_TTL, createdAt: Date.now() });
     saveSessions();
+    return token;
+}
+
+// A password change or reset is a security event: every OTHER device that was
+// signed in as that account must sign in again with the new password. The
+// caller's own request can be kept (the user just proved the password) and so
+// can the owner's, so a bulk reset never locks the owner out mid-operation.
+function revokeUserSessions(username, keepToken) {
+    const uname = String(username || '').toLowerCase();
+    if (!uname) return 0;
+    let revoked = 0;
+    for (const [token, s] of sessions) {
+        if (!s || String(s.username || '').toLowerCase() !== uname) continue;
+        if (keepToken && token === keepToken) continue;
+        sessions.delete(token);
+        revoked++;
+    }
+    if (revoked) { try { saveSessions(); } catch (e) { console.error('saveSessions failed:', e.message); } }
+    return revoked;
+}
+function requestToken(req) {
+    const auth = (req && req.headers && req.headers['authorization']) || '';
+    let token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) { try { token = parseCookies(req).session || ''; } catch {} }
     return token;
 }
 
@@ -3312,14 +3379,15 @@ function handleAPI(req, res) {
         const qUser = sessionUserForToken(urlObj.searchParams.get('token'));
         const hUser = getSessionUser(req);
         if (!qUser && !hUser) return json(res, 401, { error: 'Not authenticated' });
-        res.writeHead(200, {
+        const sseHeaders = {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-            'Access-Control-Allow-Origin': '*'
-        });
-res.write('\n');
+            'X-Accel-Buffering': 'no'
+        };
+        if (res.__corsOrigin) { sseHeaders['Access-Control-Allow-Origin'] = res.__corsOrigin; sseHeaders['Vary'] = 'Origin'; }
+        res.writeHead(200, sseHeaders);
+        res.write('\n');
         // Register the client IMMEDIATELY, using only values already resolved
         // above. This line used to read `user` — a name that does not exist in
         // this scope — so it threw a ReferenceError *after* the 200 headers had
@@ -3645,13 +3713,14 @@ res.write('\n');
 
     // GET /api/maintenance-events — public SSE stream for maintenance on/off (no auth)
     if (parts.length === 2 && parts[1] === 'maintenance-events' && req.method === 'GET') {
-        res.writeHead(200, {
+        const maintHeaders = {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-            'Access-Control-Allow-Origin': '*'
-        });
+            'X-Accel-Buffering': 'no'
+        };
+        if (res.__corsOrigin) { maintHeaders['Access-Control-Allow-Origin'] = res.__corsOrigin; maintHeaders['Vary'] = 'Origin'; }
+        res.writeHead(200, maintHeaders);
         res.write('\n');
         const client = { res, id: Date.now() };
         maintClients.push(client);
@@ -3832,6 +3901,7 @@ res.write('\n');
                 purgeRuntimeCaches(data);
                 const count = Object.keys(data).length;
                 db = data;
+                invalidateSettingsCache();
                 invalidateCountryIndex();
                 saveDB();
                 auditLog('restore', 'database', { stores: count }, authUser.username);
@@ -4002,6 +4072,7 @@ ${verified ? `<a class="btn sec" href="/#verify">✓ Verify this document</a>` :
                 // Also ensure main backup is updated
                 try { fs.writeFileSync(DB_BACKUP, JSON.stringify(data), 'utf8'); } catch {}
                 db = wrapDBObject(data);
+                invalidateSettingsCache();
                 if (DB_STORAGE_MODE === 'files') {
                     // A restore replaces EVERYTHING: mark all stores dirty and
                     // drop the log archives, so nothing older survives.
@@ -4259,7 +4330,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 if (!authUser || !authUser.user) return json(res, 401, { error: 'Not authenticated' });
                 const { currentPw, newPw } = JSON.parse(body);
                 if (!currentPw || !newPw) return json(res, 400, { error: 'Enter current and new password' });
-                if (String(newPw).length < 6) return json(res, 400, { error: 'New password must be at least 6 characters' });
+                if (String(newPw).length < 8) return json(res, 400, { error: 'New password must be at least 8 characters' });
                 const user = (db.users || []).find(u => u.username === authUser.username);
                 if (!user) return json(res, 404, { error: 'Account not found' });
                 const okCurrent = verifyPassword(currentPw, user.password) || user.password === currentPw;
@@ -4268,8 +4339,9 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 user.password = hashPassword(newPw);
                 delete user.mustChangePassword;
                 saveDB();
-                auditLog('change-password', 'user', { username: user.username }, user.username);
-                return json(res, 200, { ok: true });
+                const revoked = revokeUserSessions(user.username, requestToken(req));
+                auditLog('change-password', 'user', { username: user.username, revoked }, user.username);
+                return json(res, 200, { ok: true, revoked });
             } catch { return json(res, 400, { error: 'Invalid request' }); }
         });
         return true;
@@ -4306,17 +4378,26 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 const scope = String(parsed.scope || 'students');
                 const only = String(parsed.username || '').trim();
                 const users = db.users || [];
-                let n = 0;
+                const flagged = [];
                 for (const u of users) {
                     if (scope === 'students' && u.role !== 'student') continue;
                     if (scope === 'staff' && u.role === 'student') continue;
                     if (only && String(u.username || '').toLowerCase() !== only.toLowerCase()) continue;
                     u.mustChangePassword = true;
-                    n++;
+                    flagged.push(u);
                 }
                 saveDB();
-                auditLog('require-password-reset', 'user', { scope, only, count: n }, authUser.username);
-                return json(res, 200, { ok: true, count: n });
+                // A flagged account may have a stolen session: end it now, so
+                // the next sign-in is forced through the new password. The
+                // owner's own session is kept (the owner is never locked out
+                // of the screen they are using).
+                let revoked = 0;
+                for (const u of flagged) {
+                    if (isOwnerUser(u)) continue;
+                    revoked += revokeUserSessions(u.username, '');
+                }
+                auditLog('require-password-reset', 'user', { scope, only, count: flagged.length, revoked }, authUser.username);
+                return json(res, 200, { ok: true, count: flagged.length, revoked });
             } catch { return json(res, 400, { error: 'Invalid request' }); }
         });
         return true;
@@ -4367,10 +4448,9 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 const newPassword = parsed && parsed.newPassword ? String(parsed.newPassword) : '';
                 const resetToAdmission = !!(parsed && parsed.resetToAdmission);
                 if (!username) return json(res, 400, { error: 'Enter the account username' });
-                if (!resetToAdmission && newPassword.length < 6) return json(res, 400, { error: 'New password must be at least 6 characters' });
+                if (!resetToAdmission && newPassword.length < 8) return json(res, 400, { error: 'New password must be at least 8 characters' });
                 const target = (db.users || []).find(u => u.username === username || u.studentId === username || u.phone === username);
                 if (!target) return json(res, 404, { error: 'Account not found' });
-                const hash = pw => crypto.createHash('sha256').update(pw, 'utf8').digest('hex');
                 const isAdmin = authUser.role === 'admin';
                 const scope = countryScopeOf(authUser);
                 if (!isAdmin && !scope) return json(res, 403, { error: 'Only admins and country administrators may reset passwords' });
@@ -4392,8 +4472,13 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 delete target.mustChangePassword;
                 target.status = 'active';
                 saveDB();
-                auditLog('reset-password', 'user', { username: target.username, method: resetToAdmission ? 'to-admission' : 'custom' }, authUser.username);
-                return json(res, 200, { ok: true, resetToAdmission });
+                // A reset is how a compromised account is recovered, so every
+                // existing session for it ends. A user changing their OWN
+                // password keeps the session they are using.
+                const self = String(target.username).toLowerCase() === String(authUser.username).toLowerCase();
+                const revoked = revokeUserSessions(target.username, self ? requestToken(req) : '');
+                auditLog('reset-password', 'user', { username: target.username, method: resetToAdmission ? 'to-admission' : 'custom', revoked }, authUser.username);
+                return json(res, 200, { ok: true, resetToAdmission, revoked });
             } catch { return json(res, 400, { error: 'Invalid request' }); }
         });
         return true;
@@ -6158,6 +6243,17 @@ const LIVE_PUSH_STORES = new Set([
             if (store === 'students' || store === 'studyCenters' || store === 'regions') {
                 invalidateCountryIndex();
             }
+            if (store === 'settings') {
+                invalidateSettingsCache();
+                // Which tabs the owner grants the overall admin is a security
+                // decision: every change is written to the audit trail.
+                if (record && record.key === 'adminAccess') {
+                    const acc = record.value !== undefined ? record.value : record;
+                    const off = Object.keys(acc || {}).filter(k => k !== 'key' && k !== 'value' && acc[k] === false);
+                    auditLog(action === 'delete' ? 'access-cleared' : 'access-change', 'adminAccess',
+                        { disabledTabs: off, role: 'admin' }, user && user.username);
+                }
+            }
             if (record && record._cleared) record = null;            // whole-store clear: signal only
             if (record && LIVE_PUSH_STORES.has(store)) {
                 broadcastStoreChange(store, record, action || (record._deleted ? 'delete' : 'upsert'));
@@ -6765,13 +6861,20 @@ const server = http.createServer((req, res) => {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data: https:; connect-src 'self' https: http://localhost:8080 ws: wss:; media-src 'self' blob: https:; frame-src 'self' https: blob:; object-src 'self' blob:; worker-src 'self' blob:;");
+    // The one CORS decision for this request; every response helper reuses it.
+    res.__corsOrigin = allowedOrigin(req);
 
     if (req.method === 'OPTIONS') {
-        res.writeHead(204, {
-            'Access-Control-Allow-Origin': '*',
+        const preflight = {
             'Access-Control-Allow-Methods': 'POST, GET, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type'
-        });
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '600'
+        };
+        if (res.__corsOrigin) {
+            preflight['Access-Control-Allow-Origin'] = res.__corsOrigin;
+            preflight['Vary'] = 'Origin';
+        }
+        res.writeHead(204, preflight);
         return res.end();
     }
 

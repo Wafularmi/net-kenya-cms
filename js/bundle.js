@@ -1488,7 +1488,7 @@ function showForcedPasswordChange(user) {
         <div class="modal-body">
             <p style="font-size:13px;margin:0 0 12px;">Hello ${who} — for the security of your account you must set a new password before you can use the system.</p>
             <div class="form-group"><label>Current Password</label><input type="password" id="cp-current" style="width:100%;" autocomplete="current-password"></div>
-            <div class="form-group"><label>New Password (min 6 characters)</label><input type="password" id="cp-new" style="width:100%;" autocomplete="new-password"></div>
+            <div class="form-group"><label>New Password (min 8 characters)</label><input type="password" id="cp-new" style="width:100%;" autocomplete="new-password"></div>
             <div class="form-group"><label>Confirm New Password</label><input type="password" id="cp-confirm" style="width:100%;" autocomplete="new-password"></div>
             <div id="cp-status" style="font-size:12px;margin-top:4px;"></div>
         </div>
@@ -1500,7 +1500,7 @@ function showForcedPasswordChange(user) {
 function showChangePasswordModal() {
     showModal('🔑 Change Password',
         `<div class="form-group"><label>Current Password</label><input type="password" id="cp-current" style="width:100%;" autocomplete="current-password"></div>
-        <div class="form-group"><label>New Password (min 6 characters)</label><input type="password" id="cp-new" style="width:100%;" autocomplete="new-password"></div>
+        <div class="form-group"><label>New Password (min 8 characters)</label><input type="password" id="cp-new" style="width:100%;" autocomplete="new-password"></div>
         <div class="form-group"><label>Confirm New Password</label><input type="password" id="cp-confirm" style="width:100%;" autocomplete="new-password"></div>
         <div id="cp-status" style="font-size:12px;margin-top:4px;"></div>`,
         `<button class="btn btn-primary" onclick="submitChangePassword()">Update Password</button>`);
@@ -1511,7 +1511,7 @@ async function submitChangePassword() {
     const cf = document.getElementById('cp-confirm')?.value || '';
     const status = document.getElementById('cp-status');
     if (!cur || !nw || !cf) { if (status) { status.textContent = 'Fill all fields'; status.style.color = 'var(--danger)'; } return; }
-    if (nw.length < 6) { if (status) { status.textContent = 'New password must be at least 6 characters'; status.style.color = 'var(--danger)'; } return; }
+    if (nw.length < 8) { if (status) { status.textContent = 'New password must be at least 8 characters'; status.style.color = 'var(--danger)'; } return; }
     if (nw !== cf) { if (status) { status.textContent = 'New passwords do not match'; status.style.color = 'var(--danger)'; } return; }
     try {
         const res = await fetch('/api/change-password', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ currentPw: cur, newPw: nw }) });
@@ -2876,6 +2876,16 @@ async function printReportPDF() {
     } catch (e) { showToast('PDF failed: ' + e.message, { type: 'danger', duration: 8000 }); }
 }
 function onDBChange(store, record, action) {
+if (store === 'settings') {
+    // The owner decides which tabs the admin and the assistant may open. When
+    // those switches change, the navigation is rebuilt from the new values -
+    // the server already enforces them, this keeps the screen honest too.
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u.role === 'admin' && !u.isOwner) initAdminAccessCache().then(() => buildNavigation(u));
+        else if (u.role === 'assistant') initAssistantAccessCache().then(() => buildNavigation(u));
+    } catch (e) {}
+}
 const fn = _refreshMap[store];
 if (fn) {
 try { fn(record, action); } catch (e) {}
@@ -4196,7 +4206,7 @@ async function renderCoordinatorMgmt() {
     if (isCoordViewer && viewingCountry) {
         html += `<div class="card" style="margin-bottom:14px;padding:14px;"><div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px;">🔑 Your Own Login Password</div>
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Set a new password for your own coordinator account (no current password needed — you are already signed in).</div>
-        <div class="form-row"><div class="form-group"><label>New Password</label><input type="password" id="cownp" placeholder="min 6 characters"></div><div class="form-group"><label>Confirm</label><input type="password" id="cownm" placeholder="repeat"></div></div>
+        <div class="form-row"><div class="form-group"><label>New Password</label><input type="password" id="cownp" placeholder="min 8 characters"></div><div class="form-group"><label>Confirm</label><input type="password" id="cownm" placeholder="repeat"></div></div>
         <button class="btn btn-primary btn-sm" onclick="resetOwnPassword()">💾 Update My Password</button></div>`;
         const myCountry = viewingCountry;
         const countryStudents = students.filter(s => s && (String(s.country || '') === myCountry ||
@@ -4237,7 +4247,7 @@ async function editCoordinatorPassword(studentId) {
     if (!student) return;
     const uname = student.phone || student.id;
     const newPw = await showPrompt('Reset Student Password', 'New password for ' + (student.name || studentId) + ':');
-    if (!newPw || newPw.length < 6) return showToast('Password must be at least 6 characters!');
+    if (!newPw || newPw.length < 8) return showToast('Password must be at least 8 characters!');
     const res = await fetch('/api/reset-password', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ username: uname, newPassword: newPw }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || 'Could not reset password', { type: 'danger' });
@@ -4257,7 +4267,7 @@ async function resetStudentToAdmission(studentId) {
 }
 async function resetCoordinatorPerm(username) {
     const newPw = await showPrompt('Reset Coordinator Password', 'New password for "' + username + '":');
-    if (!newPw || newPw.length < 6) return showToast('Password must be at least 6 characters!');
+    if (!newPw || newPw.length < 8) return showToast('Password must be at least 8 characters!');
     if (!await showConfirm('Confirm Reset', 'Set new password for "' + username + '"?')) return;
     const res = await fetch('/api/reset-password', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})), body: JSON.stringify({ username, newPassword: newPw }) });
     const data = await res.json().catch(() => ({}));
@@ -4271,7 +4281,7 @@ async function resetOwnPassword() {
     const b = document.getElementById('cownm');
     if (!a || !b) return;
     const newPw = a.value;
-    if (!newPw || newPw.length < 6) return showToast('Password must be at least 6 characters!');
+    if (!newPw || newPw.length < 8) return showToast('Password must be at least 8 characters!');
     if (newPw !== b.value) return showToast('Passwords do not match!');
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (!user.username) return showToast('Not signed in', { type: 'danger' });
@@ -23176,7 +23186,7 @@ async function changePassword() {
     const confirmPw = document.getElementById('settings-confirm-pw').value;
     if (!currentPw || !newPw || !confirmPw) { status.textContent = 'Fill all fields'; status.style.color = 'var(--danger)'; return; }
     if (newPw !== confirmPw) { status.textContent = 'New passwords do not match'; status.style.color = 'var(--danger)'; return; }
-    if (newPw.length < 6) { status.textContent = 'Password must be at least 6 characters'; status.style.color = 'var(--danger)'; return; }
+    if (newPw.length < 8) { status.textContent = 'Password must be at least 8 characters'; status.style.color = 'var(--danger)'; return; }
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (!currentUser.username) { status.textContent = 'Not logged in'; status.style.color = 'var(--danger)'; return; }
     // The password is changed by the server, which stores it salted and
@@ -23600,7 +23610,7 @@ async function saveUser() {
     const username = document.getElementById('user-username').value.trim();
     const password = document.getElementById('user-password').value;
     if (!username || !password) return showToast('Username and password required!');
-    if (password.length < 4) return showToast('Password must be at least 4 characters!');
+    if (password.length < 8) return showToast('Password must be at least 8 characters!');
     const role = document.getElementById('user-role').value;
     const studentId = document.getElementById('user-student-id') ? document.getElementById('user-student-id').value : '';
     if (role === 'student' && !studentId) return showToast('Select a student record to link this user account!');
@@ -23617,16 +23627,19 @@ async function saveUser() {
 }
 async function resetUserPassword(username) {
     const newPw = await showPrompt('Reset Password', 'Enter new password for "' + username + '":');
-    if (!newPw || newPw.length < 4) return showToast('Password must be at least 4 characters!');
+    if (!newPw || newPw.length < 8) return showToast('Password must be at least 8 characters!');
     if (!await showConfirm('Confirm Reset', 'Set new password for "' + username + '"?')) return;
-    const pwHash = await hashPassword(newPw);
-    const user = await dbGet('users', username);
-    if (!user) return showToast('User not found!');
-    user.password = pwHash;
-    await dbPut('users', user);
+    // Passwords are stored only by the server (salted hash), which also ends
+    // every session of the account and writes the audit entry.
+    const res = await fetch('/api/reset-password', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})),
+        body: JSON.stringify({ username, newPassword: newPw })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showToast(data.error || 'Could not reset the password', { type: 'danger' });
     renderUsers();
     showToast('Password reset for ' + username + '!', { type: 'success' });
-    logAudit('updated', 'user-password', { username });
 }
 async function deleteUser(username) { if (!await showConfirm('Confirm', 'Delete user ' + username + '?')) return; await dbDelete('users', username); renderUsers(); showToast('User deleted'); logAudit('deleted', 'user', { username }); }
 async function renderGradRequirements() {
@@ -25866,7 +25879,7 @@ async function showCoordinatorForm(regionId) {
     const content = `<input type="hidden" id="coord-region" value="${regionId}">
 <div class="form-group"><label>Full Name *</label><input type="text" id="coord-name" placeholder="e.g., John Doe"></div>
 <div class="form-group"><label>Username *</label><input type="text" id="coord-username" placeholder="e.g., jdoe"></div>
-<div class="form-group"><label>Password *</label><input type="password" id="coord-password" placeholder="min 4 characters"></div>
+<div class="form-group"><label>Password *</label><input type="password" id="coord-password" placeholder="min 8 characters"></div>
 <div class="form-group"><label>Region</label><input type="text" value="${region.name}" disabled style="background:var(--bg-input);color:var(--text-muted);"></div>
 <div style="font-size:11px;color:var(--text-muted);">This account will be created as a <b>Coordinator</b> for <b>${region.name}</b>, with access limited to their region's data.</div>`;
     showModal('Register Coordinator — ' + region.name, content, `<button class="btn btn-primary" onclick="saveCoordinator()">Register</button>`);
@@ -25878,7 +25891,7 @@ async function saveCoordinator() {
     const username = document.getElementById('coord-username').value.trim();
     const password = document.getElementById('coord-password').value;
     if (!name || !username || !password) return showToast('All fields required!');
-    if (password.length < 4) return showToast('Password must be at least 4 characters!');
+    if (password.length < 8) return showToast('Password must be at least 8 characters!');
     const existing = await dbGet('users', username);
     if (existing) return showToast('Username already taken!');
     const pwHash = await hashPassword(password);
@@ -25893,7 +25906,7 @@ async function saveCoordinator() {
 function showCountryCoordinatorForm() {
     const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="cc-name" placeholder="e.g., Jane Doe"></div>
 <div class="form-group"><label>Username *</label><input type="text" id="cc-username" placeholder="e.g., jdoe"></div>
-<div class="form-group"><label>Password *</label><input type="password" id="cc-password" placeholder="min 4 characters"></div>
+<div class="form-group"><label>Password *</label><input type="password" id="cc-password" placeholder="min 8 characters"></div>
 <div class="form-group"><label>Country *</label><select id="cc-country"><option value="">— Select country —</option></select></div>
 <div class="form-group"><label>Contact Phone</label><input type="text" id="cc-phone" placeholder="e.g., +254 7XX XXX XXX"><small style="display:block;opacity:.7;">Appears as the contact phone on documents this coordinator generates.</small></div>
 <div style="font-size:11px;color:var(--text-muted);">This account becomes an <b>administrator of the selected country</b>: full management powers fenced to that country's data. Global settings stay with the overall admin.</div>`;
@@ -25909,7 +25922,7 @@ async function saveCountryCoordinator() {
     const countryEl = document.getElementById('cc-country');
     const country = countryEl ? countryEl.value : '';
     if (!name || !username || !password) return showToast('All fields required!');
-    if (password.length < 4) return showToast('Password must be at least 4 characters!');
+    if (password.length < 8) return showToast('Password must be at least 8 characters!');
     if (!country) return showToast('Select a country for this coordinator!');
     const existing = await dbGet('users', username).catch(() => null);
     if (existing) return showToast('Username already taken!');
