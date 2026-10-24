@@ -1563,7 +1563,7 @@
         function showLoginError(m){var el=document.getElementById('login-error');if(m){el.textContent=m;el.style.display='block';}else{el.style.display='none';}}
     }
     // Populate country dropdown before bundle.js loads
-    (function(){ try { fetch('/api/countries').then(function(r){return r.json();}).then(function(d){ var sel=document.getElementById('login-country'); if(!sel||!d.countries) return; sel.innerHTML='<option value="">-- Select country --</option>'+d.countries.map(function(c){return '<option value="'+c.name+'">'+c.brandName+'</option>';}).join(''); }).catch(function(){}); } catch(e){} })();
+    (function(){ try { fetch('/api/countries').then(function(r){return r.json();}).then(function(d){ var sel=document.getElementById('login-country'); if(!sel||!d.countries) return; sel.innerHTML='<option value="">-- Select country --</option>'+d.countries.map(function(c){return '<option value="'+c.name+'">'+(c.brandName||c.name)+'</option>';}).join(''); }).catch(function(){}); } catch(e){} })();
     </script>
     <div id="privacy-analytics-note" style="position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;max-width:680px;width:calc(100% - 24px);background:rgba(15,23,42,0.96);color:#fff;padding:12px 14px;border-radius:10px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,0.35);display:flex;gap:10px;align-items:center;">
         <span style="flex:1;line-height:1.45;">This portal uses privacy-safe analytics to understand usage by country, browser, device and source. No raw IPs or student identifiers are stored.</span>

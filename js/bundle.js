@@ -1306,6 +1306,7 @@ async function loadCountries() {
         const sel = document.getElementById('login-country');
         if (!sel || !data.countries) return;
         sel.innerHTML = '<option value="">-- Select country --</option>' + data.countries.map(c => '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.brandName || c.name) + '</option>').join('');
+        try { if (typeof showToast === 'function' && data.countries.length > 0) { /* non-intrusive */ } } catch {}
     } catch {}
 }
 let _loginAutoCountry = null;
