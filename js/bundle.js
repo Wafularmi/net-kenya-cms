@@ -1207,6 +1207,7 @@ async function saveMaintenanceMode() {
 }
 
 async function initAuth() {
+    try { if (typeof loadCountries === 'function') loadCountries(); } catch {}
     // NOTE: there used to be a block here that re-created the `admin` account
     // (with a hardcoded default password) whenever dbGet('users','admin') did
     // not return a record. dbGet fails open — an unauthenticated call throws
