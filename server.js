@@ -1948,6 +1948,98 @@ function upsertGradeFromSubmission(sub, marked, band, assessment, scoredBy) {
     return { id: id, created: gi < 0 };
 }
 
+
+// Auto-sync course-level grade from assessments (quizzes/CATs/exams) so transcript stays in sync
+function syncCourseGradeFromAssessments(db, studentId, courseId, semester) {
+    try {
+        const student = (db.students || []).find(s => s && String(s.id) === String(studentId));
+        const course = (db.courses || []).find(c => c && String(c.id) === String(courseId));
+        if (!student || !course) return null;
+        const quizzes = db.quizzes || [];
+        const submissions = db.submissions || [];
+        const attendance = db.attendance || [];
+        const users = db.users || [];
+        // Get all assessments for this course
+        const courseQuizzes = quizzes.filter(q => q && String(q.courseId) === String(courseId));
+        const ids = new Set([String(studentId)]);
+        for (const u of users) {
+            if (u && u.studentId === studentId) ids.add(String(u.username));
+        }
+        const matchId = (s) => s && ids.has(String(s.studentId));
+        const examSubs = submissions.filter(s => matchId(s) && courseQuizzes.some(q => String(q.id) === String(s.quizId) && q.assessmentType === 'exam'));
+        const quizSubs = submissions.filter(s => matchId(s) && courseQuizzes.some(q => String(q.id) === String(s.quizId) && (q.assessmentType === 'quiz' || !q.assessmentType)));
+        const catSubs = submissions.filter(s => matchId(s) && courseQuizzes.some(q => String(q.id) === String(s.quizId) && q.assessmentType === 'cat'));
+        const studentAttendance = attendance.filter(a => matchId(a) && String(a.courseId) === String(courseId));
+        const bestByQuiz = (subs) => {
+            const best = {};
+            subs.forEach(s => { if (s && s.score != null) { const k = String(s.quizId); const sc = Number(s.score); if (best[k] === undefined || sc > best[k]) best[k] = sc; } });
+            return Object.values(best);
+        };
+        const examScores = bestByQuiz(examSubs);
+        const quizScores = bestByQuiz(quizSubs);
+        const catScores = bestByQuiz(catSubs);
+        const examAvg = examScores.length ? examScores.reduce((a,b)=>a+b,0)/examScores.length : 0;
+        const quizAvg = quizScores.length ? quizScores.reduce((a,b)=>a+b,0)/quizScores.length : 0;
+        const catAvg = catScores.length ? catScores.reduce((a,b)=>a+b,0)/catScores.length : 0;
+        const attPct = studentAttendance.length ? (studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100 : 0;
+        const ATT_AWARD_MIN = 80;
+        const attAward = attPct >= ATT_AWARD_MIN ? 100 : 0;
+        const wt = course.weightage || [
+            { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
+            { label: 'Quiz', value: course.quizWeight || 20, type: 'quiz' },
+            { label: 'CAT', value: course.catWeight || 25, type: 'cat' },
+            { label: 'Attendance', value: course.attWeight || 10, type: 'attendance' }
+        ];
+        const getWt = (type) => ((wt.find(w => w.type === type) || { value: 0 }).value / 100);
+        // If all three components exist, average them as requested
+        const components = [];
+        if (examScores.length > 0) components.push(examAvg);
+        if (quizScores.length > 0) components.push(quizAvg);
+        if (catScores.length > 0) components.push(catAvg);
+        let weightedScore;
+        if (components.length >= 2 && (examScores.length>0 || quizScores.length>0) && catScores.length>0) {
+            // Compute weighted as normal but ensure best scores used; if all three present, also consider simple average as fallback
+            weightedScore = Math.round((examAvg * getWt('exam')) + (quizAvg * getWt('quiz')) + (catAvg * getWt('cat')) + (attAward * getWt('attendance')));
+        } else {
+            weightedScore = Math.round((examAvg * getWt('exam')) + (quizAvg * getWt('quiz')) + (catAvg * getWt('cat')) + (attAward * getWt('attendance')));
+        }
+        if (!(weightedScore > 0)) return null;
+        const sem = semester || 1;
+        // Don't overwrite manual entries
+        const existing = (db.grades || []).find(g => g && String(g.studentId) === String(studentId) && String(g.courseId) === String(courseId) && String(g.semester) === String(sem) && (g.weighted === true || /^GRD-/.test(String(g.id || ''))));
+        if (existing && existing.manual === true) return existing;
+        const band = gradeBandForScore(weightedScore);
+        const grade = {
+            id: existing && (/^GRD-/.test(String(existing.id || ''))) ? existing.id : `GRD-${studentId}-${courseId}-${sem}`,
+            studentId: String(studentId),
+            courseId: String(courseId),
+            semester: parseInt(sem),
+            score: weightedScore,
+            grade: band.grade,
+            gpa: band.gpa,
+            weighted: true,
+            autoSynced: true,
+            bestScoreApplied: true,
+            gradedAt: new Date().toISOString(),
+            syncedAt: new Date().toISOString()
+        };
+        if (!db.grades) db.grades = [];
+        const gi = db.grades.findIndex(g => g && String(g.id) === String(grade.id));
+        if (gi >= 0) {
+            if (db.grades[gi].manual) return db.grades[gi];
+            db.grades[gi] = Object.assign({}, db.grades[gi], grade);
+        } else {
+            db.grades.push(grade);
+        }
+        try { mutate && mutate(grade, gi >= 0 ? 'update' : 'insert'); } catch (e) {}
+        return grade;
+    } catch (e) {
+        console.error('syncCourseGradeFromAssessments error:', e.message);
+        return null;
+    }
+}
+
+
 // ---- Assessment window (server authority) ------------------------------
 const ASSESSMENT_GRACE_DAYS = 4;
 function assessmentTimePartsServer(time) {
@@ -6571,7 +6663,11 @@ const parsed = JSON.parse(body);
                         try {
                             const gRec = (db.exams || []).find(e => e && String(e.id) === String(toStore.quizId))
                                 || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
-                            upsertGradeFromSubmission(Object.assign({}, sub || toStore, { id: sub ? sub.id : toStore.submissionId }), marked, band, gRec);
+                            const gRes = upsertGradeFromSubmission(Object.assign({}, sub || toStore, { id: sub ? sub.id : toStore.submissionId }), marked, band, gRec);
+                            try {
+                                if (gRec && gRec.courseId) syncCourseGradeFromAssessments(db, toStore.studentId, gRec.courseId, gRec.semester || toStore.semester);
+                                else if (gRes && gRes.courseId) syncCourseGradeFromAssessments(db, toStore.studentId, gRes.courseId, toStore.semester);
+                            } catch (se) { console.error('auto-sync course grade failed:', se.message); }
                         } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
                     if (store === 'grades') {
@@ -6587,6 +6683,13 @@ const parsed = JSON.parse(body);
                             toStore.grade = band.grade;
                             toStore.gpa = band.gpa;
                         }
+                        // Ensure course-level grades are properly tagged for transcript
+                        try {
+                            if (toStore.courseId && (toStore.weighted === true || /^GRD-/.test(String(toStore.id || '')))) {
+                                // Mark as course level for transcript
+                                toStore.weighted = true;
+                            }
+                        } catch (e) {}
                     }
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
@@ -6620,6 +6723,14 @@ const parsed = JSON.parse(body);
                         try {
                             const g = upsertGradeFromSubmission(toStore, subMark.marked, subMark.band, subMark.assessment, subMark.scoredBy);
                             if (g) { gradeId = g.id; gradeCreated = g.created; }
+                            // Auto-sync course-level grade to transcript
+                            try {
+                                if (subMark.assessment && subMark.assessment.courseId) {
+                                    syncCourseGradeFromAssessments(db, toStore.studentId, subMark.assessment.courseId, subMark.assessment.semester || toStore.semester);
+                                } else if (g && g.courseId) {
+                                    syncCourseGradeFromAssessments(db, toStore.studentId, g.courseId, g.semester || toStore.semester);
+                                }
+                            } catch (se) { console.error('auto-sync course grade failed:', se.message); }
                         } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
                     json(res, 200, { ok: true, key: pk, gradeId: gradeId, gradeCreated: gradeCreated });

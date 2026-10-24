@@ -5326,11 +5326,17 @@ async function computeAndSaveAllGrades() {
     let saved = 0;
     for (const p of plan) {
         const gradeInfo = getGrade(p.weightedScore);
-        const grade = { id: `GRD-${p.studentId}-${courseId}-${semester}`, studentId: p.studentId, courseId, semester: parseInt(semester), score: p.weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa, weighted: true, gradedAt: new Date().toISOString() };
+        const grade = { id: `GRD-${p.studentId}-${courseId}-${semester}`, studentId: p.studentId, courseId, semester: parseInt(semester), score: p.weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa, weighted: true, autoSynced: true, gradedAt: new Date().toISOString() };
         await dbPut('grades', grade);
         saved++;
     }
     loadGrades();
+    // Also sync to ensure transcript consistency
+    try {
+        for (const sid of studentIds) {
+            await syncCourseGradeFromAssessmentsClient(sid, courseId, semester);
+        }
+    } catch(e) {}
     showToast(`Saved ${saved} weighted grade(s).${keptManual ? ` ${keptManual} manual entr${keptManual === 1 ? 'y' : 'ies'} kept.` : ''}`, { duration: 6000 });
     logAudit('computed', 'weighted-grades', { courseId, semester, count: saved, keptManual });
 }
@@ -5356,6 +5362,7 @@ async function saveGrade(studentId, courseId, semester) {
     // by "Compute Weighted" - the recorded result wins over a recomputation.
     const grade = { id: `GRD-${studentId}-${courseId}-${semester}`, studentId, courseId, semester: parseInt(semester), score, grade: gradeInfo.grade, gpa: gradeInfo.gpa, manual: true, gradedAt: new Date().toISOString() };
     await dbPut('grades', grade); showToast('Grade saved!'); logAudit('saved', 'grade', { studentId, courseId, score });
+    try { await syncCourseGradeFromAssessmentsClient(studentId, courseId, semester); } catch(e) {}
 }
 let _gradeScale = 'standard';
 function setGradeScale(scale) { _gradeScale = scale || 'standard'; _gradeScaleLoaded = true; }
@@ -5641,6 +5648,57 @@ function resolveStudentResults(allGrades, studentId, opts) {
         totalCourses: rows.length
     };
 }
+
+
+// Auto-sync course-level grade from all assessment data (quizzes/CATs/exams)
+async function syncCourseGradeFromAssessmentsClient(studentId, courseId, semester) {
+    try {
+        const course = await dbGet('courses', courseId);
+        if (!course) return null;
+        const quizzes = await dbGetAll('quizzes');
+        const submissions = await dbGetAll('submissions');
+        const attendance = await dbGetAll('attendance');
+        const users = await dbGetAll('users');
+        const allGrades = await dbGetAll('grades');
+        const courseQuizzes = (quizzes || []).filter(q => q && q.courseId === courseId);
+        const ids = studentIdSet(studentId, users);
+        const matchId = (s) => s && ids.has(s.studentId);
+        const examSubs = (submissions || []).filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && q.assessmentType === 'exam'));
+        const quizSubs = (submissions || []).filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && (q.assessmentType === 'quiz' || !q.assessmentType)));
+        const catSubs = (submissions || []).filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && q.assessmentType === 'cat'));
+        const studentAttendance = (attendance || []).filter(a => matchId(a) && a.courseId === courseId);
+        const bestByQuiz = (subs) => { const best = {}; subs.forEach(s => { if (s && s.score != null) { const sc = Number(s.score); if (best[s.quizId] === undefined || sc > best[s.quizId]) best[s.quizId] = sc; } }); return Object.values(best); };
+        const examScores = bestByQuiz(examSubs);
+        const quizScores = bestByQuiz(quizSubs);
+        const catScores = bestByQuiz(catSubs);
+        const examAvg = examScores.length ? examScores.reduce((a,b)=>a+b,0)/examScores.length : 0;
+        const quizAvg = quizScores.length ? quizScores.reduce((a,b)=>a+b,0)/quizScores.length : 0;
+        const catAvg = catScores.length ? catScores.reduce((a,b)=>a+b,0)/catScores.length : 0;
+        const attPct = studentAttendance.length ? (studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100 : 0;
+        const attAward = attPct >= 80 ? 100 : 0;
+        const wt = course.weightage || [
+            { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
+            { label: 'Quiz', value: course.quizWeight || 20, type: 'quiz' },
+            { label: 'CAT', value: course.catWeight || 25, type: 'cat' },
+            { label: 'Attendance', value: course.attWeight || 10, type: 'attendance' }
+        ];
+        const getWt = (type) => ((wt.find(w=>w.type===type)||{value:0}).value/100);
+        const weightedScore = Math.round((examAvg*getWt('exam')) + (quizAvg*getWt('quiz')) + (catAvg*getWt('cat')) + (attAward*getWt('attendance')));
+        if (!(weightedScore > 0)) return null;
+        const sem = semester === 'all' ? 1 : (semester || 1);
+        const existing = (allGrades || []).find(g => g && g.studentId === studentId && g.courseId === courseId && String(g.semester) === String(sem) && isCourseLevelGrade(g));
+        if (existing && existing.manual === true) return existing;
+        const gradeInfo = getGrade(weightedScore);
+        const grade = {
+            id: (existing && /^GRD-/.test(existing.id||'')) ? existing.id : `GRD-${studentId}-${courseId}-${sem}`,
+            studentId, courseId, semester: parseInt(sem), score: weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa,
+            weighted: true, autoSynced: true, bestScoreApplied: true, gradedAt: new Date().toISOString(), syncedAt: new Date().toISOString()
+        };
+        await dbPut('grades', grade);
+        return grade;
+    } catch (e) { console.error('syncCourseGradeFromAssessmentsClient error:', e.message); return null; }
+}
+
 
 // Live cache for the Exams screen. renderExams() fills this on its first run
 // and then renders straight from it, so an SSE "db-change" carrying the new row
@@ -9458,6 +9516,20 @@ async function generateTranscript() {
     let grades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
     if (semester !== 'all') grades = grades.filter(g => g.semester == semester);
     const courses = await dbGetAll('courses');
+    // Auto-sync all course grades from assessments before generating transcript
+    try {
+        for (const c of courses) {
+            if (semester !== 'all') {
+                await syncCourseGradeFromAssessmentsClient(studentId, c.id, semester);
+            } else {
+                // sync for all semesters this student has
+                const sems = new Set();
+                (grades||[]).forEach(g=>{if(g.semester) sems.add(g.semester);});
+                if (sems.size === 0) sems.add('1');
+                for (const s of sems) await syncCourseGradeFromAssessmentsClient(studentId, c.id, s);
+            }
+        }
+    } catch(e) {}
     const payments = await dbGetAll('payments');
     const chapel = await dbGetAll('chapel');
     const attendance = await dbGetAll('attendance');
@@ -20049,8 +20121,16 @@ function renderPortalContent(studentId, data, isStudentUser) {
     // official transcript) and ASSESSMENT MARKS (components of a course result)
     // are shown separately, so a component mark can never be read as the
     // student's course result.
+    try {
+        for (const c of data.courses) {
+            await syncCourseGradeFromAssessmentsClient(studentId, c.id, 'all');
+        }
+        // reload grades after sync
+        const freshGrades = await dbGetAll('grades');
+        data.grades = freshGrades;
+    } catch(e) {}
     const portalCourseResults = resolveStudentResults(data.grades, studentId, { semester: 'all', courses: data.courses }).rows;
-    const portalAssessments = studentGrades.filter(g => isAssessmentGrade(g)).slice(0, 10);
+    const portalAssessments = (data.grades || []).filter(g => g && g.studentId === studentId && isAssessmentGrade(g)).slice(0, 10);
     const portalGradesHtml =
         (portalCourseResults.length
             ? portalCourseResults.map(r => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;"><span>F4CA ${r.course ? r.course.name : r.courseId}${r.semester ? ' · Sem ' + r.semester : ''}</span><span style="font-weight:700;color:${r.score >= 70 ? 'var(--success)' : r.score >= 50 ? 'var(--warning)' : 'var(--danger)'};">${r.score}% (${r.grade})</span></div>`).join('')
