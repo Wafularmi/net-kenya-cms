@@ -1362,7 +1362,16 @@ async function login() {
         if (_lb) _lb.disabled = true;
         const input = sanitizeInput(document.getElementById('login-user').value.trim());
         const password = document.getElementById('login-pass').value;
-        const country = document.getElementById('login-country') ? document.getElementById('login-country').value : '';
+        let country = document.getElementById('login-country') ? document.getElementById('login-country').value : '';
+        if (!country) {
+            const sel = document.getElementById('login-country');
+            if (sel && sel.options && sel.options.length > 1) {
+                // Try to pick first non-empty
+                for (let i = 1; i < sel.options.length; i++) {
+                    if (sel.options[i].value) { country = sel.options[i].value; sel.value = country; break; }
+                }
+            }
+        }
         if (!input || !password) return showLoginError('Enter username and password');
         // Country is required for non-admin users (enforced server-side); main admin is global and may log in without a country
         const res = await fetch('/api/login', {
