@@ -4266,11 +4266,17 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 // countriesList holds entry OBJECTS {name,code,...} — compare against names.
                 // (Array.includes(country) against objects would reject every login.)
                         const countryNames = (Array.isArray(countriesList) ? countriesList : []).map(c => (typeof c === 'string' ? c : c && c.name)).filter(Boolean);
+                        const countryNamesLower = countryNames.map(c => String(c).toLowerCase());
+                        const countryLower = country ? String(country).toLowerCase() : '';
                         try { process.stderr.write('LOGIN_DUMP input=' + String(input).slice(0, 30) + ' country=' + JSON.stringify(country) + ' countryLen=' + String(country || '').length + ' names=' + JSON.stringify(countryNames) + ' role=' + (user.role || '?') + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n'); } catch {}
                         if (user.role !== 'admin') {
-                            if (countryNames.length > 0 && (!country || !countryNames.includes(country))) {
+                            if (countryNames.length > 0 && (!country || !countryNamesLower.includes(countryLower))) {
                                 auditLog('login-country-rejected', 'user', { username: user.username, country: country || null, valid: countryNames }, 'anonymous');
                                 return json(res, 400, { error: 'Please select a valid country' });
+                            }
+                            if (country) {
+                                const idxn = countryNamesLower.indexOf(countryLower);
+                                if (idxn >= 0) country = countryNames[idxn];
                             }
                         }
 
