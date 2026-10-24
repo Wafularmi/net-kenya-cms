@@ -26832,6 +26832,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { clearLoginForm(); } catch {}
     window.addEventListener('pageshow', () => { try { clearLoginForm(); } catch {} });
     try { startMaintenanceLiveSync(); } catch {}
+    try { if (typeof loadCountries === 'function') loadCountries(); } catch {}
     // The contact number must not wait for any other download - it is shown on
     // the login screen and the server already rendered it.
     try {
