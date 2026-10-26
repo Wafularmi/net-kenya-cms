@@ -22490,9 +22490,9 @@ async function saveAssistantAccess() {
     showToast('Assistant access saved!'); logAudit('updated', 'assistant-access', s);
 }
 // ---- Owner controls ------------------------------------------------------
-// The owner is the author of the system. Two cards are shown to the owner
+// The owner is the author of the system. Three cards are shown to the owner
 // only: the switches that decide which tabs the overall administrator may
-// open, and the owner-only security actions.
+// open, the owner-only security actions, and the owner password form.
 const ADMIN_ACCESS_TABS = ADMIN_TABS;
 function isOwnerUser() {
     try {
@@ -22538,8 +22538,12 @@ async function loadAdminAccess() {
     const owner = !!currentUser.isOwner;
     const card = document.getElementById('owner-access-card');
     const secCard = document.getElementById('owner-security-card');
+    const pwCard = document.getElementById('owner-password-card');
+    const standardPwCard = document.getElementById('standard-password-card');
     if (card) card.style.display = owner ? '' : 'none';
     if (secCard) secCard.style.display = owner ? '' : 'none';
+    if (pwCard) pwCard.style.display = owner ? '' : 'none';
+    if (standardPwCard) standardPwCard.style.display = owner ? 'none' : '';
     if (!owner) return;
     try {
         const rec = await dbGet('settings', 'adminAccess');
@@ -23179,34 +23183,52 @@ async function saveWhatsAppSettings() {
     const settings = { key: 'whatsapp', countryCode: document.getElementById('settings-whatsapp-code').value.trim(), adminNumber: document.getElementById('settings-whatsapp-admin').value.trim() };
     await dbPut('settings', settings); showToast('WhatsApp settings saved!'); logAudit('updated', 'whatsapp-settings', settings);
 }
-async function changePassword() {
-    const status = document.getElementById('settings-pw-status');
-    const currentPw = document.getElementById('settings-current-pw').value;
-    const newPw = document.getElementById('settings-new-pw').value;
-    const confirmPw = document.getElementById('settings-confirm-pw').value;
-    if (!currentPw || !newPw || !confirmPw) { status.textContent = 'Fill all fields'; status.style.color = 'var(--danger)'; return; }
-    if (newPw !== confirmPw) { status.textContent = 'New passwords do not match'; status.style.color = 'var(--danger)'; return; }
-    if (newPw.length < 8) { status.textContent = 'Password must be at least 8 characters'; status.style.color = 'var(--danger)'; return; }
+function setPasswordFormStatus(status, message, ok) {
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = ok ? 'var(--success)' : 'var(--danger)';
+}
+
+async function changePasswordWithFields(prefix, statusId, options) {
+    const opts = options || {};
+    const status = document.getElementById(statusId);
+    const field = (name) => document.getElementById(prefix + '-' + name + '-pw');
+    const currentPw = field('current')?.value || '';
+    const newPw = field('new')?.value || '';
+    const confirmPw = field('confirm')?.value || '';
+    const fail = (msg) => setPasswordFormStatus(status, msg, false);
+    if (opts.ownerOnly && !isOwnerUser()) return fail('Only the owner can change this password');
+    if (!currentPw || !newPw || !confirmPw) return fail('Fill all fields');
+    if (newPw !== confirmPw) return fail('New passwords do not match');
+    if (newPw.length < 8) return fail('Password must be at least 8 characters');
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (!currentUser.username) { status.textContent = 'Not logged in'; status.style.color = 'var(--danger)'; return; }
+    if (!currentUser.username) return fail('Not logged in');
     // The password is changed by the server, which stores it salted and
     // encrypted-at-rest — the browser never sees or writes the hash.
     let res;
     try {
         res = await fetch('/api/change-password', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ currentPw: currentPw, newPw: newPw }) });
     } catch (e) {
-        status.textContent = 'Could not reach the server'; status.style.color = 'var(--danger)'; return;
+        return fail('Could not reach the server');
     }
     let data = null;
     try { data = await res.json(); } catch (e) {}
-    if (!res.ok) { status.textContent = (data && data.error) || 'Password change failed'; status.style.color = 'var(--danger)'; return; }
-    document.getElementById('settings-current-pw').value = '';
-    document.getElementById('settings-new-pw').value = '';
-    document.getElementById('settings-confirm-pw').value = '';
-    status.textContent = 'Password updated successfully!';
-    status.style.color = 'var(--success)';
-    logAudit('updated', 'password', { username: currentUser.username });
-    setTimeout(() => { status.textContent = ''; }, 3000);
+    if (!res.ok) return fail((data && data.error) || 'Password change failed');
+    ['current', 'new', 'confirm'].forEach(name => { const el = field(name); if (el) el.value = ''; });
+    if (opts.owner) {
+        const revoked = Number(data && data.revoked) || 0;
+        setPasswordFormStatus(status, revoked ? `Owner password updated. ${revoked} other session(s) signed out.` : 'Owner password updated successfully!', true);
+    } else {
+        setPasswordFormStatus(status, 'Password updated successfully!', true);
+    }
+    logAudit('updated', 'password', { username: currentUser.username, owner: !!opts.owner });
+    setTimeout(() => { if (status) status.textContent = ''; }, 4000);
+}
+async function changePassword() {
+    return changePasswordWithFields('settings', 'settings-pw-status');
+}
+async function changeOwnerPassword() {
+    return changePasswordWithFields('owner', 'owner-pw-status', { ownerOnly: true, owner: true });
 }
 function updateProgramFilter() {
     const settingsEl = document.getElementById('settings-programs');
