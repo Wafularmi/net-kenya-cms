@@ -3271,7 +3271,7 @@ async function renderStudents() {
             return nameMatch || admMatch || emailMatch;
         });
     }
-    // When searching by name/admission (e.g., finding Damaris Wamboi in blocked list), show matches regardless of status filter — fixes Moi's Bridge case where inactive students were hidden
+    // When searching by name/admission (e.g., finding a blocked/inactive student), show matches regardless of status filter — fixes the Moi's Bridge case where inactive students were hidden
     if (statusFilter && !search) filtered = filtered.filter(s => s.status === statusFilter);
     if (campusFilter) filtered = filtered.filter(s => s.studyCenterId === campusFilter);
     if (programFilter) filtered = filtered.filter(s => s.program === programFilter);
@@ -4888,7 +4888,7 @@ document.getElementById('course-search').addEventListener('input', debounce(rend
 //  - All Centers      => active students enrolled in the course (global course roster).
 //  - The "officially enrolled" count lets the UI explain any difference.
 function attendanceRoster(students, enrollments, courseId, centerId) {
-    // Include active + inactive/on-leave for attendance — graduated/dropped/alumni are excluded; this fixes Moi's Bridge (Damaris Wamboi) and is replicated system-wide
+    // Include active + inactive/on-leave for attendance — graduated/dropped/alumni are excluded; this fixes the Moi's Bridge study-centre case and is replicated system-wide
     const eligible = students.filter(s => !['graduated','dropped','alumni','suspended'].includes(s.status));
     const courseEnrollments = (enrollments || []).filter(e => String(e.courseId) === String(courseId));
     const enrolledIds = new Set(courseEnrollments.map(e => String(e.studentId)));
