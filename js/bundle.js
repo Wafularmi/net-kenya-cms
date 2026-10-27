@@ -9984,20 +9984,99 @@ function buildProfessionalTranscript(data) {
     const resultRows = Array.isArray(data.resultRows)
         ? data.resultRows
         : resolveStudentResults(allGrades || grades || [], student && student.id, { semester: semester, courses: courses }).rows;
+    // Order courses the same way as the Courses tab and Student Hub: by the
+    // course sequence/order (course.order), grouped by semester.
+    const courseMap = {};
+    (courses || []).forEach(c => { if (c && c.id) courseMap[String(c.id)] = c; });
+    const getRowCourse = r => r.course || courseMap[String(r.courseId)] || null;
+    const sortRowsByCourseOrder = (rows) => {
+        const list = (rows || []).slice();
+        const courseList = list.map(r => getRowCourse(r)).filter(Boolean);
+        let ordered;
+        try {
+            if (typeof sortCoursesBySequence === 'function' && courseList.length) {
+                ordered = sortCoursesBySequence(courseList);
+            } else if (typeof sortCoursesByTranscriptOrder === 'function' && courseList.length) {
+                ordered = sortCoursesByTranscriptOrder(courseList);
+            }
+        } catch(e) {}
+        if (!ordered || !ordered.length) {
+            ordered = courseList.slice().sort((a,b) => {
+                const ao = Number(a && a.order) || 0;
+                const bo = Number(b && b.order) || 0;
+                if (ao !== bo) return ao - bo;
+                const ac = String((a && a.code) || a && a.name || a && a.id);
+                const bc = String((b && b.code) || b && b.name || b && b.id);
+                return ac.localeCompare(bc);
+            });
+        }
+        const pos = new Map();
+        ordered.forEach((c, i) => { if (c && c.id) pos.set(String(c.id), i); });
+        list.sort((a,b) => {
+            const ca = getRowCourse(a), cb = getRowCourse(b);
+            const ia = ca && ca.id != null ? pos.get(String(ca.id)) : undefined;
+            const ib = cb && cb.id != null ? pos.get(String(cb.id)) : undefined;
+            if (ia !== undefined && ib !== undefined) return ia - ib;
+            if (ia !== undefined) return -1;
+            if (ib !== undefined) return 1;
+            const ac = String(ca && (ca.code || ca.name) || a.courseId);
+            const bc = String(cb && (cb.code || cb.name) || b.courseId);
+            return ac.localeCompare(bc);
+        });
+        return list;
+    };
+    const groupBySemester = (rows) => {
+        const groups = {};
+        (rows || []).forEach(r => {
+            const sem = r.semester != null && r.semester !== '' ? String(r.semester) : '1';
+            if (!groups[sem]) groups[sem] = [];
+            groups[sem].push(r);
+        });
+        const keys = Object.keys(groups).sort((a,b) => parseInt(a) - parseInt(b));
+        return keys.map(k => ({ sem: k, rows: sortRowsByCourseOrder(groups[k]) }));
+    };
     let totalPoints = 0, totalCredits = 0;
-    const rowsHTML = resultRows.map((r, idx) => {
-        const c = r.course || courses.find(c => c.id === r.courseId);
+    const renderRow = (r, idx) => {
+        const c = getRowCourse(r);
         const credits = r.credits || (c ? (c.credits || 3) : 3);
         const gpa = Number(r.gpa) || 0;
         totalPoints += gpa * credits;
         totalCredits += credits;
         const gradeClass = getGradeClass(r.grade);
         return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">${r.semester ? 'Sem ' + r.semester : '--'}</td><td class="col-credits">${credits}</td><td class="col-score">${r.score}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
-    }).join('');
+    };
+    let coursesTableHTML;
+    if (semester && String(semester) !== 'all') {
+        const rows = sortRowsByCourseOrder(resultRows);
+        const rowsHTML = rows.map((r, idx) => renderRow(r, idx)).join('');
+        coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
+        coursesTableHTML += rowsHTML || `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course results recorded</td></tr>`;
+        coursesTableHTML += `</tbody><tfoot><tr><td colspan="4" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table>`;
+    } else {
+        const groups = groupBySemester(resultRows);
+        if (groups.length === 0) {
+            coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course results recorded</td></tr></tbody></table>`;
+        } else {
+            coursesTableHTML = groups.map(g => {
+                let pts = 0, crs = 0;
+                const rowsHTML = g.rows.map((r, idx) => {
+                    const c = getRowCourse(r);
+                    const credits = r.credits || (c ? (c.credits || 3) : 3);
+                    const gpa = Number(r.gpa) || 0;
+                    totalPoints += gpa * credits;
+                    totalCredits += credits;
+                    pts += gpa * credits; crs += credits;
+                    const gradeClass = getGradeClass(r.grade);
+                    return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">Sem ${g.sem}</td><td class="col-credits">${credits}</td><td class="col-score">${r.score}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
+                }).join('');
+                return `<div class="semester-block"><div class="semester-header"><span class="semester-title">Semester ${g.sem} Results</span></div><table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>${rowsHTML}</tbody><tfoot><tr><td colspan="4" class="footer-label">Semester ${g.sem} Totals</td><td class="footer-value">${crs}</td><td colspan="2" class="footer-label">Semester GPA</td><td class="footer-value">${crs > 0 ? (pts/crs).toFixed(2) : '0.00'}</td></tr></tfoot></table></div>`;
+            }).join('');
+        }
+    }
+    if (semester && String(semester) !== 'all') {
+        // cgpa already computed above
+    }
     const cgpa = totalCredits > 0 ? (totalPoints / totalCredits) : 0;
-    let coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
-    coursesTableHTML += rowsHTML || `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course results recorded</td></tr>`;
-    coursesTableHTML += `</tbody><tfoot><tr><td colspan="4" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table>`;
     const classification = getClassification(cgpa);
     const balance = (financial.feeAmount || 0) - financial.totalPaid;
     const feeStatus = balance <= 0 ? 'CLEARED' : 'OUTSTANDING';
@@ -10090,7 +10169,7 @@ function buildProfessionalTranscript(data) {
                 </div>
             </div>
             <div class="page-seal-area">
-                ${isOfficial ? `<p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>
+                ${isOfficial ? `<p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify this document using the Document ID and Verification code at top right of this page at www.netfoundation.ke. content source: www.english.netfoundation.nl</p>
                 <div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
             </div>
             <div class="transcript-footer">
