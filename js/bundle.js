@@ -9887,19 +9887,35 @@ async function showTranscriptForm(preselectedId) {
     const portalId = document.getElementById('portal-student')?.value || '';
     const selectedId = preselectedId || portalId;
     const issueDefault = todayDateInputValue();
-    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div></div><div class="form-group"><label>Semester Grouping</label><select id="transcript-grouping"><option value="group" selected>Group by Semester</option><option value="nogroup">Ignore Semester Grouping (single list by course order)</option></select></div>`;
+    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div></div>`;
     showModal('Generate Transcript', content, `<button class="btn btn-primary" onclick="generateTranscript()">Generate</button>`);
     setTimeout(() => {
         try {
             if (document.getElementById('transcript-grouping')) return;
-            const modal = document.querySelector('#modal-content .modal-body') || document.querySelector('#modal-content') || document.querySelector('.modal-body');
+            const modalBody = document.querySelector('#modal-content .modal-body') || document.querySelector('.modal-body');
+            if (!modalBody) return;
+            // Add as a separate div at the end
+            const wrap = document.createElement('div');
+            wrap.className = 'form-group';
+            wrap.style.marginTop = '12px';
+            wrap.innerHTML = `<label style="display:block;margin-bottom:4px;">Semester Grouping</label><select id="transcript-grouping" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;"><option value="group" selected>Group by Semester</option><option value="nogroup">Ignore Semester Grouping (single list by course order)</option></select>`;
+            modalBody.appendChild(wrap);
+        } catch(e) { console.error(e); }
+    }, 100);
+    setTimeout(() => {
+        try {
+            if (document.getElementById('transcript-grouping')) return;
+            const modal = document.getElementById('modal-content');
             if (!modal) return;
             const wrap = document.createElement('div');
             wrap.className = 'form-group';
-            wrap.innerHTML = `<label>Semester Grouping</label><select id="transcript-grouping"><option value="group" selected>Group by Semester</option><option value="nogroup">Ignore Semester Grouping (single list by course order)</option></select>`;
-            modal.appendChild(wrap);
+            wrap.style.cssText = 'margin:12px 16px 0 16px;';
+            wrap.innerHTML = `<label style="display:block;margin-bottom:4px;font-weight:600;">Semester Grouping</label><select id="transcript-grouping" style="width:100%;padding:8px;"><option value="group" selected>Group by Semester</option><option value="nogroup">Ignore Semester Grouping (single list by course order)</option></select>`;
+            const actions = modal.querySelector('.modal-actions');
+            if (actions) modal.insertBefore(wrap, actions);
+            else modal.appendChild(wrap);
         } catch(e) {}
-    }, 150);
+    }, 300);
 }
 async function generateTranscript() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
