@@ -1365,3 +1365,15 @@ body {
 .toggle-switch input:checked + .toggle-slider { background: var(--accent,#f59e0b); }
 .toggle-slider::before { content: ""; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(22px); }
+
+/* Transcript preview only: lift the low-contrast text in the student-info
+   card without touching the transcript document, print/PDF output, or the
+   stored certificate HTML (which all keep their original inline styles). */
+@media screen {
+    #transcript-print-area .transcript-document .student-info-panel .info-label {
+        color: #334155;
+    }
+    #transcript-print-area .transcript-document .student-info-panel .adm-number {
+        color: #0f172a;
+    }
+}
