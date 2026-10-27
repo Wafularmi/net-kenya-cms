@@ -688,10 +688,10 @@
 
             <section id="screen-submissions" class="screen">
                 <div class="screen-header"><h2>Quiz Results</h2><div class="screen-actions">
-                    <select id="sub-quiz" class="filter-select"><option value="">All Quizzes</option></select>
+                    <select id="sub-quiz" class="filter-select"><option value="">All Assessments</option></select>
                     <select id="sub-status" class="filter-select"><option value="">All</option><option value="pass">Passed</option><option value="fail">Failed</option><option value="pending_review">Pending Review</option></select>
                 </div></div>
-                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Student</th><th>Quiz</th><th>Score</th><th>Points</th><th>Grade</th><th>Status</th><th>Attempts</th><th>Date</th><th>Actions</th></tr></thead><tbody id="submissions-body"></tbody></table></div></div>
+                <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Student</th><th>Assessment</th><th>Score</th><th>Points</th><th>Grade</th><th>Status</th><th>Attempts</th><th>Date</th><th>Actions</th></tr></thead><tbody id="submissions-body"></tbody></table></div></div>
             </section>
 
             <section id="screen-notes" class="screen">
@@ -1327,6 +1327,14 @@
                         </div>
                         <div id="owner-security-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
+                    <div class="card" id="owner-password-card" style="display:none;"><h3>🔑 Owner — Change Password</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Change the password for the owner account. Use at least 8 characters. Other signed-in sessions for this account will be signed out.</div>
+                        <div class="form-group"><label>Current Owner Password</label><input type="password" id="owner-current-pw" autocomplete="current-password"></div>
+                        <div class="form-group"><label>New Owner Password (min 8 characters)</label><input type="password" id="owner-new-pw" autocomplete="new-password"></div>
+                        <div class="form-group"><label>Confirm New Owner Password</label><input type="password" id="owner-confirm-pw" autocomplete="new-password"></div>
+                        <button class="btn btn-primary" onclick="changeOwnerPassword()">Update Owner Password</button>
+                        <div id="owner-pw-status" style="font-size:11px;margin-top:6px;"></div>
+                    </div>
                     <div class="card" id="assistant-access-card" style="display:none;"><h3>Assistant Admin Access</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Toggle every admin sidebar tab for the Assistant Admin role. When OFF, the tab is hidden and the screen is blocked. Only admins can change this. Default is ON for all.</div>
                         <div id="assistant-access-toggles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;max-height:320px;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"></div>
@@ -1400,7 +1408,7 @@
                         <button class="btn btn-primary" onclick="saveMpesaSettings()">Save M-Pesa Settings</button>
                     </div>
 
-                    <div class="card"><h3>Change Password</h3>
+                    <div class="card" id="standard-password-card"><h3>Change Password</h3>
                         <div class="form-group"><label>Current Password</label><input type="password" id="settings-current-pw" autocomplete="off"></div>
                         <div class="form-group"><label>New Password</label><input type="password" id="settings-new-pw" autocomplete="off"></div>
                         <div class="form-group"><label>Confirm New Password</label><input type="password" id="settings-confirm-pw" autocomplete="off"></div>

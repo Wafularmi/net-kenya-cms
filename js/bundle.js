@@ -4407,17 +4407,15 @@ async function renderCourses() {
 }
 function showCourseForm(course = null) {
     const isEdit = !!course;
-    const wtSrc = course ? (course.weightage || [
-        { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
-        { label: 'Quiz', value: course.quizWeight || 20, type: 'quiz' },
-        { label: 'CAT', value: course.catWeight || 25, type: 'cat' },
-        { label: 'Attendance', value: course.attWeight || 10, type: 'attendance' }
-    ]) : [
-        { label: 'Exam', value: 30, type: 'exam' },
-        { label: 'Quiz', value: 20, type: 'quiz' },
-        { label: 'CAT', value: 25, type: 'cat' },
-        { label: 'Attendance', value: 10, type: 'attendance' }
-    ];
+    // Show the canonical component type next to each label. Older course rows
+    // can carry a type that disagrees with the label (an "Essay" typed as
+    // attendance); the label is what staff see and what the calculation uses,
+    // so the form shows the corrected type before the course is saved again.
+    const wtSrc = courseWeightGroups(course).rows.map(w => ({
+        label: w.label || COURSE_COMPONENT_LABELS[courseComponentType(w)] || 'Component',
+        value: Number(w.value) || 0,
+        type: courseComponentType(w)
+    }));
     const wtItemsHtml = wtSrc.map(w => buildWeightageRow(w.label, w.value, w.type)).join('');
     const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Lesson pacing (days between lessons)</label><input type="number" id="course-drip-days" value="${course && course.dripDaysBetween != null ? course.dripDaysBetween : ''}" min="0" max="60" step="0.5" placeholder="3.5 = max 2 lessons per week"><small style="display:block;opacity:.7;">0 = a lesson unlocks instantly after the previous one is completed. Used by Sequenced lessons.</small></div><div class="form-group"><label>Default when left blank</label><input type="text" value="3.5 days (max 2 lessons per week)" disabled style="background:var(--bg);color:var(--text);opacity:.75;"></div></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
     showModal(isEdit ? 'Edit Course' : 'Add New Course', content, `<button class="btn btn-primary" onclick="saveCourse()">${isEdit ? 'Update' : 'Create'}</button>`, { maxWidth: '860px' });
@@ -4442,17 +4440,27 @@ async function saveCourse() {
     const editId = document.getElementById('course-edit-id').value;
     const id = editId || 'CRS-' + code.toUpperCase().replace(/\s/g, '-');
     const wtRows = document.querySelectorAll('#weightage-items .form-row');
-    const weightage = Array.from(wtRows).map(r => ({
-        label: r.querySelector('.wt-label').value.trim(),
-        value: parseInt(r.querySelector('.wt-value').value) || 0,
-        type: r.querySelector('.wt-type').value
-    }));
-    const examW = weightage.find(w => w.type === 'exam');
-    const quizW = weightage.find(w => w.type === 'quiz');
-    const catW = weightage.find(w => w.type === 'cat');
-    const attW = weightage.find(w => w.type === 'attendance');
+    // Save one canonical component type per row. The label decides the category
+    // first (Exam/Essay/Practicum -> exam, CAT/Mid-Semester -> CAT, Quiz ->
+    // quiz, Attendance -> attendance); the select is only the fallback for a
+    // label that does not identify a category. This repairs old rows instead of
+    // re-saving a type that contradicts their label.
+    const weightage = Array.from(wtRows).map(r => {
+        const label = r.querySelector('.wt-label').value.trim();
+        const selected = r.querySelector('.wt-type').value;
+        return {
+            label,
+            value: parseInt(r.querySelector('.wt-value').value) || 0,
+            type: courseComponentType({ label, type: selected })
+        };
+    }).filter(w => w.value > 0);
+    const sumType = (type) => weightage.filter(w => w.type === type).reduce((sum, w) => sum + w.value, 0);
+    const examW = sumType('exam');
+    const quizW = sumType('quiz');
+    const catW = sumType('cat');
+    const attW = sumType('attendance');
     const dripEl = document.getElementById('course-drip-days');
-    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW ? examW.value : 30, quizWeight: quizW ? quizW.value : 20, catWeight: catW ? catW.value : 25, attWeight: attW ? attW.value : 10, dripDaysBetween: dripEl ? (dripEl.value.trim() === '' ? null : Math.max(0, parseFloat(dripEl.value) || 0)) : null, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
+    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW || 30, quizWeight: quizW || 20, catWeight: catW || 25, attWeight: attW || 10, dripDaysBetween: dripEl ? (dripEl.value.trim() === '' ? null : Math.max(0, parseFloat(dripEl.value) || 0)) : null, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
     await dbPut('courses', course); closeModal(); renderCourses(); updateCourseDropdowns(); showToast(editId ? 'Course updated!' : 'Course created!'); logAudit(editId ? 'updated' : 'created', 'course', course);
 }
 function buildWeightageRow(label, value, type) {
@@ -5113,6 +5121,7 @@ async function loadGrades() {
     const regionalIds = await getRegionalStudentIdSet();
     const students = regionalIds ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : await dbGetAll('students');
     const quizzes = await dbGetAll('quizzes');
+    const exams = await dbGetAll('exams');
     const submissions = await dbGetAll('submissions');
     const attendance = await dbGetAll('attendance');
     const enrollments = await dbGetAll('enrollments');
@@ -5121,7 +5130,7 @@ async function loadGrades() {
     const allCourses = await dbGetAll('courses');
     if (isStudentUser) {
         const studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username;
-        const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users);
+        const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users, exams, semester);
         const results = resolveStudentResults(allGrades, studentId, { semester: semester, courses: allCourses });
         const storedGrade = results.byCourse.get(courseId) || null;
         document.getElementById('grades-sheet').innerHTML = renderGradeBreakdown(result, course, storedGrade);
@@ -5129,40 +5138,41 @@ async function loadGrades() {
     }
     const studentIds = enrollments.filter(e => e.courseId === courseId).map(e => e.studentId);
     const courseStudents = students.filter(s => studentIds.includes(s.id));
-    const wt = course.weightage || [
-        { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
-        { label: 'Quiz', value: course.quizWeight || 20, type: 'quiz' },
-        { label: 'CAT', value: course.catWeight || 25, type: 'cat' },
-        { label: 'Attendance', value: course.attWeight || 10, type: 'attendance' }
-    ];
-    const wtTotal = wt.reduce((s, w) => s + w.value, 0);
-    let html = `<div style="margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:var(--radius);"><b>${course.name || courseId}</b> - Semester ${semester}</div>`;
+    const weightInfo = courseWeightGroups(course);
+    const wt = COURSE_COMPONENT_ORDER.filter(t => weightInfo.groups[t] > 0).map(t => ({
+        type: t,
+        label: (weightInfo.labels[t] || []).join(' + ') || COURSE_COMPONENT_LABELS[t],
+        value: weightInfo.groups[t]
+    }));
+    let html = `<div style="margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:var(--radius);"><b>${escapeHtml(course.name || courseId)}</b> - Semester ${escapeHtml(semester)}</div>`;
     html += `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap;">`;
-    for (const w of wt) html += `<span>${w.label}: <b>${w.value}%</b></span>`;
-    if (wtTotal < 100) html += `<span style="color:var(--text-muted);">Other: <b>${100 - wtTotal}%</b></span>`;
+    for (const w of wt) html += `<span>${escapeHtml(w.label)}: <b>${w.value}%</b></span>`;
     html += `</div>`;
     html += `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;padding:6px 8px;border-left:3px solid var(--accent);background:var(--bg-input);">
-        <b>Final (0-100)</b> is the <b>recorded result</b> for this course and semester - the same number printed on the official transcript.
-        The component columns show the recomputed mark; where it differs from the recorded result the row says so.
+        <b>Final (0-100)</b> is the <b>recorded course result</b> for this course and semester - the same number printed on the official transcript.
+        The component columns merge exams, quizzes and CATs and show the recomputed mark from current assessments and attendance.
         Saving stores the value as a manual entry (never overwritten by "Compute Weighted").
     </div>`;
-    const icons = { exam: '📄', quiz: '🧠', cat: '📋', attendance: '📋' };
-    const getAvg = (type, r) => type === 'exam' ? r.examAvg : type === 'quiz' ? r.quizAvg : type === 'cat' ? r.catAvg : r.attPct;
+    const icons = { exam: '📄', quiz: '🧠', cat: '📋', attendance: '📋', other: '📌' };
     // One grid row: student | components | final | grade | save | record note
     const rowStyle = `grid-template-columns: 2fr repeat(${wt.length}, minmax(52px,1fr)) 86px 56px 46px minmax(130px,220px);`;
     let headerHtml = '<span>Student</span>';
-    for (const w of wt) headerHtml += `<span>${icons[w.type] || ''} ${w.label}</span>`;
+    for (const w of wt) headerHtml += `<span>${icons[w.type] || ''} ${escapeHtml(w.label)}</span>`;
     headerHtml += '<span>Final (0-100)</span><span>Grade</span><span></span><span>Record</span>';
     html += `<div class="grade-row grade-header" style="${rowStyle}">${headerHtml}</div>`;
     for (const s of courseStudents) {
-        const result = computeWeightedGrade(s.id, courseId, course, quizzes, submissions, attendance, users);
+        const result = computeWeightedGrade(s.id, courseId, course, quizzes, submissions, attendance, users, exams, semester);
         html += `<div class="grade-row" style="${rowStyle}">`;
-        html += `<span><b>${s.name}</b></span>`;
+        html += `<span><b>${escapeHtml(s.name)}</b></span>`;
         for (const w of wt) {
-            const avg = getAvg(w.type, result);
+            const component = (result.components || []).find(c => c.type === w.type);
+            const avg = component ? Number(component.avg) || 0 : 0;
             html += `<span style="font-size:11px;color:${avg >= 70 ? 'var(--success)' : avg > 0 ? 'var(--warning)' : 'var(--text-muted)'};">${avg > 0 ? Math.round(avg) + '%' : '--'}</span>`;
         }
-        const computedScore = Math.round(result.weightedScore);
+        // Only a COMPLETE component set produces a computed course result. An
+        // incomplete set is still shown through its component columns, but it
+        // is never prefilled as a transcript result.
+        const computedScore = result.complete ? Math.round(result.weightedScore) : 0;
         const results = resolveStudentResults(allGrades, s.id, { semester: semester, courses: allCourses });
         const recorded = results.byCourse.get(courseId) || null;
         // The score of record wins: it is what the transcript prints.
@@ -5180,7 +5190,9 @@ async function loadGrades() {
             notes.push(recorded.manual === true ? 'manual' : 'recorded');
             if (computedScore > 0 && computedScore !== recorded.score) notes.push(`recomputed ${computedScore}`);
             const complete = resolveStudentResults(allGrades, s.id, { semester: 'all', courses: allCourses }).byCourse.get(courseId);
-            if (complete && String(complete.semester) !== String(semester)) notes.push(`transcript prints Sem ${complete.semester} · ${complete.score}`);
+            if (complete && String(complete.semester) !== String(semester)) notes.push(`transcript prints Sem ${complete.semester} \u00b7 ${complete.score}`);
+        } else if (!result.complete) {
+            notes.push('incomplete');
         } else {
             notes.push('not recorded');
         }
@@ -5198,45 +5210,179 @@ function studentIdSet(studentId, users) {
     }
     return ids;
 }
-// Attendance award threshold: 80%+ attendance earns the full attendance weight (binary).
+// A course result is built from COMPONENTS, in exactly the same way on the
+// server (see server.js). Exams and quizzes are one assessment pool; a CAT is a
+// quiz with assessmentType:'cat'; attendance is binary at 80%+. Weightage rows
+// are grouped by their label first, because older course records have labels
+// and types that disagree (e.g. an "Essay" row typed as attendance).
+const COURSE_COMPONENT_ORDER = ['exam', 'quiz', 'cat', 'attendance', 'other'];
+const COURSE_COMPONENT_LABELS = { exam: 'Exam', quiz: 'Quiz', cat: 'CAT', attendance: 'Attendance', other: 'Other' };
 const ATT_AWARD_MIN = 80;
-function computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users) {
-    const wt = course.weightage || [
-        { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
-        { label: 'Quiz', value: course.quizWeight || 20, type: 'quiz' },
-        { label: 'CAT', value: course.catWeight || 25, type: 'cat' },
-        { label: 'Attendance', value: course.attWeight || 10, type: 'attendance' }
+function courseComponentType(row) {
+    const label = String((row && row.label) || '').toLowerCase();
+    if (/attendance/.test(label)) return 'attendance';
+    if (/\bcat\b|class\s*assessment|mid[-\s]*sem/.test(label)) return 'cat';
+    if (/quiz/.test(label)) return 'quiz';
+    if (/exam|final|paper|practicum|essay|project|assignment|portfolio|presentation|\blab\b/.test(label)) return 'exam';
+    const type = String((row && row.type) || '').toLowerCase();
+    return ['exam', 'quiz', 'cat', 'attendance'].includes(type) ? type : 'other';
+}
+function courseWeightGroups(course) {
+    const src = course || {};
+    let rows = Array.isArray(src.weightage) ? src.weightage.filter(r => Number(r && r.value) > 0) : [];
+    if (!rows.length) {
+        rows = [
+            { label: 'Exam', value: src.examWeight != null ? src.examWeight : 30, type: 'exam' },
+            { label: 'Quiz', value: src.quizWeight != null ? src.quizWeight : 20, type: 'quiz' },
+            { label: 'CAT', value: src.catWeight != null ? src.catWeight : 25, type: 'cat' },
+            { label: 'Attendance', value: src.attWeight != null ? src.attWeight : 10, type: 'attendance' }
+        ].filter(r => Number(r.value) > 0);
+    }
+    if (!rows.length) rows = [
+        { label: 'Exam', value: 30, type: 'exam' },
+        { label: 'Quiz', value: 20, type: 'quiz' },
+        { label: 'CAT', value: 25, type: 'cat' },
+        { label: 'Attendance', value: 10, type: 'attendance' }
     ];
-    const getWt = (type) => (wt.find(w => w.type === type) || { value: 0 }).value / 100;
+    const groups = { exam: 0, quiz: 0, cat: 0, attendance: 0, other: 0 };
+    const labels = { exam: [], quiz: [], cat: [], attendance: [], other: [] };
+    for (const row of rows) {
+        const type = courseComponentType(row);
+        const value = Number(row && row.value) || 0;
+        if (!(value > 0)) continue;
+        groups[type] += value;
+        if (row && row.label) labels[type].push(String(row.label));
+    }
+    const total = groups.exam + groups.quiz + groups.cat + groups.attendance + groups.other;
+    return { rows, groups, labels, total };
+}
+function assessmentComponentType(assessment, isExam) {
+    const explicit = String((assessment && assessment.assessmentType) || '').toLowerCase();
+    if (['exam', 'quiz', 'cat'].includes(explicit)) return explicit;
+    return isExam ? 'exam' : 'quiz';
+}
+function courseAssessmentList(courseId, semester, exams, quizzes) {
+    const out = new Map();
+    const add = (assessment, isExam) => {
+        if (!assessment || !assessment.id) return;
+        if (String(assessment.courseId || '') !== String(courseId)) return;
+        if (semester !== null && semester !== undefined && semester !== '' && String(semester) !== 'all'
+            && Number(assessment.semester != null ? assessment.semester : 1) !== Number(semester)) return;
+        out.set(String(assessment.id), { id: String(assessment.id), type: assessmentComponentType(assessment, isExam), assessment, isExam: !!isExam });
+    };
+    (quizzes || []).forEach(q => add(q, false));
+    (exams || []).forEach(e => add(e, true));
+    return Array.from(out.values());
+}
+function computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users, exams, semester) {
+    const weight = courseWeightGroups(course);
+    const components = courseAssessmentList(courseId, semester, exams, quizzes);
     const ids = studentIdSet(studentId, users);
     const matchId = (s) => ids.has(s.studentId);
-    const courseQuizzes = quizzes.filter(q => q.courseId === courseId);
-    const examSubs = submissions.filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && q.assessmentType === 'exam'));
-    const quizSubs = submissions.filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && (q.assessmentType === 'quiz' || !q.assessmentType)));
-    const catSubs = submissions.filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && q.assessmentType === 'cat'));
-    const studentAttendance = attendance.filter(a => matchId(a) && a.courseId === courseId);
-    const bestByQuiz = (subs) => {
-        const best = {};
-        subs.forEach(s => { if (!best[s.quizId] || s.score > best[s.quizId]) best[s.quizId] = s.score; });
-        return Object.values(best);
+    const componentIds = new Set(components.map(c => c.id));
+    const best = new Map();
+    (submissions || []).forEach(s => {
+        if (!s || !matchId(s)) return;
+        const assessmentId = String(s.quizId || s.examId || '');
+        if (!componentIds.has(assessmentId)) return;
+        if (s.needsReview === true || s.status === 'pending_review') return;
+        const score = Number(s.score);
+        if (!Number.isFinite(score)) return;
+        const prior = best.get(assessmentId);
+        if (!prior || score > prior.score) best.set(assessmentId, { score });
+    });
+    const studentAttendance = (attendance || []).filter(a => a && matchId(a) && a.courseId === courseId);
+    const courseHasAttendance = (attendance || []).some(a => a && a.courseId === courseId);
+    const details = {};
+    const missing = [];
+    let requiredWeight = 0;
+    let weighted = 0;
+    let hasAcademic = false;
+    for (const type of ['exam', 'quiz', 'cat']) {
+        const groupWeight = Number(weight.groups[type]) || 0;
+        if (!(groupWeight > 0)) continue;
+        const definitions = components.filter(c => c.type === type);
+        // A component type the course never offered is not a missing mark.
+        if (!definitions.length) continue;
+        hasAcademic = true;
+        requiredWeight += groupWeight;
+        const scores = definitions.map(d => best.get(d.id)).filter(Boolean).map(x => Number(x.score)).filter(Number.isFinite);
+        const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+        if (!scores.length) missing.push(type);
+        weighted += avg * groupWeight;
+        details[type] = {
+            type,
+            label: (weight.labels[type] || []).join(' + ') || COURSE_COMPONENT_LABELS[type],
+            weight: groupWeight,
+            avg,
+            count: scores.length,
+            defined: definitions.length
+        };
+    }
+    let attPct = 0;
+    const attWeight = Number(weight.groups.attendance) || 0;
+    if (attWeight > 0 && studentAttendance.length) {
+        requiredWeight += attWeight;
+        attPct = (studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100;
+        const attAward = attPct >= ATT_AWARD_MIN ? 100 : 0;
+        weighted += attAward * attWeight;
+        details.attendance = {
+            type: 'attendance',
+            label: (weight.labels.attendance || []).join(' + ') || COURSE_COMPONENT_LABELS.attendance,
+            weight: attWeight,
+            avg: attAward,
+            count: studentAttendance.length,
+            defined: studentAttendance.length
+        };
+    } else if (attWeight > 0 && courseHasAttendance) {
+        requiredWeight += attWeight;
+        missing.push('attendance');
+        details.attendance = {
+            type: 'attendance',
+            label: (weight.labels.attendance || []).join(' + ') || COURSE_COMPONENT_LABELS.attendance,
+            weight: attWeight,
+            avg: 0,
+            count: 0,
+            defined: 0
+        };
+    }
+    if (weight.groups.other > 0) {
+        requiredWeight += weight.groups.other;
+        missing.push('other');
+        details.other = {
+            type: 'other',
+            label: (weight.labels.other || []).join(' + ') || COURSE_COMPONENT_LABELS.other,
+            weight: weight.groups.other,
+            avg: 0,
+            count: 0,
+            defined: 0
+        };
+    }
+    const weightedScore = requiredWeight > 0 ? weighted / requiredWeight : 0;
+    const result = {
+        complete: hasAcademic && requiredWeight > 0 && missing.length === 0,
+        weightedScore,
+        requiredWeight,
+        missing,
+        groups: weight.groups,
+        labels: weight.labels,
+        components: Object.values(details),
+        attPct,
+        attAwarded: !!(details.attendance && details.attendance.avg >= 100),
+        examAvg: details.exam ? details.exam.avg : 0,
+        quizAvg: details.quiz ? details.quiz.avg : 0,
+        catAvg: details.cat ? details.cat.avg : 0,
+        examCount: details.exam ? details.exam.count : 0,
+        quizCount: details.quiz ? details.quiz.count : 0,
+        catCount: details.cat ? details.cat.count : 0,
+        attTotal: details.attendance ? details.attendance.count : 0,
+        examWeight: weight.groups.exam,
+        quizWeight: weight.groups.quiz,
+        catWeight: weight.groups.cat,
+        attWeight: weight.groups.attendance,
+        otherWeight: weight.groups.other
     };
-    const examScores = bestByQuiz(examSubs);
-    const quizScores = bestByQuiz(quizSubs);
-    const catScores = bestByQuiz(catSubs);
-    const examAvg = examScores.length ? examScores.reduce((a, b) => a + b, 0) / examScores.length : 0;
-    const quizAvg = quizScores.length ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : 0;
-    const catAvg = catScores.length ? catScores.reduce((a, b) => a + b, 0) / catScores.length : 0;
-    const attPct = studentAttendance.length ? (studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100 : 0;
-    // Attendance award: binary — 80%+ earns the full attendance weight, below earns nothing.
-    const attAward = attPct >= ATT_AWARD_MIN ? 100 : 0;
-    const examWeight = getWt('exam');
-    const quizWeight = getWt('quiz');
-    const catWeight = getWt('cat');
-    const attWeight = getWt('attendance');
-    const otherWeight = Math.max(0, 1 - examWeight - quizWeight - catWeight - attWeight);
-    const weightedScore = (examAvg * examWeight) + (quizAvg * quizWeight) + (catAvg * catWeight) + (attAward * attWeight);
-    const result = { examAvg, quizAvg, catAvg, attPct, attAwarded: attPct >= ATT_AWARD_MIN, weightedScore, examCount: examScores.length, quizCount: quizScores.length, catCount: catScores.length, attTotal: studentAttendance.length, examWeight: examWeight * 100, quizWeight: quizWeight * 100, catWeight: catWeight * 100, attWeight: attWeight * 100, otherWeight: otherWeight * 100 };
-    result.weightage = wt;
+    result.weightage = weight.rows;
     return result;
 }
 function renderGradeBreakdown(result, course, storedGrade, storedNote) {
@@ -5249,26 +5395,29 @@ function renderGradeBreakdown(result, course, storedGrade, storedNote) {
     const gradeInfo = getGrade(headline);
     const computedInfo = getGrade(computedScore);
     const differs = hasRecorded && computedScore > 0 && computedScore !== recorded;
-    const wt = result.weightage || [];
-    const icons = { exam: '\U0001F4C4', quiz: '\U0001F9E0', cat: '\U0001F4CB', attendance: '\U0001F4CB' };
-    const getAvg = (type) => type === 'exam' ? result.examAvg : type === 'quiz' ? result.quizAvg : type === 'cat' ? result.catAvg : result.attPct;
-    const getCount = (type) => type === 'exam' ? result.examCount : type === 'quiz' ? result.quizCount : type === 'cat' ? result.catCount : result.attTotal;
-    const getWeight = (type) => type === 'exam' ? result.examWeight : type === 'quiz' ? result.quizWeight : type === 'cat' ? result.catWeight : result.attWeight;
+    const icons = { exam: '\U0001F4C4', quiz: '\U0001F9E0', cat: '\U0001F4CB', attendance: '\U0001F4CB', other: '\U0001F4CC' };
     let breakdownHtml = '';
     let calcHtml = '';
-    for (const w of wt) {
-        const avg = getAvg(w.type);
-        const weight = getWeight(w.type);
-        const count = getCount(w.type);
+    for (const c of (result.components || [])) {
+        const weight = Number(c.weight) || 0;
+        const avg = Number(c.avg) || 0;
         const contrib = avg * (weight / 100);
-        if (count > 0 || w.type === 'attendance') {
+        if (c.count > 0 || c.type === 'attendance') {
             breakdownHtml += `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--bg-input);border-radius:6px;font-size:13px;">
-                <span>${icons[w.type] || '\U0001F4CB'} ${w.label} (${Math.round(weight)}%)</span>
+                <span>${icons[c.type] || '\U0001F4CB'} ${c.label} (${Math.round(weight)}%)</span>
                 <span><b>${Math.round(avg)}%</b> <span style="color:var(--text-muted);font-size:11px;">\u2192 +${Math.round(contrib)}%</span></span>
             </div>`;
-            calcHtml += `${w.label} avg (${Math.round(avg)}%) \u00d7 ${Math.round(weight)}% weight = ${Math.round(contrib)}%<br>`;
+            calcHtml += `${c.label} avg (${Math.round(avg)}%) \u00d7 ${Math.round(weight)}% weight = ${Math.round(contrib)}%<br>`;
+        } else {
+            breakdownHtml += `<div style="display:flex;justify-content:space-between;padding:8px;background:var(--bg-input);border-radius:6px;font-size:13px;color:var(--text-muted);">
+                <span>${icons[c.type] || '\U0001F4CB'} ${c.label} (${Math.round(weight)}%)</span><span>No mark yet</span>
+            </div>`;
+            calcHtml += `${c.label}: no mark yet (0%)<br>`;
         }
     }
+    const missingHtml = result.missing && result.missing.length
+        ? `<div style="margin-top:10px;padding:8px;border-left:3px solid var(--warning);background:var(--bg-input);font-size:11px;color:var(--text-muted);">Provisional only \u2014 still missing: <b>${result.missing.map(t => COURSE_COMPONENT_LABELS[t] || t).join(', ')}</b>. A course result is written when every component that exists for the course has a mark.</div>`
+        : '';
     const scoreColour = headline >= 70 ? 'var(--success)' : headline >= 50 ? 'var(--warning)' : 'var(--danger)';
     return `<div style="padding:20px;">
         <div style="margin-bottom:16px;padding:12px;background:var(--bg-input);border-radius:var(--radius);text-align:center;">
@@ -5283,6 +5432,7 @@ function renderGradeBreakdown(result, course, storedGrade, storedNote) {
         <div style="margin-top:20px;">
             <h4 style="color:var(--accent);margin-bottom:8px;">Component Breakdown</h4>
             <div style="display:grid;gap:8px;">${breakdownHtml}</div>
+            ${missingHtml}
             <div style="margin-top:12px;padding:10px;border-top:2px solid var(--accent);display:flex;justify-content:space-between;font-size:15px;font-weight:700;">
                 <span>${hasRecorded ? 'Recorded Result' : 'Final Weighted Score'}</span>
                 <span style="color:${scoreColour};">${headline}% (${gradeInfo.grade})</span>
@@ -5301,6 +5451,7 @@ async function computeAndSaveAllGrades() {
     if (!courseId) return showToast('Select a course!');
     const course = await dbGet('courses', courseId);
     const quizzes = await dbGetAll('quizzes');
+    const exams = await dbGetAll('exams');
     const submissions = await dbGetAll('submissions');
     const attendance = await dbGetAll('attendance');
     const enrollments = await dbGetAll('enrollments');
@@ -5315,16 +5466,20 @@ async function computeAndSaveAllGrades() {
         const existing = allGrades.find(g => g && g.studentId === studentId && g.courseId === courseId
             && String(g.semester) === String(semester) && isCourseLevelGrade(g));
         if (existing && existing.manual === true) { keptManual++; continue; }
-        const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users);
+        const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users, exams, semester);
+        // A course result is saved only when every component that exists for
+        // the course has a mark. Partial component data stays visible in the
+        // grid but is never written as a result of record.
+        if (!result.complete) { noData++; continue; }
         const weightedScore = Math.round(result.weightedScore);
         if (!(weightedScore > 0)) { noData++; continue; }
-        if (existing && Number(existing.score) === weightedScore) { keptSame++; continue; }
-        plan.push({ studentId, weightedScore, replacing: !!existing });
+        if (existing && Number(existing.score) === weightedScore && existing.source === 'assessments') { keptSame++; continue; }
+        plan.push({ studentId, weightedScore, replacing: !!existing, components: result.components, weights: result.groups });
     }
     const willCreate = plan.filter(p => !p.replacing).length;
     const willUpdate = plan.length - willCreate;
     if (!plan.length) {
-        showToast(`Nothing to compute: ${keptManual} manual entr${keptManual === 1 ? 'y was' : 'ies were'} kept, ${keptSame} already up to date${noData ? `, ${noData} without assessment data` : ''}.`, { type: 'warning', duration: 7000 });
+        showToast(`Nothing to compute: ${keptManual} manual entr${keptManual === 1 ? 'y was' : 'ies were'} kept, ${keptSame} already up to date${noData ? `, ${noData} without a complete assessment set` : ''}.`, { type: 'warning', duration: 7000 });
         return;
     }
     const summary = `<b>${course.name || courseId} \u2014 Semester ${semester}</b><br>`
@@ -5337,7 +5492,12 @@ async function computeAndSaveAllGrades() {
     let saved = 0;
     for (const p of plan) {
         const gradeInfo = getGrade(p.weightedScore);
-        const grade = { id: `GRD-${p.studentId}-${courseId}-${semester}`, studentId: p.studentId, courseId, semester: parseInt(semester), score: p.weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa, weighted: true, autoSynced: true, gradedAt: new Date().toISOString() };
+        const grade = {
+            id: `GRD-${p.studentId}-${courseId}-${semester}`, studentId: p.studentId, courseId,
+            semester: parseInt(semester), score: p.weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa,
+            weighted: true, source: 'assessments', computedFrom: 'exam+quiz+cat+attendance',
+            components: p.components || [], weights: p.weights || {}, gradedAt: new Date().toISOString()
+        };
         await dbPut('grades', grade);
         saved++;
     }
@@ -5575,18 +5735,26 @@ function isAssessmentGrade(g) {
 function gradeRecordPriority(g) {
     return {
         manual: g && g.manual === true ? 1 : 0,
+        // A result computed by the current assessment engine outranks an old
+        // weighted snapshot with the same course/semester. The live data has at
+        // least one legacy duplicate (a stale failed mark and a fresh result);
+        // without this rank the old record can hide the current grade on the
+        // transcript.
+        assessments: g && g.source === 'assessments' ? 1 : 0,
         weighted: g && g.weighted === true ? 1 : 0,
         ts: Date.parse((g && (g.gradedAt || g.createdAt || g.updatedAt)) || '') || 0,
         score: Number(g && g.score) || 0
     };
 }
 // When two records describe the same result the most authoritative wins:
-// a manually entered mark first, then a computed one, then the most recent.
+// a manually entered mark first, then a current assessment-engine result, then
+// a computed/weighted mark, then the most recent.
 function pickAuthoritativeGrade(a, b) {
     if (!a) return b;
     if (!b) return a;
     const pa = gradeRecordPriority(a), pb = gradeRecordPriority(b);
     if (pa.manual !== pb.manual) return pa.manual > pb.manual ? a : b;
+    if (pa.assessments !== pb.assessments) return pa.assessments > pb.assessments ? a : b;
     if (pa.weighted !== pb.weighted) return pa.weighted > pb.weighted ? a : b;
     if (pa.ts !== pb.ts) return pa.ts > pb.ts ? a : b;
     return pa.score >= pb.score ? a : b;
@@ -10407,6 +10575,7 @@ async function generateFinalTranscript() {
     const enrollments = await dbGetAll('enrollments');
     const courses = await dbGetAll('courses');
     const quizzes = await dbGetAll('quizzes');
+    const exams = await dbGetAll('exams');
     const submissions = await dbGetAll('submissions');
     const attendance = await dbGetAll('attendance');
     const users = await dbGetAll('users');
@@ -10450,7 +10619,7 @@ async function generateFinalTranscript() {
     let totalGPAPoints = 0;
     let autoCount = 0;
     for (const course of studentCourses) {
-        const result = computeWeightedGrade(studentId, course.id, course, quizzes, submissions, attendance, users);
+        const result = computeWeightedGrade(studentId, course.id, course, quizzes, submissions, attendance, users, exams, null);
         const recorded = recordedByCourse.get(course.id);
         const credits = course.credits || 3;
         let weightedScore, gradeInfo = null, source, semester = null;
@@ -15679,10 +15848,11 @@ async function verifyDocument() {
                 });
                 const submissions = await dbGetAll('submissions');
                 const quizzes = await dbGetAll('quizzes');
+                const exams = await dbGetAll('exams');
                 const attendance = await dbGetAll('attendance');
                 const users = await dbGetAll('users');
                 const currentHash = await sha256(studentCours.map(c => {
-                    const r = computeWeightedGrade(sid, c.id, c, quizzes, submissions, attendance, users);
+                    const r = computeWeightedGrade(sid, c.id, c, quizzes, submissions, attendance, users, exams, null);
                     let ws = Math.round(r.weightedScore);
                     if (ws === 0) { const sg = savedGrades.find(g => g.courseId === c.id); if (sg && sg.score) ws = Math.round(sg.score); }
                     const gi = ws > 0 ? getGrade(ws) : null;
@@ -17872,36 +18042,46 @@ async function deleteQuizRegistration(regId, quizId) {
     showQuizRegistration(quizId);
 }
 async function viewQuizSubmissions(quizId) {
-    const quiz = await dbGet('quizzes', quizId);
-    if (!quiz) return;
+    const assessment = await dbGet('quizzes', quizId) || await dbGet('exams', quizId);
+    if (!assessment) return;
     showScreen('submissions');
-    document.getElementById('sub-quiz').value = quizId;
-    renderSubmissions();
+    renderSubmissions(quizId);
 }
-async function renderSubmissions() {
+async function renderSubmissions(forcedQuizId) {
     const quizzes = await dbGetAll('quizzes');
+    const exams = await dbGetAll('exams');
     const submissions = await dbGetAll('submissions');
     const students = await dbGetAll('students');
+    // Exams and quizzes are one assessment pool on this screen too. A paper
+    // submitted through the Exams tab must be reviewable/resettable here, not
+    // hidden because its record happens to live in the other store.
+    const assessments = new Map();
+    quizzes.forEach(q => assessments.set(String(q.id), Object.assign({}, q, { _kind: 'Quiz' })));
+    exams.forEach(e => assessments.set(String(e.id), Object.assign({}, e, { _kind: 'Exam' })));
+    const assessmentList = Array.from(assessments.values());
     const quizSelect = document.getElementById('sub-quiz');
-    const savedQuiz = quizSelect.value;
-    quizSelect.innerHTML = '<option value="">All Quizzes</option>' + quizzes.map(q => `<option value="${q.id}">${q.title}</option>`).join('');
-    if (savedQuiz && quizzes.some(q => q.id === savedQuiz)) quizSelect.value = savedQuiz;
+    const explicitFilter = typeof forcedQuizId === 'string' ? forcedQuizId : '';
+    const savedQuiz = explicitFilter || quizSelect.value;
+    quizSelect.innerHTML = '<option value="">All Assessments</option>' + assessmentList.map(a => `<option value="${a.id}">${escapeHtml(a._kind + ' · ' + (a.title || a.id))}</option>`).join('');
+    if (savedQuiz && assessments.has(String(savedQuiz))) quizSelect.value = savedQuiz;
+    else quizSelect.value = '';
     const statusSelect = document.getElementById('sub-status');
     const savedStatus = statusSelect.value;
     const quizFilter = quizSelect.value;
     const statusFilter = statusSelect.value;
     let filtered = submissions;
-    if (quizFilter) filtered = filtered.filter(s => s.quizId === quizFilter);
+    if (quizFilter) filtered = filtered.filter(s => String(s.quizId || s.examId || '') === quizFilter);
     if (statusFilter) filtered = filtered.filter(s => s.status === statusFilter);
     filtered.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
     document.getElementById('submissions-body').innerHTML = filtered.map(s => {
         const student = students.find(st => st.id === s.studentId);
-        const quiz = quizzes.find(q => q.id === s.quizId);
+        const assessment = assessments.get(String(s.quizId || s.examId || ''));
         const statusClass = s.status === 'pass' ? 'success' : s.status === 'fail' ? 'danger' : 'warning';
         const pointsDisplay = s.pointsEarned != null ? `${Math.round(s.pointsEarned * 10) / 10}/${s.totalPoints} pts` : '';
         const isPendingReview = s.status === 'pending_review' || s.needsReview;
         const reviewBtn = isPendingReview ? `<button class="btn btn-warning btn-sm" onclick="showEssayReviewPanel('${s.id}')">📝 Review</button> ` : '';
-        return `<tr><td>${student ? student.name : s.studentId}</td><td style="font-size:12px;">${quiz ? quiz.title : s.quizId}</td><td style="font-weight:700;">${s.score}%</td><td>${pointsDisplay}</td><td>${s.grade || '--'}</td><td><span class="badge badge-${isPendingReview ? 'warning' : statusClass}">${isPendingReview ? 'PENDING REVIEW' : s.status.toUpperCase()}</span></td><td>${s.attempts || 1}</td><td style="font-size:11px;">${formatDate(s.submittedAt)}</td><td>${reviewBtn}${s.essayAnalysis ? `<button class="btn btn-outline btn-sm" onclick="viewEssayAnalysis('${s.id}')">View AI</button>` : ''} <button class="btn btn-outline btn-sm" onclick="viewSubmissionDetails('${s.id}')">Details</button> <button class="btn btn-warning btn-sm" onclick="resetSubmission('${s.id}')">Reset</button> <button class="btn btn-danger btn-sm" onclick="deleteSubmission('${s.id}')">Del</button></td></tr>`;
+        const title = assessment ? `<span style="font-size:10px;color:var(--text-muted);">${assessment._kind}</span> ${escapeHtml(assessment.title || assessment.id)}` : escapeHtml(s.quizId || s.examId || '');
+        return `<tr><td>${student ? escapeHtml(student.name) : escapeHtml(s.studentId)}</td><td style="font-size:12px;">${title}</td><td style="font-weight:700;">${s.score}%</td><td>${pointsDisplay}</td><td>${s.grade || '--'}</td><td><span class="badge badge-${isPendingReview ? 'warning' : statusClass}">${isPendingReview ? 'PENDING REVIEW' : String(s.status || '').toUpperCase()}</span></td><td>${s.attempts || 1}</td><td style="font-size:11px;">${formatDate(s.submittedAt)}</td><td>${reviewBtn}${s.essayAnalysis ? `<button class="btn btn-outline btn-sm" onclick="viewEssayAnalysis('${s.id}')">View AI</button>` : ''} <button class="btn btn-outline btn-sm" onclick="viewSubmissionDetails('${s.id}')">Details</button> <button class="btn btn-warning btn-sm" onclick="resetSubmission('${s.id}')">Reset</button> <button class="btn btn-danger btn-sm" onclick="deleteSubmission('${s.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No submissions yet.</td></tr>';
     if (savedStatus) statusSelect.value = savedStatus;
     quizSelect.onchange = renderSubmissions;
@@ -17977,8 +18157,10 @@ async function deleteSubmission(id) {
 async function resetSubmission(id) {
     const sub = await dbGet('submissions', id);
     if (!sub) return showToast('Submission not found.', { type: 'danger' });
-    const quiz = (await dbGetAll('quizzes')).find(q => q.id === sub.quizId);
-    const quizTitle = quiz ? quiz.title : sub.quizId;
+    const assessmentId = sub.quizId || sub.examId;
+    const quiz = (await dbGetAll('quizzes')).find(q => q.id === assessmentId)
+        || (await dbGetAll('exams')).find(e => e.id === assessmentId);
+    const quizTitle = quiz ? quiz.title : assessmentId;
     window._resetSubmissionId = id;
     window._resetSubmissionConfirm = async function() {
         const reason = document.getElementById('reset-reason')?.value.trim();
@@ -18019,7 +18201,7 @@ async function showEssayReviewPanel(submissionId) {
     const sub = await dbGet('submissions', submissionId);
     if (!sub) return showToast('Submission not found!');
     const questions = await dbGetAll('questionBank');
-    const quiz = await dbGet('quizzes', sub.quizId);
+    const quiz = await dbGet('quizzes', sub.quizId) || await dbGet('exams', sub.quizId || sub.examId);
     const student = (await dbGetAll('students')).find(s => s.id === sub.studentId);
     const essayAnswers = sub.answers.filter(a => a.type === 'essay');
     if (!essayAnswers.length) return showToast('No essay questions in this submission.');
@@ -18104,7 +18286,7 @@ async function saveEssayReview(submissionId) {
     const sub = await dbGet('submissions', submissionId);
     if (!sub) return;
     const questions = await dbGetAll('questionBank');
-    const quiz = await dbGet('quizzes', sub.quizId);
+    const quiz = await dbGet('quizzes', sub.quizId) || await dbGet('exams', sub.quizId || sub.examId);
     let totalAdjusted = 0;
     const updatedAnswers = sub.answers.map(a => {
         if (a.type === 'essay') {
@@ -20132,14 +20314,6 @@ function renderPortalContent(studentId, data, isStudentUser) {
     // official transcript) and ASSESSMENT MARKS (components of a course result)
     // are shown separately, so a component mark can never be read as the
     // student's course result.
-    try {
-        for (const c of data.courses) {
-            await syncCourseGradeFromAssessmentsClient(studentId, c.id, 'all');
-        }
-        // reload grades after sync
-        const freshGrades = await dbGetAll('grades');
-        data.grades = freshGrades;
-    } catch(e) {}
     const portalCourseResults = resolveStudentResults(data.grades, studentId, { semester: 'all', courses: data.courses }).rows;
     const portalAssessments = (data.grades || []).filter(g => g && g.studentId === studentId && isAssessmentGrade(g)).slice(0, 10);
     const portalGradesHtml =
@@ -22581,9 +22755,9 @@ async function saveAssistantAccess() {
     showToast('Assistant access saved!'); logAudit('updated', 'assistant-access', s);
 }
 // ---- Owner controls ------------------------------------------------------
-// The owner is the author of the system. Two cards are shown to the owner
+// The owner is the author of the system. Three cards are shown to the owner
 // only: the switches that decide which tabs the overall administrator may
-// open, and the owner-only security actions.
+// open, the owner-only security actions, and the owner password form.
 const ADMIN_ACCESS_TABS = ADMIN_TABS;
 function isOwnerUser() {
     try {
@@ -22629,8 +22803,12 @@ async function loadAdminAccess() {
     const owner = !!currentUser.isOwner;
     const card = document.getElementById('owner-access-card');
     const secCard = document.getElementById('owner-security-card');
+    const pwCard = document.getElementById('owner-password-card');
+    const standardPwCard = document.getElementById('standard-password-card');
     if (card) card.style.display = owner ? '' : 'none';
     if (secCard) secCard.style.display = owner ? '' : 'none';
+    if (pwCard) pwCard.style.display = owner ? '' : 'none';
+    if (standardPwCard) standardPwCard.style.display = owner ? 'none' : '';
     if (!owner) return;
     try {
         const rec = await dbGet('settings', 'adminAccess');
@@ -23270,34 +23448,52 @@ async function saveWhatsAppSettings() {
     const settings = { key: 'whatsapp', countryCode: document.getElementById('settings-whatsapp-code').value.trim(), adminNumber: document.getElementById('settings-whatsapp-admin').value.trim() };
     await dbPut('settings', settings); showToast('WhatsApp settings saved!'); logAudit('updated', 'whatsapp-settings', settings);
 }
-async function changePassword() {
-    const status = document.getElementById('settings-pw-status');
-    const currentPw = document.getElementById('settings-current-pw').value;
-    const newPw = document.getElementById('settings-new-pw').value;
-    const confirmPw = document.getElementById('settings-confirm-pw').value;
-    if (!currentPw || !newPw || !confirmPw) { status.textContent = 'Fill all fields'; status.style.color = 'var(--danger)'; return; }
-    if (newPw !== confirmPw) { status.textContent = 'New passwords do not match'; status.style.color = 'var(--danger)'; return; }
-    if (newPw.length < 8) { status.textContent = 'Password must be at least 8 characters'; status.style.color = 'var(--danger)'; return; }
+function setPasswordFormStatus(status, message, ok) {
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = ok ? 'var(--success)' : 'var(--danger)';
+}
+
+async function changePasswordWithFields(prefix, statusId, options) {
+    const opts = options || {};
+    const status = document.getElementById(statusId);
+    const field = (name) => document.getElementById(prefix + '-' + name + '-pw');
+    const currentPw = field('current')?.value || '';
+    const newPw = field('new')?.value || '';
+    const confirmPw = field('confirm')?.value || '';
+    const fail = (msg) => setPasswordFormStatus(status, msg, false);
+    if (opts.ownerOnly && !isOwnerUser()) return fail('Only the owner can change this password');
+    if (!currentPw || !newPw || !confirmPw) return fail('Fill all fields');
+    if (newPw !== confirmPw) return fail('New passwords do not match');
+    if (newPw.length < 8) return fail('Password must be at least 8 characters');
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (!currentUser.username) { status.textContent = 'Not logged in'; status.style.color = 'var(--danger)'; return; }
+    if (!currentUser.username) return fail('Not logged in');
     // The password is changed by the server, which stores it salted and
     // encrypted-at-rest — the browser never sees or writes the hash.
     let res;
     try {
         res = await fetch('/api/change-password', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ currentPw: currentPw, newPw: newPw }) });
     } catch (e) {
-        status.textContent = 'Could not reach the server'; status.style.color = 'var(--danger)'; return;
+        return fail('Could not reach the server');
     }
     let data = null;
     try { data = await res.json(); } catch (e) {}
-    if (!res.ok) { status.textContent = (data && data.error) || 'Password change failed'; status.style.color = 'var(--danger)'; return; }
-    document.getElementById('settings-current-pw').value = '';
-    document.getElementById('settings-new-pw').value = '';
-    document.getElementById('settings-confirm-pw').value = '';
-    status.textContent = 'Password updated successfully!';
-    status.style.color = 'var(--success)';
-    logAudit('updated', 'password', { username: currentUser.username });
-    setTimeout(() => { status.textContent = ''; }, 3000);
+    if (!res.ok) return fail((data && data.error) || 'Password change failed');
+    ['current', 'new', 'confirm'].forEach(name => { const el = field(name); if (el) el.value = ''; });
+    if (opts.owner) {
+        const revoked = Number(data && data.revoked) || 0;
+        setPasswordFormStatus(status, revoked ? `Owner password updated. ${revoked} other session(s) signed out.` : 'Owner password updated successfully!', true);
+    } else {
+        setPasswordFormStatus(status, 'Password updated successfully!', true);
+    }
+    logAudit('updated', 'password', { username: currentUser.username, owner: !!opts.owner });
+    setTimeout(() => { if (status) status.textContent = ''; }, 4000);
+}
+async function changePassword() {
+    return changePasswordWithFields('settings', 'settings-pw-status');
+}
+async function changeOwnerPassword() {
+    return changePasswordWithFields('owner', 'owner-pw-status', { ownerOnly: true, owner: true });
 }
 function updateProgramFilter() {
     const settingsEl = document.getElementById('settings-programs');

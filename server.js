@@ -1881,9 +1881,377 @@ function gradeBandForScore(score) {
     for (const b of bands) { if (s >= b.min) return { grade: b.grade, gpa: b.gpa }; }
     return { grade: 'F', gpa: 0.0 };
 }
+
+// ---- One course result from its assessment components --------------------
+// The transcript prints a COURSE-LEVEL result (GRD-...), never an individual
+// exam/quiz/CAT mark. This block keeps that result in step with the components:
+// it reads the course weightage, merges the exams + quizzes stores, takes the
+// learner's best attempt for each assessment, applies the component weights and
+// writes a course-level grade when every component that exists for the course
+// has a mark. A component category with no assessments in the course is not
+// required, so a course that only has an exam is graded from that exam (and
+// attendance if the course records it) instead of being held at zero by a quiz
+// that was never offered.
+const COURSE_COMPONENT_ORDER = ['exam', 'quiz', 'cat', 'attendance', 'other'];
+const COURSE_COMPONENT_LABELS = { exam: 'Exam', quiz: 'Quiz', cat: 'CAT', attendance: 'Attendance', other: 'Other' };
+const COURSE_ATT_AWARD_MIN = 80;
+
+function courseComponentType(row) {
+    const label = String((row && row.label) || '').toLowerCase();
+    if (/attendance/.test(label)) return 'attendance';
+    if (/\bcat\b|class\s*assessment|mid[-\s]*sem/.test(label)) return 'cat';
+    if (/quiz/.test(label)) return 'quiz';
+    if (/exam|final|paper|practicum|essay|project|assignment|portfolio|presentation|\blab\b/.test(label)) return 'exam';
+    const type = String((row && row.type) || '').toLowerCase();
+    return ['exam', 'quiz', 'cat', 'attendance'].includes(type) ? type : 'other';
+}
+
+function courseWeightGroups(course) {
+    const src = course || {};
+    let rows = Array.isArray(src.weightage) ? src.weightage.filter(r => Number(r && r.value) > 0) : [];
+    if (!rows.length) {
+        rows = [
+            { label: 'Exam', value: src.examWeight != null ? src.examWeight : 30, type: 'exam' },
+            { label: 'Quiz', value: src.quizWeight != null ? src.quizWeight : 20, type: 'quiz' },
+            { label: 'CAT', value: src.catWeight != null ? src.catWeight : 25, type: 'cat' },
+            { label: 'Attendance', value: src.attWeight != null ? src.attWeight : 10, type: 'attendance' }
+        ].filter(r => Number(r.value) > 0);
+    }
+    if (!rows.length) rows = [
+        { label: 'Exam', value: 30, type: 'exam' },
+        { label: 'Quiz', value: 20, type: 'quiz' },
+        { label: 'CAT', value: 25, type: 'cat' },
+        { label: 'Attendance', value: 10, type: 'attendance' }
+    ];
+    const groups = { exam: 0, quiz: 0, cat: 0, attendance: 0, other: 0 };
+    const labels = { exam: [], quiz: [], cat: [], attendance: [], other: [] };
+    for (const row of rows) {
+        const type = courseComponentType(row);
+        const value = Number(row && row.value) || 0;
+        if (!(value > 0)) continue;
+        groups[type] += value;
+        if (row && row.label) labels[type].push(String(row.label));
+    }
+    const total = groups.exam + groups.quiz + groups.cat + groups.attendance + groups.other;
+    return { rows, groups, labels, total };
+}
+
+function assessmentComponentType(assessment, isExam) {
+    const explicit = String((assessment && assessment.assessmentType) || '').toLowerCase();
+    if (['exam', 'quiz', 'cat'].includes(explicit)) return explicit;
+    return isExam ? 'exam' : 'quiz';
+}
+
+// The exams store is the assessment source. Quizzes is retained for older
+// CAT/quiz records. A component belongs to the semester of its assessment.
+function courseAssessmentComponents(courseId, semester) {
+    const out = new Map();
+    const add = (assessment, isExam) => {
+        if (!assessment || !assessment.id) return;
+        if (String(assessment.courseId || '') !== String(courseId)) return;
+        if (semester !== null && semester !== undefined && semester !== '' && String(semester) !== 'all'
+            && Number(assessment.semester != null ? assessment.semester : 1) !== Number(semester)) return;
+        const type = assessmentComponentType(assessment, isExam);
+        out.set(String(assessment.id), { id: String(assessment.id), type, assessment, isExam: !!isExam });
+    };
+    (db.quizzes || []).forEach(q => add(q, false));
+    (db.exams || []).forEach(e => add(e, true));
+    return Array.from(out.values());
+}
+
+function bestAssessmentScores(studentId, components) {
+    const ids = new Set(components.map(c => c.id));
+    const best = new Map();
+    for (const sub of (db.submissions || [])) {
+        if (!sub || String(sub.studentId || '') !== String(studentId)) continue;
+        const assessmentId = String(sub.quizId || sub.examId || '');
+        if (!ids.has(assessmentId)) continue;
+        if (sub.needsReview === true || sub.status === 'pending_review') continue;
+        const score = Number(sub.score);
+        if (!Number.isFinite(score)) continue;
+        const prior = best.get(assessmentId);
+        if (!prior || score > prior.score) {
+            best.set(assessmentId, { score, submissionId: sub.id, scoredAt: sub.submittedAt || sub.gradedAt || '' });
+        }
+    }
+    return best;
+}
+
+function isCourseLevelGradeRecord(grade) {
+    if (!grade || !grade.courseId) return false;
+    if (grade.weighted === true) return true;
+    return /^GRD-/.test(String(grade.id || ''));
+}
+
+function findCourseLevelGrade(studentId, courseId, semester) {
+    return (db.grades || []).find(g => g && isCourseLevelGradeRecord(g)
+        && String(g.studentId || '') === String(studentId)
+        && String(g.courseId || '') === String(courseId)
+        && String(g.semester) === String(semester)) || null;
+}
+
+function computeCourseResultFromAssessments(studentId, courseId, semester) {
+    const course = (db.courses || []).find(c => c && String(c.id) === String(courseId));
+    if (!course || !studentId || !courseId) return null;
+    const weight = courseWeightGroups(course);
+    const components = courseAssessmentComponents(courseId, semester);
+    const best = bestAssessmentScores(studentId, components);
+    const details = {};
+    const missing = [];
+    let requiredWeight = 0;
+    let weighted = 0;
+    let hasAcademic = false;
+
+    for (const type of ['exam', 'quiz', 'cat']) {
+        const groupWeight = Number(weight.groups[type]) || 0;
+        if (!(groupWeight > 0)) continue;
+        const definitions = components.filter(c => c.type === type);
+        // If the course has no assessment of this type, it is not a missing
+        // component - it is simply not part of this course's assessment plan.
+        if (!definitions.length) continue;
+        hasAcademic = true;
+        requiredWeight += groupWeight;
+        const scores = definitions.map(d => best.get(d.id)).filter(Boolean)
+            .map(x => Number(x.score)).filter(Number.isFinite);
+        const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+        if (!scores.length) missing.push(type);
+        weighted += avg * groupWeight;
+        details[type] = {
+            type,
+            label: (weight.labels[type] || []).join(' + ') || COURSE_COMPONENT_LABELS[type],
+            weight: groupWeight,
+            avg,
+            count: scores.length,
+            defined: definitions.length
+        };
+    }
+
+    // Attendance is a component only when the course records attendance for
+    // this learner (or at all). No attendance sheet means "not offered".
+    const attRows = (db.attendance || []).filter(a => a
+        && String(a.studentId || '') === String(studentId)
+        && String(a.courseId || '') === String(courseId));
+    const courseHasAttendance = (db.attendance || []).some(a => a && String(a.courseId || '') === String(courseId));
+    const attWeight = Number(weight.groups.attendance) || 0;
+    let attendancePct = 0;
+    if (attWeight > 0 && attRows.length) {
+        requiredWeight += attWeight;
+        attendancePct = (attRows.filter(a => a.status === 'present' || a.status === 'late').length / attRows.length) * 100;
+        const attAward = attendancePct >= COURSE_ATT_AWARD_MIN ? 100 : 0;
+        weighted += attAward * attWeight;
+        details.attendance = {
+            type: 'attendance',
+            label: (weight.labels.attendance || []).join(' + ') || COURSE_COMPONENT_LABELS.attendance,
+            weight: attWeight,
+            avg: attAward,
+            count: attRows.length,
+            defined: attRows.length
+        };
+    } else if (attWeight > 0 && courseHasAttendance) {
+        requiredWeight += attWeight;
+        missing.push('attendance');
+        details.attendance = {
+            type: 'attendance',
+            label: (weight.labels.attendance || []).join(' + ') || COURSE_COMPONENT_LABELS.attendance,
+            weight: attWeight,
+            avg: 0,
+            count: 0,
+            defined: 0
+        };
+    }
+
+    if (weight.groups.other > 0) {
+        requiredWeight += weight.groups.other;
+        missing.push('other');
+        details.other = {
+            type: 'other',
+            label: (weight.labels.other || []).join(' + ') || COURSE_COMPONENT_LABELS.other,
+            weight: weight.groups.other,
+            avg: 0,
+            count: 0,
+            defined: 0
+        };
+    }
+
+    const score = requiredWeight > 0 ? Math.round(weighted / requiredWeight) : 0;
+    return {
+        complete: hasAcademic && requiredWeight > 0 && missing.length === 0,
+        score,
+        weightedScore: score,
+        requiredWeight,
+        missing,
+        groups: weight.groups,
+        labels: weight.labels,
+        components: Object.values(details),
+        attendancePct,
+        examAvg: details.exam ? details.exam.avg : 0,
+        quizAvg: details.quiz ? details.quiz.avg : 0,
+        catAvg: details.cat ? details.cat.avg : 0,
+        attAwarded: !!(details.attendance && details.attendance.avg >= 100),
+        examCount: details.exam ? details.exam.count : 0,
+        quizCount: details.quiz ? details.quiz.count : 0,
+        catCount: details.cat ? details.cat.count : 0,
+        attTotal: details.attendance ? details.attendance.count : 0,
+        examWeight: weight.groups.exam,
+        quizWeight: weight.groups.quiz,
+        catWeight: weight.groups.cat,
+        attWeight: weight.groups.attendance,
+        otherWeight: weight.groups.other
+    };
+}
+
+// Write the course-level result only when the component set is complete. A
+// manually entered result is absolutely protected; an older imported result
+// (neither manual nor weighted) is also left alone. A result this engine wrote,
+// or a staff "compute weighted" snapshot, is refreshed as marks change.
+function syncCourseGradeFromAssessments(studentId, courseId, semester, opts) {
+    try {
+        const options = opts || {};
+        const result = computeCourseResultFromAssessments(studentId, courseId, semester);
+        // There must be ONE course-level result per course + semester. Older
+        // data contains duplicate GRD records (for example a stale failed mark
+        // under an old student id and the current computed result). Pick the
+        // authoritative record instead of whichever happens to come first, and
+        // remove the duplicates below. A manual record always wins.
+        const matches = (db.grades || []).filter(g => g && isCourseLevelGradeRecord(g)
+            && String(g.studentId || '') === String(studentId)
+            && String(g.courseId || '') === String(courseId)
+            && String(g.semester) === String(semester));
+        const manualRecord = matches.find(g => g.manual === true) || null;
+        const existing = manualRecord
+            || matches.find(g => g.source === 'assessments')
+            || matches.find(g => g.weighted === true)
+            || matches[0] || null;
+        if (!result || !result.complete) {
+            if (options.removeIfIncomplete) {
+                const removable = matches.filter(g => g.manual !== true && g.source === 'assessments');
+                if (removable.length) {
+                    db.grades = (db.grades || []).filter(g => !removable.includes(g));
+                    saveDB();
+                    try { broadcastEvent('db-change', { store: 'grades' }); } catch {}
+                    auditLog('removed', 'course-grade', {
+                        studentId, courseId, semester: Number(semester) || 1, reason: 'incomplete', count: removable.length
+                    }, 'system');
+                    return { id: removable[0].id, removed: true };
+                }
+            }
+            return result ? Object.assign({}, result, { recorded: false, existing: false }) : null;
+        }
+        if (existing && existing.manual === true) return Object.assign({}, result, { id: existing.id, recorded: true, protected: 'manual' });
+        if (existing && existing.source !== 'assessments' && existing.weighted !== true) {
+            return Object.assign({}, result, { id: existing.id, recorded: true, protected: 'imported' });
+        }
+        if (options.createOnly && existing) return Object.assign({}, result, { id: existing.id, recorded: true, unchanged: true });
+        const band = gradeBandForScore(result.score);
+        const id = existing ? existing.id : `GRD-${studentId}-${courseId}-${semester}`;
+        const now = new Date().toISOString();
+        const duplicates = matches.filter(g => g && String(g.id) !== String(id) && g.manual !== true);
+        const same = existing
+            && Number(existing.score) === result.score
+            && existing.grade === band.grade
+            && Number(existing.gpa) === band.gpa
+            && JSON.stringify(existing.components || []) === JSON.stringify(result.components);
+        if (same && !duplicates.length) return Object.assign({}, result, { id, recorded: true, unchanged: true });
+        const record = Object.assign({}, existing || {}, {
+            id,
+            studentId,
+            courseId,
+            semester: Number(semester) || 1,
+            score: result.score,
+            grade: band.grade,
+            gpa: band.gpa,
+            weighted: true,
+            source: 'assessments',
+            computedFrom: 'exam+quiz+cat+attendance',
+            components: result.components,
+            weights: result.groups,
+            computedAt: now,
+            updatedAt: now
+        });
+        if (!existing) record.gradedAt = now;
+        if (!db.grades) db.grades = [];
+        const idx = db.grades.findIndex(g => g && String(g.id) === String(id));
+        if (idx >= 0) db.grades[idx] = record; else db.grades.push(record);
+        if (duplicates.length) {
+            db.grades = db.grades.filter(g => !duplicates.includes(g));
+        }
+        saveDB();
+        try { broadcastEvent('db-change', { store: 'grades' }); } catch {}
+        auditLog(existing ? 'recomputed' : 'computed', 'course-grade', {
+            studentId, courseId, semester: Number(semester) || 1, score: result.score,
+            source: 'assessments', duplicatesRemoved: duplicates.length
+        }, 'system');
+        return Object.assign({}, result, {
+            id, recorded: true, created: !existing, changed: true, duplicatesRemoved: duplicates.length
+        });
+    } catch (e) {
+        console.error('syncCourseGradeFromAssessments failed:', e.message);
+        return null;
+    }
+}
+
+// One idempotent pass at boot for results that were scored before this engine
+// existed. It only looks at assessments that actually have a mark; missing
+// components stay missing (partial courses do not get a transcript result).
+function backfillCourseGradesFromAssessments() {
+    try {
+        const pairs = new Map();
+        for (const sub of (db.submissions || [])) {
+            if (!sub || sub.needsReview === true || sub.status === 'pending_review') continue;
+            if (!Number.isFinite(Number(sub.score))) continue;
+            const assessment = (db.exams || []).find(a => a && String(a.id) === String(sub.quizId || sub.examId))
+                || (db.quizzes || []).find(a => a && String(a.id) === String(sub.quizId || sub.examId));
+            if (!assessment || !assessment.courseId) continue;
+            const semester = Number(assessment.semester != null ? assessment.semester : 1) || 1;
+            pairs.set(String(sub.studentId) + '|' + assessment.courseId + '|' + semester, {
+                studentId: String(sub.studentId), courseId: String(assessment.courseId), semester
+            });
+        }
+        let created = 0, updated = 0;
+        for (const pair of pairs.values()) {
+            const r = syncCourseGradeFromAssessments(pair.studentId, pair.courseId, pair.semester, {});
+            if (r && r.created) created++;
+            else if (r && r.changed) updated++;
+        }
+        if (created || updated) {
+            process.stderr.write('COURSE_GRADE_BACKFILL: ' + created + ' created, ' + updated + ' updated\n');
+        }
+        return { created, updated };
+    } catch (e) {
+        console.error('backfillCourseGradesFromAssessments failed:', e.message);
+        return { created: 0, updated: 0 };
+    }
+}
+
+// Keep an EXISTING automatic course result current when its inputs outside the
+// submissions store change (attendance, course weightage). This deliberately
+// does not create new records: an attendance edit alone must not turn a course
+// with no academic components into a result.
+function syncExistingCourseGradesFor(studentId, courseId) {
+    const rows = (db.grades || []).filter(g => g && isCourseLevelGradeRecord(g)
+        && g.source === 'assessments' && g.manual !== true
+        && String(g.studentId || '') === String(studentId)
+        && String(g.courseId || '') === String(courseId));
+    for (const g of rows) {
+        syncCourseGradeFromAssessments(g.studentId, g.courseId, g.semester, {});
+    }
+}
+function syncExistingCourseGradesForCourse(courseId) {
+    const seen = new Set();
+    for (const g of (db.grades || [])) {
+        if (!g || !isCourseLevelGradeRecord(g) || g.source !== 'assessments' || g.manual === true) continue;
+        if (String(g.courseId || '') !== String(courseId)) continue;
+        const key = String(g.studentId) + '|' + String(g.semester);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        syncCourseGradeFromAssessments(g.studentId, g.courseId, g.semester, {});
+    }
+}
+
 // The stored results are brought in line with the ACTIVE scale once the scale
 // itself is available (the tables above are declared before this point).
 try { normaliseStoredGradeScale(); } catch (e) { console.error('boot grade normalisation failed:', e); }
+try { backfillCourseGradesFromAssessments(); } catch (e) { console.error('boot course-grade backfill failed:', e); }
 // The identifiers a learner may answer to: the student id, the username and
 // the admission number. A session may carry any one of them.
 function studentAliases(user) {
@@ -1945,7 +2313,19 @@ function upsertGradeFromSubmission(sub, marked, band, assessment, scoredBy) {
     };
     const gi = (db.grades || []).findIndex(x => x && x.id === id);
     if (gi >= 0) db.grades[gi] = entry; else db.grades.push(entry);
-    return { id: id, created: gi < 0 };
+    // Refresh the COURSE result as soon as a component is marked. This is the
+    // bridge that makes an exam/quiz/CAT reach the transcript; the transcript
+    // itself keeps printing the course-level GRD record, never this one.
+    const courseResult = courseId
+        ? syncCourseGradeFromAssessments(studentId, courseId, entry.semester, {})
+        : null;
+    return {
+        id: id,
+        created: gi < 0,
+        courseGradeId: courseResult && courseResult.id ? courseResult.id : null,
+        courseGradeComplete: !!(courseResult && courseResult.complete),
+        courseGradeRecorded: !!(courseResult && courseResult.recorded)
+    };
 }
 
 
@@ -6729,6 +7109,14 @@ const parsed = JSON.parse(body);
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }
+                    // Attendance and course weightage are course-result inputs,
+                    // so refresh any automatic result that already exists.
+                    if (store === 'attendance' && toStore.studentId && toStore.courseId) {
+                        try { syncExistingCourseGradesFor(String(toStore.studentId), String(toStore.courseId)); } catch (e) { console.error('attendance course-grade refresh failed:', e.message); }
+                    }
+                    if (store === 'courses' && toStore.id) {
+                        try { syncExistingCourseGradesForCourse(String(toStore.id)); } catch (e) { console.error('course-weight course-grade refresh failed:', e.message); }
+                    }
                     // A marked paper also creates its grade record here, so the
                     // exam is on the transcript after this single write.
                     let gradeId = null, gradeCreated = false;
@@ -6842,6 +7230,25 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                 // A log store is append-only, so a deletion is recorded as a
                 // tombstone; otherwise the record would come back on restart.
                 if (isLogStore(store) && doomed) tombstoneLogArchive(store, doomed);
+            }
+            // Removing a paper can make its course result incomplete. Refresh
+            // the course-level mark from the submissions that remain; if this
+            // engine wrote the result, remove it rather than leaving a stale
+            // transcript entry for a component that no longer exists.
+            if (doomed && store === 'submissions') {
+                try {
+                    const assessmentId = String(doomed.quizId || doomed.examId || '');
+                    const assessment = (db.exams || []).find(a => a && String(a.id) === assessmentId)
+                        || (db.quizzes || []).find(a => a && String(a.id) === assessmentId);
+                    if (assessment && assessment.courseId) {
+                        const semester = Number(doomed.semester != null ? doomed.semester
+                            : (assessment.semester != null ? assessment.semester : 1)) || 1;
+                        syncCourseGradeFromAssessments(String(doomed.studentId || ''), String(assessment.courseId), semester, { removeIfIncomplete: true });
+                    }
+                } catch (e) { console.error('submission course-grade refresh failed:', e.message); }
+            }
+            if (doomed && store === 'attendance' && doomed.studentId && doomed.courseId) {
+                try { syncExistingCourseGradesFor(String(doomed.studentId), String(doomed.courseId)); } catch (e) { console.error('attendance course-grade refresh failed:', e.message); }
             }
             // Remove orphaned doc files for deleted certificates/idCards (docs + volume).
             if (doomed && (store === 'certificates' || store === 'idCards' || store === 'idcards')) {
