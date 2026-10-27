@@ -13814,7 +13814,7 @@ async function showCertificateForm() {
     const portalId = document.getElementById('portal-student')?.value || '';
     // Pre-fill date with today; will auto-update to registration date when student selected
     const todayIso = new Date().toISOString().split('T')[0];
-    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
+    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group" id="cert-issue-date-group" style="display:none;"><label>Date of Issue <span style="font-size:11px;color:var(--text-muted);">(printed beside the official seal — editable)</span></label><input type="date" id="cert-issue-date" value="${todayIso}" max="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Defaults to today. Choose an earlier date when reissuing a transcript.</div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
     showModal('Generate Document', content, `<button class="btn btn-primary" onclick="generateCertificate()">Generate</button>`);
     setTimeout(() => { onCertStudentChange(); onCertTypeChange(); }, 50);
 }
@@ -13833,9 +13833,15 @@ function onCertStudentChange() {
 function onCertTypeChange() {
     const type = document.getElementById('cert-type-select')?.value;
     const group = document.getElementById('cert-date-group');
-    if (!group) return;
-    const noDateTypes = ['transcript'];
-    group.style.display = noDateTypes.includes(type) ? 'none' : '';
+    const issueGroup = document.getElementById('cert-issue-date-group');
+    const issueInput = document.getElementById('cert-issue-date');
+    const isTranscript = type === 'transcript';
+    if (group) group.style.display = isTranscript ? 'none' : '';
+    if (issueGroup) issueGroup.style.display = isTranscript ? '' : 'none';
+    if (issueInput && isTranscript && !issueInput.value) {
+        issueInput.value = todayDateInputValue();
+        issueInput.max = todayDateInputValue();
+    }
 }
 async function generateCertificate() {
     try {
@@ -13852,6 +13858,7 @@ async function generateCertificate() {
     const notes = document.getElementById('cert-notes').value.trim();
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
     const vCode = generateVerificationCode();
+    const issue = issueDateInfo(type === 'transcript' ? (document.getElementById('cert-issue-date')?.value || '') : '');
     // Custom letter date: auto = registration date, editable, formatted like diploma (12th September 2025)
     const customDateVal = document.getElementById('cert-letter-date')?.value || '';
     const regIso = getStudentRegistrationDate(student);
@@ -14008,7 +14015,7 @@ async function generateCertificate() {
         docId = 'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 4).toUpperCase();
         html = `<div id="transcript-print-area">${buildProfessionalTranscript({
             student, grades, courses, branding: { schoolName, tagline, initials: branding ? branding.initials : 'CM', logo: branding ? branding.logo : null, accentColor: branding ? branding.accentColor : '#f59e0b', sig_registrar: getRoleSignature('Registrar', branding), sig_dean: getRoleSignature('Academic Dean', branding), sig_director: getRoleSignature('Director / Principal', branding), postalAddress: branding ? branding.postalAddress : '', city: branding ? branding.city : '', phone: branding ? branding.phone : '', email: branding ? branding.email : '', website: branding ? branding.website : '' },
-            docType: 'official', semester: 'all', year: student.academicYear || '', docId, vCode, generatedDate: today, generatedTime: '', center,
+            docType: 'official', semester: 'all', year: student.academicYear || '', docId, vCode, generatedDate: today, generatedTime: '', issueDate: issue.label, center,
             financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
             academic: { chapel: studentChapel, attendancePct },
             allGrades, academicSettings
@@ -14047,9 +14054,13 @@ async function generateCertificate() {
         ${a4PrintStyle}</div>`;
     }
     const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, studentName: student.name, type, docTitle, content: html, docId, vCode, letterDate: letterDateIso, letterDateFormatted: letterDate, generatedAt: new Date().toISOString() };
+    if (type === 'transcript') {
+        cert.issueDate = issue.iso;
+        cert.issueDateFormatted = issue.label;
+    }
     await dbPut('certificates', cert);
     if (type === 'transcript') {
-        const ver = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, generatedAt: new Date().toISOString() };
+        const ver = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label };
         await dbPut('transcriptVerifications', ver);
     }
     logAudit('generated', 'certificate', cert);
