@@ -14245,7 +14245,7 @@ async function viewCertificate(certId) {
                 ${cert.revokeContact ? ` Contact: ${escapeHtml(cert.revokeContact)}.` : ' It is no longer valid for official use.'}
             </div>
         </div>` : '';
-    const metaBar = `<div style="font-size:12px;line-height:1.7;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+    const metaBar = `<div style="font-size:12px;line-height:1.7;color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
         <div><b>${who}</b> ${statusBadge}</div>
         <div>${kind} &middot; Doc ID: <b>${docId}</b> &middot; V-Code: <span style="font-family:'Courier New',monospace;">${vCode}</span></div>
         <div>Issued: ${gen}</div>
