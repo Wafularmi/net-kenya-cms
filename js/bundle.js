@@ -537,6 +537,58 @@ function findStudentWithAlumniFallback(students, alumni, currentUser) {
     }
     return null;
 }
+// One shared visibility rule for a learner's assessments. The server enforces
+// the same boundary in filterStoreForUser; keeping it here as well means the
+// UI is still correct when an older API response is replayed from a cache.
+//   - the assessment must belong to one of the learner's active courses;
+//   - it must match the learner's country, region and study center when tagged;
+//   - table exams, CATs, exams and scheduled quizzes require the learner's own
+//     registration (or their own completed attempt / retake request);
+//   - open-window assessments are deliberately published to every enrolled
+//     learner, so they stay available without a separate registration;
+//   - ordinary unscheduled lesson quizzes are course work for the class.
+function isStudentAssessmentScheduled(rec) {
+    // opensAt/closesAt is just the availability window of an ordinary course
+    // quiz; it does not turn that quiz into a registered sitting. A real
+    // scheduled assessment carries a date/time (CATs and exams are handled by
+    // their assessment type regardless).
+    return !!(rec && (rec.date || rec.time || rec.openWindow));
+}
+function isStudentCourseworkQuiz(rec) {
+    if (!rec) return false;
+    const type = String(rec.assessmentType || '').toLowerCase();
+    return (type === 'quiz' || !type) && !isStudentAssessmentScheduled(rec);
+}
+function assessmentInStudentScope(rec, student, centers) {
+    if (!rec || !student) return false;
+    const myCenterId = String(student.studyCenterId || '');
+    const center = (centers || []).find(c => c && String(c.id) === myCenterId) || null;
+    const myRegionId = String((center && center.regionId) || student.regionId || '');
+    const myCountry = String(student.country || (center && center.country) || '');
+    if (rec.studyCenterId && (!myCenterId || String(rec.studyCenterId) !== myCenterId)) return false;
+    if (rec.regionId && (!myRegionId || String(rec.regionId) !== myRegionId)) return false;
+    if (rec.country && (!myCountry || String(rec.country) !== myCountry)) return false;
+    return true;
+}
+function canStudentAccessAssessment(rec, kind, ctx) {
+    if (!rec || !ctx || !ctx.student) return false;
+    if (rec.published === false) return false;
+    if (!ctx.courseIds || !ctx.courseIds.has(String(rec.courseId))) return false;
+    if (!assessmentInStudentScope(rec, ctx.student, ctx.centers || [])) return false;
+    const id = String(rec.id);
+    if (kind === 'exam') {
+        if (!(rec.openWindow || (rec.date && rec.time))) return false;
+        return !!(rec.openWindow
+            || (ctx.examRegIds && ctx.examRegIds.has(id))
+            || (ctx.retakeExamIds && ctx.retakeExamIds.has(id))
+            || (ctx.submittedIds && ctx.submittedIds.has(id)));
+    }
+    if (rec.openWindow) return true;
+    if ((ctx.quizRegIds && ctx.quizRegIds.has(id))
+        || (ctx.examRegIds && ctx.examRegIds.has(id))
+        || (ctx.submittedIds && ctx.submittedIds.has(id))) return true;
+    return isStudentCourseworkQuiz(rec);
+}
 function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
@@ -4731,14 +4783,36 @@ async function viewStudentQuizzes(courseId) {
     if (!course) return showToast('Course not found');
     const quizzes = await dbGetAll('quizzes');
     const submissions = await dbGetAll('submissions');
-    if (currentUser.role === 'student') { try { await loadDripMaps(currentUser.studentId || currentUser.username); await ensureDripUnlocks(currentUser.studentId || currentUser.username, courseId); } catch {} }
+    let studentId = currentUser.studentId || currentUser.username;
+    if (currentUser.role === 'student') {
+        try { studentId = await resolveStudentId(currentUser) || studentId; } catch (e) { console.error('resolveStudentId error:', e); }
+        try { await loadDripMaps(studentId); await ensureDripUnlocks(studentId, courseId); } catch {}
+    }
     let _lesMap = {};
     try { (await dbGetAll('lessons')).forEach(l => _lesMap[l.id] = l); } catch {}
     const courseQuizzes = quizzes.filter(q => q.courseId === courseId).filter(q => !q.lessonId || !_lesMap[q.lessonId] || lessonVisible(_lesMap[q.lessonId]));
-    const studentSubmissions = submissions.filter(s => s.studentId === currentUser.studentId || s.studentId === currentUser.username);
-    const quizRegs = (await dbGetAll('quizRegistrations')).filter(r => r.studentId === (currentUser.studentId || currentUser.username));
-    const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
-    const filteredQuizzes = courseQuizzes.filter(q => q.assessmentType === 'quiz' || !q.assessmentType || registeredQuizIds.has(q.id));
+    const studentSubmissions = submissions.filter(s => String(s.studentId) === String(studentId) || s.studentId === currentUser.username);
+    const quizRegs = (await dbGetAll('quizRegistrations')).filter(r => String(r.studentId) === String(studentId));
+    let filteredQuizzes = courseQuizzes;
+    if (currentUser.role === 'student') {
+        const [students, enrollments, allExamRegs, retakeRequests, centers] = await Promise.all([
+            dbGetAll('students'), dbGetAll('enrollments'), dbGetAll('examRegistrations'),
+            dbGetAll('retakeRequests').catch(() => []), getCenters()
+        ]);
+        const me = findStudentForCurrentUser(students, currentUser) || students.find(s => String(s.id) === String(studentId));
+        const courseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
+        const examRegs = allExamRegs.filter(r => String(r.studentId) === String(studentId));
+        const assessmentCtx = {
+            student: me,
+            centers,
+            courseIds,
+            examRegIds: new Set(examRegs.map(r => r.examId || r.quizId)),
+            quizRegIds: new Set(quizRegs.map(r => r.quizId)),
+            retakeExamIds: new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => r.examId)),
+            submittedIds: new Set(studentSubmissions.map(s => s.quizId))
+        };
+        filteredQuizzes = courseQuizzes.filter(q => canStudentAccessAssessment(q, 'quiz', assessmentCtx));
+    }
     let html = `<div style="margin-bottom:12px;padding:8px;background:var(--bg-input);border-radius:6px;"><b>${course.code}</b> — ${course.name}</div>`;
     if (filteredQuizzes.length) {
         html += '<div style="max-height:400px;overflow-y:auto;">';
@@ -5950,10 +6024,21 @@ async function renderExams(opts) {
         const students = await dbGetAll('students');
         const me = findStudentForCurrentUser(students, currentUser);
         const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
-        const myCenterId = me?.studyCenterId || '';
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
-        const sorted = exams.filter(e => e.published !== false && semMatches(e) && (e.openWindow || (e.date && e.time)) && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId)).sort((a, b) => {
+        const myRegistrations = registrations.filter(r => String(r.studentId) === String(studentId));
+        const myRetakeExamIds = new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => r.examId));
+        const submissions = await dbGetAll('submissions');
+        const mySubmittedIds = new Set(submissions.filter(s => s.studentId === studentId).map(s => s.quizId));
+        const assessmentCtx = {
+            student: me,
+            centers,
+            courseIds: enrolledCourseIds,
+            examRegIds: new Set(myRegistrations.map(r => r.examId || r.quizId)),
+            retakeExamIds: myRetakeExamIds,
+            submittedIds: mySubmittedIds
+        };
+        const sorted = exams.filter(e => !inactiveCourseIds.has(e.courseId) && semMatches(e) && canStudentAccessAssessment(e, 'exam', assessmentCtx)).sort((a, b) => {
             const ad = a.date || '9999-12-31', bd = b.date || '9999-12-31';
             return ad.localeCompare(bd);
         });
@@ -5962,9 +6047,6 @@ async function renderExams(opts) {
         // it must never appear under Past, or students would assume it is closed.
         const upcoming = sorted.filter(e => e.openWindow || e.date >= today);
         const past = sorted.filter(e => !e.openWindow && e.date < today);
-
-        const myRetakeExamIds = new Set(retakeRequests.filter(r => r.studentId === studentId && r.status !== 'rejected').map(r => r.examId));
-        const submissions = await dbGetAll('submissions');
         const tbody = document.getElementById('exams-body');
         const tableContainer = tbody.closest('.table-container');
         if (tableContainer) tableContainer.style.display = 'none';
@@ -5979,7 +6061,7 @@ async function renderExams(opts) {
         function examCard(e) {
             const course = courses.find(c => c.id === e.courseId);
             const center = centers.find(x => x.id === e.studyCenterId);
-            const myReg = registrations.find(r => r.examId === e.id);
+            const myReg = myRegistrations.find(r => (r.examId || r.quizId) === e.id);
             const examCheckIds = [e.id];
             if (e.linkedQuizId) examCheckIds.push(e.linkedQuizId);
             const examSub = submissions.find(s => examCheckIds.includes(s.quizId) && s.studentId === studentId);
@@ -17724,7 +17806,11 @@ async function renderQuizzes() {
     if (isStudentUser) {
         const addBtn = document.querySelector('#screen-quizzes .btn-primary');
         if (addBtn) addBtn.remove();
-        document.querySelector('#screen-quizzes .filter-select')?.remove();
+        // Keep the course selector in the DOM: the student branch below uses
+        // it to narrow this list to the learner's enrolled courses. Hiding it
+        // is enough; removing it made every student quiz render throw.
+        const filterSelect = document.querySelector('#screen-quizzes .filter-select');
+        if (filterSelect) filterSelect.style.display = 'none';
     }
     const [courses, lessons, quizzes, submissions, questions] = await Promise.all([
         dbGetAll('courses'), dbGetAll('lessons'), dbGetAll('quizzes'),
@@ -17734,28 +17820,36 @@ async function renderQuizzes() {
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
         let studentId;
         try { studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username; } catch (e) { studentId = currentUser.studentId || currentUser.username; console.error('resolveStudentId error:', e); }
-        const [enrollments, allExams, students, allQuizRegs, allExamRegs] = await Promise.all([
+        const [enrollments, allExams, students, allQuizRegs, allExamRegs, retakeRequests, centers] = await Promise.all([
             dbGetAll('enrollments'), dbGetAll('exams'),
-            dbGetAll('students'), dbGetAll('quizRegistrations'), dbGetAll('examRegistrations')
+            dbGetAll('students'), dbGetAll('quizRegistrations'), dbGetAll('examRegistrations'),
+            dbGetAll('retakeRequests').catch(() => []), getCenters()
         ]);
         const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
         const publishedLessonIds = new Set(lessons.filter(lessonVisible).map(l => l.id));
         const availableQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !inactiveCourseIds.has(q.courseId));
-        const quizRegs = allQuizRegs.filter(r => r.studentId === studentId);
-        const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
-        const filteredQuizzes = availableQuizzes.filter(q => q.assessmentType === 'quiz' || !q.assessmentType || registeredQuizIds.has(q.id));
-        const examRegs = allExamRegs.filter(r => r.studentId === studentId);
-        const me = findStudentForCurrentUser(students, currentUser) || students.find(s => s.id === studentId);
-        const myCenterId = me?.studyCenterId || '';
-        const filteredExams = allExams.filter(e => e.published !== false && e.date && e.time && enrolledCourseIds.has(e.courseId) && !inactiveCourseIds.has(e.courseId) && (!myCenterId || !e.studyCenterId || e.studyCenterId === myCenterId));
+        const quizRegs = allQuizRegs.filter(r => String(r.studentId) === String(studentId));
+        const examRegs = allExamRegs.filter(r => String(r.studentId) === String(studentId));
         const studentSubmissions = submissions.filter(s => s.studentId === currentUser.username || s.studentId === studentId);
+        const me = findStudentForCurrentUser(students, currentUser) || students.find(s => s.id === studentId);
+        const assessmentCtx = {
+            student: me,
+            centers,
+            courseIds: enrolledCourseIds,
+            examRegIds: new Set(examRegs.map(r => r.examId || r.quizId)),
+            quizRegIds: new Set(quizRegs.map(r => r.quizId)),
+            retakeExamIds: new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => r.examId)),
+            submittedIds: new Set(studentSubmissions.map(s => s.quizId))
+        };
+        const filteredQuizzes = availableQuizzes.filter(q => canStudentAccessAssessment(q, 'quiz', assessmentCtx));
+        const filteredExams = allExams.filter(e => !inactiveCourseIds.has(e.courseId) && canStudentAccessAssessment(e, 'exam', assessmentCtx));
         const courseSelect = document.getElementById('quiz-course');
         const currentFilter = courseSelect.value;
         const studentCourses = courses.filter(c => enrolledCourseIds.has(c.id) && c.status !== 'inactive');
         courseSelect.innerHTML = '<option value="">All Courses</option>' + studentCourses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
         if (currentFilter && studentCourses.some(c => c.id === currentFilter)) courseSelect.value = currentFilter;
         const filter = courseSelect.value;
-        const filtered = filter ? filteredQuizzes.filter(q => q.courseId === filter) : filteredQuizzes;
+        let filtered = filter ? filteredQuizzes.filter(q => q.courseId === filter) : filteredQuizzes;
         const filteredEx = filter ? filteredExams.filter(e => e.courseId === filter) : filteredExams;
         filtered = orderQuestionsByBank(filtered);
         filteredEx.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -17841,6 +17935,8 @@ async function renderQuizzes() {
     } else {
         const addBtn = document.querySelector('#screen-quizzes .btn-primary');
         if (addBtn) addBtn.style.display = '';
+        const filterSelect = document.querySelector('#screen-quizzes .filter-select');
+        if (filterSelect) filterSelect.style.display = '';
         const tableEl = document.querySelector('#quizzes-body').closest('table');
         if (tableEl) tableEl.style.display = '';
         const container = document.getElementById('student-quizzes-container');
@@ -17850,7 +17946,7 @@ async function renderQuizzes() {
         courseSelect.innerHTML = '<option value="">All Courses</option>' + courses.map(c => `<option value="${c.id}">${c.name} (${c.code})</option>`).join('');
         if (currentFilter && courses.some(c => c.id === currentFilter)) courseSelect.value = currentFilter;
         const filter = courseSelect.value;
-        const filtered = filter ? quizzes.filter(q => q.courseId === filter) : quizzes;
+        let filtered = filter ? quizzes.filter(q => q.courseId === filter) : quizzes;
         filtered = orderQuestionsByBank(filtered);
         document.getElementById('quizzes-body').innerHTML = filtered.map(q => {
             const course = courses.find(c => c.id === q.courseId);
@@ -18520,14 +18616,26 @@ async function renderStudentQuiz() {
     if (!currentUser || currentUser.role !== 'student') return;
     let studentId;
     try { studentId = await resolveStudentId(currentUser) || currentUser.studentId || currentUser.username; } catch (e) { studentId = currentUser.studentId || currentUser.username; console.error('resolveStudentId error:', e); }
-    const enrollments = await dbGetAll('enrollments');
-    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
-    const quizzes = (await dbGetAll('quizzes')).filter(q => enrolledCourseIds.has(q.courseId));
-    const quizRegs = (await dbGetAll('quizRegistrations')).filter(r => r.studentId === studentId);
-    const registeredQuizIds = new Set(quizRegs.map(r => r.quizId));
-    const filteredQuizzes = quizzes.filter(q => q.assessmentType === 'quiz' || !q.assessmentType || registeredQuizIds.has(q.id));
-    const submissions = (await dbGetAll('submissions')).filter(s => s.studentId === studentId);
-    const courses = await dbGetAll('courses');
+    const [enrollments, quizzesRaw, quizRegsRaw, submissionsRaw, students, examRegsRaw, retakeRequests, centers, courses] = await Promise.all([
+        dbGetAll('enrollments'), dbGetAll('quizzes'), dbGetAll('quizRegistrations'),
+        dbGetAll('submissions'), dbGetAll('students'), dbGetAll('examRegistrations'),
+        dbGetAll('retakeRequests').catch(() => []), getCenters(), dbGetAll('courses')
+    ]);
+    const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
+    const quizRegs = quizRegsRaw.filter(r => String(r.studentId) === String(studentId));
+    const submissions = submissionsRaw.filter(s => String(s.studentId) === String(studentId));
+    const examRegs = examRegsRaw.filter(r => String(r.studentId) === String(studentId));
+    const me = findStudentForCurrentUser(students, currentUser) || students.find(s => String(s.id) === String(studentId));
+    const assessmentCtx = {
+        student: me,
+        centers,
+        courseIds: enrolledCourseIds,
+        examRegIds: new Set(examRegs.map(r => r.examId || r.quizId)),
+        quizRegIds: new Set(quizRegs.map(r => r.quizId)),
+        retakeExamIds: new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => r.examId)),
+        submittedIds: new Set(submissions.map(s => s.quizId))
+    };
+    const filteredQuizzes = quizzesRaw.filter(q => enrolledCourseIds.has(q.courseId) && canStudentAccessAssessment(q, 'quiz', assessmentCtx));
     const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
     const filteredQuizzesActive = filteredQuizzes.filter(q => !inactiveCourseIds.has(q.courseId));
     let html = '<h4 style="color:var(--accent);margin-bottom:12px;">My Assessments</h4>';
@@ -20064,14 +20172,15 @@ let portalSearchDebounce = null;
 let portalSelectedStudent = null;
 async function loadPortalData() {
     if (portalDataCache) return portalDataCache;
-    const [allStudents, courses, lessons, notes, allQuizzes, allSubmissions, allGrades, allPayments, allAttendance, allEnrollments, allQuizRegistrations, lessonFiles, allExamRegistrations, exams, allAlumni] = await Promise.all([
+    const [allStudents, courses, lessons, notes, allQuizzes, allSubmissions, allGrades, allPayments, allAttendance, allEnrollments, allQuizRegistrations, lessonFiles, allExamRegistrations, exams, allAlumni, retakeRequests, centers, regions] = await Promise.all([
         dbGetAll('students'), dbGetAll('courses'), dbGetAll('lessons'), dbGetAll('notes'),
         dbGetAll('quizzes'), dbGetAll('submissions'), dbGetAll('grades'), dbGetAll('payments'),
         dbGetAll('attendance'), dbGetAll('enrollments'), dbGetAll('quizRegistrations'),
-        dbGetAll('lessonFiles'), dbGetAll('examRegistrations'), dbGetAll('exams'), dbGetAll('alumni').catch(() => [])
+        dbGetAll('lessonFiles'), dbGetAll('examRegistrations'), dbGetAll('exams'), dbGetAll('alumni').catch(() => []),
+        dbGetAll('retakeRequests').catch(() => []), getCenters(), dbGetAll('regions').catch(() => [])
     ]);
     const regionalIds = await getRegionalStudentIdSet();
-    let students = allStudents, submissions = allSubmissions, grades = allGrades, payments = allPayments, attendance = allAttendance, enrollments = allEnrollments, quizRegistrations = allQuizRegistrations, examRegistrations = allExamRegistrations, quizzes = allQuizzes;
+    let students = allStudents, submissions = allSubmissions, grades = allGrades, payments = allPayments, attendance = allAttendance, enrollments = allEnrollments, quizRegistrations = allQuizRegistrations, examRegistrations = allExamRegistrations, quizzes = allQuizzes, retakeReqs = retakeRequests;
     if (regionalIds) {
         students = allStudents.filter(s => regionalIds.has(s.id));
         const sidSet = new Set(students.map(s => s.id));
@@ -20082,9 +20191,10 @@ async function loadPortalData() {
         enrollments = allEnrollments?.filter(r => sidSet.has(r.studentId));
         quizRegistrations = allQuizRegistrations?.filter(r => sidSet.has(r.studentId));
         examRegistrations = allExamRegistrations?.filter(r => sidSet.has(r.studentId));
+        retakeReqs = retakeRequests?.filter(r => sidSet.has(r.studentId));
     }
     const alumni = allAlumni || [];
-    portalDataCache = { students, courses, lessons, notes, quizzes, submissions, grades, payments, attendance, enrollments, quizRegistrations, lessonFiles, examRegistrations, exams, alumni, loadedAt: Date.now() };
+    portalDataCache = { students, courses, lessons, notes, quizzes, submissions, grades, payments, attendance, enrollments, quizRegistrations, lessonFiles, examRegistrations, exams, alumni, retakeRequests: retakeReqs, centers, regions, loadedAt: Date.now() };
     return portalDataCache;
 }
 function invalidatePortalCache() {
@@ -20239,7 +20349,8 @@ function renderPortalContent(studentId, data, isStudentUser) {
     const portalCourses = sortCoursesByTranscriptOrder(data.courses.filter(c => {
         if (c.status === 'inactive') return false;
         if (enrolledCourseIds.size > 0) return enrolledCourseIds.has(c.id);
-        return true;
+        // A learner with no enrollment has no course assessments to browse.
+        return !isStudentUser;
     }));
     const portalEnrolledByCourse = {};
     (data.enrollments || []).filter(e => allPortalStudentIds.has(e.studentId)).forEach(e => { portalEnrolledByCourse[e.courseId] = e; });
@@ -20276,25 +20387,35 @@ function renderPortalContent(studentId, data, isStudentUser) {
     studentSubmissions.forEach(s => {
         if (s.status === 'pass') submissionStatusByQuiz[s.quizId] = 'pass';
     });
-    const enrollmentCourseIds = new Set(data.enrollments ? data.enrollments.filter(e => e.studentId === studentId).map(e => e.courseId) : []);
-        const publishedCourseIds = new Set(data.lessons.filter(lessonVisible).map(l => l.courseId));
-    const allCourses = new Set(data.courses.map(c => c.id));
-    const visibleCourseIds = isStudentUser ? (enrollmentCourseIds.size > 0 ? enrollmentCourseIds : publishedCourseIds) : allCourses;
-    const quizRegIds = new Set((data.quizRegistrations || []).filter(r => r.studentId === studentId).map(r => r.quizId));
-    const activeQuizzes = data.quizzes.filter(q => visibleCourseIds.has(q.courseId) && (q.assessmentType === 'quiz' || !q.assessmentType || quizRegIds.has(q.id)) && (() => {
-        const attempts = studentSubmissions.filter(s => s.quizId === q.id).length;
-        return attempts < (q.maxRetakes || 1);
-    })());
-    const studentExamRegs = (data.examRegistrations || []).filter(r => r.studentId === studentId);
+    const visibleCourseIds = isStudentUser ? enrolledCourseIds : new Set(data.courses.map(c => c.id));
+    const quizRegIds = new Set((data.quizRegistrations || []).filter(r => allPortalStudentIds.has(r.studentId)).map(r => r.quizId));
+    const studentExamRegs = (data.examRegistrations || []).filter(r => allPortalStudentIds.has(r.studentId));
     const registeredExamIds = new Set(studentExamRegs.map(r => r.examId || r.quizId));
-    const registeredQuizzes = data.quizzes.filter(q => (q.assessmentType === 'exam' || q.assessmentType === 'cat') && registeredExamIds.has(q.id) && visibleCourseIds.has(q.courseId));
-    const registeredTableExams = (data.exams || []).filter(e => e.published !== false && visibleCourseIds.has(e.courseId));
-    const allAssessments = [...activeQuizzes, ...registeredQuizzes, ...registeredTableExams];
+    const retakeExamIds = new Set((data.retakeRequests || [])
+        .filter(r => allPortalStudentIds.has(r.studentId) && r.status !== 'rejected')
+        .map(r => r.examId));
+    const assessmentCtx = {
+        student,
+        centers: data.centers || [],
+        courseIds: visibleCourseIds,
+        examRegIds: registeredExamIds,
+        quizRegIds,
+        retakeExamIds,
+        submittedIds: new Set(studentSubmissions.map(s => s.quizId))
+    };
+    const activeQuizzes = (isStudentUser
+        ? data.quizzes.filter(q => canStudentAccessAssessment(q, 'quiz', assessmentCtx))
+        : data.quizzes.filter(q => visibleCourseIds.has(q.courseId)))
+        .filter(q => !isStudentUser || studentSubmissions.filter(s => s.quizId === q.id).length < (q.maxRetakes || 1));
+    const registeredTableExams = isStudentUser
+        ? (data.exams || []).filter(e => canStudentAccessAssessment(e, 'exam', assessmentCtx))
+        : (data.exams || []).filter(e => e.published !== false && visibleCourseIds.has(e.courseId));
+    const allAssessments = [...activeQuizzes, ...registeredTableExams];
     const seenIds = new Set();
     const uniqueAssessments = allAssessments.filter(q => { if (seenIds.has(q.id)) return false; seenIds.add(q.id); return true; });
     document.getElementById('portal-quizzes').innerHTML = uniqueAssessments.length ? uniqueAssessments.map(q => {
         const course = data.courses.find(c => c.id === q.courseId);
-        const isTableExam = !q.assessmentType && q.date;
+        const isTableExam = !q.assessmentType && (q.date || q.type || q.openWindow);
         const typeIcon = isTableExam ? '📄' : q.assessmentType === 'exam' ? '📄' : q.assessmentType === 'cat' ? '📋' : '🧠';
         const typeLabel = isTableExam ? 'Exam' : q.assessmentType === 'exam' ? 'Exam' : q.assessmentType === 'cat' ? 'CAT' : 'Quiz';
         const bestScore = bestScoresByQuiz[q.id] || null;
@@ -20302,8 +20423,12 @@ function renderPortalContent(studentId, data, isStudentUser) {
         const isReg = registeredExamIds.has(q.id) && !quizRegIds.has(q.id);
         let actionHtml;
         if (isTableExam) {
-            const examSub = data.submissions.find(s => s.quizId === q.id && s.studentId === studentId);
-            actionHtml = examSub ? `<span class="badge badge-${examSub.status === 'pass' ? 'success' : 'danger'}">${examSub.score}%</span>` : '<span class="badge badge-info">Registered</span>';
+            const examSub = data.submissions.find(s => s.quizId === q.id && allPortalStudentIds.has(s.studentId));
+            actionHtml = examSub
+                ? `<span class="badge badge-${examSub.status === 'pass' ? 'success' : 'danger'}">${examSub.score}%</span>`
+                : (isStudentUser && q.openWindow
+                    ? `<button class="btn btn-primary btn-sm" onclick="startExam('${q.id}')">📝 Start Exam</button>`
+                    : '<span class="badge badge-info">Registered</span>');
         } else {
             actionHtml = isStudentUser ? (passed ? '<span class="badge badge-success">Passed</span>' : (isReg ? '<span class="badge badge-info">Registered</span>' : `<button class="btn btn-primary btn-sm" onclick="startQuiz('${q.id}')">${bestScore !== null ? 'Retake' : 'Start'}</button>`)) : (bestScore !== null ? `<span class="badge badge-${bestScore >= 70 ? 'success' : bestScore >= 50 ? 'warning' : 'danger'}">${bestScore}%</span>` : '<span class="badge badge-info">Not attempted</span>');
         }
