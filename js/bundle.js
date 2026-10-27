@@ -9968,7 +9968,7 @@ function buildProfessionalTranscript(data) {
                 <div class="header-divider"></div>
                 <div class="header-title-row">
                     <h2 class="document-title">Official Academic Transcript</h2>
-                    <div class="doc-meta">${isOfficial ? 'Date of Issue: ' + (issueDate || generatedDate) : 'Generated: ' + generatedDate + ' at ' + generatedTime}</div>
+                    ${isOfficial ? '' : `<div class="doc-meta">Generated: ${generatedDate} at ${generatedTime}</div>`}
                 </div>
             </div>
             <div class="student-info-panel">
@@ -9996,8 +9996,14 @@ function buildProfessionalTranscript(data) {
                 </div>
             </div>
             <div class="page-seal-area">
-                ${isOfficial ? `<div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
-                <p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
+                ${isOfficial ? `<p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>
+                <div class="issuance-block">
+                    <div class="issue-date">
+                        <span class="issue-date-label">Date of Issue</span>
+                        <span class="issue-date-value">${issueDate || generatedDate}</span>
+                    </div>
+                    <div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
+                </div>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
             </div>
             <div class="transcript-footer">
                 <span>${schoolName} — ${tagline}</span>
@@ -10490,7 +10496,8 @@ function buildProfessionalTranscript(data) {
             line-height: 1.4;
             margin: 0;
             text-align: left;
-            max-width: 65%;
+            flex: 1;
+            max-width: none;
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
@@ -10604,7 +10611,38 @@ function buildProfessionalTranscript(data) {
             flex: 0 0 auto;
             margin: 0 35px 6px;
             display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 20px;
+        }
+        .transcript-document .issuance-block {
+            display: flex;
             flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .transcript-document .issue-date {
+            min-width: 48mm;
+            padding-top: 5px;
+            text-align: right;
+            border-top: 1px solid ${accentColor}55;
+        }
+        .transcript-document .issue-date-label {
+            display: block;
+            font-size: 7px;
+            color: #64748b;
+            font-weight: 700;
+            letter-spacing: 1.3px;
+            text-transform: uppercase;
+        }
+        .transcript-document .issue-date-value {
+            display: block;
+            margin-top: 2px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #1a1a2e;
+            letter-spacing: 0.2px;
         }
         .transcript-document .transcript-header-compact {
             padding: 18px 35px 0;
@@ -10865,7 +10903,6 @@ function buildFinalTranscriptDocument(data) {
             <div class="header-divider"></div>
             <div class="header-title-row">
                 <h2 class="document-title">FINAL ACADEMIC TRANSCRIPT</h2>
-                <div class="doc-meta">Date of Issue: ${issueDate || generatedDate}</div>
             </div>
         </div>
         <div class="student-info-panel">
@@ -10922,7 +10959,13 @@ function buildFinalTranscriptDocument(data) {
             </div>
 <div class="official-footer">
                 <p class="footer-disclaimer">This final academic transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>
-                <div class="stamp-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
+                <div class="issuance-block">
+                    <div class="issue-date">
+                        <span class="issue-date-label">Date of Issue</span>
+                        <span class="issue-date-value">${issueDate || generatedDate}</span>
+                    </div>
+                    <div class="stamp-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
+                </div>
             </div>
         </div>
     </div>
@@ -11010,6 +11053,10 @@ function buildFinalTranscriptDocument(data) {
         .transcript-document .signature-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #1a1a2e; }
         .transcript-document .signature-date { font-size: 8px; color: #64748b; margin-top: 3px; }
 .transcript-document .stamp-area { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .transcript-document .issuance-block { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; flex-shrink: 0; }
+        .transcript-document .issue-date { min-width: 44mm; padding-top: 4px; text-align: right; border-top: 1px solid ${accentColor}55; }
+        .transcript-document .issue-date-label { display: block; font-size: 8px; color: #64748b; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+        .transcript-document .issue-date-value { display: block; margin-top: 2px; font-size: 11px; font-weight: 700; color: #1a1a2e; letter-spacing: 0.2px; }
         .transcript-document .college-stamp-img { max-width: 100%; max-height: 100%; object-fit: contain; }
         .transcript-document .footer-disclaimer { font-size: 9px; color: #64748b; line-height: 1.4; margin: 0; flex: 1; padding-right: 12px; }
         .transcript-document .footer-disclaimer strong { color: #1a1a2e; font-family: 'Courier New', monospace; }
