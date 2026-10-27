@@ -9861,7 +9861,7 @@ async function generateTranscript() {
     const generatedTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const cgpa = results.cgpa;
     const html = buildProfessionalTranscript({
-        student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, college_stamp: branding.college_stamp },
+        student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, sig_registrar: docType === 'official' ? getRoleSignature('Registrar', branding) : null, sig_dean: docType === 'official' ? getRoleSignature('Academic Dean', branding) : null, sig_director: docType === 'official' ? getRoleSignature('Director / Principal', branding) : null, college_stamp: branding.college_stamp, postalAddress: branding.postalAddress || '', city: branding.city || '', phone: branding.phone || '', email: branding.email || '', website: branding.website || '' },
         docType, semester, year, docId, generatedDate, generatedTime, issueDate: issue.label, center, vCode,
         financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
         academic: { chapel: studentChapel, attendancePct },
@@ -9990,20 +9990,21 @@ function buildProfessionalTranscript(data) {
                 <div class="semester-block"><div class="semester-header"><span class="semester-title">${semester && String(semester) !== 'all' ? 'Semester ' + semester + ' Results' : 'Complete Academic Record — All Courses'}</span></div>${coursesTableHTML}</div>
                 ${summaryBlock}
                 <div class="signatures-section">
-                    ${sig_registrar ? `<div class="signature-block"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                    ${sig_dean ? `<div class="signature-block"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                    ${sig_director ? `<div class="signature-block"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                    <div class="signature-blocks">
+                        ${sig_registrar ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"></div><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                        ${sig_dean ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"></div><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                        ${sig_director ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"></div><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                    </div>
+                    ${isOfficial ? `<div class="issue-date">
+                        <div class="issue-date-rule"></div>
+                        <span class="issue-date-label">Date of Issue</span>
+                        <span class="issue-date-value">${issueDate || generatedDate}</span>
+                    </div>` : ''}
                 </div>
             </div>
             <div class="page-seal-area">
                 ${isOfficial ? `<p class="footer-disclaimer">This transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>
-                <div class="issuance-block">
-                    <div class="issue-date">
-                        <span class="issue-date-label">Date of Issue</span>
-                        <span class="issue-date-value">${issueDate || generatedDate}</span>
-                    </div>
-                    <div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
-                </div>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
+                <div class="seal-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>` : `<div class="unofficial-footer" style="width:100%;"><p>This is an unofficial copy generated for student reference. For official transcripts, contact the Registrar's office.</p><p style="margin-top:4px;">Document ID: ${docId}</p></div>`}
             </div>
             <div class="transcript-footer">
                 <span>${schoolName} — ${tagline}</span>
@@ -10444,17 +10445,40 @@ function buildProfessionalTranscript(data) {
         }
         .transcript-document .signatures-section {
             margin: 14px 35px 10px;
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 28px;
+        }
+        .transcript-document .signature-blocks {
+            display: flex;
+            align-items: flex-start;
+            gap: 24px;
         }
         .transcript-document .signature-block {
+            width: 150px;
+            flex: 0 0 150px;
             text-align: center;
         }
+        .transcript-document .signature-img-box {
+            height: 38px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            margin-bottom: 3px;
+        }
+        .transcript-document .transcript-sig-img {
+            max-height: 34px;
+            max-width: 130px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            display: block;
+        }
         .transcript-document .signature-line {
-            width: 100%;
+            width: 150px;
             border-top: 1px solid #1a1a2e;
-            margin-bottom: 6px;
+            margin: 0 auto 6px;
         }
         .transcript-document .signature-title {
             font-size: 8px;
@@ -10615,18 +10639,16 @@ function buildProfessionalTranscript(data) {
             justify-content: space-between;
             gap: 20px;
         }
-        .transcript-document .issuance-block {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 8px;
-            flex-shrink: 0;
-        }
         .transcript-document .issue-date {
-            min-width: 48mm;
-            padding-top: 5px;
-            text-align: right;
+            width: 150px;
+            flex: 0 0 150px;
+            margin-left: auto;
+            text-align: center;
+        }
+        .transcript-document .issue-date-rule {
             border-top: 1px solid ${accentColor}55;
+            margin-top: 41px;
+            margin-bottom: 6px;
         }
         .transcript-document .issue-date-label {
             display: block;
@@ -10635,6 +10657,7 @@ function buildProfessionalTranscript(data) {
             font-weight: 700;
             letter-spacing: 1.3px;
             text-transform: uppercase;
+            text-align: center;
         }
         .transcript-document .issue-date-value {
             display: block;
@@ -10643,6 +10666,7 @@ function buildProfessionalTranscript(data) {
             font-weight: 700;
             color: #1a1a2e;
             letter-spacing: 0.2px;
+            text-align: center;
         }
         .transcript-document .transcript-header-compact {
             padding: 18px 35px 0;
@@ -10953,19 +10977,20 @@ function buildFinalTranscriptDocument(data) {
                 </div>
             </div>
             <div class="signatures-section">
-                ${sig_registrar ? `<div class="signature-block"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                ${sig_dean ? `<div class="signature-block"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                ${sig_director ? `<div class="signature-block"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                <div class="signature-blocks">
+                    ${sig_registrar ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"></div><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                    ${sig_dean ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"></div><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                    ${sig_director ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"></div><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                </div>
+                <div class="issue-date">
+                    <div class="issue-date-rule"></div>
+                    <span class="issue-date-label">Date of Issue</span>
+                    <span class="issue-date-value">${issueDate || generatedDate}</span>
+                </div>
             </div>
 <div class="official-footer">
                 <p class="footer-disclaimer">This final academic transcript is an official document of ${schoolName}. Any alteration or reproduction invalidates this document. Verify authenticity at the Registrar's office using Document ID: <strong>${docId}</strong>.</p>
-                <div class="issuance-block">
-                    <div class="issue-date">
-                        <span class="issue-date-label">Date of Issue</span>
-                        <span class="issue-date-value">${issueDate || generatedDate}</span>
-                    </div>
-                    <div class="stamp-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
-                </div>
+                <div class="stamp-area">${college_stamp ? `<img src="${college_stamp}" class="college-stamp-img" alt="College Seal">` : ''}</div>
             </div>
         </div>
     </div>
@@ -11046,17 +11071,19 @@ function buildFinalTranscriptDocument(data) {
         .transcript-document .class-fail { background: #fee2e2; color: #dc2626; }
         .transcript-document .status-clear { color: #059669; }
         .transcript-document .status-outstanding { color: #dc2626; }
-        .transcript-document .signatures-section { margin: 8px 25px 6px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-        .transcript-document .signature-block { text-align: center; }
-        .transcript-document .transcript-sig-img { max-height: 34px; display: block; margin: 0 auto 3px; }
-        .transcript-document .signature-line { width: 100%; border-top: 1px solid #1a1a2e; margin-bottom: 3px; }
+        .transcript-document .signatures-section { margin: 8px 25px 6px; display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; }
+        .transcript-document .signature-blocks { display: flex; align-items: flex-start; gap: 24px; }
+        .transcript-document .signature-block { width: 150px; flex: 0 0 150px; text-align: center; }
+        .transcript-document .signature-img-box { height: 38px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 3px; }
+        .transcript-document .transcript-sig-img { max-height: 34px; max-width: 130px; width: auto; height: auto; object-fit: contain; display: block; }
+        .transcript-document .signature-line { width: 150px; border-top: 1px solid #1a1a2e; margin: 0 auto 3px; }
         .transcript-document .signature-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #1a1a2e; }
         .transcript-document .signature-date { font-size: 8px; color: #64748b; margin-top: 3px; }
 .transcript-document .stamp-area { width: 28mm; height: 28mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-        .transcript-document .issuance-block { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; flex-shrink: 0; }
-        .transcript-document .issue-date { min-width: 44mm; padding-top: 4px; text-align: right; border-top: 1px solid ${accentColor}55; }
-        .transcript-document .issue-date-label { display: block; font-size: 8px; color: #64748b; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
-        .transcript-document .issue-date-value { display: block; margin-top: 2px; font-size: 11px; font-weight: 700; color: #1a1a2e; letter-spacing: 0.2px; }
+        .transcript-document .issue-date { width: 150px; flex: 0 0 150px; margin-left: auto; text-align: center; }
+        .transcript-document .issue-date-rule { border-top: 1px solid ${accentColor}55; margin-top: 41px; margin-bottom: 3px; }
+        .transcript-document .issue-date-label { display: block; font-size: 8px; color: #64748b; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; text-align: center; }
+        .transcript-document .issue-date-value { display: block; margin-top: 2px; font-size: 11px; font-weight: 700; color: #1a1a2e; letter-spacing: 0.2px; text-align: center; }
         .transcript-document .college-stamp-img { max-width: 100%; max-height: 100%; object-fit: contain; }
         .transcript-document .footer-disclaimer { font-size: 9px; color: #64748b; line-height: 1.4; margin: 0; flex: 1; padding-right: 12px; }
         .transcript-document .footer-disclaimer strong { color: #1a1a2e; font-family: 'Courier New', monospace; }
@@ -13814,7 +13841,7 @@ async function showCertificateForm() {
     const portalId = document.getElementById('portal-student')?.value || '';
     // Pre-fill date with today; will auto-update to registration date when student selected
     const todayIso = new Date().toISOString().split('T')[0];
-    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group" id="cert-issue-date-group" style="display:none;"><label>Date of Issue <span style="font-size:11px;color:var(--text-muted);">(printed beside the official seal — editable)</span></label><input type="date" id="cert-issue-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Defaults to today. Past and future dates are allowed for scheduled issuance.</div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
+    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group" id="cert-issue-date-group" style="display:none;"><label>Date of Issue <span style="font-size:11px;color:var(--text-muted);">(printed above the official seal — editable)</span></label><input type="date" id="cert-issue-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Defaults to today. Past and future dates are allowed for scheduled issuance.</div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
     showModal('Generate Document', content, `<button class="btn btn-primary" onclick="generateCertificate()">Generate</button>`);
     setTimeout(() => { onCertStudentChange(); onCertTypeChange(); }, 50);
 }
