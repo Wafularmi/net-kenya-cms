@@ -9887,7 +9887,7 @@ async function showTranscriptForm(preselectedId) {
     const portalId = document.getElementById('portal-student')?.value || '';
     const selectedId = preselectedId || portalId;
     const issueDefault = todayDateInputValue();
-    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div></div>`;
+    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div></div><div class="form-group"><label>Semester Grouping</label><select id="transcript-grouping"><option value="group" selected>Group by Semester</option><option value="nogroup">Ignore Semester Grouping (single list by course order)</option></select><small style="display:block;opacity:.7;margin-top:4px;">Group by semester keeps "Semester 1/2/3/4" blocks. Ignoring grouping lists all courses in course sequence order regardless of semester.</small></div>`;
     showModal('Generate Transcript', content, `<button class="btn btn-primary" onclick="generateTranscript()">Generate</button>`);
 }
 async function generateTranscript() {
@@ -9898,6 +9898,7 @@ async function generateTranscript() {
     const semester = document.getElementById('transcript-semester').value;
     const year = document.getElementById('transcript-year').value;
     const docType = document.getElementById('transcript-doc-type').value;
+    const grouping = document.getElementById('transcript-grouping')?.value || 'group';
     const issue = issueDateInfo(document.getElementById('transcript-issue-date')?.value || '');
     const student = await dbGet('students', studentId);
     let grades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
@@ -9949,7 +9950,7 @@ async function generateTranscript() {
     const cgpa = results.cgpa;
     const html = buildProfessionalTranscript({
         student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, sig_registrar: docType === 'official' ? getRoleSignature('Registrar', branding) : null, sig_dean: docType === 'official' ? getRoleSignature('Academic Dean', branding) : null, sig_director: docType === 'official' ? getRoleSignature('Director / Principal', branding) : null, college_stamp: branding.college_stamp, postalAddress: branding.postalAddress || '', city: branding.city || '', phone: branding.phone || '', email: branding.email || '', website: branding.website || '' },
-        docType, semester, year, docId, generatedDate, generatedTime, issueDate: issue.label, center, vCode,
+        docType, semester, year, grouping, docId, generatedDate, generatedTime, issueDate: issue.label, center, vCode,
         financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
         academic: { chapel: studentChapel, attendancePct },
         allGrades, academicSettings: academic,
@@ -9965,7 +9966,7 @@ async function generateTranscript() {
     logAudit('generated', 'transcript', { studentId, docId, docType });
 }
 function buildProfessionalTranscript(data) {
-    const { student, grades, courses, branding, docType, semester, year, docId, vCode, generatedDate, generatedTime, issueDate, center, financial, academic, allGrades, academicSettings } = data;
+    const { student, grades, courses, branding, docType, semester, year, grouping = 'group', docId, vCode, generatedDate, generatedTime, issueDate, center, financial, academic, allGrades, academicSettings } = data;
     const { schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, postalAddress, city, phone, email, website, college_stamp } = branding;
     const addrParts = [];
     if (postalAddress || city) addrParts.push([postalAddress, city].filter(Boolean).join(', '));
@@ -9985,7 +9986,7 @@ function buildProfessionalTranscript(data) {
         ? data.resultRows
         : resolveStudentResults(allGrades || grades || [], student && student.id, { semester: semester, courses: courses }).rows;
     // Order courses the same way as the Courses tab and Student Hub: by the
-    // course sequence/order (course.order), grouped by semester.
+    // course sequence/order (course.order). Optionally group by semester.
     const courseMap = {};
     (courses || []).forEach(c => { if (c && c.id) courseMap[String(c.id)] = c; });
     const getRowCourse = r => r.course || courseMap[String(r.courseId)] || null;
@@ -10035,6 +10036,7 @@ function buildProfessionalTranscript(data) {
         const keys = Object.keys(groups).sort((a,b) => parseInt(a) - parseInt(b));
         return keys.map(k => ({ sem: k, rows: sortRowsByCourseOrder(groups[k]) }));
     };
+    const noGroup = String(grouping || 'group').toLowerCase() === 'nogroup' || String(grouping || 'group').toLowerCase() === 'none';
     let totalPoints = 0, totalCredits = 0;
     const renderRow = (r, idx) => {
         const c = getRowCourse(r);
@@ -10052,6 +10054,14 @@ function buildProfessionalTranscript(data) {
         coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>`;
         coursesTableHTML += rowsHTML || `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course results recorded</td></tr>`;
         coursesTableHTML += `</tbody><tfoot><tr><td colspan="4" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table>`;
+    } else if (noGroup) {
+        const rows = sortRowsByCourseOrder(resultRows);
+        if (rows.length === 0) {
+            coursesTableHTML = `<table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course results recorded</td></tr></tbody></table>`;
+        } else {
+            const rowsHTML = rows.map((r, idx) => renderRow(r, idx)).join('');
+            coursesTableHTML = `<div class="semester-block"><div class="semester-header"><span class="semester-title">Complete Academic Record — All Courses</span></div><table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>${rowsHTML}</tbody><tfoot><tr><td colspan="4" class="footer-label">Totals</td><td class="footer-value">${totalCredits}</td><td colspan="2" class="footer-label">Cumulative GPA</td><td class="footer-value gpa-highlight">${cgpa.toFixed(2)}</td></tr></tfoot></table></div>`;
+        }
     } else {
         const groups = groupBySemester(resultRows);
         if (groups.length === 0) {
