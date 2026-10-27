@@ -5746,6 +5746,8 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     docId: record.docId || did,
                     docTitle: record.docTitle || (isTranscript ? 'Official Transcript' : (record.type ? ({ diploma: 'Diploma Certificate', completion: 'Completion Certificate', transcript: 'Official Transcript', admission: 'Admission Letter', enrollment: 'Enrollment Letter', recommendation: 'Recommendation Letter', 'fee-statement': 'Fee Statement' }[record.type] || (String(record.type)[0].toUpperCase() + String(record.type).slice(1))) : 'Certificate')),
                     generatedAt: record.generatedAt || record.createdAt || '',
+                    issueDate: record.issueDate || '',
+                    issueDateFormatted: record.issueDateFormatted || '',
                     revoked: record.docStatus === 'revoked',
                     revokedBy: record.revokedBy || '',
                     revokedAt: record.revokedAt || '',

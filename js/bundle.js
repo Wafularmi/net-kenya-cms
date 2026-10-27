@@ -185,6 +185,29 @@ function formatDate(dateStr) {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
+function todayDateInputValue() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+function issueDateInfo(value) {
+    const raw = String(value || '').trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+    if (m) {
+        const y = Number(m[1]), mo = Number(m[2]) - 1, day = Number(m[3]);
+        const d = new Date(y, mo, day);
+        if (d.getFullYear() === y && d.getMonth() === mo && d.getDate() === day) {
+            return { iso: raw, label: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) };
+        }
+    }
+    const now = new Date();
+    return { iso: todayDateInputValue(), label: now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) };
+}
+function issueDateLabel(value) {
+    const raw = String(value || '').trim();
+    const info = issueDateInfo(raw);
+    return info.iso === raw ? info.label : '';
+}
 function formatOrdinalDate(dateStr) {
     if (!dateStr) return formatDate(dateStr);
     const d = new Date(dateStr + (dateStr.includes('T') ? '' : 'T12:00:00'));
@@ -1612,6 +1635,7 @@ function verificationResultHtml(data, opts) {
         return `<div style="text-align:center;padding:20px;"><div style="font-size:44px;margin-bottom:10px;">❌</div><h3 style="color:var(--danger);margin:0 0 8px;">${mismatch ? 'Verification Failed' : 'Document Not Found'}</h3><p style="color:var(--text-muted);font-size:13px;">${mismatch ? 'The verification code does not match this Document ID. The document may be a forgery or the code was entered incorrectly.' : 'No document matches this ID. This document may not be authentic.'}</p>${!mismatch ? `<p style="font-size:13px;font-weight:700;color:var(--danger);margin-top:10px;">Check that you typed correctly, if you did, then it could be a clear forgery, and Net Foundation dissociates with the document and the bearer!</p>` : ''}</div>`;
     }
     const gen = data.generatedAt ? new Date(data.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+    const issued = data.issueDateFormatted || issueDateLabel(data.issueDate) || gen;
     const field = (label, value, strong) => value ? `<div style="margin:0 0 10px;"><div style="font-size:10px;font-weight:700;letter-spacing:1px;color:#64748b;text-transform:uppercase;">${label}</div><div style="font-size:${strong === false ? '14' : '15'}px;font-weight:${strong === false ? '700' : '800'};color:#0f172a;margin-top:2px;">${escapeHtml(value)}</div></div>` : '';
     // Revoked and authenticated are separate branches so no template expression
     // spans a multi-line `${cond ? ` : `}` block.
@@ -1633,7 +1657,7 @@ function verificationResultHtml(data, opts) {
                     ${typeof data.cgpa === 'number' ? field('CGPA', data.cgpa.toFixed(2), false) : ''}
                     ${field('Classification', data.classification, false)}
                     ${field('Document ID', data.docId || '')}
-                    ${gen ? `<p><strong>Generated:</strong> ${escapeHtml(gen)}</p>` : ''}
+                    ${issued ? `<p><strong>Issued:</strong> ${escapeHtml(issued)}</p>` : ''}
                 </div>
                 ${opts.integrity ? `<div style="margin-top:12px;padding:8px 12px;border-radius:6px;background:#fff;font-size:12px;color:var(--text-secondary);">${escapeHtml(opts.integrity)}</div>` : ''}
                 <p style="font-size:13px;color:#166534;margin-top:12px;line-height:1.7;">Thanks for confirming authenticity. ${escapeHtml(data.institutionName || (data.country ? 'Net Foundation ' + data.country : 'Net Foundation Kenya'))} upholds integrity, and quality Theological training. To check out our content source, visit: <a href="https://english.netfoundation.nl" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;">https://english.netfoundation.nl</a></p>
@@ -9775,7 +9799,8 @@ async function showTranscriptForm(preselectedId) {
     const students = await dbGetAll('students');
     const portalId = document.getElementById('portal-student')?.value || '';
     const selectedId = preselectedId || portalId;
-    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div>`;
+    const issueDefault = todayDateInputValue();
+    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" max="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div></div>`;
     showModal('Generate Transcript', content, `<button class="btn btn-primary" onclick="generateTranscript()">Generate</button>`);
 }
 async function generateTranscript() {
@@ -9786,6 +9811,7 @@ async function generateTranscript() {
     const semester = document.getElementById('transcript-semester').value;
     const year = document.getElementById('transcript-year').value;
     const docType = document.getElementById('transcript-doc-type').value;
+    const issue = issueDateInfo(document.getElementById('transcript-issue-date')?.value || '');
     const student = await dbGet('students', studentId);
     let grades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
     if (semester !== 'all') grades = grades.filter(g => g.semester == semester);
@@ -9836,23 +9862,23 @@ async function generateTranscript() {
     const cgpa = results.cgpa;
     const html = buildProfessionalTranscript({
         student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, college_stamp: branding.college_stamp },
-        docType, semester, year, docId, generatedDate, generatedTime, center, vCode,
+        docType, semester, year, docId, generatedDate, generatedTime, issueDate: issue.label, center, vCode,
         financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
         academic: { chapel: studentChapel, attendancePct },
         allGrades, academicSettings: academic,
         resultRows: results.rows
     });
-    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
+    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'transcript', content: html, docId, vCode, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label };
     await dbPut('certificates', cert);
     // The verification record must describe the SAME document: same rows, same
     // credits, same CGPA - otherwise /api/verify contradicts the printed page.
-    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: results.totalCredits, generatedAt: new Date().toISOString(), courseHash: '' };
+    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: results.totalCredits, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label, courseHash: '' };
     await dbPut('transcriptVerifications', verification);
     showModal('Official Transcript — ' + student.name, `<div id="transcript-print-area">${html}</div>`, `<button class="btn btn-primary" onclick="printTranscript()">🖨️ Print / PDF</button> <button class="btn btn-outline" onclick="downloadTranscriptPDF()">Download PDF</button>`);
     logAudit('generated', 'transcript', { studentId, docId, docType });
 }
 function buildProfessionalTranscript(data) {
-    const { student, grades, courses, branding, docType, semester, year, docId, vCode, generatedDate, generatedTime, center, financial, academic, allGrades, academicSettings } = data;
+    const { student, grades, courses, branding, docType, semester, year, docId, vCode, generatedDate, generatedTime, issueDate, center, financial, academic, allGrades, academicSettings } = data;
     const { schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, postalAddress, city, phone, email, website, college_stamp } = branding;
     const addrParts = [];
     if (postalAddress || city) addrParts.push([postalAddress, city].filter(Boolean).join(', '));
@@ -9942,7 +9968,7 @@ function buildProfessionalTranscript(data) {
                 <div class="header-divider"></div>
                 <div class="header-title-row">
                     <h2 class="document-title">Official Academic Transcript</h2>
-                    <div class="doc-meta">Generated: ${generatedDate} at ${generatedTime}</div>
+                    <div class="doc-meta">${isOfficial ? 'Date of Issue: ' + (issueDate || generatedDate) : 'Generated: ' + generatedDate + ' at ' + generatedTime}</div>
                 </div>
             </div>
             <div class="student-info-panel">
@@ -10657,13 +10683,15 @@ async function showFinalTranscriptForm() {
     if (currentUser.role === 'student') return showToast('Students cannot generate transcripts.');
     const students = await dbGetAll('students');
     const portalId = document.getElementById('portal-student')?.value || '';
-    const content = `<div class="form-group"><label>Student</label><select id="final-transcript-student" class="filter-select" style="width:100%;"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div>`;
+    const issueDefault = todayDateInputValue();
+    const content = `<div class="form-group"><label>Student</label><select id="final-transcript-student" class="filter-select" style="width:100%;"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-group"><label>Date of Issue</label><input type="date" id="final-transcript-issue-date" value="${issueDefault}" max="${issueDefault}" style="width:100%;"></div>`;
     showModal('Generate Final Transcript', content, `<button class="btn btn-primary" onclick="generateFinalTranscript()">Generate</button>`);
 }
 async function generateFinalTranscript() {
     try {
     const studentId = document.getElementById('final-transcript-student').value;
     if (!studentId) return showToast('Select a student!');
+    const issue = issueDateInfo(document.getElementById('final-transcript-issue-date')?.value || '');
     closeModal();
     const student = await dbGet('students', studentId);
     if (!student) return showToast('Student not found!');
@@ -10761,14 +10789,14 @@ async function generateFinalTranscript() {
         student, courseResults, schoolName, tagline, initials, logo, accentColor,
         sig_registrar, sig_dean, sig_director, center, academic,
         cgpa, classification, totalCredits, totalGPAPoints,
-        docId, vCode, generatedDate, generatedTime, feeBalance,
+        docId, vCode, generatedDate, generatedTime, issueDate: issue.label, feeBalance,
         postalAddress, city, phone, email, website,
         college_stamp: branding.college_stamp
     });
     const courseHash = await sha256(courseResults.map(r => r.course.id + ':' + r.weightedScore + ':' + r.gradeInfo?.grade).join('|'));
-    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: classification.label, totalCredits, generatedAt: new Date().toISOString(), courseHash };
+    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: classification.label, totalCredits, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label, courseHash };
     await dbPut('transcriptVerifications', verification);
-    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'final-transcript', content: html, docId, vCode, generatedAt: new Date().toISOString() };
+    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'final-transcript', content: html, docId, vCode, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label };
     await dbPut('certificates', cert);
     logAudit('generated', 'transcript', { studentId, docId, docType: 'final' });
     showModal('Final Transcript — ' + student.name,
@@ -10781,7 +10809,7 @@ async function generateFinalTranscript() {
     }
 }
 function buildFinalTranscriptDocument(data) {
-    const { student, courseResults, schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, center, academic, cgpa, classification, totalCredits, totalGPAPoints, docId, vCode, generatedDate, generatedTime, feeBalance, postalAddress, city, phone, email, website, college_stamp } = data;
+    const { student, courseResults, schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, center, academic, cgpa, classification, totalCredits, totalGPAPoints, docId, vCode, generatedDate, generatedTime, issueDate, feeBalance, postalAddress, city, phone, email, website, college_stamp } = data;
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
     let rowsHtml = '';
     courseResults.forEach((cr, idx) => {
@@ -10837,7 +10865,7 @@ function buildFinalTranscriptDocument(data) {
             <div class="header-divider"></div>
             <div class="header-title-row">
                 <h2 class="document-title">FINAL ACADEMIC TRANSCRIPT</h2>
-                <div class="doc-meta">Generated: ${generatedDate} at ${generatedTime}</div>
+                <div class="doc-meta">Date of Issue: ${issueDate || generatedDate}</div>
             </div>
         </div>
         <div class="student-info-panel">
@@ -14246,7 +14274,7 @@ async function viewCertificate(certId) {
     const kind = duplicateTypeLabel(cert.type);
     const docId = escapeHtml(cert.docId || cert.id || '—');
     const vCode = escapeHtml(cert.vCode || '—');
-    const gen = certDateLabel(cert, true);
+    const gen = cert.issueDateFormatted || issueDateLabel(cert.issueDate) || certDateLabel(cert, true);
     const isRevoked = cert.docStatus === 'revoked';
     const statusBadge = certStatusBadge(cert);
     const revokedBlock = isRevoked ? `
@@ -14367,7 +14395,8 @@ async function sendDocWhatsApp(certId) {
     msg += `Student: ${name}\n`;
     if (admission) msg += `Admission: ${admission}\n`;
     if (program) msg += `Program: ${program}\n`;
-    msg += `\nThis document was issued on ${new Date(cert.generatedAt || Date.now()).toLocaleDateString('en-GB')}.\n\n`;
+    const issuedOn = cert.issueDateFormatted || issueDateLabel(cert.issueDate) || new Date(cert.generatedAt || Date.now()).toLocaleDateString('en-GB');
+    msg += `\nThis document was issued on ${issuedOn}.\n\n`;
     msg += `Download your document: ${link}\n`;
     if (cert.docId) msg += `Document ID: ${cert.docId}\n`;
     if (vCode) msg += `Verification code: ${vCode}\n`;
@@ -15981,7 +16010,7 @@ async function reprintDocument() {
             resultDiv.innerHTML = `<div style="text-align:center;padding:24px;"><div style="font-size:48px;margin-bottom:12px;">⚠️</div><h3 style="color:var(--danger);margin:0 0 8px;">No Content</h3><p style="color:var(--text-muted);">The document record exists but the content was not saved and cannot be reprinted.</p></div>`;
             return;
         }
-        const generatedDate = cert.generatedAt ? new Date(cert.generatedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+        const issuedDate = cert.issueDateFormatted || issueDateLabel(cert.issueDate) || (cert.generatedAt ? new Date(cert.generatedAt).toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '');
         const label = cert.studentName || cert.docTitle || 'Document';
         
         // Fetch all certificates for navigation
@@ -16027,7 +16056,7 @@ async function reprintDocument() {
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;${isRevoked ? 'background:#fef2f2;border-bottom:1px solid #fecaca;' : 'background:#f0fdf4;border-bottom:1px solid #bbf7d0;'}">
                     <div>
                         <div style="font-size:14px;font-weight:700;${isRevoked ? 'color:var(--danger);' : 'color:#166534;'}">${escapeHtml(label)}</div>
-                        <div style="font-size:11px;${isRevoked ? 'color:#b91c1c;' : 'color:#4ade80;'}">${generatedDate} &middot; ${escapeHtml(cert.docId || cert.id)}</div>
+                        <div style="font-size:11px;${isRevoked ? 'color:#b91c1c;' : 'color:#4ade80;'}">${issuedDate} &middot; ${escapeHtml(cert.docId || cert.id)}</div>
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn btn-outline" onclick="clearReprintResult()">✕ Close</button>
