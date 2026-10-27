@@ -274,6 +274,27 @@ function showModal(title, content, actions = null, options = null) {
     `;
     overlay.style.display = 'flex';
     overlay.classList.add('active');
+    try {
+        if (title && String(title).toLowerCase().includes('transcript') && !title.toLowerCase().includes('final')) {
+            const inject = () => {
+                if (document.getElementById('transcript-grouping')) return true;
+                const modalBody = document.querySelector('#modal-content .modal-body');
+                if (!modalBody) return false;
+                const wrap = document.createElement('div');
+                wrap.className = 'form-group';
+                wrap.style.cssText = 'margin:12px 16px 0 16px;padding:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;';
+                wrap.innerHTML = `<label style="display:block;margin-bottom:6px;font-weight:600;">Semester Grouping</label><select id="transcript-grouping" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;"><option value="group" selected>Group by Semester</option><option value="nogroup">Ignore Semester Grouping (single list by course order)</option></select>`;
+                const actionsDiv = document.querySelector('#modal-content .modal-actions');
+                if (actionsDiv) modal.insertBefore(wrap, actionsDiv);
+                else modalBody.appendChild(wrap);
+                return true;
+            };
+            inject();
+            setTimeout(inject, 50);
+            setTimeout(inject, 150);
+            setTimeout(inject, 300);
+        }
+    } catch(e) {}
 }
 function showConfirm(title, message) {
     return new Promise(resolve => {
