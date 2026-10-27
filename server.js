@@ -2331,6 +2331,49 @@ function upsertGradeFromSubmission(sub, marked, band, assessment, scoredBy) {
 
 // ---- Assessment window (server authority) ------------------------------
 const ASSESSMENT_GRACE_DAYS = 4;
+// The Date/Time fields in the exam and quiz forms are wall-clock times at the
+// campus, not UTC. The server container runs in UTC, so comparing those strings
+// directly made a 17:00 East Africa exam look like it opened at 20:00 local and
+// rejected every learner in between. Resolve the campus timezone first, then
+// compare actual instants.
+const ASSESSMENT_DEFAULT_TIME_ZONE = 'Africa/Nairobi';
+const ASSESSMENT_TIME_ZONES = {
+    KENYA: 'Africa/Nairobi', KE: 'Africa/Nairobi',
+    UGANDA: 'Africa/Kampala', UG: 'Africa/Kampala',
+    TANZANIA: 'Africa/Dar_es_Salaam', TZ: 'Africa/Dar_es_Salaam',
+    RWANDA: 'Africa/Kigali', RW: 'Africa/Kigali',
+    BURUNDI: 'Africa/Bujumbura', BI: 'Africa/Bujumbura',
+    ETHIOPIA: 'Africa/Addis_Ababa', ET: 'Africa/Addis_Ababa',
+    'SOUTH SUDAN': 'Africa/Juba', SS: 'Africa/Juba',
+    SOMALIA: 'Africa/Mogadishu', SO: 'Africa/Mogadishu',
+    ZAMBIA: 'Africa/Lusaka', ZM: 'Africa/Lusaka',
+    TOGO: 'Africa/Lome', TG: 'Africa/Lome',
+    NIGERIA: 'Africa/Lagos', NG: 'Africa/Lagos',
+    GHANA: 'Africa/Accra', GH: 'Africa/Accra',
+    CAMEROON: 'Africa/Douala', CM: 'Africa/Douala'
+};
+function assessmentTimeZone(a, user) {
+    const explicit = String((a && (a.timeZone || a.timezone)) || '').trim();
+    if (explicit) {
+        try { new Intl.DateTimeFormat('en-US', { timeZone: explicit }).format(new Date()); return explicit; } catch {}
+    }
+    const names = [];
+    if (a && a.country) names.push(String(a.country).trim().toUpperCase());
+    try {
+        const sid = serverStudentId(user || {});
+        const student = sid ? (db.students || []).find(s => s && String(s.id) === String(sid)) : null;
+        if (student) {
+            if (student.country) names.push(String(student.country).trim().toUpperCase());
+            const center = (db.studyCenters || []).find(c => c && String(c.id) === String(student.studyCenterId));
+            if (center && center.country) names.push(String(center.country).trim().toUpperCase());
+            const regionId = (center && center.regionId) || student.regionId;
+            const region = regionId ? (db.regions || []).find(r => r && String(r.id) === String(regionId)) : null;
+            if (region && region.country) names.push(String(region.country).trim().toUpperCase());
+        }
+    } catch {}
+    for (const name of names) if (ASSESSMENT_TIME_ZONES[name]) return ASSESSMENT_TIME_ZONES[name];
+    return ASSESSMENT_DEFAULT_TIME_ZONE;
+}
 function assessmentTimePartsServer(time) {
     const raw = String(time || '').trim();
     if (!raw) return { start: '', end: '' };
@@ -2343,27 +2386,76 @@ function assessmentTimePartsServer(time) {
     if (single) { const p = String(single[1]).padStart(2, '0') + ':' + String(single[2]).padStart(2, '0'); return { start: p, end: '' }; }
     return { start: '', end: '' };
 }
+// Convert a wall-clock date/time in an IANA timezone to a UTC epoch. The
+// zones used by the institution have no daylight-saving transition, but the
+// two-pass offset calculation also behaves correctly at a DST boundary.
+function assessmentEpoch(day, clock, timeZone) {
+    const dm = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!dm) return NaN;
+    const tm = String(clock || '00:00').match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!tm) return NaN;
+    const guess = Date.UTC(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]),
+        Number(tm[1]), Number(tm[2]), Number(tm[3] || 0));
+    try {
+        const dtf = new Intl.DateTimeFormat('en-US', {
+            timeZone: timeZone || ASSESSMENT_DEFAULT_TIME_ZONE, hour12: false,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+        const offsetAt = (ms) => {
+            const p = {};
+            for (const part of dtf.formatToParts(new Date(ms))) if (part.type !== 'literal') p[part.type] = part.value;
+            let hour = Number(p.hour); if (hour === 24) hour = 0;
+            const asUTC = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day),
+                hour, Number(p.minute), Number(p.second));
+            return asUTC - ms;
+        };
+        let epoch = guess - offsetAt(guess);
+        const settled = guess - offsetAt(epoch);
+        if (Number.isFinite(settled)) epoch = settled;
+        return epoch;
+    } catch { return guess; }
+}
 // Manual close date wins; then the end time in the Time field; then the
 // 4-day default. The Time field also sets the earliest start of the day.
-function assessmentWindowServer(a) {
-    const now = new Date();
-    if (!a) return { opensAtISO: '', closesAtISO: '', closesAt: '', closed: false, notYetOpen: false };
+function assessmentWindowServer(a, user) {
+    const now = Date.now();
+    if (!a) return { opensAtISO: '', closesAtISO: '', closesAt: '', closed: false, notYetOpen: false, timeZone: ASSESSMENT_DEFAULT_TIME_ZONE };
+    const timeZone = assessmentTimeZone(a, user);
     const t = assessmentTimePartsServer(a.time);
     const baseDay = String(a.opensAt || a.date || '').slice(0, 10);
     let opensAtISO = '';
-    if (baseDay) opensAtISO = baseDay + 'T' + (t.start || '00:00') + ':00';
+    let opensAtEpoch = NaN;
+    if (baseDay) {
+        const start = t.start || '00:00';
+        opensAtISO = baseDay + 'T' + start + ':00';
+        opensAtEpoch = assessmentEpoch(baseDay, start, timeZone);
+    }
     let closesAt = a.closesAt || '';
     let closesAtISO = '';
-    if (closesAt) closesAtISO = String(closesAt).slice(0, 10) + 'T23:59:59';
-    else if (baseDay && t.end) { closesAtISO = baseDay + 'T' + t.end + ':00'; closesAt = baseDay; }
-    else if (baseDay) {
-        const d = new Date(baseDay + 'T12:00:00');
-        if (!isNaN(d.getTime())) { d.setDate(d.getDate() + ASSESSMENT_GRACE_DAYS); closesAt = d.toISOString().slice(0, 10); closesAtISO = closesAt + 'T23:59:59'; }
+    let closesAtEpoch = NaN;
+    if (closesAt) {
+        const closeDay = String(closesAt).slice(0, 10);
+        closesAtISO = closeDay + 'T23:59:59';
+        closesAtEpoch = assessmentEpoch(closeDay, '23:59:59', timeZone);
+    } else if (baseDay && t.end) {
+        closesAtISO = baseDay + 'T' + t.end + ':00';
+        closesAtEpoch = assessmentEpoch(baseDay, t.end, timeZone);
+        closesAt = baseDay;
+    } else if (baseDay) {
+        const d = new Date(baseDay + 'T12:00:00Z');
+        if (!isNaN(d.getTime())) {
+            d.setUTCDate(d.getUTCDate() + ASSESSMENT_GRACE_DAYS);
+            closesAt = d.toISOString().slice(0, 10);
+            closesAtISO = closesAt + 'T23:59:59';
+            closesAtEpoch = assessmentEpoch(closesAt, '23:59:59', timeZone);
+        }
     }
     return {
-        opensAtISO, closesAtISO, closesAt,
-        closed: !!closesAtISO && now > new Date(closesAtISO),
-        notYetOpen: !!opensAtISO && now < new Date(opensAtISO)
+        opensAtISO, closesAtISO, closesAt, timeZone,
+        opensAtEpoch, closesAtEpoch,
+        closed: Number.isFinite(closesAtEpoch) && now > closesAtEpoch,
+        notYetOpen: Number.isFinite(opensAtEpoch) && now < opensAtEpoch
     };
 }
 
@@ -6934,9 +7026,15 @@ const parsed = JSON.parse(body);
                         const target = (db.exams || []).find(e => e && (String(e.id) === String(toStore.quizId) || String(e.id) === String(toStore.examId)))
                             || (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId));
                         if (target) {
-                            const w = assessmentWindowServer(target);
-                            if (w.closed) return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + ' and can no longer be submitted.' });
-                            if (w.notYetOpen && user && user.role === 'student') return json(res, 403, { error: 'This assessment opens on ' + w.opensAtISO.slice(0, 10) + ' at ' + w.opensAtISO.slice(11, 16) + '.' });
+                            const w = assessmentWindowServer(target, user);
+                            if (w.closed) {
+                                console.warn('[assessment-window] closed', target.id, w.closesAtISO, w.timeZone);
+                                return json(res, 403, { error: 'This assessment closed on ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + ' and can no longer be submitted.' });
+                            }
+                            if (w.notYetOpen && user && user.role === 'student') {
+                                console.warn('[assessment-window] not yet open', target.id, w.opensAtISO, w.timeZone);
+                                return json(res, 403, { error: 'This assessment opens on ' + w.opensAtISO.slice(0, 10) + ' at ' + w.opensAtISO.slice(11, 16) + '.' });
+                            }
                         }
                         // A learner's own paper is marked HERE, not in the browser:
                         // the server re-marks the answers against the answer key,
