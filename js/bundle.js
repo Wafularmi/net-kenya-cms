@@ -4400,6 +4400,44 @@ function renderStudentCourseCard(c, lessonsByCourseId, staffById, isEnrolled) {
         </div>` : '<p style="font-size:12px;color:var(--text-muted);margin:0;">No content available yet</p>'}
     </div>`;
 }
+// Course-level alumni settings. Older courses have no block and stay closed
+// until an administrator explicitly opts them in.
+function courseAlumniAccess(course) {
+    const a = course && course.alumniAccess && typeof course.alumniAccess === 'object' ? course.alumniAccess : null;
+    const enabled = !!(a ? a.enabled !== false : (course && course.alumniEnabled === true));
+    const rawDays = a ? Number(a.accessDays) : 365;
+    return {
+        enabled,
+        mode: a && a.mode === 'invite' ? 'invite' : 'open',
+        accessDays: Number.isFinite(rawDays) && rawDays > 0 ? Math.min(3650, Math.round(rawDays)) : 365,
+        certificate: a ? a.certificate !== false : true,
+        certificateFee: Math.max(0, Number(a && a.certificateFee) || 0)
+    };
+}
+function alumniGrantIsActive(grant) {
+    if (!grant) return false;
+    const status = String(grant.status || 'active').toLowerCase();
+    if (['invited', 'dropped', 'declined', 'expired', 'revoked', 'cancelled'].includes(status)) return false;
+    const now = Date.now();
+    const end = grant.expiresAt ? Date.parse(String(grant.expiresAt)) : NaN;
+    if (Number.isFinite(end) && end < now) return false;
+    const start = grant.startsAt ? Date.parse(String(grant.startsAt)) : NaN;
+    if (Number.isFinite(start) && start > now) return false;
+    return true;
+}
+function alumniLinkedUser(alumni, users) {
+    if (!alumni) return null;
+    const aid = String(alumni.id || '');
+    const sid = String(alumni.studentId || '');
+    const phone = String(alumni.phone || '');
+    const email = String(alumni.email || '').toLowerCase();
+    return (users || []).find(u => u && u.role === 'student' && (
+        (aid && String(u.alumniId || '') === aid) ||
+        (sid && String(u.studentId || '') === sid) ||
+        (phone && String(u.username || '').toLowerCase() === phone.toLowerCase()) ||
+        (email && String(u.username || '').toLowerCase() === email)
+    )) || null;
+}
 async function renderCourses() {
     const batchResult = await dbGetBatch(['courses', 'staff', 'enrollments', 'lessons', 'students']);
     const courses = batchResult.courses || [];
@@ -4429,8 +4467,25 @@ async function renderCourses() {
     });
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const isStudentUser = currentUser && currentUser.role === 'student';
+    const isAlumniUser = isStudentUser && (currentUser.accountType === 'alumni' || !!currentUser.alumniId);
     const addBtn = document.querySelector('#screen-courses .btn-primary');
     if (addBtn) addBtn.style.display = isStudentUser ? 'none' : '';
+    if (isAlumniUser) {
+        let container = document.getElementById('student-courses-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'student-courses-container';
+            container.style.padding = '16px 0';
+            document.getElementById('tab-course-list').appendChild(container);
+        }
+        container.innerHTML = `<div class="card" style="max-width:640px;margin:24px auto;text-align:center;padding:32px;">
+            <div style="font-size:42px;margin-bottom:10px;">🎓</div>
+            <h3 style="color:var(--accent);margin:0 0 8px;">Alumni Learning</h3>
+            <p style="color:var(--text-muted);font-size:13px;line-height:1.6;margin:0 0 18px;">Alumni courses are in your lifelong-learning hub, with free auditing, access windows and continuing-education records.</p>
+            <button class="btn btn-primary" onclick="showScreen('student-hub')">Open Alumni Learning →</button>
+        </div>`;
+        return;
+    }
     if (isStudentUser) {
         const me = findStudentForCurrentUser(students, currentUser);
         const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
@@ -4479,11 +4534,31 @@ async function renderCourses() {
         const videoCount = lessonsByCourseId[c.id]?.videos || 0;
         const statusClass = c.status === 'inactive' ? 'danger' : lessonCount > 0 ? 'success' : 'warning';
         const statusLabel = c.status === 'inactive' ? 'Inactive' : lessonCount > 0 ? 'Active' : 'No Lessons';
-        return `<tr><td><b>${c.code}</b></td><td>${c.name}</td><td>${instructor ? instructor.name : '--'}</td><td>${studentCount}</td><td>${lessonCount}${videoCount ? ' <span style="font-size:10px;color:var(--accent);">🎬' + videoCount + '</span>' : ''}</td><td><span class="badge badge-${statusClass}">${statusLabel}</span></td><td><button class="btn btn-outline btn-sm" onclick="editCourse('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteCourse('${c.id}')">Del</button></td></tr>`;
+        const alumniAccess = courseAlumniAccess(c);
+        return `<tr><td><b>${c.code}</b>${alumniAccess.enabled ? ' <span title="Open to alumni" style="font-size:12px;">🎓</span>' : ''}</td><td>${c.name}</td><td>${instructor ? instructor.name : '--'}</td><td>${studentCount}</td><td>${lessonCount}${videoCount ? ' <span style="font-size:10px;color:var(--accent);">🎬' + videoCount + '</span>' : ''}</td><td><span class="badge badge-${statusClass}">${statusLabel}</span></td><td><button class="btn btn-outline btn-sm" onclick="editCourse('${c.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteCourse('${c.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No courses found.</td></tr>';
 }
 function showCourseForm(course = null) {
     const isEdit = !!course;
+    const _alumniAccess = courseAlumniAccess(course);
+    const _alumniEnabled = course ? _alumniAccess.enabled : true;
+    const _alumniMode = _alumniAccess.mode;
+    const _alumniDays = _alumniAccess.accessDays;
+    const _alumniCert = _alumniAccess.certificate;
+    const _alumniFee = _alumniAccess.certificateFee;
+    const alumniSettingsHtml = `<h4 style="color:var(--accent);margin:12px 0 8px;">🎓 Alumni Learning</h4>
+<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-input);">
+    <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer;"><input type="checkbox" id="course-alumni-enabled" ${_alumniEnabled ? 'checked' : ''} style="width:auto;flex:none;"> Enable alumni access</label>
+    <div style="font-size:11px;color:var(--text-muted);margin:4px 0 10px;line-height:1.5;">Graduates can audit this course without a new student record or admission number. Older courses stay closed until you enable them.</div>
+    <div class="form-row">
+        <div class="form-group"><label>Access mode</label><select id="course-alumni-mode"><option value="open" ${_alumniMode === 'open' ? 'selected' : ''}>Open to all alumni</option><option value="invite" ${_alumniMode === 'invite' ? 'selected' : ''}>Invitation only</option></select></div>
+        <div class="form-group"><label>Access window (days)</label><input type="number" id="course-alumni-days" value="${_alumniDays}" min="1" max="3650"></div>
+    </div>
+    <div class="form-row">
+        <div class="form-group"><label>Certificate fee (KES)</label><input type="number" id="course-alumni-fee" value="${_alumniFee}" min="0" step="1"><small style="display:block;opacity:.7;">0 = certificate included. Audit access is always free.</small></div>
+        <div class="form-group"><label style="display:flex;align-items:center;gap:8px;font-weight:normal;margin-top:26px;cursor:pointer;"><input type="checkbox" id="course-alumni-certificate" ${_alumniCert ? 'checked' : ''} style="width:auto;flex:none;"> Offer a course certificate after assessment</label></div>
+    </div>
+</div>`;
     // Show the canonical component type next to each label. Older course rows
     // can carry a type that disagrees with the label (an "Essay" typed as
     // attendance); the label is what staff see and what the calculation uses,
@@ -4497,7 +4572,7 @@ function showCourseForm(course = null) {
     const _paceUnit = course && course.dripPaceUnit === 'hours' ? 'hours' : 'days';
     const _paceDays = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : null;
     const _paceValue = _paceDays == null || !Number.isFinite(_paceDays) ? '' : (_paceUnit === 'hours' ? Number((_paceDays * 24).toFixed(4)) : _paceDays);
-    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Lesson pacing (between sequenced lessons)</label><div style="display:flex;gap:6px;"><input type="number" id="course-drip-days" value="${_paceValue}" min="0" max="${_paceUnit === 'hours' ? 1440 : 60}" step="any" placeholder="3.5" style="flex:2;"><select id="course-drip-unit" style="flex:1;"><option value="days" ${_paceUnit === 'days' ? 'selected' : ''}>Days</option><option value="hours" ${_paceUnit === 'hours' ? 'selected' : ''}>Hours</option></select></div><small style="display:block;opacity:.7;">0 = instant. Course default for Sequenced lessons; country, region, center and learner overrides can adjust it in Lesson Pacing.</small></div><div class="form-group"><label>Default when left blank</label><input type="text" value="3.5 days (built-in fallback)" disabled style="background:var(--bg);color:var(--text);opacity:.75;"></div></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
+    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Lesson pacing (between sequenced lessons)</label><div style="display:flex;gap:6px;"><input type="number" id="course-drip-days" value="${_paceValue}" min="0" max="${_paceUnit === 'hours' ? 1440 : 60}" step="any" placeholder="3.5" style="flex:2;"><select id="course-drip-unit" style="flex:1;"><option value="days" ${_paceUnit === 'days' ? 'selected' : ''}>Days</option><option value="hours" ${_paceUnit === 'hours' ? 'selected' : ''}>Hours</option></select></div><small style="display:block;opacity:.7;">0 = instant. Course default for Sequenced lessons; country, region, center and learner overrides can adjust it in Lesson Pacing.</small></div><div class="form-group"><label>Default when left blank</label><input type="text" value="3.5 days (built-in fallback)" disabled style="background:var(--bg);color:var(--text);opacity:.75;"></div></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div>${alumniSettingsHtml}<h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
     showModal(isEdit ? 'Edit Course' : 'Add New Course', content, `<button class="btn btn-primary" onclick="saveCourse()">${isEdit ? 'Update' : 'Create'}</button>`, { maxWidth: '860px' });
     loadStaffDropdown();
     loadCampusDropdownForCourse();
@@ -4549,7 +4624,19 @@ async function saveCourse() {
         return;
     }
     const dripDays = dripValue == null ? null : (dripUnit === 'hours' ? dripValue / 24 : dripValue);
-    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW || 30, quizWeight: quizW || 20, catWeight: catW || 25, attWeight: attW || 10, dripDaysBetween: dripDays, dripPaceUnit: dripDays == null ? null : dripUnit, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
+    const alumniEnabledEl = document.getElementById('course-alumni-enabled');
+    const alumniModeEl = document.getElementById('course-alumni-mode');
+    const alumniDaysEl = document.getElementById('course-alumni-days');
+    const alumniCertEl = document.getElementById('course-alumni-certificate');
+    const alumniFeeEl = document.getElementById('course-alumni-fee');
+    const alumniAccess = {
+        enabled: !!(alumniEnabledEl && alumniEnabledEl.checked),
+        mode: alumniModeEl && alumniModeEl.value === 'invite' ? 'invite' : 'open',
+        accessDays: Math.max(1, Math.min(3650, Math.round(parseFloat(alumniDaysEl && alumniDaysEl.value) || 365))),
+        certificate: !!(alumniCertEl && alumniCertEl.checked),
+        certificateFee: Math.max(0, Math.round(parseFloat(alumniFeeEl && alumniFeeEl.value) || 0))
+    };
+    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW || 30, quizWeight: quizW || 20, catWeight: catW || 25, attWeight: attW || 10, dripDaysBetween: dripDays, dripPaceUnit: dripDays == null ? null : dripUnit, alumniAccess, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
     await dbPut('courses', course); closeModal(); renderCourses(); updateCourseDropdowns(); showToast(editId ? 'Course updated!' : 'Course created!'); logAudit(editId ? 'updated' : 'created', 'course', course);
 }
 function buildWeightageRow(label, value, type) {
@@ -13705,26 +13792,201 @@ document.getElementById('inventory-search').addEventListener('input', debounce(r
 
 async function renderAlumni() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    let alumni = await dbGetAll('alumni');
+    const batch = await dbGetBatch(['alumni', 'students', 'users', 'courses', 'alumniEnrollments']);
+    let alumni = batch.alumni || [];
+    const students = batch.students || [];
+    const users = batch.users || [];
+    const grants = batch.alumniEnrollments || [];
     if (u.role === 'coordinator' && u.regionId) {
         const regionalIds = await getRegionalStudentIdSet();
         if (regionalIds) {
-            const students = regionalIds.size ? (await dbGetAll('students')).filter(s => regionalIds.has(s.id)) : [];
-            const regionalNames = new Set(students.map(s => s.name?.toLowerCase()));
-            alumni = alumni.filter(a => regionalNames.has(a.name?.toLowerCase()));
+            const regionalNames = new Set(students.filter(s => regionalIds.has(s.id)).map(s => String(s.name || '').toLowerCase()));
+            alumni = alumni.filter(a => (a.studentId && regionalIds.has(a.studentId)) ||
+                regionalNames.has(String(a.name || '').toLowerCase()) ||
+                (a.regionId && String(a.regionId) === String(u.regionId)));
         }
     }
     const search = document.getElementById('alumni-search').value.toLowerCase();
-    const filtered = alumni.filter(a => !search || a.name.toLowerCase().includes(search) || (a.program || '').toLowerCase().includes(search) || (a.ministry || '').toLowerCase().includes(search));
+    const filtered = alumni.filter(a => !search || String(a.name || '').toLowerCase().includes(search) || String(a.program || '').toLowerCase().includes(search) || String(a.ministry || '').toLowerCase().includes(search));
     filtered.sort((a, b) => (b.gradYear || 0) - (a.gradYear || 0));
     document.getElementById('alumni-body').innerHTML = filtered.map(a => {
         const phone = a.phone || '';
-        return `<tr><td><b>${a.id}</b></td><td><div><b>${a.name}</b></div></td><td>${a.program || '--'}</td><td>${a.gradYear || '--'}</td><td>${a.ministry || '--'}</td><td>${a.phone || '--'}</td><td>${phone ? `<button class="btn btn-success btn-sm" onclick="sendWhatsApp('${phone}','Hello ${a.name}, greetings from the college!')">Message</button>` : '--'}</td><td><button class="btn btn-outline btn-sm" onclick="editAlumni('${a.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteAlumni('${a.id}')">Del</button></td></tr>`;
+        const linkedUser = alumniLinkedUser(a, users);
+        const sid = String(a.studentId || '');
+        const myGrants = grants.filter(g => g && ((sid && String(g.studentId) === sid) || String(g.studentId) === String(a.id)));
+        const activeCount = myGrants.filter(alumniGrantIsActive).length;
+        const pendingCount = myGrants.filter(g => String(g.status || '').toLowerCase() === 'invited').length;
+        const portal = linkedUser
+            ? '<span style="display:inline-block;margin-top:3px;font-size:10px;font-weight:700;color:var(--success);">🟢 Portal active</span>'
+            : '<span style="display:inline-block;margin-top:3px;font-size:10px;color:var(--text-muted);">⚪ Portal not activated</span>';
+        const accessTxt = activeCount
+            ? `${activeCount} active alumni course${activeCount === 1 ? '' : 's'}`
+            : (pendingCount ? `${pendingCount} pending invitation${pendingCount === 1 ? '' : 's'}` : 'No alumni courses yet');
+        return `<tr><td><b>${escapeHtml(a.id)}</b></td><td><div><b>${escapeHtml(a.name)}</b></div>${portal}<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${escapeHtml(accessTxt)}</div></td><td>${escapeHtml(a.program || '--')}</td><td>${a.gradYear || '--'}</td><td>${escapeHtml(a.ministry || '--')}</td><td>${escapeHtml(a.phone || '--')}</td><td>${phone ? `<button class="btn btn-success btn-sm" onclick="sendWhatsApp('${phone}','Hello ${escapeHtml(a.name)}, greetings from the college!')">Message</button>` : '--'}</td><td style="white-space:nowrap;"><button class="btn btn-outline btn-sm" onclick="showAlumniInviteModal('${a.id}')">🎓 Invite</button> <button class="btn btn-outline btn-sm" onclick="activateAlumniPortal('${a.id}')">${linkedUser ? 'Portal ✓' : 'Activate Portal'}</button> <button class="btn btn-outline btn-sm" onclick="editAlumni('${a.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteAlumni('${a.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No alumni registered. Graduated students can be added here.</td></tr>';
 }
+async function showAlumniInviteModal(alumniId) {
+    const batch = await dbGetBatch(['alumni', 'students', 'courses', 'alumniEnrollments']);
+    const alumni = (batch.alumni || []).find(a => String(a.id) === String(alumniId));
+    if (!alumni) return showToast('Alumni record not found', { type: 'danger' });
+    let sid = String(alumni.studentId || '');
+    if (!sid && alumni.admissionNumber) {
+        const st = (batch.students || []).find(s => String(s.admissionNumber || '') === String(alumni.admissionNumber));
+        if (st) sid = String(st.id);
+    }
+    if (!sid) return showToast('Link this alumni record to the original student before inviting them', { type: 'danger', duration: 7000 });
+    const courses = (batch.courses || []).filter(c => courseAlumniAccess(c).enabled);
+    const grants = (batch.alumniEnrollments || []).filter(g => g && String(g.studentId) === sid);
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    let rows = courses.map(c => {
+        const access = courseAlumniAccess(c);
+        const grant = grants.find(g => String(g.courseId) === String(c.id));
+        const status = String((grant && grant.status) || '').toLowerCase();
+        const active = !!grant && alumniGrantIsActive(grant);
+        const invited = status === 'invited';
+        return `<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border);cursor:${active ? 'default' : 'pointer'};">
+            <input type="checkbox" class="alumni-invite-course" value="${c.id}" ${active || invited ? 'checked' : ''} ${active ? 'disabled' : ''} style="width:auto;flex:none;margin-top:2px;">
+            <span style="flex:1;"><b>${escapeHtml(c.code)}</b> — ${escapeHtml(c.name)}
+                <span style="display:block;font-size:11px;color:var(--text-muted);margin-top:2px;">${access.mode === 'invite' ? 'Invitation-only' : 'Open to all alumni'} · ${access.accessDays}-day access · ${active ? '<b style="color:var(--success);">Access active</b>' : (invited ? '<b style="color:var(--warning);">Invitation pending</b>' : 'Not invited')}</span>
+            </span>
+        </label>`;
+    }).join('');
+    if (!courses.length) rows = '<div class="card" style="padding:16px;color:var(--text-muted);">No courses have alumni access enabled yet. Open Courses, edit a course, and enable 🎓 Alumni Learning first.</div>';
+    const content = `<div style="margin-bottom:10px;padding:10px;background:var(--bg-input);border-radius:8px;font-size:12px;line-height:1.55;">
+        <b>${escapeHtml(alumni.name)}</b><br>
+        Alumni ID ${escapeHtml(alumni.id)} · Original student ${escapeHtml(sid)}<br>
+        <span style="color:var(--text-muted);">Invite this alumnus to continue learning. They keep their academic history and do not get a new student record or admission number.</span>
+    </div>
+    <div style="max-height:360px;overflow:auto;margin-bottom:10px;">${rows || '<div style="color:var(--text-muted);padding:12px;">No alumni courses available.</div>'}</div>
+    <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Unticking a pending invitation cancels it. Active access is never removed from this screen.</div>`;
+    showModal('🎓 Invite to Alumni Course', content, `<button class="btn btn-primary" onclick="saveAlumniInvites('${alumniId}')">Send Invitations</button>`, { maxWidth: '700px' });
+}
+async function saveAlumniInvites(alumniId) {
+    const batch = await dbGetBatch(['alumni', 'courses', 'alumniEnrollments']);
+    const alumni = (batch.alumni || []).find(a => String(a.id) === String(alumniId));
+    if (!alumni) return showToast('Alumni record not found', { type: 'danger' });
+    let sid = String(alumni.studentId || '');
+    if (!sid && alumni.admissionNumber) {
+        const st = await dbGetAll('students');
+        const linked = (st || []).find(s => String(s.admissionNumber || '') === String(alumni.admissionNumber));
+        if (linked) sid = String(linked.id);
+    }
+    if (!sid) return showToast('Alumni record is not linked to a student', { type: 'danger' });
+    const courses = batch.courses || [];
+    const grants = batch.alumniEnrollments || [];
+    const checks = Array.from(document.querySelectorAll('.alumni-invite-course:checked:not(:disabled)')).map(c => c.value);
+    const selected = new Set(checks.map(String));
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const now = new Date().toISOString();
+    let invited = 0, cancelled = 0;
+    try {
+        for (const c of courses) {
+            const courseId = String(c.id);
+            const existing = grants.find(g => g && String(g.studentId) === sid && String(g.courseId) === courseId);
+            if (!selected.has(courseId)) {
+                if (existing && String(existing.status || '').toLowerCase() === 'invited') {
+                    await dbDelete('alumniEnrollments', existing.id);
+                    cancelled++;
+                }
+                continue;
+            }
+            if (existing && alumniGrantIsActive(existing)) continue;
+            const access = courseAlumniAccess(c);
+            const rec = Object.assign({}, existing || {}, {
+                id: (existing && existing.id) || `AENR-${courseId}-${sid}`,
+                courseId,
+                studentId: sid,
+                accountType: 'alumni',
+                status: 'invited',
+                accessDays: access.accessDays,
+                certificate: access.certificate,
+                certificateFee: access.certificateFee,
+                invitedAt: now,
+                invitedBy: currentUser.username || '',
+                country: alumni.country || (existing && existing.country) || '',
+                studyCenterId: alumni.studyCenterId || (existing && existing.studyCenterId) || '',
+                regionId: alumni.regionId || (existing && existing.regionId) || '',
+                updatedAt: now,
+                createdAt: (existing && existing.createdAt) || now
+            });
+            await dbPut('alumniEnrollments', rec);
+            invited++;
+        }
+        closeModal();
+        renderAlumni();
+        showToast(`${invited ? invited + ' invitation' + (invited === 1 ? '' : 's') + ' sent' : 'No new invitations'}${cancelled ? ' · ' + cancelled + ' pending cancelled' : ''}`, { type: 'success', duration: 6000 });
+        logAudit('updated', 'alumni-enrollment', { alumniId, studentId: sid, invited, cancelled });
+    } catch (e) {
+        console.error('saveAlumniInvites error:', e);
+        showToast('Invitation failed: ' + (e.message || 'Server denied'), { type: 'danger', duration: 7000 });
+    }
+}
+async function activateAlumniPortal(alumniId) {
+    try {
+        const batch = await dbGetBatch(['alumni', 'students', 'users']);
+        const alumni = (batch.alumni || []).find(a => String(a.id) === String(alumniId));
+        if (!alumni) return showToast('Alumni record not found', { type: 'danger' });
+        const students = batch.students || [];
+        const users = batch.users || [];
+        const linkedStudent = (students || []).find(s => (alumni.studentId && String(s.id) === String(alumni.studentId)) ||
+            (alumni.admissionNumber && String(s.admissionNumber || '') === String(alumni.admissionNumber))) || null;
+        const sid = String(alumni.studentId || (linkedStudent && linkedStudent.id) || '');
+        if (!sid) return showToast('This alumni record is not linked to the original student record', { type: 'danger', duration: 7000 });
+        const username = String(alumni.phone || (linkedStudent && linkedStudent.phone) || alumni.email || (linkedStudent && linkedStudent.email) || '').trim();
+        const admissionNumber = String(alumni.admissionNumber || (linkedStudent && linkedStudent.admissionNumber) || '').trim();
+        if (!username) return showToast('Add a phone number or email to this alumni record first', { type: 'danger', duration: 7000 });
+        if (!admissionNumber) return showToast('The original admission number is missing — add it before activating the portal', { type: 'danger', duration: 7000 });
+        let linkedUser = alumniLinkedUser(alumni, users) || users.find(u => u && String(u.username || '').toLowerCase() === username.toLowerCase()) || null;
+        if (linkedUser && linkedUser.role !== 'student') return showToast('That phone/email already belongs to a staff account', { type: 'danger', duration: 7000 });
+        const existingLogin = !!linkedUser;
+        if (linkedUser) {
+            linkedUser.role = 'student';
+            linkedUser.accountType = 'alumni';
+            linkedUser.alumniId = alumni.id;
+            linkedUser.studentId = sid;
+            linkedUser.admissionNumber = admissionNumber;
+            linkedUser.name = alumni.name || linkedUser.name;
+            if (!linkedUser.status) linkedUser.status = 'active';
+            await dbPut('users', linkedUser);
+        } else {
+            const pwHash = await hashPassword(admissionNumber);
+            linkedUser = {
+                username,
+                password: pwHash,
+                name: alumni.name || (linkedStudent && linkedStudent.name) || 'Alumni',
+                role: 'student',
+                status: 'active',
+                studentId: sid,
+                admissionNumber,
+                accountType: 'alumni',
+                alumniId: alumni.id,
+                alumniSince: alumni.gradYear || '',
+                phone: alumni.phone || (linkedStudent && linkedStudent.phone) || '',
+                email: alumni.email || (linkedStudent && linkedStudent.email) || '',
+                createdAt: new Date().toISOString()
+            };
+            await dbPut('users', linkedUser);
+        }
+        const old = await dbGet('alumni', alumni.id);
+        await dbPut('alumni', Object.assign({}, old || alumni, {
+            userId: linkedUser.username,
+            admissionNumber,
+            studentId: sid,
+            portalActivatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        }));
+        showToast(`Alumni portal ready. Sign in as ${linkedUser.username} with ${existingLogin ? 'their existing password' : 'the original admission number as password'}.`, { type: 'success', duration: 9000 });
+        logAudit('updated', 'alumni', { id: alumni.id, portal: 'activated', username: linkedUser.username });
+        renderAlumni();
+    } catch (e) {
+        console.error('activateAlumniPortal error:', e);
+        showToast('Portal activation failed: ' + (e.message || 'Server denied'), { type: 'danger', duration: 7000 });
+    }
+}
+
 async function showAlumniForm(alumni = null) {
     const isEdit = !!alumni;
-    const content = `<input type="hidden" id="alumni-edit-id" value="${alumni ? alumni.id : ''}">${alumni ? `<div class="form-group"><label>Full Name *</label><input type="text" id="alumni-name" value="${alumni.name}" required></div>` : `<div class="form-group"><label>Add by Student *</label><input type="hidden" id="alumni-student-id" value=""><input type="hidden" id="alumni-name" value=""><div class="form-group" style="margin-bottom:8px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;"><input type="checkbox" id="alumni-bulk" onchange="toggleAlumniBulk()"> Bulk add multiple students</label></div><div id="alumni-student-wrap"><select id="alumni-student" class="form-control" onchange="onAlumniStudentSelect(this)"><option value="">Select student...</option></select></div><div id="alumni-bulk-list" style="display:none;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:10px;"></div></div>`}<div class="form-row"><div class="form-group"><label>Program</label><input type="text" id="alumni-program" value="${alumni ? alumni.program || '' : ''}"></div><div class="form-group"><label>Graduation Year</label><input type="number" id="alumni-year" value="${alumni ? alumni.gradYear || new Date().getFullYear() : new Date().getFullYear()}"></div></div><div class="form-row"><div class="form-group"><label>Phone</label><input type="text" id="alumni-phone" value="${alumni ? alumni.phone || '' : ''}"></div><div class="form-group"><label>Email</label><input type="email" id="alumni-email" value="${alumni ? alumni.email || '' : ''}"></div></div><div class="form-group"><label>Current Ministry/Work</label><input type="text" id="alumni-ministry" value="${alumni ? alumni.ministry || '' : ''}"></div><div class="form-group"><label>Location</label><input type="text" id="alumni-location" value="${alumni ? alumni.location || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="alumni-notes">${alumni ? alumni.notes || '' : ''}</textarea></div>`;
+    const content = `<input type="hidden" id="alumni-edit-id" value="${alumni ? alumni.id : ''}">${alumni ? `<input type="hidden" id="alumni-student-id" value="${alumni.studentId || ''}"><div class="form-group"><label>Full Name *</label><input type="text" id="alumni-name" value="${alumni.name}" required></div>` : `<div class="form-group"><label>Add by Student *</label><input type="hidden" id="alumni-student-id" value=""><input type="hidden" id="alumni-name" value=""><div class="form-group" style="margin-bottom:8px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;"><input type="checkbox" id="alumni-bulk" onchange="toggleAlumniBulk()"> Bulk add multiple students</label></div><div id="alumni-student-wrap"><select id="alumni-student" class="form-control" onchange="onAlumniStudentSelect(this)"><option value="">Select student...</option></select></div><div id="alumni-bulk-list" style="display:none;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:10px;"></div></div>`}<div class="form-row"><div class="form-group"><label>Program</label><input type="text" id="alumni-program" value="${alumni ? alumni.program || '' : ''}"></div><div class="form-group"><label>Graduation Year</label><input type="number" id="alumni-year" value="${alumni ? alumni.gradYear || new Date().getFullYear() : new Date().getFullYear()}"></div></div><div class="form-row"><div class="form-group"><label>Phone</label><input type="text" id="alumni-phone" value="${alumni ? alumni.phone || '' : ''}"></div><div class="form-group"><label>Email</label><input type="email" id="alumni-email" value="${alumni ? alumni.email || '' : ''}"></div></div><div class="form-group"><label>Current Ministry/Work</label><input type="text" id="alumni-ministry" value="${alumni ? alumni.ministry || '' : ''}"></div><div class="form-group"><label>Location</label><input type="text" id="alumni-location" value="${alumni ? alumni.location || '' : ''}"></div><div class="form-group"><label>Notes</label><textarea id="alumni-notes">${alumni ? alumni.notes || '' : ''}</textarea></div>`;
     showModal(isEdit ? 'Edit Alumni' : 'Add Alumni', content, `<button class="btn btn-primary" onclick="saveAlumni()">${isEdit ? 'Update' : 'Add'}</button>`);
     if (!isEdit) loadAlumniStudentPool();
 }
@@ -13785,11 +14047,35 @@ async function saveAlumni() {
     const existing = await dbGetAll('alumni');
     const existsByStudent = new Set(existing.map(a => a.studentId).filter(Boolean));
     const existsByName = new Set(existing.map(a => (a.name || '').toLowerCase()));
+    const oldAlumni = editId ? await dbGet('alumni', editId) : null;
     let addedCount = 0, skippedCount = 0;
     const built = [];
     const finalize = async (student, extra) => {
         const id = 'ALU-' + Date.now().toString(36).toUpperCase() + (built.length ? '-' + built.length : '');
-        const rec = Object.assign({ id, name: (student && student.name) || extra.name, program: (student && student.program) || (extra.program || ''), gradYear: year, phone: (student && student.phone) || (extra.phone || ''), email: (student && student.email) || (extra.email || ''), ministry: extra.ministry || '', location: extra.location || '', notes: extra.notes || '', studentId: student ? student.id : undefined, createdAt: new Date().toISOString() }, extra.template || {});
+        const template = extra.template || {};
+        const rec = Object.assign({ createdAt: new Date().toISOString() }, template, {
+            id: template.id || id,
+            name: (student && student.name) || extra.name || template.name || '',
+            program: (student && student.program) || (extra.program || ''),
+            gradYear: year,
+            phone: (student && student.phone) || (extra.phone || ''),
+            email: (student && student.email) || (extra.email || ''),
+            ministry: extra.ministry || '',
+            location: extra.location || '',
+            notes: extra.notes || '',
+            studentId: student ? student.id : (template.studentId || undefined)
+        });
+        // Keep the lifelong-learner identity linked to the original academic
+        // record: the original student id and the same identity fields used for
+        // course access, certificates and continuing-education records.
+        rec.studentId = (student && student.id) || rec.studentId || '';
+        rec.admissionNumber = rec.admissionNumber || (student && student.admissionNumber) || '';
+        rec.studyCenterId = rec.studyCenterId || (student && student.studyCenterId) || '';
+        rec.regionId = rec.regionId || (student && student.regionId) || '';
+        rec.country = rec.country || (student && student.country) || '';
+        rec.enrollmentDate = rec.enrollmentDate || (student && student.enrollmentDate) || '';
+        rec.graduationDate = rec.graduationDate || (student && student.graduationDate) || '';
+        rec.updatedAt = new Date().toISOString();
         await dbPut('alumni', rec);
         built.push(rec);
         addedCount++;
@@ -13802,7 +14088,7 @@ async function saveAlumni() {
     };
     if (editId) {
         const st = await dbGet('students', document.getElementById('alumni-student-id') ? document.getElementById('alumni-student-id').value : '');
-        await finalize(st, { name: document.getElementById('alumni-name').value.trim(), program: document.getElementById('alumni-program').value.trim(), phone: document.getElementById('alumni-phone').value.trim(), email: document.getElementById('alumni-email').value.trim(), ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim(), template: { id: editId, createdAt: (await dbGet('alumni', editId)).createdAt, studentId: (await dbGet('alumni', editId)).studentId } });
+        await finalize(st, { name: document.getElementById('alumni-name').value.trim(), program: document.getElementById('alumni-program').value.trim(), phone: document.getElementById('alumni-phone').value.trim(), email: document.getElementById('alumni-email').value.trim(), ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim(), template: oldAlumni ? { ...oldAlumni, id: editId } : { id: editId } });
     } else if (isBulk) {
         const ids = Array.from(document.querySelectorAll('#alumni-bulk-list .alumni-bulk-cb:checked')).map(c => c.value);
         if (!ids.length) return showToast('Select at least one student!');
@@ -13821,7 +14107,8 @@ async function saveAlumni() {
         if (await skipIfExists(st)) return showToast('Student already in alumni!');
         await finalize(st, { ministry: document.getElementById('alumni-ministry').value.trim(), location: document.getElementById('alumni-location').value.trim(), notes: document.getElementById('alumni-notes').value.trim() });
     }
-    if (editId) { if (built.length) { await dbDelete('alumni', editId); } }
+    // Editing writes back to the SAME alumni id (and preserves the original
+    // student link); deleting the old record after the write would erase it.
     closeModal(); renderAlumni();
     const msg = isBulk ? `Added ${addedCount} alumni${skippedCount ? `, skipped ${skippedCount} existing` : ''}!` : (editId ? 'Alumni updated!' : 'Alumni added!');
     showToast(msg);

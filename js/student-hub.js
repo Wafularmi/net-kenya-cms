@@ -15,9 +15,86 @@ function safeSetLocal(key, value) {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+// ---- Alumni learning helpers ------------------------------------------------
+// A course opts in explicitly. Courses created before alumni access existed
+// have no settings block and stay closed until an administrator enables them.
+function _hubAlumniAccess(course) {
+    const a = course && course.alumniAccess && typeof course.alumniAccess === 'object' ? course.alumniAccess : null;
+    const enabled = !!(a ? a.enabled !== false : (course && course.alumniEnabled === true));
+    const rawDays = a ? Number(a.accessDays) : 365;
+    return {
+        enabled,
+        mode: a && a.mode === 'invite' ? 'invite' : 'open',
+        accessDays: Number.isFinite(rawDays) && rawDays > 0 ? Math.min(3650, Math.round(rawDays)) : 365,
+        certificate: a ? a.certificate !== false : true,
+        certificateFee: Math.max(0, Number(a && a.certificateFee) || 0)
+    };
+}
+function _hubAlumniGrantActive(grant, now) {
+    if (!grant) return false;
+    const status = String(grant.status || 'active').toLowerCase();
+    if (['invited', 'dropped', 'declined', 'expired', 'revoked', 'cancelled'].includes(status)) return false;
+    const t = now == null ? Date.now() : now;
+    const start = grant.startsAt ? Date.parse(String(grant.startsAt)) : NaN;
+    if (Number.isFinite(start) && start > t) return false;
+    const end = grant.expiresAt ? Date.parse(String(grant.expiresAt)) : NaN;
+    if (Number.isFinite(end) && end < t) return false;
+    return true;
+}
+function _hubLearnerIds(me) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const alumni = me && me._alumniRecord;
+    return new Set([
+        me && me.id, me && me.studentId, me && me.admissionNumber, me && me.phone, me && me.email,
+        me && me.username, alumni && alumni.id, alumni && alumni.studentId,
+        currentUser.studentId, currentUser.alumniId, currentUser.username
+    ].filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(String));
+}
+function _hubMyAlumniGrants(me, data) {
+    if (!me || !data) return [];
+    const ids = _hubLearnerIds(me);
+    return (data.alumniEnrollments || []).filter(g => g && ids.has(String(g.studentId)));
+}
+function _hubGrantForCourse(me, data, courseId) {
+    const rows = _hubMyAlumniGrants(me, data).filter(g => String(g.courseId) === String(courseId));
+    return rows.sort((a, b) => String(b.updatedAt || b.acceptedAt || b.invitedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.acceptedAt || a.invitedAt || a.createdAt || '')))[0] || null;
+}
+function _hubGrantAsEnrollment(grant) {
+    return {
+        id: 'ALUMNI-' + String(grant.id || (grant.courseId + '-' + grant.studentId)),
+        courseId: grant.courseId,
+        studentId: grant.studentId,
+        enrolledAt: grant.acceptedAt || grant.enrolledAt || grant.createdAt || '',
+        expiresAt: grant.expiresAt || '',
+        _alumniGrant: true,
+        _grantId: grant.id
+    };
+}
+function _hubEffectiveEnrollments(me, data) {
+    const rows = [...((data && data.enrollments) || [])];
+    if (!me || !data) return rows;
+    const courseOpenToAlumni = courseId => {
+        const course = (data.courses || []).find(c => String(c.id) === String(courseId));
+        return !!(course && _hubAlumniAccess(course).enabled);
+    };
+    _hubMyAlumniGrants(me, data)
+        .filter(g => _hubAlumniGrantActive(g) && courseOpenToAlumni(g.courseId))
+        .forEach(g => {
+            if (!rows.some(e => String(e.studentId) === String(g.studentId) && String(e.courseId) === String(g.courseId))) {
+                rows.push(_hubGrantAsEnrollment(g));
+            }
+        });
+    return rows;
+}
+function _hubIsAlumni(me, currentUser) {
+    currentUser = currentUser || JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    return !!(me && (me._isAlumni || me.accountType === 'alumni')) ||
+        !!(currentUser && (currentUser.accountType === 'alumni' || currentUser.alumniId));
+}
+
 async function loadStudentHubData(force) {
     if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
+    const core = ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
     const batch = await dbGetBatch(core);
     if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
     studentHubCache = { ...batch, loadedAt: Date.now() };
@@ -42,6 +119,10 @@ async function hubContentGate() {
 async function hubCourseAccess(me, data) {
     const openAll = () => ({ gated: false, allowed: new Set((data.courses || []).map(c => c.id)), locked: new Set(), statuses: {} });
     if (!me || !data) return openAll();
+    // Alumni access is per-course and already granted; the student sequence
+    // gate belongs to the original programme and must not lock an alumnus out
+    // of a course they are entitled to audit.
+    if (_hubIsAlumni(me)) return openAll();
     const gate = await hubContentGate();
     if (!gate) return openAll();
     try {
@@ -158,6 +239,9 @@ async function hubMyAgreement(me) {
 async function hubFeeLockInfo(me, data) {
     const none = { locked: false, target: 0, paid: 0, gated: [], grace: false, dueText: '', totalFee: 0, totalPaid: 0, programBalance: 0, weekPaid: 0, weeksElapsed: 1, weeksAhead: 0, agreement: null };
     if (!me) return none;
+    // Alumni audit courses are free; course certificates/fees are handled by
+    // the alumni course settings, never by the live tuition gate.
+    if (_hubIsAlumni(me)) return none;
     const rawGate = await hubFeeGateConfig();
     const gate = hubEffectiveGate(me, rawGate);
     if (!gate || !gate.enabled || !(gate.amount > 0)) return none;
@@ -348,11 +432,31 @@ function hubLiveBanner(c) {
 function _hubBuildComputed(data, me) {
     const studentId = me.id;
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, me.id, me.admissionNumber, me.phone, me.email].filter(Boolean));
-    const enrolledIds = new Set((data.enrollments || []).filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
+    const alumniRecord = me._alumniRecord || {};
+    const allStudentIds = new Set([studentId, currentUser.username, currentUser.studentId, currentUser.alumniId,
+        me.id, me.admissionNumber, me.phone, me.email, alumniRecord.id, alumniRecord.studentId].filter(Boolean));
+    const isAlumni = _hubIsAlumni(me, currentUser);
+    const effectiveEnrollments = _hubEffectiveEnrollments(me, data);
+    const enrolledIds = new Set(effectiveEnrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
     let myCourses = (data.courses || []).filter(c => enrolledIds.has(c.id));
     if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
-    let availableCourses = (data.courses || []).filter(c => c.published !== false && !enrolledIds.has(c.id));
+    let availableCourses = (data.courses || []).filter(c => {
+        if (c.published === false || enrolledIds.has(c.id)) return false;
+        // Alumni see only courses deliberately opened to alumni. This is the
+        // lifelong-learning catalogue, not the active-student enrolment list.
+        // An invitation-only course is invisible until that alumnus is invited.
+        if (isAlumni) {
+            const access = _hubAlumniAccess(c);
+            if (!access.enabled) return false;
+            if (access.mode === 'invite') {
+                const grant = _hubGrantForCourse(me, data, c.id);
+                const status = String((grant && grant.status) || '').toLowerCase();
+                if (!['invited', 'active'].includes(status)) return false;
+            }
+            return true;
+        }
+        return true;
+    });
     if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
     const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(r.studentId)).map(r => r.examId));
     const allCourseExams = (data.exams || []).filter(e =>
@@ -431,7 +535,7 @@ function _hubBuildComputed(data, me) {
     const _openExams = upcomingRegisteredExams.filter(_stillVisible);
     const _closedExams = upcomingRegisteredExams.filter(e => !_stillVisible(e));
     const myUpcomingExams = [..._openExams, ...upcomingAvailableExams.filter(e => _stillVisible(e) && !_openExams.some(r => String(r.id) === String(e.id)))];
-    return { me, data, studentId, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, myUpcomingExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
+    return { me, data, studentId, isAlumni, effectiveEnrollments, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, myUpcomingExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
 }
 
 
@@ -577,6 +681,13 @@ async function renderStudentHub() {
 
         _hubStudent = me;
         _hubData = data;
+        const _isAlumniHub = _hubIsAlumni(me, currentUser);
+        try {
+            const titleEl = document.getElementById('student-hub-title');
+            if (titleEl) titleEl.textContent = _isAlumniHub ? '🎓 Alumni Learning' : '🎓 My Student Hub';
+            const navText = document.querySelector('.nav-tab[data-screen="student-hub"] .nav-text');
+            if (navText && _isAlumniHub) navText.textContent = '🎓 Alumni Learning';
+        } catch {}
         // Drip: load unlock maps + auto-unlock whatever is due BEFORE anything renders.
         try {
             if (typeof loadDripMaps === 'function' && me && me.id) {
@@ -612,9 +723,9 @@ async function renderStudentHub() {
                 <div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;background:rgba(255,255,255,0.06);border-radius:50%;"></div>
                 <div style="position:absolute;bottom:-60px;right:60px;width:120px;height:120px;background:rgba(255,255,255,0.04);border-radius:50%;"></div>
                 <div style="position:relative;z-index:1;">
-                    <div style="font-size:13px;opacity:0.85;margin-bottom:4px;">Welcome back,</div>
-                    <h1 style="margin:0 0 6px 0;font-size:26px;font-weight:700;">${esc(me.name)}</h1>
-                    <div style="font-size:13px;opacity:0.9;">${esc(me.admissionNumber || '')} · ${esc(me.program || 'No program assigned')}${me.year ? ' · Year ' + me.year : ''}</div>
+                    <div style="font-size:13px;opacity:0.85;margin-bottom:4px;">${_isAlumniHub ? 'Welcome back, alumnus' : 'Welcome back,'}</div>
+                    <h1 style="margin:0 0 6px 0;font-size:26px;font-weight:700;">${esc(me.name)} ${_isAlumniHub ? '<span style="font-size:11px;font-weight:700;vertical-align:middle;margin-left:8px;padding:4px 10px;border-radius:12px;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.35);letter-spacing:.5px;">🎓 ALUMNI</span>' : ''}</h1>
+                    <div style="font-size:13px;opacity:0.9;">${_isAlumniHub ? `Alumni ID ${esc(me.admissionNumber || me.id || '')} · ${esc(me.program || 'Lifelong learner')}${me.gradYear || me.alumniSince ? ' · Class of ' + esc(me.gradYear || me.alumniSince) : ''}` : `${esc(me.admissionNumber || '')} · ${esc(me.program || 'No program assigned')}${me.year ? ' · Year ' + me.year : ''}`}</div>
                 </div>
                 <div id="hub-live-pill" style="position:absolute;top:14px;right:14px;display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(255,255,255,0.95);border:1px solid rgba(255,255,255,0.5);border-radius:20px;font-size:12px;font-weight:600;color:#1e3c72;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.15);">
                     <span id="hub-live-dot" style="width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 0 rgba(74,222,128,0.7);animation:hub-pulse 2s infinite;flex-shrink:0;"></span>
@@ -624,7 +735,7 @@ async function renderStudentHub() {
             ${hubLiveBanner(c)}
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;">
-                <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('courses')"><div class="stat-label">📚 Enrolled Courses</div><div class="stat-value" style="color:var(--success);">${c.myCourses.length}</div></div>
+                <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('courses')"><div class="stat-label">${_isAlumniHub ? '🎓 Alumni Courses' : '📚 Enrolled Courses'}</div><div class="stat-value" style="color:var(--success);">${c.myCourses.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('exams')"><div class="stat-label">📝 My Exams</div><div class="stat-value" style="color:var(--accent);">${c.myUpcomingExams.length}</div>${c.upcomingAvailableExams.length ? `<div style="font-size:10px;color:var(--warning);margin-top:2px;">${c.upcomingAvailableExams.length} to register</div>` : ''}</div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('quizzes')"><div class="stat-label">📋 Pending Quizzes</div><div class="stat-value" style="color:var(--warning);">${c.pendingQuizzes.length}</div></div>
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('notes')"><div class="stat-label">📄 Study Notes</div><div class="stat-value">${c.myNotes.length}</div></div>
@@ -753,6 +864,7 @@ async function switchHubTab(tab, btn) {
 }
 
 function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuizzes, data, todoItems, registeredExams, availableOnlyExams) {
+    const isAlumni = _hubIsAlumni(me);
     const mySubmissions = (data.submissions || []).filter(s => s.studentId === me.id);
     const _isTuit2 = (typeof isTuitionPayment === 'function') ? isTuitionPayment : (() => true);
     const myPayments = (data.payments || []).filter(p => p.studentId === me.id && _isTuit2(p));
@@ -812,10 +924,13 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
             <div class="card" style="border-top:3px solid var(--info);">
                 <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">📊 My Stats</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                    <div style="text-align:center;padding:8px;background:var(--bg-input);border-radius:6px;">
+                    ${isAlumni ? `<div style="text-align:center;padding:8px;background:var(--bg-input);border-radius:6px;">
+                        <div style="font-size:20px;font-weight:700;color:var(--accent);">🎓</div>
+                        <div style="font-size:10px;color:var(--text-muted);">Alumni Learner</div>
+                    </div>` : `<div style="text-align:center;padding:8px;background:var(--bg-input);border-radius:6px;">
                         <div style="font-size:20px;font-weight:700;color:${attendancePct >= 75 ? 'var(--success)' : 'var(--danger)'};">${attendancePct}%</div>
                         <div style="font-size:10px;color:var(--text-muted);">Attendance</div>
-                    </div>
+                    </div>`}
                     <div style="text-align:center;padding:8px;background:var(--bg-input);border-radius:6px;">
                         <div style="font-size:20px;font-weight:700;color:var(--success);">${completedQuizzes.length}</div>
                         <div style="font-size:10px;color:var(--text-muted);">Quizzes Done</div>
@@ -832,8 +947,13 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
             </div>
 
             <div class="card" style="border-top:3px solid var(--success);">
-                <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">💰 Fees</h3>
-                ${(() => {
+                <h3 style="color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px;">${isAlumni ? '🎓 Alumni Benefits' : '💰 Fees'}</h3>
+                ${isAlumni ? `<div style="font-size:13px;line-height:1.7;">
+                    <div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;"><span>✅</span><div><b>Free course audit</b><div style="font-size:11px;color:var(--text-muted);">Revisit and continue learning without tuition or a new admission.</div></div></div>
+                    <div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;"><span>📜</span><div><b>Course certificate</b><div style="font-size:11px;color:var(--text-muted);">Available after the course assessment where the course offers one.</div></div></div>
+                    <div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;"><span>📚</span><div><b>Continuing-education record</b><div style="font-size:11px;color:var(--text-muted);">Every completed alumni course is added to your lifelong learning record.</div></div></div>
+                    <div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;"><span>🕒</span><div><b>Self-paced access</b><div style="font-size:11px;color:var(--text-muted);">Your access window is shown on each course. Optional cohorts may be offered later.</div></div></div>
+                </div>` : (() => {
                     const L = window._hubFeeLock;
                     const fmt = (n) => (typeof formatCurrency === 'function' ? formatCurrency(n) : n);
                     const fee = (L && L.totalFee) || hubFeeBalance(me, totalPaid) + totalPaid || 0;
@@ -862,7 +982,7 @@ function renderHubOverview(me, myCourses, myExams, pendingQuizzes, completedQuiz
                     ${waiverLine}
                     ${status}`;
                 })()}
-                ${window._hubMpesaOn ? `<button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>` : `<div style="font-size:11px;color:var(--text-muted);margin-top:10px;text-align:center;">Online payments coming soon — contact the finance office.</div>`}
+                ${isAlumni ? `<div style="font-size:11px;color:var(--text-muted);margin-top:10px;text-align:center;">Audit is free. Certificate and assessment fees are shown on each course.</div>` : (window._hubMpesaOn ? `<button class="btn btn-success btn-sm" style="width:100%;margin-top:10px;" onclick="showMpesaPayModal('${me.id}')">💰 Pay Fees via M-Pesa</button>` : `<div style="font-size:11px;color:var(--text-muted);margin-top:10px;text-align:center;">Online payments coming soon — contact the finance office.</div>`)}
             </div>
         </div>
     `;
@@ -1036,10 +1156,23 @@ window.refreshHubCoverage = refreshHubCoverage;
 function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
     const locked = lockedIds instanceof Set ? lockedIds : new Set(lockedIds || []);
     const coveredIds = _hubCoveredIds(me, data);
+    const isAlumni = _hubIsAlumni(me);
+    const grantFor = cid => _hubGrantForCourse(me, data, cid);
+    const expiryText = g => {
+        if (!g || !g.expiresAt || !_hubAlumniGrantActive(g)) return '';
+        try { return `Access until ${formatDate(String(g.expiresAt).slice(0, 10))}`; } catch { return 'Access window active'; }
+    };
+    const certificateText = access => {
+        if (!access.certificate) return 'Continuing-education record available on completion';
+        return access.certificateFee > 0
+            ? `Course certificate: KES ${access.certificateFee.toLocaleString()} after assessment`
+            : 'Course certificate and continuing-education record on completion';
+    };
     return `
         <div style="margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                <h3 style="color:var(--accent);margin:0;">📚 My Enrolled Courses <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${myCourses.length})</span></h3>
+                <h3 style="color:var(--accent);margin:0;">${isAlumni ? '🎓 My Alumni Courses' : '📚 My Enrolled Courses'} <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${myCourses.length})</span></h3>
+                ${isAlumni ? '<span style="font-size:11px;color:var(--text-muted);">Self-paced · free audit</span>' : ''}
             </div>
             ${myCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${myCourses.map(c => {
                 const isLocked = locked.has(c.id);
@@ -1048,35 +1181,56 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
                 const reason = (window._hubCourseAccess && window._hubCourseAccess.reasons && window._hubCourseAccess.reasons[c.id]) || 'sequence';
                 const reasonTxt = reason === 'manual' ? 'Locked by administrator' : 'Locked — complete earlier courses first';
                 const borderColor = isCovered ? 'var(--success)' : (isLocked ? 'var(--text-muted)' : 'var(--accent)');
+                const grant = isAlumni ? grantFor(c.id) : null;
+                const access = isAlumni ? _hubAlumniAccess(c) : null;
+                const expiry = isAlumni ? expiryText(grant) : '';
+                const alumniLine = !isAlumni ? '' : (grant
+                    ? (expiry || 'Alumni access active')
+                    : 'Original programme course · academic record kept');
                 return `
                 <div class="card" title="${isCovered ? 'Course covered' : (isLocked ? esc(reasonTxt) : '')}" style="border-left:4px solid ${borderColor};transition:box-shadow 0.2s;${isCovered ? 'background:var(--bg-input);' : ''}" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                         <div style="font-weight:700;font-size:15px;color:var(--text);">${isLocked && !isCovered ? '🔒 ' : ''}${esc(c.code)}</div>
-                        ${isCovered ? `<span style="flex-shrink:0;background:var(--success);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px;">✅ COVERED</span>` : ''}
+                        ${isCovered ? `<span style="flex-shrink:0;background:var(--success);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px;">✅ COVERED</span>` : (isAlumni ? '<span style="flex-shrink:0;background:#f0f4ff;color:var(--accent);font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;">ALUMNI</span>' : '')}
                     </div>
                     <div style="color:var(--text);font-size:13px;margin-top:4px;font-weight:500;">${esc(c.name)}</div>
                     ${isCovered ? `<div style="margin-top:8px;font-size:12px;color:var(--success);font-weight:600;">Course covered — ${coveredCount} of ${myCourses.length} completed.</div>` : ''}
+                    ${isAlumni ? `<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">${esc(alumniLine)}</div>${grant ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);line-height:1.45;">${esc(certificateText(access))}</div>` : ''}` : ''}
                     ${isLocked && !isCovered ? `<div style="margin-top:8px;font-size:12px;color:var(--warning);">${esc(reasonTxt)}.</div>` : (c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : '')}
                     <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;">
                         ${isLocked && !isCovered ? '' : `<button class="btn btn-outline btn-sm" onclick="_hubNotesPreselect='${c.id}';switchHubTab('notes', document.querySelector('.hub-tab[data-tab=notes]'))">📄 View Notes</button>`}
-                        <button class="btn btn-outline btn-sm" onclick="hubDropCourse('${c.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);">Drop</button>
+                        ${!isAlumni || grant ? `<button class="btn btn-outline btn-sm" onclick="hubDropCourse('${c.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);">${isAlumni ? 'Leave' : 'Drop'}</button>` : ''}
                     </div>
                 </div>`;
-            }).join('')}</div>` : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">📚</div><div>You haven\'t enrolled in any courses yet.</div><div style="font-size:12px;margin-top:8px;">Browse available courses below to get started.</div></div>'}
+            }).join('')}</div>` : `<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">${isAlumni ? '🎓' : '📚'}</div><div>${isAlumni ? 'You have not joined an alumni course yet.' : "You haven't enrolled in any courses yet."}</div><div style="font-size:12px;margin-top:8px;">${isAlumni ? 'Choose from the alumni catalogue below — auditing is free.' : 'Browse available courses below to get started.'}</div></div>`}
         </div>
 
         <div>
-            <h3 style="color:var(--accent);margin-bottom:12px;">➕ Available Courses <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${availableCourses.length})</span></h3>
-            ${availableCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${availableCourses.map(c => `
-                <div class="card" style="border-left:4px solid var(--accent);">
-                    <div style="font-weight:700;font-size:15px;">${esc(c.code)}</div>
+            <h3 style="color:var(--accent);margin-bottom:12px;">${isAlumni ? '🎓 Alumni Course Catalogue' : '➕ Available Courses'} <span style="color:var(--text-muted);font-weight:400;font-size:13px;">(${availableCourses.length})</span></h3>
+            ${isAlumni ? '<div style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;">Open to all alumni · learn at your own pace · certificate and CE record after assessment.</div>' : ''}
+            ${availableCourses.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">${availableCourses.map(c => {
+                const access = isAlumni ? _hubAlumniAccess(c) : null;
+                const grant = isAlumni ? grantFor(c.id) : null;
+                const grantStatus = String((grant && grant.status) || '').toLowerCase();
+                const invited = grantStatus === 'invited';
+                const expiredInvite = isAlumni && access.mode === 'invite' && grantStatus === 'active' && !_hubAlumniGrantActive(grant);
+                const badge = expiredInvite ? 'INVITATION EXPIRED' : (invited ? 'INVITED' : (access.mode === 'invite' ? 'INVITATION ONLY' : 'OPEN TO ALUMNI'));
+                return `
+                <div class="card" style="border-left:4px solid ${invited ? 'var(--success)' : 'var(--accent)'};">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                        <div style="font-weight:700;font-size:15px;">${esc(c.code)}</div>
+                        ${isAlumni ? `<span style="flex-shrink:0;background:${expiredInvite ? 'var(--warning)' : (invited ? 'var(--success)' : '#f0f4ff')};color:${expiredInvite ? '#fff' : (invited ? '#fff' : 'var(--accent)')};font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;">${badge}</span>` : ''}
+                    </div>
                     <div style="color:var(--text);font-size:13px;margin-top:4px;font-weight:500;">${esc(c.name)}</div>
                     ${c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : ''}
+                    ${isAlumni ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${access.accessDays}-day access window · ${esc(certificateText(access))}</div>` : ''}
                     <div style="margin-top:12px;">
-                        <button class="btn btn-primary btn-sm" onclick="hubEnrollCourse('${c.id}','${esc(me.name)}')">➕ Enroll Now</button>
+                        ${expiredInvite
+                            ? `<button class="btn btn-outline btn-sm" disabled style="opacity:.65;cursor:not-allowed;">Invitation expired</button><div style="font-size:10px;color:var(--text-muted);margin-top:5px;">Ask the alumni office to invite you again.</div>`
+                            : `<button class="btn ${invited ? 'btn-success' : 'btn-primary'} btn-sm" onclick="hubEnrollCourse('${c.id}','${esc(me.name)}')">${invited ? '✅ Accept Invitation' : (isAlumni ? '🎓 Start Free Audit' : '➕ Enroll Now')}</button>`}
                     </div>
-                </div>
-            `).join('')}</div>` : '<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">No more courses available for enrollment.</div>'}
+                </div>`;
+            }).join('')}</div>` : `<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">${isAlumni ? 'No alumni courses are open right now. Please check back later.' : 'No more courses available for enrollment.'}</div>`}
         </div>
     `;
 }
@@ -1086,10 +1240,13 @@ function _hubFindStudent(students, currentUser, alumniList) {
     if (!currentUser) return null;
     const uid = String(currentUser.username || '').trim();
     const sid = String(currentUser.studentId || '').trim();
+    const requestedAlumniId = String(currentUser.alumniId || '').trim();
+    const accountIsAlumni = currentUser.accountType === 'alumni' || !!requestedAlumniId;
     const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
     const nameLower = String(currentUser.name || '').trim().toLowerCase();
     const check = (s) => {
         if (!s) return false;
+        if (requestedAlumniId && s.id && String(s.id) === requestedAlumniId) return true;
         if (s.id && (String(s.id) === sid || String(s.id) === uid || String(s.id) === 'STU-' + uid || String(s.id) === 'STU-' + sid)) return true;
         if (s.admissionNumber && (String(s.admissionNumber) === uid || String(s.admissionNumber) === sid)) return true;
         if (s.studentId && (String(s.studentId) === sid || String(s.studentId) === uid)) return true;
@@ -1100,16 +1257,62 @@ function _hubFindStudent(students, currentUser, alumniList) {
         if (nameLower && s.name && String(s.name).trim().toLowerCase() === nameLower) return true;
         return false;
     };
-    let found = (students || []).find(check);
-    if (found) return found;
-    // Graduated/migrated students live in alumni store - check there as fallback
-    if (alumniList) {
-        found = (alumniList || []).find(check);
-        if (found) {
-            // Normalize alumni record to look like a student for the hub (so existing code works)
-            return { ...found, id: found.studentId || found.id, _isAlumni: true, _alumniRecord: found };
+    const findStudentForAlumni = (alumni) => {
+        const linkedId = String((alumni && alumni.studentId) || sid || '');
+        if (!linkedId) return null;
+        return (students || []).find(s => s && (
+            String(s.id) === linkedId ||
+            String(s.id) === 'STU-' + linkedId ||
+            (alumni && alumni.admissionNumber && String(s.admissionNumber) === String(alumni.admissionNumber)) ||
+            (linkedId === sid && check(s))
+        )) || null;
+    };
+    const normalizeAlumni = (alumni, student) => {
+        const merged = { ...(student || {}), ...(alumni || {}) };
+        merged.id = (student && student.id) || (alumni && (alumni.studentId || alumni.id)) || sid;
+        merged.studentId = merged.id;
+        merged.accountType = 'alumni';
+        merged._isAlumni = true;
+        merged._alumniRecord = alumni || null;
+        merged._studentRecord = student || null;
+        // Older alumni records can carry blank fields that overwrite a complete
+        // academic row during the merge. Fill identity fields from whichever
+        // side actually has them.
+        if (!merged.admissionNumber) merged.admissionNumber = (student && student.admissionNumber) || (alumni && alumni.admissionNumber) || '';
+        if (!merged.program) merged.program = (student && student.program) || (alumni && alumni.program) || '';
+        if (!merged.studyCenterId) merged.studyCenterId = (student && student.studyCenterId) || (alumni && alumni.studyCenterId) || '';
+        if (!merged.regionId) merged.regionId = (student && student.regionId) || (alumni && alumni.regionId) || '';
+        if (!merged.country) merged.country = (student && student.country) || (alumni && alumni.country) || '';
+        return merged;
+    };
+    const studentRecord = (students || []).find(check) || null;
+    const studentIsArchived = !!(studentRecord && String(studentRecord.status || '').toLowerCase() === 'alumni');
+
+    // An alumni session must resolve the alumni identity first. A still-present
+    // students-store row is only academic history and must not switch the hub
+    // back to active-student rules.
+    if (accountIsAlumni) {
+        const alumni = (alumniList || []).find(check) || null;
+        if (alumni) return normalizeAlumni(alumni, findStudentForAlumni(alumni) || studentRecord);
+        if (studentRecord && (studentIsArchived || (sid && String(studentRecord.id) === sid))) {
+            return normalizeAlumni(null, studentRecord);
         }
     }
+
+    if (studentRecord) {
+        if (studentIsArchived) {
+            const alumni = (alumniList || []).find(a => a && (
+                (a.studentId && String(a.studentId) === String(studentRecord.id)) ||
+                check(a)
+            )) || null;
+            return normalizeAlumni(alumni, studentRecord);
+        }
+        return studentRecord;
+    }
+
+    // No students-store row: a linked/legacy alumnus is a full lifelong learner.
+    const alumni = (alumniList || []).find(check) || null;
+    if (alumni) return normalizeAlumni(alumni, findStudentForAlumni(alumni));
     return null;
 }
 function _hubGetMe() {
@@ -1140,10 +1343,70 @@ function _hubCacheRemove(store, id) {
 
 async function hubEnrollCourse(courseId, studentName) {
     try {
-        if (!await showConfirm('Enroll in Course', `Enroll ${studentName} in this course?`)) return;
         const data = studentHubCache || await loadStudentHubData();
         const me = _hubGetMe();
         if (!me) return showToast('Student profile not found', { type: 'danger' });
+
+        if (_hubIsAlumni(me)) {
+            const course = (data.courses || []).find(c => String(c.id) === String(courseId));
+            if (!course) return showToast('Course not found', { type: 'danger' });
+            const access = _hubAlumniAccess(course);
+            if (!access.enabled) return showToast('This course is not open to alumni', { type: 'danger' });
+            const grant = _hubGrantForCourse(me, data, courseId);
+            const status = String((grant && grant.status) || '').toLowerCase();
+            if (_hubAlumniGrantActive(grant)) return showToast('Already enrolled in this course');
+            if (access.mode === 'invite' && status === 'active') {
+                return showToast('Your invitation has expired — ask the alumni office to invite you again', { type: 'danger', duration: 7000 });
+            }
+            if (access.mode === 'invite' && status !== 'invited') {
+                return showToast('This course is invitation-only', { type: 'danger' });
+            }
+            const invited = status === 'invited';
+            const ok = await showConfirm(
+                invited ? 'Accept Alumni Invitation' : 'Join Alumni Course',
+                invited
+                    ? `Accept your invitation to ${course.name}? Your access will run for ${access.accessDays} days.`
+                    : `Start learning ${course.name} as an alumnus? Auditing is free for ${access.accessDays} days.`
+            );
+            if (!ok) return;
+            const now = new Date();
+            const nowIso = now.toISOString();
+            const currentEnd = grant && grant.expiresAt ? Date.parse(String(grant.expiresAt)) : NaN;
+            const expiresAt = Number.isFinite(currentEnd) && currentEnd > now.getTime()
+                ? new Date(currentEnd).toISOString()
+                : new Date(now.getTime() + access.accessDays * 86400000).toISOString();
+            const record = {
+                ...(grant || {}),
+                // Keep an existing grant id (administrators may have created it
+                // with a custom id); the server refuses to move a grant, so a
+                // new id would create a duplicate instead of accepting it.
+                id: (grant && grant.id) || `AENR-${courseId}-${me.id}`,
+                courseId,
+                studentId: me.id,
+                accountType: 'alumni',
+                status: 'active',
+                accessDays: access.accessDays,
+                invitedAt: (grant && grant.invitedAt) || '',
+                invitedBy: (grant && grant.invitedBy) || '',
+                acceptedAt: (grant && grant.acceptedAt) || nowIso,
+                enrolledAt: (grant && grant.enrolledAt) || nowIso,
+                startsAt: nowIso,
+                expiresAt,
+                country: me.country || (grant && grant.country) || '',
+                studyCenterId: me.studyCenterId || (grant && grant.studyCenterId) || '',
+                regionId: me.regionId || (grant && grant.regionId) || '',
+                updatedAt: nowIso
+            };
+            await dbPut('alumniEnrollments', record);
+            _hubCachePush('alumniEnrollments', record);
+            _hubCachePush('enrollments', _hubGrantAsEnrollment(record));
+            showToast(invited ? '✅ Invitation accepted — welcome back!' : '✅ Alumni access started — enjoy the course!');
+            logAudit(invited ? 'accepted' : 'created', 'alumni-enrollment', { studentId: me.id, courseId });
+            renderStudentHub();
+            return;
+        }
+
+        if (!await showConfirm('Enroll in Course', `Enroll ${studentName} in this course?`)) return;
         if ((data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId)) return showToast('Already enrolled');
         const record = { id: `ENR-${courseId}-${me.id}`, courseId, studentId: me.id, enrolledAt: new Date().toISOString() };
         await dbPut('enrollments', record);
@@ -1159,10 +1422,33 @@ async function hubEnrollCourse(courseId, studentName) {
 
 async function hubDropCourse(courseId, studentName) {
     try {
-        if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
         const data = studentHubCache || await loadStudentHubData();
         const me = _hubGetMe();
         if (!me) return showToast('Student profile not found', { type: 'danger' });
+
+        if (_hubIsAlumni(me)) {
+            const grant = _hubGrantForCourse(me, data, courseId);
+            if (!grant) {
+                return showToast('This course is part of your academic record and cannot be removed here.', { type: 'warning', duration: 6000 });
+            }
+            const invited = String(grant.status || '').toLowerCase() === 'invited';
+            const ok = await showConfirm(
+                invited ? 'Decline Invitation' : 'Leave Alumni Course',
+                invited
+                    ? 'Decline this course invitation? You can ask the alumni office to invite you again.'
+                    : 'Leave this alumni course? Your learning access will be removed, but your academic history is kept.'
+            );
+            if (!ok) return;
+            await dbDelete('alumniEnrollments', grant.id);
+            _hubCacheRemove('alumniEnrollments', grant.id);
+            _hubCacheRemove('enrollments', 'ALUMNI-' + String(grant.id));
+            showToast(invited ? 'Invitation declined' : 'You have left the alumni course');
+            logAudit(invited ? 'declined' : 'deleted', 'alumni-enrollment', { studentId: me.id, courseId });
+            renderStudentHub();
+            return;
+        }
+
+        if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
         const enr = (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId);
         if (enr) { await dbDelete('enrollments', enr.id); _hubCacheRemove('enrollments', enr.id); }
         else {

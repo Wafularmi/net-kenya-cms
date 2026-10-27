@@ -1313,6 +1313,7 @@ const STORE_TO_TAB = {
     payments: 'finance', income: 'finance', expenses: 'finance', fees: 'finance', invoices: 'finance',
     hostel: 'hostel', hostels: 'hostel', borrows: 'hostel',
     library: 'library', inventory: 'inventory', alumni: 'alumni',
+    alumniEnrollments: 'alumni',
     certificates: 'certificates', events: 'events', whatsapp: 'whatsapp', whatsappTemplates: 'whatsapp', whatsappLog: 'whatsapp',
     audit: 'audit', idcards: 'idcards', idCards: 'idcards', questions: 'questions', quizzes: 'quizzes',
     submissions: 'submissions', notes: 'notes', portal: 'portal', pending: 'pending',
@@ -1587,7 +1588,8 @@ const STUDENT_DENY_STORES = new Set([
 // Stores a student is allowed to write to (their own activity records)
 const STUDENT_WRITE_STORES = new Set([
     'submissions', 'quizRegistrations', 'examRegistrations',
-    'retakeRequests', 'seating', 'borrows', 'tickets', 'enrollments'
+    'retakeRequests', 'seating', 'borrows', 'tickets', 'enrollments',
+    'alumniEnrollments'
 ]);
 
 // Stores with NO country identity by design — institution-wide shared content
@@ -2438,13 +2440,51 @@ function syncExistingCourseGradesForCourse(courseId) {
 try { normaliseStoredGradeScale(); } catch (e) { console.error('boot grade normalisation failed:', e); }
 try { backfillCourseGradesFromAssessments(); } catch (e) { console.error('boot course-grade backfill failed:', e); }
 // The identifiers a learner may answer to: the student id, the username and
-// the admission number. A session may carry any one of them.
+// the admission number. A session may carry any one of them. Alumni keep the
+// original student's academic id, so grants and history stay linked even when
+// the students-store row has been archived.
+function findAlumniForUser(user) {
+    if (!user) return null;
+    const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username)) || {};
+    const alumni = db.alumni || [];
+    const aid = String(user.alumniId || uRec.alumniId || '').trim();
+    const sid = String(user.studentId || uRec.studentId || '').trim();
+    const login = String(user.username || '').trim();
+    const loginLower = login.toLowerCase();
+    const digits = login.replace(/[^0-9]/g, '').slice(-9);
+    let hit = aid ? alumni.find(a => a && String(a.id) === aid) : null;
+    if (!hit && sid) hit = alumni.find(a => a && (String(a.studentId || '') === sid || String(a.id || '') === sid));
+    if (!hit && login) hit = alumni.find(a => a && (
+        String(a.id || '') === login ||
+        String(a.studentId || '') === login ||
+        String(a.admissionNumber || '') === login ||
+        String(a.phone || '') === login ||
+        String(a.email || '').toLowerCase() === loginLower
+    ));
+    if (!hit && digits) hit = alumni.find(a => a && a.phone && String(a.phone).replace(/[^0-9]/g, '').slice(-9) === digits);
+    if (!hit && user._allowAlumniNameMatch === true) {
+        const nameLower = String(user.name || uRec.name || '').trim().toLowerCase();
+        if (nameLower) {
+            const matches = alumni.filter(a => a && String(a.name || '').trim().toLowerCase() === nameLower);
+            if (matches.length === 1) hit = matches[0];
+        }
+    }
+    return hit || null;
+}
 function studentAliases(user) {
     if (!user) return new Set();
     const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username));
     const stuId = String(user.studentId || '');
     const myStu = (db.students || []).find(s => s && String(s.id) === String(stuId || (uRec && uRec.studentId) || ''));
-    return new Set([stuId, String((uRec && uRec.studentId) || ''), String(user.username || ''), String((myStu && myStu.admissionNumber) || '')].filter(Boolean));
+    const alumni = findAlumniForUser(user);
+    return new Set([
+        stuId, String((uRec && uRec.studentId) || ''), String(user.username || ''),
+        String((myStu && myStu.admissionNumber) || ''),
+        String(user.alumniId || (uRec && uRec.alumniId) || ''),
+        String((alumni && alumni.studentId) || ''), String((alumni && alumni.id) || ''),
+        String((alumni && alumni.admissionNumber) || ''),
+        String((alumni && alumni.phone) || ''), String((alumni && alumni.email) || '')
+    ].filter(Boolean));
 }
 // WHICH student a session belongs to. The server decides this - the browser
 // never says whose paper it is.
@@ -2461,7 +2501,134 @@ function serverStudentId(user) {
         String(s.admissionNumber || '') === login ||
         String(s.email || '') === login
     ));
-    return byLogin ? String(byLogin.id) : '';
+    if (byLogin) return String(byLogin.id);
+    const alumni = findAlumniForUser(user);
+    if (alumni) return String(alumni.studentId || alumni.id || '');
+    return '';
+}
+// Course-level alumni access. Courses opt in explicitly; a course created
+// before this feature has no alumniAccess block and is therefore not exposed.
+function alumniCourseSettings(course) {
+    const a = course && course.alumniAccess && typeof course.alumniAccess === 'object' ? course.alumniAccess : null;
+    const enabled = !!(a ? a.enabled !== false : (course && course.alumniEnabled === true));
+    const mode = a && a.mode === 'invite' ? 'invite' : 'open';
+    const rawDays = a ? Number(a.accessDays) : 365;
+    const accessDays = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(3650, Math.round(rawDays)) : 365;
+    return {
+        enabled, mode, accessDays,
+        certificate: a ? a.certificate !== false : true,
+        certificateFee: Math.max(0, Number(a && a.certificateFee) || 0)
+    };
+}
+function alumniGrantActive(grant, now) {
+    if (!grant) return false;
+    const status = String(grant.status || 'active').toLowerCase();
+    if (['invited', 'dropped', 'declined', 'expired', 'revoked', 'cancelled'].includes(status)) return false;
+    const t = now == null ? Date.now() : now;
+    const start = grant.startsAt ? Date.parse(String(grant.startsAt)) : NaN;
+    if (Number.isFinite(start) && start > t) return false;
+    const end = grant.expiresAt ? Date.parse(String(grant.expiresAt)) : NaN;
+    if (Number.isFinite(end) && end < t) return false;
+    return true;
+}
+// Students may accept their own invitation or self-enrol in an open alumni
+// course. They may never create an invitation, enrol another learner, or
+// reach a course whose alumni access is switched off.
+function studentAlumniEnrollmentError(user, rec, existing) {
+    if (!user || user.role !== 'student' || !rec) return 'Not permitted';
+    // Alumni access is a lifelong-learner entitlement, never a shortcut for
+    // an active student to bypass tuition or the normal enrolment process.
+    if (!isAlumniAccount(user)) return 'Alumni course access is for alumni accounts';
+    const sid = serverStudentId(user);
+    if (!sid) return 'Your session is not linked to an alumni record';
+    const aliases = studentAliases(user);
+    const recSid = String(rec.studentId || (existing && existing.studentId) || '');
+    if (recSid && recSid !== sid && !aliases.has(recSid)) return 'You may only change your own alumni access';
+    const existingSid = String((existing && existing.studentId) || '');
+    if (existingSid && existingSid !== sid && !aliases.has(existingSid)) return 'You may only change your own alumni access';
+    const courseId = String(rec.courseId || (existing && existing.courseId) || '');
+    // An existing grant may be accepted or renewed, but never moved to a
+    // different course: otherwise an open-course grant could be re-pointed at
+    // an invitation-only course and bypass the invitation.
+    if (existing && String(existing.courseId || '') !== courseId) {
+        return 'An alumni grant cannot be moved to another course';
+    }
+    const course = (db.courses || []).find(c => c && String(c.id) === courseId);
+    if (!course) return 'Course not found';
+    const settings = alumniCourseSettings(course);
+    if (!settings.enabled) return 'This course is not open to alumni';
+    const existingStatus = String((existing && existing.status) || '').toLowerCase();
+    if (settings.mode === 'invite' && !existing) return 'This course is invitation-only';
+    if (settings.mode === 'invite' && existingStatus === 'active' && !alumniGrantActive(existing)) {
+        return 'This invitation has expired — ask the alumni office to invite you again';
+    }
+    if (settings.mode === 'invite' && existingStatus && !['invited', 'active'].includes(existingStatus)) {
+        return 'This invitation is no longer active';
+    }
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const currentEnd = existing && existing.expiresAt ? Date.parse(String(existing.expiresAt)) : NaN;
+    const keepEnd = existingStatus === 'active' && Number.isFinite(currentEnd) && currentEnd > now;
+    rec.id = existing && existing.id ? existing.id : `AENR-${courseId}-${sid}`;
+    rec.courseId = courseId;
+    rec.studentId = sid;
+    rec.accountType = 'alumni';
+    rec.status = 'active';
+    rec.accessDays = settings.accessDays;
+    rec.expiresAt = keepEnd ? new Date(currentEnd).toISOString() : new Date(now + settings.accessDays * 86400000).toISOString();
+    rec.acceptedAt = (existing && existing.acceptedAt) || nowIso;
+    if (existing && existing.invitedAt) rec.invitedAt = existing.invitedAt;
+    if (!rec.enrolledAt) rec.enrolledAt = nowIso;
+    return null;
+}
+function studentAlumniGrantDeleteError(user, rec) {
+    if (!user || user.role !== 'student' || !rec) return 'Not permitted';
+    const sid = serverStudentId(user);
+    if (!sid) return 'Your session is not linked to an alumni record';
+    const aliases = studentAliases(user);
+    const recSid = String(rec.studentId || '');
+    if (recSid !== sid && !aliases.has(recSid)) return 'You may only change your own alumni access';
+    return null;
+}
+// Link an existing student login to its lifelong-learner identity without
+// creating a student record, admission number, or public registration.
+function isAlumniAccount(user) {
+    if (!user || user.role !== 'student') return false;
+    const su = user.user || user;
+    if (su.accountType === 'alumni' || su.alumniId) return true;
+    const uRec = (db.users || []).find(u => u && String(u.username) === String(user.username)) || null;
+    if (uRec && (uRec.accountType === 'alumni' || uRec.alumniId)) return true;
+    const sid = serverStudentId(user);
+    const student = (db.students || []).find(s => s && String(s.id) === String(sid)) || null;
+    if (student) return String(student.status || '').toLowerCase() === 'alumni';
+    return !!findAlumniForUser(user);
+}
+function markAlumniAccount(user, storedUser) {
+    if (!user || user.role !== 'student') return;
+    const target = storedUser || user;
+    const studentId = String(user.studentId || target.studentId || '');
+    const student = (db.students || []).find(s => s && String(s.id) === studentId) || null;
+    const archivedStudent = !!(student && String(student.status || '').toLowerCase() === 'alumni');
+    if (archivedStudent || user.accountType === 'alumni' || target.accountType === 'alumni') {
+        user._allowAlumniNameMatch = true;
+    }
+    const alumni = findAlumniForUser(user);
+    if (!alumni && !archivedStudent && user.accountType !== 'alumni' && target.accountType !== 'alumni') return;
+    const linkedStudentId = String(
+        user.studentId || target.studentId ||
+        (alumni && alumni.studentId) || (student && student.id) || (alumni && alumni.id) || ''
+    );
+    const alumniId = String(
+        (alumni && alumni.id) || user.alumniId || target.alumniId || ''
+    );
+    const alumniSince = (alumni && alumni.gradYear) || user.alumniSince || target.alumniSince || '';
+    for (const rec of [user, target]) {
+        if (!rec) continue;
+        rec.accountType = 'alumni';
+        if (alumniId) rec.alumniId = alumniId;
+        if (linkedStudentId) rec.studentId = linkedStudentId;
+        if (alumniSince !== '') rec.alumniSince = alumniSince;
+    }
 }
 // A stable id for the grade of one attempt, so the server and the browser
 // always write the SAME record (no duplicates when both write it).
@@ -2905,16 +3072,31 @@ function meetingVisibleTo(user, mtg) {
 function learnerAssessmentContext(user) {
     const sid = serverStudentId(user || {});
     if (!sid) return null;
-    const student = (db.students || []).find(s => s && String(s.id) === String(sid)) || null;
+    const student = (db.students || []).find(s => s && String(s.id) === String(sid))
+        || findAlumniForUser(user || {})
+        || null;
     if (!student) return null;
+    const canonicalId = String(student.studentId || student.id || sid);
     const aliases = studentAliases(user || {});
     aliases.add(String(student.id || ''));
+    aliases.add(canonicalId);
+    if (student.studentId) aliases.add(String(student.studentId));
     if (student.admissionNumber) aliases.add(String(student.admissionNumber));
     const center = (db.studyCenters || []).find(c => c && String(c.id) === String(student.studyCenterId)) || null;
     const region = (db.regions || []).find(r => r && String(r.id) === String((center && center.regionId) || student.regionId)) || null;
     const enrolledCourseIds = new Set((db.enrollments || [])
         .filter(e => e && aliases.has(String(e.studentId)))
         .map(e => String(e.courseId)));
+    // Active alumni access grants are course enrolments too. Invitations do
+    // not count until the learner accepts them, and closing a course to alumni
+    // closes its grants with it.
+    (db.alumniEnrollments || [])
+        .filter(g => {
+            if (!g || !aliases.has(String(g.studentId)) || !alumniGrantActive(g)) return false;
+            const course = (db.courses || []).find(c => c && String(c.id) === String(g.courseId));
+            return !!(course && alumniCourseSettings(course).enabled);
+        })
+        .forEach(g => enrolledCourseIds.add(String(g.courseId)));
     const examRegIds = new Set((db.examRegistrations || [])
         .filter(r => r && aliases.has(String(r.studentId)))
         .map(r => String(r.examId || r.quizId)));
@@ -2928,7 +3110,7 @@ function learnerAssessmentContext(user) {
         .filter(r => r && aliases.has(String(r.studentId)))
         .map(r => String(r.quizId)));
     return {
-        studentId: String(student.id),
+        studentId: canonicalId,
         student,
         centerId: String(student.studyCenterId || (center && center.id) || ''),
         regionId: String((center && center.regionId) || student.regionId || (region && region.id) || ''),
@@ -2990,7 +3172,8 @@ function filterStoreForUser(user, store, rows) {
     if (user && user.role === 'student') {
         const su = user.user || {};
         const uid = String(user.username || '').trim();
-        const sid = String(su.studentId || '').trim();
+        const sid = String(su.studentId || serverStudentId(user) || '').trim();
+        const alumniId = String(su.alumniId || '').trim();
         const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
         const nameLower = String(su.name || user.username || '').trim().toLowerCase();
         if (store === 'students') {
@@ -3013,10 +3196,11 @@ function filterStoreForUser(user, store, rows) {
         // Grades, submissions, attendance, enrolments and exam/quiz registrations
         // are keyed by studentId and were previously readable by any signed-in
         // student account.
-        const LEARNER_OWNED = ['grades', 'submissions', 'attendance', 'enrollments',
+        const LEARNER_OWNED = ['grades', 'submissions', 'attendance', 'enrollments', 'alumniEnrollments',
             'examRegistrations', 'quizRegistrations', 'retakeRequests', 'seating'];
         if (LEARNER_OWNED.includes(store)) {
-            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid));
+            const learnerAliases = studentAliases(user);
+            return rows.filter(r => r && (String(r.studentId) === sid || String(r.studentId) === uid || learnerAliases.has(String(r.studentId))));
         }
         // Alerts are staff/system notices (they contain other learners' names and
         // reasons). Students must not see the alert log at all.
@@ -3041,7 +3225,8 @@ function filterStoreForUser(user, store, rows) {
             return rows.filter(r => {
                 if (!r) return false;
                 if (r.studentId && (String(r.studentId) === sid || String(r.studentId) === uid)) return true;
-                if (r.id && (String(r.id) === sid || String(r.id) === uid)) return true;
+                if (r.id && (String(r.id) === sid || String(r.id) === uid || (alumniId && String(r.id) === alumniId))) return true;
+                if (r.userId && String(r.userId) === uid) return true;
                 if (r.phone && uidDigits && String(r.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
                 if (r.phone && String(r.phone) === uid) return true;
                 if (r.email && String(r.email).toLowerCase() === uid.toLowerCase()) return true;
@@ -4124,7 +4309,12 @@ function handleAPI(req, res) {
     if (parts.length === 2 && parts[1] === 'session' && req.method === 'GET') {
         const su = getRequestUser(req);
         if (!su) return json(res, 401, { error: 'Not authenticated' });
-        return json(res, 200, { authenticated: true, user: { username: su.username, role: su.role, country: (su.user && su.user.country) || '' } });
+        return json(res, 200, { authenticated: true, user: {
+            username: su.username, role: su.role, country: (su.user && su.user.country) || '',
+            accountType: (su.user && su.user.accountType) || 'student',
+            alumniId: (su.user && su.user.alumniId) || '',
+            studentId: (su.user && su.user.studentId) || ''
+        } });
     }
 
     // GET /api/events â€” SSE stream for real-time updates (authenticated only)
@@ -4907,6 +5097,12 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 }
 
                 if (!pwMatch) { process.stderr.write('LOGIN_FAIL_PW input=' + String(input).slice(0, 40) + '\n'); loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
+
+                // Lifelong learners keep their original student id as the link
+                // to academic history, but the login is marked as alumni so the
+                // hub and course catalogue use alumni rules. No student row,
+                // admission number or registration is created here.
+                if (user.role === 'student') markAlumniAccount(user, storedUser);
 
                 // Upgrade a legacy digest to PBKDF2 the first time the owner signs in.
                 if (!String(storedUser.password || '').startsWith('pbkdf2$')) {
@@ -7006,6 +7202,10 @@ return json(res, 200, result);
                 const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
                 for (const rec of records) {
                     if (!rec || typeof rec !== 'object') { result.errors.push({ error: 'Not an object' }); continue; }
+                    if ((store === 'alumniEnrollments' || store === 'enrollments') && user && user.role === 'student' && (store === 'alumniEnrollments' || isAlumniAccount(user))) {
+                        result.errors.push({ error: store === 'alumniEnrollments' ? 'Use single-record alumni enrollment' : 'Alumni course access is managed through alumni enrolment' });
+                        continue;
+                    }
                     if (store === 'settings') {
                         const extErr = externalizeSettingsRecord(rec);
                         if (extErr) { result.errors.push({ error: extErr }); continue; }
@@ -7025,6 +7225,10 @@ return json(res, 200, result);
                     preserveDocIdentity(store, r, _exB);
                     const _scB = scopeWrite(user, store, r, _exB);
                     if (_scB) { result.errors.push({ error: _scB }); continue; }
+                    if (store === 'alumniEnrollments' && user && user.role === 'student') {
+                        const alumniBatchErr = studentAlumniEnrollmentError(user, r, _exB);
+                        if (alumniBatchErr) { result.errors.push({ error: alumniBatchErr }); continue; }
+                    }
                     const idx = db[store].findIndex(x => x[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = r;
                     else db[store].push(r);
@@ -7307,6 +7511,14 @@ const parsed = JSON.parse(body);
                             const priorRec = (db.grades || []).find(x => x && String(x.studentId) === String(toStore.studentId) && String(x.quizId) === String(toStore.quizId));
                             if (priorRec && priorRec.id && String(priorRec.id) !== String(toStore.id)) toStore.id = priorRec.id;
                         } catch {}
+                    }
+                    if (store === 'alumniEnrollments' && user && user.role === 'student') {
+                        const prior = (db.alumniEnrollments || []).find(x => x && String(x.id) === String(toStore.id)) || null;
+                        const alumniErr = studentAlumniEnrollmentError(user, toStore, prior);
+                        if (alumniErr) return json(res, 403, { error: alumniErr });
+                    }
+                    if (store === 'enrollments' && user && user.role === 'student' && isAlumniAccount(user)) {
+                        return json(res, 403, { error: 'Alumni course access is managed through alumni enrolment' });
                     }
                     const pk = toStore[keyPath];
                     if (pk === undefined || pk === null) {
@@ -7631,6 +7843,13 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
         if (req.method === 'DELETE' && key) {
             const idx = db[store].findIndex(r => String(r[keyPath]) === key);
             const doomed = idx >= 0 ? db[store][idx] : null;
+            if (store === 'alumniEnrollments' && user && user.role === 'student' && doomed) {
+                const alumniDelErr = studentAlumniGrantDeleteError(user, doomed);
+                if (alumniDelErr) return json(res, 403, { error: alumniDelErr });
+            }
+            if (store === 'enrollments' && user && user.role === 'student' && isAlumniAccount(user)) {
+                return json(res, 403, { error: 'Alumni academic records cannot be removed here' });
+            }
             const _scDel = scopeWrite(user, store, doomed, doomed);
             if (_scDel) return json(res, 403, { error: _scDel });
             if (idx >= 0) {
