@@ -1771,6 +1771,186 @@ function recordCountryOf(store, rec) {
     if (rec.regionId && idx.regionCountry[rec.regionId]) return idx.regionCountry[rec.regionId];
     return '';
 }
+// ---- Lesson pacing configuration/scoping --------------------------------
+// Pace overrides live under the `lessonPacing` settings record. Coordinators
+// cannot write global settings, so they use the dedicated /api/lesson-pacing
+// route, which enforces the same country/region fence as the Fee Gate.
+function pacingSameCountry(a, b) {
+    const x = String(a == null ? '' : a).trim();
+    const y = String(b == null ? '' : b).trim();
+    return !!x && !!y && x.toLowerCase() === y.toLowerCase();
+}
+function pacingConfiguredCountries() {
+    const rec = (db.settings || []).find(s => s && s.key === 'countries');
+    const raw = rec ? (rec.value || rec) : [];
+    return (Array.isArray(raw) ? raw : [])
+        .map(c => (typeof c === 'string' ? { name: c } : c))
+        .filter(c => c && c.name)
+        .map(c => ({ name: String(c.name), code: c.code || '', brandName: c.brandName || c.name }));
+}
+function pacingRoleOf(user) {
+    if (!user) return null;
+    if (user.role === 'admin') return 'admin';
+    if (user.role !== 'coordinator' || !user.user) return null;
+    if (countryScopeOf(user)) return 'country';
+    if (user.user.regionId) return 'region';
+    return null;
+}
+function pacingScopeInfo(user, role) {
+    if (role === 'country') return { country: countryScopeOf(user) || '' };
+    if (role === 'region') {
+        const regionId = String((user && user.user && user.user.regionId) || '');
+        const region = (db.regions || []).find(r => r && String(r.id) === regionId) || null;
+        return { country: String((region && region.country) || ''), regionId: regionId };
+    }
+    return {};
+}
+function pacingRegionById(id) {
+    return (db.regions || []).find(r => r && String(r.id) === String(id)) || null;
+}
+function pacingCenterById(id) {
+    return (db.studyCenters || []).find(c => c && String(c.id) === String(id)) || null;
+}
+function pacingStudentById(id) {
+    return (db.students || []).find(s => s && (String(s.id) === String(id) || String(s.admissionNumber || '') === String(id))) || null;
+}
+function pacingStudentRegionId(student) {
+    if (!student) return '';
+    const center = student.studyCenterId ? pacingCenterById(student.studyCenterId) : null;
+    return String((center && center.regionId) || student.regionId || '');
+}
+function pacingCountryForCenter(center) {
+    return center ? recordCountryOf('studyCenters', center) : '';
+}
+function pacingCountryForStudent(student) {
+    return student ? recordCountryOf('students', student) : '';
+}
+function pacingCanonicalScope(scope, id) {
+    const key = String(id == null ? '' : id).trim();
+    if (!key) return null;
+    if (scope === 'country') {
+        const hit = pacingConfiguredCountries().find(c => pacingSameCountry(c.name, key));
+        return { id: hit ? hit.name : key, rec: hit || { name: key } };
+    }
+    if (scope === 'region') {
+        const rec = pacingRegionById(key);
+        return rec ? { id: String(rec.id), rec: rec } : null;
+    }
+    if (scope === 'center') {
+        const rec = pacingCenterById(key);
+        return rec ? { id: String(rec.id), rec: rec } : null;
+    }
+    if (scope === 'student') {
+        const rec = pacingStudentById(key);
+        return rec ? { id: String(rec.id), rec: rec } : null;
+    }
+    return null;
+}
+function pacingCanEdit(user, role, scope, canonical) {
+    if (role === 'admin') return true;
+    if (!canonical) return false;
+    if (role === 'country') {
+        const country = countryScopeOf(user);
+        if (!country) return false;
+        if (scope === 'country') return pacingSameCountry(canonical.id, country) || pacingSameCountry(canonical.rec && canonical.rec.name, country);
+        if (scope === 'region') return pacingSameCountry(canonical.rec && canonical.rec.country, country);
+        if (scope === 'center') return pacingSameCountry(pacingCountryForCenter(canonical.rec), country);
+        if (scope === 'student') return pacingSameCountry(pacingCountryForStudent(canonical.rec), country);
+        return false;
+    }
+    if (role === 'region') {
+        const rid = String((user && user.user && user.user.regionId) || '');
+        if (!rid) return false;
+        if (scope === 'region') return String(canonical.id) === rid;
+        if (scope === 'center') return String((canonical.rec && canonical.rec.regionId) || '') === rid;
+        if (scope === 'student') return pacingStudentRegionId(canonical.rec) === rid;
+        return false;
+    }
+    return false;
+}
+function pacingFilterConfig(cfg, role, scopeInfo) {
+    if (role === 'admin') return cfg;
+    const out = { countries: {}, regions: {}, centers: {}, students: {} };
+    const country = String((scopeInfo && scopeInfo.country) || '');
+    const regionId = String((scopeInfo && scopeInfo.regionId) || '');
+    Object.keys(cfg.countries || {}).forEach(id => {
+        if (pacingSameCountry(id, country)) out.countries[id] = cfg.countries[id];
+    });
+    Object.keys(cfg.regions || {}).forEach(id => {
+        const rec = pacingRegionById(id);
+        if (role === 'region' ? String(id) === regionId : pacingSameCountry(rec && rec.country, country)) out.regions[id] = cfg.regions[id];
+    });
+    Object.keys(cfg.centers || {}).forEach(id => {
+        const rec = pacingCenterById(id);
+        if (role === 'region' ? String((rec && rec.regionId) || '') === regionId : pacingSameCountry(pacingCountryForCenter(rec), country)) out.centers[id] = cfg.centers[id];
+    });
+    Object.keys(cfg.students || {}).forEach(id => {
+        const rec = pacingStudentById(id);
+        if (role === 'region' ? pacingStudentRegionId(rec) === regionId : pacingSameCountry(pacingCountryForStudent(rec), country)) out.students[id] = cfg.students[id];
+    });
+    return out;
+}
+function pacingOptionsFor(role, scopeInfo) {
+    const configured = pacingConfiguredCountries();
+    let regions = (db.regions || []).filter(Boolean);
+    let centers = (db.studyCenters || []).filter(Boolean);
+    let students = (db.students || []).filter(Boolean);
+    if (role === 'country') {
+        const country = String((scopeInfo && scopeInfo.country) || '');
+        regions = regions.filter(r => pacingSameCountry(r.country, country));
+        centers = centers.filter(c => pacingSameCountry(pacingCountryForCenter(c), country));
+        students = students.filter(s => pacingSameCountry(pacingCountryForStudent(s), country));
+    } else if (role === 'region') {
+        const regionId = String((scopeInfo && scopeInfo.regionId) || '');
+        regions = regions.filter(r => String(r.id) === regionId);
+        centers = centers.filter(c => String((c && c.regionId) || '') === regionId);
+        students = students.filter(s => pacingStudentRegionId(s) === regionId);
+    }
+    const countryMap = {};
+    if (role === 'admin') {
+        configured.forEach(c => { countryMap[String(c.name).toLowerCase()] = c; });
+        regions.forEach(r => { if (r.country && !countryMap[String(r.country).toLowerCase()]) countryMap[String(r.country).toLowerCase()] = { name: String(r.country), code: '', brandName: String(r.country) }; });
+        centers.forEach(c => { const n = pacingCountryForCenter(c); if (n && !countryMap[n.toLowerCase()]) countryMap[n.toLowerCase()] = { name: n, code: '', brandName: n }; });
+        students.forEach(s => { const n = pacingCountryForStudent(s); if (n && !countryMap[n.toLowerCase()]) countryMap[n.toLowerCase()] = { name: n, code: '', brandName: n }; });
+    } else {
+        const name = String((scopeInfo && scopeInfo.country) || '');
+        if (name) {
+            const hit = configured.find(c => pacingSameCountry(c.name, name));
+            countryMap[name.toLowerCase()] = hit || { name: name, code: '', brandName: name };
+        }
+    }
+    return {
+        countries: Object.keys(countryMap).map(k => countryMap[k]).sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        regions: regions.map(r => ({ id: String(r.id), name: r.name || '', country: r.country || '' })).sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        centers: centers.map(c => ({ id: String(c.id), name: c.name || '', code: c.code || '', regionId: c.regionId || '', country: pacingCountryForCenter(c) })).sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        students: students.map(s => ({ id: String(s.id), name: s.name || s.fullName || '', admissionNumber: s.admissionNumber || '', studyCenterId: s.studyCenterId || '', regionId: pacingStudentRegionId(s), country: pacingCountryForStudent(s) })).sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    };
+}
+function pacingSaveConfig(cfg, user) {
+    const clean = { countries: {}, regions: {}, centers: {}, students: {} };
+    ['countries', 'regions', 'centers', 'students'].forEach(level => {
+        const src = (cfg && cfg[level]) || {};
+        Object.keys(src).forEach(id => {
+            const byCourse = src[id] || {};
+            const courses = {};
+            Object.keys(byCourse).forEach(cid => {
+                const entry = byCourse[cid] || {};
+                const pace = dripEngine.dripNormalizePace(entry.value, entry.unit);
+                if (pace) courses[String(cid)] = { value: pace.value, unit: pace.unit };
+            });
+            if (Object.keys(courses).length) clean[level][String(id)] = courses;
+        });
+    });
+    db.settings = db.settings || [];
+    let rec = db.settings.find(s => s && s.key === 'lessonPacing');
+    if (!rec) { rec = { key: 'lessonPacing' }; db.settings.push(rec); }
+    rec.value = clean;
+    rec.updatedAt = new Date().toISOString();
+    rec.updatedBy = (user && user.username) || 'system';
+    saveDB();
+    try { broadcastEvent('db-change', { store: 'settings' }); } catch (e) {}
+}
+
 // Counter keys a country/region coordinator may legitimately read/write: the
 // per-month payment receipt counters (payment-YYYYMM) needed to issue RCT
 // receipt numbers. Everything else (e.g. the global staff ID counter) stays
@@ -4906,6 +5086,114 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
         return true;
     }
 
+    // GET /api/lesson-pacing — per-course pace configuration for the caller's
+    // scope. Admins see everything; country coordinators see their country and
+    // its regions/centers/students; regional coordinators see their region,
+    // its centers/students, plus the country course defaults they inherit.
+    if (parts.length === 2 && parts[1] === 'lesson-pacing' && req.method === 'GET') {
+        const lpUser = getRequestUser(req);
+        if (!lpUser) return json(res, 401, { error: 'Not authenticated' });
+        const role = pacingRoleOf(lpUser);
+        if (!role) return json(res, 403, { error: 'Forbidden' });
+        const scopeInfo = pacingScopeInfo(lpUser, role);
+        const cfg = dripEngine.dripPaceConfig(db);
+        const courses = (db.courses || []).filter(Boolean).map(c => ({
+            id: String(c.id),
+            code: c.code || '',
+            name: c.name || '',
+            order: c.order == null ? null : c.order,
+            dripDaysBetween: c.dripDaysBetween == null || c.dripDaysBetween === '' ? null : c.dripDaysBetween,
+            dripPaceUnit: c.dripPaceUnit === 'hours' ? 'hours' : 'days',
+            defaultPace: dripEngine.dripCoursePace(c)
+        })).sort((a, b) => {
+            const ao = a.order == null ? 9999 : Number(a.order);
+            const bo = b.order == null ? 9999 : Number(b.order);
+            return ao - bo || String(a.code).localeCompare(String(b.code));
+        });
+        return json(res, 200, {
+            ok: true,
+            role: role,
+            scope: scopeInfo,
+            config: pacingFilterConfig(cfg, role, scopeInfo),
+            options: pacingOptionsFor(role, scopeInfo),
+            courses: courses
+        });
+    }
+
+    // PUT /api/lesson-pacing — set or clear one course pace at one scope.
+    // Body: { scope, scopeId?, courseId, value?, unit?, clear? }
+    // `scope: course` edits the admin-owned course default. Coordinators may
+    // never write the course default or another country's records.
+    if (parts.length === 2 && parts[1] === 'lesson-pacing' && req.method === 'PUT') {
+        const lpUser = getRequestUser(req);
+        if (!lpUser) return json(res, 401, { error: 'Not authenticated' });
+        const role = pacingRoleOf(lpUser);
+        if (!role) return json(res, 403, { error: 'Forbidden' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(body || '{}');
+                const scope = String(data.scope || '');
+                const courseId = String(data.courseId || '').trim();
+                if (!courseId) return json(res, 400, { error: 'courseId required' });
+                const course = (db.courses || []).find(c => c && String(c.id) === courseId);
+                if (!course) return json(res, 404, { error: 'Course not found' });
+                const clearing = !!data.clear || data.value === null || data.value === undefined || String(data.value).trim() === '';
+
+                if (scope === 'course') {
+                    if (role !== 'admin') return json(res, 403, { error: 'Only an administrator can change the course default' });
+                    let pace = null;
+                    if (!clearing) {
+                        pace = dripEngine.dripNormalizePace(data.value, data.unit);
+                        if (!pace) return json(res, 400, { error: 'Pace must be between 0 and 60 days (or 1,440 hours)' });
+                    }
+                    if (pace) {
+                        course.dripDaysBetween = pace.ms / 86400000;
+                        course.dripPaceUnit = pace.unit;
+                    } else {
+                        course.dripDaysBetween = null;
+                        course.dripPaceUnit = null;
+                    }
+                    course.updatedAt = new Date().toISOString();
+                    saveDB();
+                    try { broadcastEvent('db-change', { store: 'courses' }); } catch (e) {}
+                    auditLog('lesson-pacing-course', 'course', { courseId: courseId, value: pace ? pace.value : null, unit: pace ? pace.unit : null }, lpUser.username);
+                    return json(res, 200, { ok: true, scope: 'course', courseId: courseId, pace: pace });
+                }
+
+                if (!['country', 'region', 'center', 'student'].includes(scope)) {
+                    return json(res, 400, { error: 'Unknown pacing scope' });
+                }
+                const canonical = pacingCanonicalScope(scope, data.scopeId);
+                if (!canonical) return json(res, 404, { error: 'Pacing scope record not found' });
+                if (!pacingCanEdit(lpUser, role, scope, canonical)) return json(res, 403, { error: 'Outside your pacing scope' });
+                let pace = null;
+                if (!clearing) {
+                    pace = dripEngine.dripNormalizePace(data.value, data.unit);
+                    if (!pace) return json(res, 400, { error: 'Pace must be between 0 and 60 days (or 1,440 hours)' });
+                }
+                const level = scope === 'country' ? 'countries' : scope === 'region' ? 'regions' : scope === 'center' ? 'centers' : 'students';
+                const cfg = dripEngine.dripPaceConfig(db);
+                if (clearing) {
+                    if (cfg[level][canonical.id]) {
+                        delete cfg[level][canonical.id][courseId];
+                        if (!Object.keys(cfg[level][canonical.id]).length) delete cfg[level][canonical.id];
+                    }
+                } else {
+                    cfg[level][canonical.id] = cfg[level][canonical.id] || {};
+                    cfg[level][canonical.id][courseId] = { value: pace.value, unit: pace.unit };
+                }
+                pacingSaveConfig(cfg, lpUser);
+                auditLog('lesson-pacing', 'settings', { scope: scope, scopeId: canonical.id, courseId: courseId, value: pace ? pace.value : null, unit: pace ? pace.unit : null, clear: clearing }, lpUser.username);
+                return json(res, 200, { ok: true, scope: scope, scopeId: canonical.id, courseId: courseId, pace: pace });
+            } catch (e) {
+                return json(res, 400, { error: 'Invalid request' });
+            }
+        });
+        return true;
+    }
+
     // POST /api/change-password — self-service password change (any authenticated user, own account only)
     if (parts.length === 2 && parts[1] === 'change-password' && req.method === 'POST') {
         let body = '';
@@ -6341,6 +6629,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     const maps = E.dripMapsFor(db, sid);
                     result.unlocks = maps.unlocks;
                     result.completions = maps.completions;
+                    result.paces = maps.paces;
                     result.fee = sweep.fee;
                     if (parsed.courseId) result.next = E.dripNextInfo(db, sid, String(parsed.courseId), null);
                 } else if (action === 'read') {
@@ -6374,6 +6663,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                         const maps = E.dripMapsFor(db, sid);
                         result.unlocks = maps.unlocks;
                         result.completions = maps.completions;
+                        result.paces = maps.paces;
                     }
                 } else if (action === 'video') {
                     // Watched-video seconds for one lesson. The client only credits
@@ -6429,6 +6719,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     const maps = E.dripMapsFor(db, sid);
                     result.unlocks = maps.unlocks;
                     result.completions = maps.completions;
+                    result.paces = maps.paces;
                 } else if (action === 'evaluate') {
                     if (!parsed.lessonId) return json(res, 400, { error: 'lessonId required' });
                     const lesson = (db.lessons || []).find(l => String(l.id) === String(parsed.lessonId));
@@ -6448,6 +6739,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     const maps = E.dripMapsFor(db, sid);
                     result.unlocks = maps.unlocks;
                     result.completions = maps.completions;
+                    result.paces = maps.paces;
                 } else if (action === 'manual') {
                     // Staff-only, except the learner's own choice to continue past a
                     // lesson quiz they have not passed.
@@ -6511,6 +6803,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     const maps = E.dripMapsFor(db, sid);
                     result.unlocks = maps.unlocks;
                     result.completions = maps.completions;
+                    result.paces = maps.paces;
                 } else {
                     return json(res, 400, { error: 'Unknown action' });
                 }

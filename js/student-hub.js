@@ -453,10 +453,26 @@ function _hubFeeSnapshotOk() {
     } catch {}
     return true;
 }
+function hubDripPace(course) {
+    const id = course && course.id != null ? String(course.id) : '';
+    const p = id && typeof _dripPaces !== 'undefined' && _dripPaces ? _dripPaces[id] : null;
+    if (p && p.ms != null) return p;
+    let days = 3.5;
+    let explicit = false;
+    if (course && course.dripDaysBetween != null && course.dripDaysBetween !== '') {
+        const n = parseFloat(course.dripDaysBetween);
+        if (Number.isFinite(n) && n >= 0) { days = n; explicit = true; }
+    }
+    const unit = explicit && course && course.dripPaceUnit === 'hours' ? 'hours' : 'days';
+    const value = unit === 'hours' ? days * 24 : days;
+    return { value: Number(value.toFixed(4)), unit: unit, ms: Math.round(days * 86400000), source: explicit ? 'course' : 'default' };
+}
 function hubDripPaceLabel(course) {
-    const raw = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
-    if (raw === 0) return 'instant';
-    return (raw % 1 === 0 ? raw : raw.toFixed(1)) + ' days';
+    const pace = hubDripPace(course);
+    if (!pace || pace.ms === 0) return 'instant';
+    const unit = pace.unit === 'hours' ? 'hour' : 'day';
+    const n = Number((Number(pace.value != null ? pace.value : (pace.unit === 'hours' ? pace.ms / 3600000 : pace.ms / 86400000))).toFixed(2));
+    return n + ' ' + unit + (n === 1 ? '' : 's');
 }
 // Parts of the SAME lesson unit (title prefix "Lesson N") unlock back-to-back
 // instantly; the pause sits BETWEEN lesson units only.
@@ -2612,8 +2628,8 @@ async function viewHubLessonNote(lessonId, courseId) {
                         if (!feeOk) reason = 'Your weekly fee target is not met yet. Clear the target to unlock this lesson.';
                         else if (!prevDone) reason = prevL ? 'Complete "' + (prevL.title || 'the previous part') + '" first' + (sameUnit ? ' — the next part unlocks instantly, no waiting.' : ' (timed reading + 50% quiz).') : 'Finish the previous lesson first (timed reading + 50% quiz).';
                         else {
-                            const pace = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
-                            reason = sameUnit ? 'This is the next part of the same lesson — it unlocks instantly once the previous part is done.' : pace === 0 ? 'Unlocks as soon as the previous lesson is completed.' : 'Allow ' + (pace % 1 === 0 ? pace : pace.toFixed(1)) + ' day' + (pace === 1 ? '' : 's') + ' between lessons — it unlocks after the previous lesson completes and the pacing gap passes.';
+                            const pace = hubDripPace(course);
+                            reason = sameUnit ? 'This is the next part of the same lesson — it unlocks instantly once the previous part is done.' : pace.ms === 0 ? 'Unlocks as soon as the previous lesson is completed.' : 'Allow ' + hubDripPaceLabel(course) + ' between lessons — it unlocks after the previous lesson completes and the pacing gap passes.';
                         }
                     } catch (e) { reason = ''; }
                     return showToast('🔗 This lesson is still locked. ' + (reason || 'Complete the previous lesson, keep fees current, and allow the course pacing gap.'), { type: 'warning', duration: 5000 });

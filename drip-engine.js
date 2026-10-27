@@ -10,14 +10,20 @@
 //   - chain       = lesson N in a drip course unlocks only when all earlier drip
 //                   lessons are complete, the pacing window has elapsed, and the
 //                   weekly fee target is current
-//   - pace        = course.dripDaysBetween days after the previous lesson was
-//                   unlocked/completed (0 = instant; default 3.5 days)
+//   - pace        = the effective per-course pace after the previous lesson was
+//                   unlocked/completed. Scope precedence is
+//                   student > center > region > country > course default >
+//                   3.5-day fallback. Settings are stored under the
+//                   `lessonPacing` settings record and may be expressed in
+//                   hours or days (0 = instant; 1 day = 24 hours).
 //   - fees        = weekly fee gate (settings: feeGate) with per-region overrides,
 //                   per-student exemptions/amounts, waivers and approved agreements
 'use strict';
 
 const DRIP_PASS = 50;
 const DRIP_DEFAULT_PACE_DAYS = 3.5;
+const DRIP_PACE_MAX_MS = 60 * 86400000;
+const DRIP_PACE_LEVELS = ['countries', 'regions', 'centers', 'students'];
 // A lesson video counts as watched once this fraction of its real duration has
 // actually been played (the client only credits forward playback, so scrubbing
 // to the end does not count).
@@ -45,14 +51,152 @@ function dripLessonContent(db, lesson) {
     return (note && note.content) || lesson.description || lesson.reference || '';
 }
 
-function dripPaceMs(course) {
-    let d = DRIP_DEFAULT_PACE_DAYS;
-    if (course && typeof course.dripDaysBetween === 'number' && course.dripDaysBetween >= 0) d = course.dripDaysBetween;
-    if (course && course.dripDaysBetween != null && course.dripDaysBetween !== '' && !isNaN(parseFloat(course.dripDaysBetween))) {
-        const f = parseFloat(course.dripDaysBetween);
-        if (f >= 0) d = f;
+// Normalize a configured pace. `value` is expressed in `unit` (hours/days).
+// Returns null for missing/invalid values; zero is a valid instant pace.
+function dripNormalizePace(value, unit) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return null;
+    const u = unit === 'hours' ? 'hours' : 'days';
+    const ms = Math.round(n * (u === 'hours' ? 3600000 : 86400000));
+    if (ms > DRIP_PACE_MAX_MS) return null;
+    return { value: n, unit: u, ms: ms };
+}
+
+// Course-level default. The stored canonical value is still
+// `course.dripDaysBetween` (days), with `dripPaceUnit` only controlling how the
+// staff form displays it. A missing course value falls back to 3.5 days.
+function dripCoursePace(course) {
+    let days = DRIP_DEFAULT_PACE_DAYS;
+    let explicit = false;
+    if (course && course.dripDaysBetween != null && course.dripDaysBetween !== '') {
+        const n = parseFloat(course.dripDaysBetween);
+        if (Number.isFinite(n) && n >= 0) { days = n; explicit = true; }
     }
-    return Math.round(d * 86400000);
+    const unit = explicit && course && course.dripPaceUnit === 'hours' ? 'hours' : 'days';
+    const value = unit === 'hours' ? days * 24 : days;
+    return {
+        value: Number(value.toFixed(4)),
+        unit: unit,
+        ms: Math.round(days * 86400000),
+        source: explicit ? 'course' : 'default',
+        sourceId: explicit ? String(course.id || '') : ''
+    };
+}
+
+// Read the optional per-course override settings. Shape:
+//   { countries: { KENYA: { 'CRS-1': { value, unit } } }, regions, centers, students }
+// Unknown/invalid entries are ignored rather than failing the lesson chain.
+function dripPaceConfig(db) {
+    const out = { countries: {}, regions: {}, centers: {}, students: {} };
+    let raw = {};
+    try {
+        const rec = (db.settings || []).find(r => r && r.key === 'lessonPacing');
+        raw = rec && rec.value && typeof rec.value === 'object' ? rec.value : {};
+    } catch (e) { raw = {}; }
+    DRIP_PACE_LEVELS.forEach(level => {
+        const src = raw && raw[level] && typeof raw[level] === 'object' ? raw[level] : {};
+        Object.keys(src).forEach(id => {
+            const byCourse = src[id];
+            if (!byCourse || typeof byCourse !== 'object') return;
+            const clean = {};
+            Object.keys(byCourse).forEach(cid => {
+                const entry = byCourse[cid];
+                if (!entry || typeof entry !== 'object') return;
+                const pace = dripNormalizePace(entry.value, entry.unit);
+                if (!pace || pace.ms > DRIP_PACE_MAX_MS) return;
+                clean[String(cid)] = { value: pace.value, unit: pace.unit, ms: pace.ms };
+            });
+            if (Object.keys(clean).length) out[level][String(id)] = clean;
+        });
+    });
+    return out;
+}
+
+// Resolve the learner's organizational chain once, then look up each level.
+// IDs are matched case-insensitively for hand-entered country names, while
+// region/center/student ids remain exact after trimming.
+function dripScopeForStudent(db, sidOrStudent) {
+    const out = { studentId: '', centerId: '', regionId: '', country: '' };
+    let s = null;
+    if (sidOrStudent && typeof sidOrStudent === 'object') s = sidOrStudent;
+    else {
+        const wanted = String(sidOrStudent == null ? '' : sidOrStudent);
+        if (wanted) s = (db.students || []).find(x => x && (String(x.id) === wanted || String(x.admissionNumber || '') === wanted)) || null;
+        if (!s) { out.studentId = wanted; return out; }
+    }
+    if (!s) return out;
+    out.studentId = String(s.id || '');
+    out.centerId = String(s.studyCenterId || '');
+    const center = out.centerId ? (db.studyCenters || []).find(c => c && String(c.id) === out.centerId) : null;
+    out.regionId = String((center && center.regionId) || s.regionId || '');
+    const region = out.regionId ? (db.regions || []).find(r => r && String(r.id) === out.regionId) : null;
+    out.country = String(s.country || (center && center.country) || (region && region.country) || '');
+    return out;
+}
+
+function dripPaceLookup(byCourse, courseId) {
+    if (!byCourse || typeof byCourse !== 'object') return null;
+    const key = String(courseId);
+    if (byCourse[key]) return byCourse[key];
+    const lower = key.toLowerCase();
+    const match = Object.keys(byCourse).find(k => String(k).toLowerCase() === lower);
+    return match ? byCourse[match] : null;
+}
+
+function dripPaceLevelEntry(cfg, level, id, courseId) {
+    if (!id) return null;
+    const bucket = (cfg && cfg[level]) || {};
+    const key = String(id);
+    let byCourse = bucket[key];
+    if (!byCourse) {
+        const lower = key.toLowerCase();
+        const match = Object.keys(bucket).find(k => String(k).toLowerCase() === lower);
+        if (match) byCourse = bucket[match];
+    }
+    return dripPaceLookup(byCourse, courseId);
+}
+
+function dripResolvePace(cfg, scope, course, courseId) {
+    const chain = [
+        ['student', 'students', scope && scope.studentId],
+        ['center', 'centers', scope && scope.centerId],
+        ['region', 'regions', scope && scope.regionId],
+        ['country', 'countries', scope && scope.country]
+    ];
+    for (const row of chain) {
+        const entry = dripPaceLevelEntry(cfg, row[1], row[2], courseId);
+        if (entry) {
+            return {
+                value: entry.value,
+                unit: entry.unit,
+                ms: entry.ms,
+                source: row[0],
+                sourceId: String(row[2] || '')
+            };
+        }
+    }
+    return dripCoursePace(course);
+}
+
+function dripEffectivePace(db, sid, courseId) {
+    const course = (db.courses || []).find(c => c && String(c.id) === String(courseId)) || null;
+    return dripResolvePace(dripPaceConfig(db), dripScopeForStudent(db, sid), course, courseId);
+}
+
+function dripPacesFor(db, sid) {
+    const cfg = dripPaceConfig(db);
+    const scope = dripScopeForStudent(db, sid);
+    const out = {};
+    (db.courses || []).forEach(course => {
+        if (!course || course.id == null) return;
+        out[String(course.id)] = dripResolvePace(cfg, scope, course, course.id);
+    });
+    return out;
+}
+
+function dripPaceMs(course) {
+    return dripCoursePace(course).ms;
 }
 
 // Lesson parts are grouped into UNITS by the leading "Lesson N" prefix of the
@@ -387,12 +531,14 @@ function dripSweep(db, sid, courseIdOnly) {
     const byCourse = {};
     ordered.forEach(l => { if (l.courseId != null) (byCourse[l.courseId] = byCourse[l.courseId] || []).push(l); });
     const fee = dripFeeOk(db, sid);
+    const paceCfg = dripPaceConfig(db);
+    const paceScope = dripScopeForStudent(db, sid);
     let changed = false;
     for (const cid of Object.keys(byCourse)) {
         const drips = byCourse[cid].filter(l => dripModeOfLesson(l) === 'drip');
         if (!drips.length) continue;
         const course = (db.courses || []).find(c => String(c.id) === String(cid));
-        const paceMs = dripPaceMs(course);
+        const paceMs = dripResolvePace(paceCfg, paceScope, course, cid).ms;
         if (!fee.ok) break;
         for (let i = 0; i < drips.length; i++) {
             const l = drips[i];
@@ -421,7 +567,10 @@ function dripSweep(db, sid, courseIdOnly) {
 function dripMapsFor(db, sid) {
     return {
         unlocks: (db.lessonUnlocks || []).filter(r => String(r.studentId) === String(sid)),
-        completions: (db.lessonCompletions || []).filter(r => String(r.studentId) === String(sid))
+        completions: (db.lessonCompletions || []).filter(r => String(r.studentId) === String(sid)),
+        // The learner's effective pace for every course, so learner/staff
+        // labels stay in step with the server's chain decision.
+        paces: dripPacesFor(db, sid)
     };
 }
 
@@ -440,21 +589,29 @@ function dripNextInfo(db, sid, courseId, afterLessonId) {
     const prev = drips[idx];
     const pc = myC.find(r => String(r.lessonId) === String(prev.id));
     if (!pc || !pc.completedAt) return { lessonId: nx.id, title: nx.title, reason: 'prev' };
-    const course = (db.courses || []).find(c => String(c.id) === String(courseId));
-    const paceMs = dripPaceMs(course);
+    const pace = dripEffectivePace(db, sid, courseId);
+    const paceMs = pace.ms;
     const pu = myU.find(r => String(r.lessonId) === String(prev.id));
     const anchor = Math.max(pu ? (+new Date(pu.unlockedAt) || 0) : 0, +new Date(pc.completedAt) || 0);
     const gapMs = dripSameLessonUnit(prev, nx) ? 0 : paceMs;
     if (gapMs > 0 && Date.now() - anchor < gapMs) {
-        const paceDays = (course && course.dripDaysBetween != null && course.dripDaysBetween !== '' && !isNaN(parseFloat(course.dripDaysBetween))) ? parseFloat(course.dripDaysBetween) : DRIP_DEFAULT_PACE_DAYS;
-        return { lessonId: nx.id, title: nx.title, reason: 'pace', paceDays, opensAtMs: anchor + gapMs };
+        return {
+            lessonId: nx.id,
+            title: nx.title,
+            reason: 'pace',
+            pace: pace,
+            paceDays: pace.ms / 86400000,
+            opensAtMs: anchor + gapMs
+        };
     }
     return { lessonId: nx.id, title: nx.title, reason: 'open' };
 }
 
 module.exports = {
-    DRIP_PASS, DRIP_DEFAULT_PACE_DAYS, DRIP_VIDEO_RATIO,
-    dripRecId, dripModeOfLesson, dripReadEstimateSecs, dripLessonContent, dripPaceMs,
+    DRIP_PASS, DRIP_DEFAULT_PACE_DAYS, DRIP_PACE_MAX_MS, DRIP_VIDEO_RATIO,
+    dripRecId, dripModeOfLesson, dripReadEstimateSecs, dripLessonContent,
+    dripNormalizePace, dripCoursePace, dripPaceConfig, dripScopeForStudent,
+    dripEffectivePace, dripPacesFor, dripPaceMs,
     dripGroupOfLesson, dripSameLessonUnit,
     dripLessonVideo, dripVideoTrackable, dripVideoRequired, dripVideoDone,
     dripLessonVideos, dripRequiredVideos, dripVideoStates, dripVideosDone, dripRecordVideoProgress,

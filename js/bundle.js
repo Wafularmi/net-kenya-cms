@@ -593,7 +593,7 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings','reports'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','lesson-pacing','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings','reports'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
@@ -608,7 +608,7 @@ function getRolePermissions(role, user) {
         lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports'],
         student: ['student-hub','exams','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','meetings','reports'],
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','lesson-pacing','meetings','reports'],
         assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings','reports']
     };
     const base = perms[role] ? [...perms[role]] : [];
@@ -1873,7 +1873,7 @@ function buildNavigation(user) {
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, { id: 'exams', icon: '', text: 'Examinations' }, { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quiz & Exams' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
-        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
+        { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'lesson-pacing', icon: '', text: '⏱ Lesson Pacing' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'reports', icon: '', text: '📈 Reports' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'analytics', icon: '', text: '📐 Analytics' }, { id: 'media', icon: '', text: '📸 Media' }, { id: 'global-viewer', icon: '', text: '🌐 Global Viewer' }, { id: 'settings', icon: '', text: 'Settings' }] }
     ];
     let html = '';
@@ -2342,11 +2342,12 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
         case 'fee-gate': renderFeeGateCoordinator(); break;
+        case 'lesson-pacing': loadLessonPacing(); break;
         case 'meetings': renderMeetings(); break;
         case 'coverage': renderCoverage(); break;
         case 'reports': loadReportScopeOptions(); renderReport(); break;
@@ -4469,7 +4470,10 @@ function showCourseForm(course = null) {
         type: courseComponentType(w)
     }));
     const wtItemsHtml = wtSrc.map(w => buildWeightageRow(w.label, w.value, w.type)).join('');
-    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Lesson pacing (days between lessons)</label><input type="number" id="course-drip-days" value="${course && course.dripDaysBetween != null ? course.dripDaysBetween : ''}" min="0" max="60" step="0.5" placeholder="3.5 = max 2 lessons per week"><small style="display:block;opacity:.7;">0 = a lesson unlocks instantly after the previous one is completed. Used by Sequenced lessons.</small></div><div class="form-group"><label>Default when left blank</label><input type="text" value="3.5 days (max 2 lessons per week)" disabled style="background:var(--bg);color:var(--text);opacity:.75;"></div></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
+    const _paceUnit = course && course.dripPaceUnit === 'hours' ? 'hours' : 'days';
+    const _paceDays = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : null;
+    const _paceValue = _paceDays == null || !Number.isFinite(_paceDays) ? '' : (_paceUnit === 'hours' ? Number((_paceDays * 24).toFixed(4)) : _paceDays);
+    const content = `<input type="hidden" id="course-edit-id" value="${course ? course.id : ''}"><div class="form-row"><div class="form-group"><label>Course Code *</label><input type="text" id="course-code" value="${course ? course.code : ''}" required></div><div class="form-group"><label>Course Name *</label><input type="text" id="course-name" value="${course ? course.name : ''}" required></div></div><div class="form-row"><div class="form-group"><label>Credits</label><input type="number" id="course-credits" value="${course ? course.credits || 3 : 3}" min="1" max="6"></div><div class="form-group"><label>Department</label><input type="text" id="course-department" value="${course ? course.department || '' : ''}"></div></div><div class="form-row"><div class="form-group"><label>Sequence Order (course progression)</label><input type="number" id="course-order" value="${course ? (course.order || '') : ''}" min="1" max="99" placeholder="e.g. 1 = first course"></div></div><div class="form-row"><div class="form-group"><label>Lesson pacing (between sequenced lessons)</label><div style="display:flex;gap:6px;"><input type="number" id="course-drip-days" value="${_paceValue}" min="0" max="${_paceUnit === 'hours' ? 1440 : 60}" step="any" placeholder="3.5" style="flex:2;"><select id="course-drip-unit" style="flex:1;"><option value="days" ${_paceUnit === 'days' ? 'selected' : ''}>Days</option><option value="hours" ${_paceUnit === 'hours' ? 'selected' : ''}>Hours</option></select></div><small style="display:block;opacity:.7;">0 = instant. Course default for Sequenced lessons; country, region, center and learner overrides can adjust it in Lesson Pacing.</small></div><div class="form-group"><label>Default when left blank</label><input type="text" value="3.5 days (built-in fallback)" disabled style="background:var(--bg);color:var(--text);opacity:.75;"></div></div></div><div class="form-row"><div class="form-group"><label>Campus</label><select id="course-campus"><option value="">Main Campus</option></select></div><div class="form-group"><label>Instructor</label><select id="course-instructor"><option value="">Unassigned</option></select></div></div><div class="form-group"><label>Description</label><textarea id="course-description">${course ? course.description || '' : ''}</textarea></div><h4 style="color:var(--accent);margin:12px 0 8px;">Schedule</h4><div class="form-row"><div class="form-group"><label>Days</label><select id="course-days"><option value="MWF" ${course && course.days === 'MWF' ? 'selected' : ''}>Mon/Wed/Fri</option><option value="TTh" ${course && course.days === 'TTh' ? 'selected' : ''}>Tue/Thu</option><option value="MW" ${course && course.days === 'MW' ? 'selected' : ''}>Mon/Wed</option><option value="TThS" ${course && course.days === 'TThS' ? 'selected' : ''}>Tue/Thu/Sat</option></select></div><div class="form-group"><label>Time</label><input type="text" id="course-time" value="${course ? course.time || '09:00-10:00' : '09:00-10:00'}" placeholder="09:00-10:00"></div></div><div class="form-group"><label>Room</label><input type="text" id="course-room" value="${course ? course.room || '' : ''}"></div><div class="form-group"><label>Status</label><select id="course-status"><option value="active" ${!course || course.status !== 'inactive' ? 'selected' : ''}>Active</option><option value="inactive" ${course && course.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div><h4 style="color:var(--accent);margin:12px 0 8px;">Grade Weightage (must total 100%)</h4><div id="weightage-items">${wtItemsHtml}</div><div style="margin:6px 0;"><button class="btn btn-outline btn-sm" onclick="window.addWeightageItem()">+ Add Component</button></div><div id="wt-summary" style="font-size:12px;margin-top:4px;">Total: <b id="wt-total">0</b>% <span id="wt-status" style="color:var(--warning);">(should be 100%)</span></div>`;
     showModal(isEdit ? 'Edit Course' : 'Add New Course', content, `<button class="btn btn-primary" onclick="saveCourse()">${isEdit ? 'Update' : 'Create'}</button>`, { maxWidth: '860px' });
     loadStaffDropdown();
     loadCampusDropdownForCourse();
@@ -4512,7 +4516,16 @@ async function saveCourse() {
     const catW = sumType('cat');
     const attW = sumType('attendance');
     const dripEl = document.getElementById('course-drip-days');
-    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW || 30, quizWeight: quizW || 20, catWeight: catW || 25, attWeight: attW || 10, dripDaysBetween: dripEl ? (dripEl.value.trim() === '' ? null : Math.max(0, parseFloat(dripEl.value) || 0)) : null, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
+    const dripUnitEl = document.getElementById('course-drip-unit');
+    const dripUnit = dripUnitEl && dripUnitEl.value === 'hours' ? 'hours' : 'days';
+    const dripValue = dripEl && dripEl.value.trim() !== '' ? Math.max(0, parseFloat(dripEl.value) || 0) : null;
+    const dripMax = dripUnit === 'hours' ? 1440 : 60;
+    if (dripValue != null && dripValue > dripMax) {
+        showToast('Lesson pacing must be ' + (dripUnit === 'hours' ? '1,440 hours or less' : '60 days or less'), { type: 'warning' });
+        return;
+    }
+    const dripDays = dripValue == null ? null : (dripUnit === 'hours' ? dripValue / 24 : dripValue);
+    const course = { id, code, name, credits: parseInt(document.getElementById('course-credits').value) || 3, order: parseInt(document.getElementById('course-order').value) || null, department: document.getElementById('course-department').value.trim(), campus: document.getElementById('course-campus').value, instructorId: document.getElementById('course-instructor').value, description: document.getElementById('course-description').value.trim(), days: document.getElementById('course-days').value, time: document.getElementById('course-time').value.trim(), room: document.getElementById('course-room').value.trim(), status: document.getElementById('course-status').value, weightage, examWeight: examW || 30, quizWeight: quizW || 20, catWeight: catW || 25, attWeight: attW || 10, dripDaysBetween: dripDays, dripPaceUnit: dripDays == null ? null : dripUnit, createdAt: editId ? (await dbGet('courses', id)).createdAt : new Date().toISOString() };
     await dbPut('courses', course); closeModal(); renderCourses(); updateCourseDropdowns(); showToast(editId ? 'Course updated!' : 'Course created!'); logAudit(editId ? 'updated' : 'created', 'course', course);
 }
 function buildWeightageRow(label, value, type) {
@@ -16191,7 +16204,7 @@ function fmtPublishAt(p) { try { const d = new Date(p); if (isNaN(d.getTime())) 
 // ---------- Drip engine: per-learner sequential unlock, max 2 lessons/week ----------
 // Lesson modes: 'immediate' | 'date' (publishAt) | 'drip'. Stores: lessonCompletions (LC-), lessonUnlocks (LU-).
 const DRIP_DAYS = 3.5, DRIP_MS = 3.5 * 86400000, DRIP_PASS = 50;
-let _dripU = {}, _dripC = {}, _dripSid = null, _dripAt = 0, _dripNext = null, _dripFee = null;
+let _dripU = {}, _dripC = {}, _dripPaces = {}, _dripSid = null, _dripAt = 0, _dripNext = null, _dripFee = null;
 function lessonMode(l) { if (!l) return 'immediate'; if (l.releaseMode === 'drip' || l.releaseMode === 'date' || l.releaseMode === 'immediate') return l.releaseMode; return l.publishAt ? 'date' : 'immediate'; }
 function dripId(prefix, sid, lid) { return prefix + '-' + String(sid).replace(/[^A-Za-z0-9-]/g, '') + '-' + String(lid).replace(/[^A-Za-z0-9-]/g, ''); }
 // Talk to the authoritative server drip engine (/api/drip/sync). The server owns
@@ -16208,15 +16221,47 @@ function dripApplyMaps(data) {
     if (!data) return false;
     if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
     if (Array.isArray(data.completions)) { data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+    if (data.paces && typeof data.paces === 'object') _dripPaces = data.paces;
     if (data.next) _dripNext = data.next;
     if (data.fee) _dripFee = data.fee;
     _dripAt = Date.now();
     return true;
 }
+function dripCoursePaceClient(course) {
+    let days = 3.5, explicit = false;
+    if (course && course.dripDaysBetween != null && course.dripDaysBetween !== '') {
+        const n = parseFloat(course.dripDaysBetween);
+        if (Number.isFinite(n) && n >= 0) { days = n; explicit = true; }
+    }
+    const unit = explicit && course && course.dripPaceUnit === 'hours' ? 'hours' : 'days';
+    const value = unit === 'hours' ? days * 24 : days;
+    return { value: Number(value.toFixed(4)), unit: unit, ms: Math.round(days * 86400000), source: explicit ? 'course' : 'default' };
+}
+function dripPaceForCourse(course) {
+    const id = course && course.id != null ? String(course.id) : '';
+    const p = id && _dripPaces ? _dripPaces[id] : null;
+    return p && p.ms != null ? p : dripCoursePaceClient(course);
+}
+function dripPaceLabel(pace) {
+    if (!pace || pace.ms == null) return '3.5 days';
+    if (pace.ms === 0) return 'instant';
+    const unit = pace.unit === 'hours' ? 'hour' : 'day';
+    const value = Number(pace.value != null ? pace.value : (pace.unit === 'hours' ? pace.ms / 3600000 : pace.ms / 86400000));
+    const clean = Number(value.toFixed(2));
+    return clean + ' ' + unit + (clean === 1 ? '' : 's');
+}
+function dripRemainingText(ms) {
+    const left = Math.max(0, Number(ms) || 0);
+    if (left < 60000) return 'now';
+    if (left < 3600000) { const m = Math.ceil(left / 60000); return m + ' minute' + (m === 1 ? '' : 's'); }
+    if (left < 86400000) { const h = Math.ceil(left / 3600000); return h + ' hour' + (h === 1 ? '' : 's'); }
+    const d = Math.ceil(left / 86400000);
+    return d + ' day' + (d === 1 ? '' : 's');
+}
 async function loadDripMaps(sid, force) {
     if (!sid) return;
     if (!force && _dripSid === sid && _dripU && Date.now() - _dripAt < 120000) return;
-    _dripSid = sid; _dripU = {}; _dripC = {}; _dripNext = null; _dripFee = null;
+    _dripSid = sid; _dripU = {}; _dripC = {}; _dripPaces = {}; _dripNext = null; _dripFee = null;
     // Authoritative source: the server sweeps the chain and returns fresh maps.
     const data = await dripApi({ action: 'state', studentId: sid });
     if (dripApplyMaps(data)) return;
@@ -16274,6 +16319,7 @@ async function ensureDripUnlocks(sid, courseId) {
 async function dripRecordRead(sid, lesson, addSecs) {
     await loadDripMaps(sid);
     const data = await dripApi({ action: 'read', studentId: sid, lessonId: String(lesson.id), readSecs: addSecs });
+    if (data && data.paces && typeof data.paces === 'object') _dripPaces = data.paces;
     if (data && data.completion) { _dripC[lesson.id] = data.completion; return data.completion; }
     let comp = _dripC[lesson.id];
     if (!comp) comp = { id: dripId('LC', sid, lesson.id), studentId: sid, lessonId: lesson.id, courseId: lesson.courseId, readSecs: 0 };
@@ -16291,6 +16337,7 @@ async function dripRecordVideo(sid, lesson, addSecs, durationSecs, videoId) {
         _dripC[lesson.id] = data.completion;
         if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
         if (Array.isArray(data.completions)) { _dripC = {}; data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+        if (data.paces && typeof data.paces === 'object') _dripPaces = data.paces;
         if (data.next) _dripNext = data.next;
     }
     return data;
@@ -16476,6 +16523,7 @@ async function evalLessonCompletion(sid, lesson, opts) {
         _dripC[lesson.id] = data.completion;
         if (Array.isArray(data.unlocks)) { _dripU = {}; data.unlocks.forEach(r => { if (r && r.lessonId) _dripU[r.lessonId] = r; }); }
         if (Array.isArray(data.completions)) { data.completions.forEach(r => { if (r && r.lessonId) _dripC[r.lessonId] = r; }); }
+        if (data.paces && typeof data.paces === 'object') _dripPaces = data.paces;
         if (data.next) _dripNext = data.next;
         if (data.fee) _dripFee = data.fee;
         if (data.justCompleted && !opts.silent) { try { await dripCongrats(sid, lesson, data.completion.quizBest); } catch (e) {} }
@@ -16492,9 +16540,8 @@ async function dripCongrats(sid, lesson, best) {
     if (nx) {
         if (nx.reason === 'open') nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is now open - tap it to begin!';
         else if (nx.reason === 'pace' && nx.opensAtMs) {
-            const days = Math.max(1, Math.ceil((nx.opensAtMs - Date.now()) / 86400000));
             const opens = new Date(nx.opensAtMs).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-            nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> opens in <b>' + days + ' day' + (days !== 1 ? 's' : '') + '</b> (' + opens + ') - well-earned rest!';
+            nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> opens in <b>' + dripRemainingText(nx.opensAtMs - Date.now()) + '</b> (' + opens + ') - well-earned rest!';
         }
         else if (nx.reason === 'fees') nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> is ready - just clear the weekly fee target to unlock it.';
         else nextTxt = 'Your next lesson <b>' + escapeHtml(nx.title) + '</b> unlocks after this one is fully completed - keep going!';
@@ -16639,11 +16686,11 @@ async function updateLessonDripHint() {
     if (sel.value) {
         try { const course = await dbGet('courses', sel.value); pace = course ? hubPaceText(course) : null; } catch {}
     }
-    hint.innerHTML = '🔗 Sequenced: Lesson 1 opens once week-1 fees/waiver/agreement hold. Each next lesson unlocks when the previous is completed (timed reading + 50% quiz/exam) AND fees stay current. ' + (pace ? 'Pacing for this course: ' + pace + '.' : 'Pacing comes from the course page (days between lessons; 0 = instant).');
+    hint.innerHTML = '🔗 Sequenced: Lesson 1 opens once week-1 fees/waiver/agreement hold. Each next lesson unlocks when the previous is completed (timed reading + 50% quiz/exam) AND fees stay current. ' + (pace ? 'Pacing for this course: ' + pace + '.' : 'Pacing comes from the course default (hours/days; 0 = instant). Country, region, center and learner overrides can change it in Lesson Pacing.');
 }
 function hubPaceText(course) {
-    const days = course && course.dripDaysBetween != null && course.dripDaysBetween !== '' ? parseFloat(course.dripDaysBetween) : 3.5;
-    return days === 0 ? 'instant — a lesson unlocks as soon as the previous one is done' : 'one new lesson every ' + days + ' day' + (days === 1 ? '' : 's');
+    const pace = dripCoursePaceClient(course);
+    return pace.ms === 0 ? 'instant — a lesson unlocks as soon as the previous one is done' : 'one new lesson every ' + dripPaceLabel(pace);
 }
 function previewLessonVideo() {
     const url = document.getElementById('lesson-video').value.trim();
@@ -23172,6 +23219,255 @@ async function saveFeeGateCoordinator() {
     if (st) { st.textContent = '✓ Saved for your region'; st.style.color = 'var(--success)'; }
     showToast('Regional fee gate saved!');
 }
+// ---- Lesson Pacing (per-course, scoped) ---------------------------------
+let _pacingData = null;
+let _pacingLoading = false;
+function pacingCourseById(id) {
+    return ((_pacingData && _pacingData.courses) || []).find(c => String(c.id) === String(id)) || null;
+}
+function pacingOptionKind(scope) {
+    return scope === 'country' ? 'countries' : scope === 'region' ? 'regions' : scope === 'center' ? 'centers' : scope === 'student' ? 'students' : '';
+}
+function pacingOptionList(scope) {
+    const kind = pacingOptionKind(scope);
+    return kind ? (((_pacingData && _pacingData.options) || {})[kind] || []) : [];
+}
+function pacingOptionId(scope, opt) {
+    return String(scope === 'country' ? (opt && opt.name) : (opt && opt.id) || '');
+}
+function pacingOptionRecord(scope, id) {
+    return pacingOptionList(scope).find(o => pacingOptionId(scope, o) === String(id)) || null;
+}
+function pacingOptionName(scope, id) {
+    const opt = pacingOptionRecord(scope, id);
+    if (!opt) return String(id || '');
+    if (scope === 'student') return String(opt.name || opt.admissionNumber || opt.id);
+    return String(opt.brandName || opt.name || opt.id);
+}
+function pacingEntry(level, id, courseId) {
+    const cfg = (_pacingData && _pacingData.config) || {};
+    const bucket = cfg[level] && id ? cfg[level][id] : null;
+    if (!bucket || !bucket[courseId]) return null;
+    const e = bucket[courseId];
+    return { value: Number(e.value), unit: e.unit === 'hours' ? 'hours' : 'days' };
+}
+function pacingPaceFromEntry(entry) {
+    if (!entry) return null;
+    const n = Number(entry.value);
+    if (!Number.isFinite(n) || n < 0) return null;
+    const unit = entry.unit === 'hours' ? 'hours' : 'days';
+    return { value: n, unit: unit, ms: Math.round(n * (unit === 'hours' ? 3600000 : 86400000)) };
+}
+function pacingCoursePace(course) {
+    if (course && course.defaultPace && course.defaultPace.ms != null) return course.defaultPace;
+    return dripCoursePaceClient(course);
+}
+function pacingAncestors(scope, id) {
+    const out = [];
+    if (scope === 'student') {
+        const s = pacingOptionRecord('student', id);
+        if (s) {
+            if (s.studyCenterId) out.push({ level: 'centers', id: s.studyCenterId, scope: 'center' });
+            if (s.regionId) out.push({ level: 'regions', id: s.regionId, scope: 'region' });
+            if (s.country) out.push({ level: 'countries', id: s.country, scope: 'country' });
+        }
+    } else if (scope === 'center') {
+        const c = pacingOptionRecord('center', id);
+        if (c) {
+            if (c.regionId) out.push({ level: 'regions', id: c.regionId, scope: 'region' });
+            if (c.country) out.push({ level: 'countries', id: c.country, scope: 'country' });
+        }
+    } else if (scope === 'region') {
+        const r = pacingOptionRecord('region', id);
+        if (r && r.country) out.push({ level: 'countries', id: r.country, scope: 'country' });
+    }
+    return out;
+}
+function pacingInherited(scope, id, courseId) {
+    const chain = pacingAncestors(scope, id);
+    for (const a of chain) {
+        const entry = pacingEntry(a.level, a.id, courseId);
+        if (entry) return { pace: pacingPaceFromEntry(entry), source: a.scope, sourceId: a.id };
+    }
+    const course = pacingCourseById(courseId);
+    const pace = pacingCoursePace(course);
+    return { pace: pace, source: pace && pace.source === 'course' ? 'course' : 'default', sourceId: courseId };
+}
+function pacingSourceText(source, sourceId) {
+    if (source === 'country') return 'Country: ' + pacingOptionName('country', sourceId);
+    if (source === 'region') return 'Region: ' + pacingOptionName('region', sourceId);
+    if (source === 'center') return 'Study center: ' + pacingOptionName('center', sourceId);
+    if (source === 'student') return 'Learner: ' + pacingOptionName('student', sourceId);
+    if (source === 'course') { const c = pacingCourseById(sourceId); return 'Course default' + (c ? ' (' + (c.code || c.name) + ')' : ''); }
+    return 'Built-in fallback';
+}
+function pacingPaceText(pace) {
+    if (!pace || pace.ms == null) return '—';
+    if (pace.ms === 0) return 'Instant';
+    return dripPaceLabel(pace);
+}
+function renderPacingCourseSelect(preserve) {
+    const sel = document.getElementById('pacing-course');
+    if (!sel) return;
+    const list = (_pacingData && _pacingData.courses) || [];
+    sel.innerHTML = list.length ? list.map(c => `<option value="${escapeHtml(String(c.id))}">${escapeHtml((c.code ? c.code + ' — ' : '') + (c.name || c.id))}</option>`).join('') : '<option value="">No courses found</option>';
+    if (preserve && list.some(c => String(c.id) === String(preserve))) sel.value = preserve;
+}
+function renderPacingScopeSelect(preserve) {
+    const sel = document.getElementById('pacing-scope');
+    if (!sel) return;
+    const role = (_pacingData && _pacingData.role) || '';
+    let opts = [];
+    if (role === 'admin') opts = [['course', 'Course default (all learners)'], ['country', 'Country'], ['region', 'Region'], ['center', 'Study center'], ['student', 'Learner']];
+    else if (role === 'country') opts = [['country', 'Country (my country)'], ['region', 'Region'], ['center', 'Study center'], ['student', 'Learner']];
+    else opts = [['region', 'Region (my region)'], ['center', 'Study center'], ['student', 'Learner']];
+    sel.innerHTML = opts.map(o => `<option value="${o[0]}">${escapeHtml(o[1])}</option>`).join('');
+    if (preserve && opts.some(o => o[0] === preserve)) sel.value = preserve;
+}
+function renderPacingScopeIds(preserve) {
+    const scope = document.getElementById('pacing-scope')?.value || '';
+    const sel = document.getElementById('pacing-scope-id');
+    const search = document.getElementById('pacing-student-search');
+    if (!sel) return;
+    const group = document.getElementById('pacing-scope-id-group');
+    if (scope === 'course') {
+        if (group) group.style.display = 'none';
+        if (search) search.style.display = 'none';
+        refreshPacingEdit();
+        return;
+    }
+    if (group) group.style.display = '';
+    if (search) search.style.display = scope === 'student' ? '' : 'none';
+    const q = scope === 'student' ? String(search && search.value || '').toLowerCase().trim() : '';
+    let list = pacingOptionList(scope);
+    if (q) list = list.filter(o => (String(o.name || '') + ' ' + String(o.admissionNumber || '') + ' ' + String(o.id || '')).toLowerCase().includes(q));
+    if (list.length > 500) list = list.slice(0, 500);
+    const keep = preserve || sel.value;
+    sel.innerHTML = list.length ? list.map(o => {
+        const id = pacingOptionId(scope, o);
+        const label = scope === 'student' ? ((o.name || 'Learner') + ' (' + (o.admissionNumber || o.id) + ')') : (o.brandName || o.name || id);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`;
+    }).join('') : '<option value="">— No records in your scope —</option>';
+    if (keep && list.some(o => pacingOptionId(scope, o) === String(keep))) sel.value = keep;
+    refreshPacingEdit();
+}
+function onPacingScopeChange() {
+    renderPacingScopeIds('');
+}
+function onPacingScopeIdChange() {
+    refreshPacingEdit();
+}
+function refreshPacingEdit() {
+    const scope = document.getElementById('pacing-scope')?.value || '';
+    const scopeId = document.getElementById('pacing-scope-id')?.value || '';
+    const courseId = document.getElementById('pacing-course')?.value || '';
+    const valEl = document.getElementById('pacing-value');
+    const unitEl = document.getElementById('pacing-unit');
+    const stateEl = document.getElementById('pacing-current');
+    const inheritedEl = document.getElementById('pacing-inherited');
+    const noteEl = document.getElementById('pacing-scope-note');
+    const saveBtn = document.getElementById('pacing-save-btn');
+    if (!valEl || !unitEl || !stateEl || !inheritedEl) return;
+    const course = pacingCourseById(courseId);
+    if (!course) {
+        valEl.value = ''; valEl.disabled = true; unitEl.disabled = true;
+        stateEl.textContent = 'Select a course to begin.';
+        inheritedEl.textContent = '';
+        if (saveBtn) saveBtn.disabled = true;
+        return;
+    }
+    if (scope !== 'course' && !scopeId) {
+        valEl.value = ''; valEl.disabled = true; unitEl.disabled = true;
+        stateEl.textContent = 'Select a scope record to see its pace.';
+        inheritedEl.textContent = '';
+        if (saveBtn) saveBtn.disabled = true;
+        return;
+    }
+    valEl.disabled = false; unitEl.disabled = false;
+    if (saveBtn) saveBtn.disabled = false;
+    if (scope === 'course') {
+        const explicit = course.dripDaysBetween != null && course.dripDaysBetween !== '';
+        const pace = pacingCoursePace(course);
+        valEl.value = explicit ? pace.value : '';
+        unitEl.value = explicit ? pace.unit : 'days';
+        stateEl.innerHTML = explicit
+            ? 'Course default: <b>' + escapeHtml(pacingPaceText(pace)) + '</b>.'
+            : 'No course default set — learners fall back to <b>3.5 days</b>.';
+        inheritedEl.innerHTML = 'Applies to every learner unless a country, region, center or learner override exists.';
+        if (noteEl) noteEl.textContent = 'Course default (admin only). Overrides at lower levels win.';
+        return;
+    }
+    const entry = pacingEntry(pacingOptionKind(scope), scopeId, courseId);
+    const inherited = pacingInherited(scope, scopeId, courseId);
+    if (entry) {
+        const pace = pacingPaceFromEntry(entry);
+        valEl.value = entry.value;
+        unitEl.value = entry.unit;
+        stateEl.innerHTML = 'Override here: <b>' + escapeHtml(pacingPaceText(pace)) + '</b>.';
+    } else {
+        valEl.value = '';
+        unitEl.value = inherited.pace && inherited.pace.unit ? inherited.pace.unit : 'days';
+        stateEl.textContent = 'No override at this level.';
+    }
+    inheritedEl.innerHTML = 'Inherited: <b>' + escapeHtml(pacingPaceText(inherited.pace)) + '</b> — ' + escapeHtml(pacingSourceText(inherited.source, inherited.sourceId));
+    if (noteEl) noteEl.textContent = 'A learner inherits the nearest override: learner → center → region → country → course default.';
+}
+async function loadLessonPacing() {
+    if (_pacingLoading) return;
+    const status = document.getElementById('pacing-status');
+    const oldCourse = document.getElementById('pacing-course')?.value || '';
+    const oldScope = document.getElementById('pacing-scope')?.value || '';
+    const oldScopeId = document.getElementById('pacing-scope-id')?.value || '';
+    _pacingLoading = true;
+    if (status) { status.textContent = 'Loading pacing…'; status.style.color = 'var(--text-muted)'; }
+    try {
+        const res = await fetch('/api/lesson-pacing', { headers: getAuthHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        _pacingData = data;
+        renderPacingCourseSelect(oldCourse);
+        renderPacingScopeSelect(oldScope);
+        renderPacingScopeIds(oldScopeId);
+        if (status) { status.textContent = ''; }
+    } catch (e) {
+        if (status) { status.textContent = 'Could not load pacing: ' + (e.message || e); status.style.color = 'var(--danger)'; }
+    } finally {
+        _pacingLoading = false;
+    }
+}
+async function saveLessonPacing(clear) {
+    const scope = document.getElementById('pacing-scope')?.value || '';
+    const scopeId = scope === 'course' ? '' : (document.getElementById('pacing-scope-id')?.value || '');
+    const courseId = document.getElementById('pacing-course')?.value || '';
+    const status = document.getElementById('pacing-status');
+    const valueEl = document.getElementById('pacing-value');
+    const unitEl = document.getElementById('pacing-unit');
+    if (!courseId) return showToast('Select a course first', { type: 'warning' });
+    if (scope !== 'course' && !scopeId) return showToast('Select a scope record first', { type: 'warning' });
+    const body = { scope: scope, courseId: courseId };
+    if (scope !== 'course') body.scopeId = scopeId;
+    if (clear || !valueEl || String(valueEl.value).trim() === '') {
+        body.clear = true;
+    } else {
+        const n = Number(valueEl.value);
+        if (!Number.isFinite(n) || n < 0) { showToast('Enter a pace of 0 or more', { type: 'warning' }); return; }
+        body.value = n;
+        body.unit = unitEl && unitEl.value === 'hours' ? 'hours' : 'days';
+    }
+    if (status) { status.textContent = 'Saving…'; status.style.color = 'var(--text-muted)'; }
+    try {
+        const res = await fetch('/api/lesson-pacing', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        showToast(clear || body.clear ? 'Override cleared — inherited pace will apply' : 'Lesson pace saved');
+        if (status) { status.textContent = '✓ Saved'; status.style.color = 'var(--success)'; }
+        await loadLessonPacing();
+    } catch (e) {
+        if (status) { status.textContent = '✗ ' + (e.message || e); status.style.color = 'var(--danger)'; }
+        showToast('Could not save pacing: ' + (e.message || e), { type: 'danger' });
+    }
+}
+function clearLessonPacing() { return saveLessonPacing(true); }
 let _contentGateFull = null;
 function toggleContentGateOptions() {
     const on = document.getElementById('contentgate-enabled')?.checked;
