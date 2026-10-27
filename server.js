@@ -1792,21 +1792,26 @@ function scoreSubmissionOnServer(sub) {
         || (db.exams || []).find(e => e && String(e.id) === String(sub.quizId));
     if (!quiz) return null;
     const byId = new Map((db.questionBank || []).map(q => [String(q.id), q]));
+    const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
     let earned = 0, total = 0;
     for (const a of sub.answers) {
-        if (!a || a.type === 'essay') return null;         // staff-marked
+        if (!a) return null;
         const q = byId.get(String(a.questionId));
         if (!q) return null;                              // question removed
+        // The question bank owns the type. Trusting the browser's answer type
+        // let a tampered submission label an essay as an MCQ and award itself
+        // full marks, so the type in the paper is what decides how it is marked.
+        const qType = String(q.type || a.type || '').toLowerCase();
+        if (qType === 'essay') return null;                // staff-marked
         const pts = Number(q.points) || 0;
         total += pts;
-        if (a.type === 'mcq' || a.type === 'truefalse') {
+        if (qType === 'mcq' || qType === 'truefalse') {
             const key = Array.isArray(q.correctAnswers) && q.correctAnswers.length ? q.correctAnswers : [q.correctAnswer];
             const given = Array.isArray(a.answer) ? a.answer : (a.answer != null ? [a.answer] : []);
-            const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
             const keyN = key.map(norm), givenN = given.map(norm);
             const ok = keyN.length === givenN.length && keyN.every(k => givenN.includes(k));
             if (ok) earned += pts;
-        } else if (a.type === 'matching') {
+        } else if (qType === 'matching') {
             const pairs = Array.isArray(q.pairs) ? q.pairs : [];
             if (!pairs.length) return null;
             let hits = 0;
@@ -1815,7 +1820,7 @@ function scoreSubmissionOnServer(sub) {
                 if (norm(got) === norm(p.right)) hits++;
             });
             earned += (hits / pairs.length) * pts;
-        } else if (a.type === 'fillin') {
+        } else if (qType === 'fillin') {
             const blanks = Array.isArray(q.blanks) ? q.blanks : [];
             if (!blanks.length) return null;
             let hits = 0;
@@ -7237,7 +7242,13 @@ const parsed = JSON.parse(body);
                         } catch (ge) { console.error('server grade upsert failed:', ge.message); }
                     }
                     json(res, 200, { ok: true, key: pk, gradeId: gradeId, gradeCreated: gradeCreated });
-                } catch (e) { json(res, 400, { error: 'Invalid JSON' }); }
+                } catch (e) {
+                    // Do not let a server-side failure look like malformed JSON:
+                    // log the real cause while keeping the learner-facing reply
+                    // short and free of internal details.
+                    console.error('PUT ' + store + ' failed:', e && (e.stack || e.message || e));
+                    json(res, 400, { error: 'Invalid JSON' });
+                }
             });
             return true;
         }
