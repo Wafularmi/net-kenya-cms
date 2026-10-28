@@ -4551,7 +4551,7 @@ function handleAPI(req, res) {
                         const idx2 = buildCountryIndex();
                         center = (db.studyCenters || []).find(c => c && String(idx2.centerCountry[c.id] || c.country || '') === country) || null;
                     }
-                    const centerCode = center ? (center.code || 'GEN') : 'GEN';
+                    const centerCode = center && center.code ? String(center.code).trim().replace(/\//g,'') : (center && center.name ? (String(center.name).toUpperCase().replace(/[^A-Z0-9]/g,' ').trim().split(/\s+/).filter(Boolean).slice(0,2).map((p,i)=>p[0]).join('').substring(0,4) || 'CTR') : 'CTR');
                     const branding = (db.settings || []).find(s => s.key === 'branding');
                     const instituteCode = branding && branding.initials ? branding.initials : 'NF';
                     const prevCountry = rec.country || (rec.studyCenterId && buildCountryIndex().centerCountry[rec.studyCenterId]) || '';
@@ -6704,7 +6704,7 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     // country identity (e.g. "UNSC"); sequence rolls across all
                     // centers of one country and is stored per country.
                     const center = studyCenterId ? db.studyCenters?.find(c => c.id === studyCenterId) : null;
-                    const centerCode = center ? center.code : 'GEN';
+                    const centerCode = center && center.code ? String(center.code).trim().replace(/\//g,'') : (center && center.name ? (String(center.name).toUpperCase().replace(/[^A-Z0-9]/g,' ').trim().split(/\s+/).filter(Boolean).slice(0,2).map(p=>p[0]).join('').substring(0,4) || 'CTR') : 'CTR');
                     // The signup request carries the country explicitly (login-screen
                     // country dropdown); it must agree with the selected center/region.
                     const derivedCountry = (center && center.country) || (regionId ? (db.regions || []).find(r => r.id === regionId)?.country : '') || '';

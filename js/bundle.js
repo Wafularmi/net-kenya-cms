@@ -16231,7 +16231,7 @@ async function previewCommMessage() {
             preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);
         }
     } else {
-        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'INST/GEN/01-24/001').replace(/{{admissionNumber}}/g, 'INST/GEN/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{username}}/g, '2547XXXXXXXX').replace(/{{login}}/g, '2547XXXXXXXX').replace(/{{password}}/g, 'INST/GEN/01-24/001').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com').replace(/{{year}}/g, '1').replace(/{{region}}/g, 'Coast Region').replace(/{{center}}/g, 'Mombasa Center').replace(/{{centerCode}}/g, 'MSA').replace(/{{requested}}/g, '01 Jul 2026').replace(/{{fee}}/g, 'KES 25,000.00').replace(/{{min}}/g, '75');
+        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'NF/CTR/01-24/001').replace(/{{admissionNumber}}/g, 'NF/CTR/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{username}}/g, '2547XXXXXXXX').replace(/{{login}}/g, '2547XXXXXXXX').replace(/{{password}}/g, 'NF/CTR/01-24/001').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com').replace(/{{year}}/g, '1').replace(/{{region}}/g, 'Coast Region').replace(/{{center}}/g, 'Mombasa Center').replace(/{{centerCode}}/g, 'MSA').replace(/{{requested}}/g, '01 Jul 2026').replace(/{{fee}}/g, 'KES 25,000.00').replace(/{{min}}/g, '75');
     }
     const area = document.getElementById('comm-preview-area');
     area.textContent = preview;
@@ -21567,8 +21567,21 @@ function admissionMonthYear(d) {
     return { month: String(dt.getMonth() + 1).padStart(2, '0'), year: String(dt.getFullYear()).slice(-2) };
 }
 function generateAdmissionNumber(student, branding, centers, seq) {
-    const center = centers.find(c => c.id === student.studyCenterId);
-    const centerCode = center ? center.code : 'GEN';
+    const center = centers && centers.find ? centers.find(c => c.id === student.studyCenterId) : null;
+    let centerCode = center && center.code ? String(center.code).trim() : '';
+    if (!centerCode) {
+        // Try to derive from center name or use a short fallback based on country/region
+        if (center && center.name) {
+            const parts = String(center.name).toUpperCase().replace(/[^A-Z0-9]/g, ' ').trim().split(/\s+/);
+            if (parts.length >= 2) {
+                centerCode = (parts[0][0] + parts[1][0]).substring(0, 4);
+            } else if (parts[0]) {
+                centerCode = parts[0].substring(0, 4);
+            }
+        }
+    }
+    if (!centerCode) centerCode = 'CTR';
+    centerCode = centerCode.replace(/\//g, '');
     const instituteCode = admissionInstituteCode(branding);
     const my = admissionMonthYear();
     const seqStr = String(seq).padStart(3, '0');
