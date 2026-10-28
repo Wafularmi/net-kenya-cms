@@ -21237,6 +21237,7 @@ async function openApproveModal(studentId) {
         }
     } catch (e) {}
     const maxExisting = await getMaxExistingAdmissionSeq(apprCountry);
+    // Compute preview sequence without incrementing/persisting settings
     const seq = Math.max(settingVal, maxExisting) + 1;
     // Use the student's assigned center if available; ensure we pass the full centers list
     const admStudent = { ...student, studyCenterId: student.studyCenterId || (centers[0] ? centers[0].id : '') };
@@ -21596,7 +21597,7 @@ async function regenerateAdmission() {
     const apprCenterId = document.getElementById('appr-center').value || _approvalState.originalStudent.studyCenterId;
     const apprCenter = _approvalState.centers.find(c => c.id === apprCenterId) || null;
     const regenCountry = _approvalState.originalStudent.country || await admissionCountryForCenter(apprCenter);
-    // Use current sequence without incrementing settings - only increment on final approval
+    // Compute sequence for preview WITHOUT incrementing settings - only increment on final approval
     const cKey = regenCountry ? 'admissionLastSeqByCountry' : 'admissionLastSeq';
     let settingVal = 0;
     try {
@@ -21608,6 +21609,7 @@ async function regenerateAdmission() {
         }
     } catch (e) {}
     const maxExisting = await getMaxExistingAdmissionSeq(regenCountry);
+    // Use the current "next" value for preview - don't bump it when just changing center
     const seq = Math.max(settingVal, maxExisting) + 1;
     const newAdmno = generateAdmissionNumber(
         { ..._approvalState.originalStudent, studyCenterId: apprCenterId },
@@ -21617,8 +21619,10 @@ async function regenerateAdmission() {
     );
     _approvalState.admissionNumber = newAdmno;
     _approvalState.admissionSeq = seq;
+    _approvalState.admissionCountry = regenCountry || _approvalState.admissionCountry;
     document.getElementById('appr-admno').value = newAdmno;
-    document.getElementById('appr-admno-display').textContent = newAdmno;
+    const admnoDisp = document.getElementById('appr-admno-display');
+    if (admnoDisp) admnoDisp.textContent = newAdmno;
     updateCredentialsSummary();
     onApprovalTemplateChange();
 }
