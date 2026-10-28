@@ -10093,7 +10093,9 @@ function buildProfessionalTranscript(data) {
         totalPoints += gpa * credits;
         totalCredits += credits;
         const gradeClass = getGradeClass(r.grade);
-        return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">${r.semester ? 'Sem ' + r.semester : '--'}</td><td class="col-credits">${credits}</td><td class="col-score">${r.score}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
+        const scoreVal = r.score != null && r.score !== '' ? Number(r.score) : 0;
+        const scoreDisplay = Number.isFinite(scoreVal) ? Math.round(scoreVal) + '%' : (r.score || '--') + (String(r.score).includes('%') ? '' : '%');
+        return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">${r.semester ? 'Sem ' + r.semester : '--'}</td><td class="col-credits">${credits}</td><td class="col-score">${scoreDisplay}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
     };
     let coursesTableHTML;
     if (semester && String(semester) !== 'all') {
@@ -10125,7 +10127,9 @@ function buildProfessionalTranscript(data) {
                     totalCredits += credits;
                     pts += gpa * credits; crs += credits;
                     const gradeClass = getGradeClass(r.grade);
-                    return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">Sem ${g.sem}</td><td class="col-credits">${credits}</td><td class="col-score">${r.score}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
+                    const scoreVal = r.score != null && r.score !== '' ? Number(r.score) : 0;
+                    const scoreDisplay = Number.isFinite(scoreVal) ? Math.round(scoreVal) + '%' : (r.score || '--') + (String(r.score).includes('%') ? '' : '%');
+                    return `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}"><td class="col-no">${idx + 1}</td><td class="col-code">${c ? (c.code || c.id) : r.courseId}</td><td class="col-title">${c ? (c.name || c.id) : r.courseId}</td><td class="col-sem">Sem ${g.sem}</td><td class="col-credits">${credits}</td><td class="col-score">${scoreDisplay}</td><td class="col-grade ${gradeClass}">${r.grade}</td><td class="col-gpa">${gpa.toFixed(2)}</td></tr>`;
                 }).join('');
                 return `<div class="semester-block"><div class="semester-header"><span class="semester-title">Semester ${g.sem} Results</span></div><table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Course Code</th><th class="col-title">Course Title</th><th class="col-sem">Sem</th><th class="col-credits">Credits</th><th class="col-score">Score</th><th class="col-grade">Grade</th><th class="col-gpa">Grade Pt</th></tr></thead><tbody>${rowsHTML}</tbody><tfoot><tr><td colspan="4" class="footer-label">Semester ${g.sem} Totals</td><td class="footer-value">${crs}</td><td colspan="2" class="footer-label">Semester GPA</td><td class="footer-value">${crs > 0 ? (pts/crs).toFixed(2) : '0.00'}</td></tr></tfoot></table></div>`;
             }).join('');
