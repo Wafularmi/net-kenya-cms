@@ -21596,7 +21596,19 @@ async function regenerateAdmission() {
     const apprCenterId = document.getElementById('appr-center').value || _approvalState.originalStudent.studyCenterId;
     const apprCenter = _approvalState.centers.find(c => c.id === apprCenterId) || null;
     const regenCountry = _approvalState.originalStudent.country || await admissionCountryForCenter(apprCenter);
-    const seq = await getNextAdmissionSeq(regenCountry);
+    // Use current sequence without incrementing settings - only increment on final approval
+    const cKey = regenCountry ? 'admissionLastSeqByCountry' : 'admissionLastSeq';
+    let settingVal = 0;
+    try {
+        const setting = await dbGet('settings', cKey);
+        if (regenCountry) {
+            if (setting && setting.value && typeof setting.value === 'object' && typeof setting.value[regenCountry] === 'number') settingVal = setting.value[regenCountry];
+        } else if (setting && typeof setting.value === 'number') {
+            settingVal = setting.value;
+        }
+    } catch (e) {}
+    const maxExisting = await getMaxExistingAdmissionSeq(regenCountry);
+    const seq = Math.max(settingVal, maxExisting) + 1;
     const newAdmno = generateAdmissionNumber(
         { ..._approvalState.originalStudent, studyCenterId: apprCenterId },
         _approvalState.branding,
