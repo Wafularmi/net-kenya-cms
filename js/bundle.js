@@ -21238,7 +21238,9 @@ async function openApproveModal(studentId) {
     } catch (e) {}
     const maxExisting = await getMaxExistingAdmissionSeq(apprCountry);
     const seq = Math.max(settingVal, maxExisting) + 1;
-    const admissionNumber = generateAdmissionNumber(student, branding, centers, seq);
+    // Use the student's assigned center if available; ensure we pass the full centers list
+    const admStudent = { ...student, studyCenterId: student.studyCenterId || (centers[0] ? centers[0].id : '') };
+    const admissionNumber = generateAdmissionNumber(admStudent, branding, centers, seq);
     _approvalState.admissionSeq = seq;
     _approvalState.admissionCountry = apprCountry;
     const BUILTIN_MSG = `Welcome to {{school}}, {{name}}! 🎓
@@ -21268,7 +21270,7 @@ May God bless your studies and may this be a transformative season in your life.
     const initialRendered = makeRenderer(allTemplates, student, schoolName, admissionNumber)(initialTpl);
     _approvalState = {
         studentId,
-        originalStudent: { ...student },
+        originalStudent: { ...student, studyCenterId: admStudent.studyCenterId },
         admissionNumber,
         centers,
         programs,
@@ -21276,7 +21278,7 @@ May God bless your studies and may this be a transformative season in your life.
         schoolName,
         builtinMsg: BUILTIN_MSG,
         allTemplates: allTemplates || [],
-        renderFor: makeRenderer(allTemplates, student, schoolName, admissionNumber),
+        renderFor: makeRenderer(allTemplates, { ...student, studyCenterId: admStudent.studyCenterId }, schoolName, admissionNumber),
         currentTplId: initialTpl
     };
     const html = `
@@ -21310,7 +21312,8 @@ May God bless your studies and may this be a transformative season in your life.
             <div class="form-row">
                 <div class="form-group">
                     <label>Study Center</label>
-                    <select id="appr-center" onchange="updateCredentialsSummary()"><option value="">Select...</option>${centers.map(c => `<option value="${c.id}" ${student.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select>
+                    <select id="appr-center" onchange="regenerateAdmission(); updateCredentialsSummary(); updateMessagePreview();"><option value="">Select...</option>${centers.map(c => `<option value="${c.id}" ${student.studyCenterId === c.id ? 'selected' : ''}>${c.name} (${c.code || 'NO-CODE'})</option>`).join('')}</select>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Configure center codes in <b>Regions & Centers → Study Centers → Edit</b></div>
                 </div>
                 <div class="form-group">
                     <label>Academic Year</label>
