@@ -24720,13 +24720,19 @@ function suggestSCCode() {
     if (name) {
         const words = name.split(/\s+/).filter(w => w.length > 0);
         if (words.length >= 3) {
-            suggested = words.map(w => w[0]).join('').toUpperCase().substring(0, 5);
+            suggested = words.map(w => w[0]).join('').toUpperCase().substring(0, 6);
         } else if (words.length === 2) {
-            suggested = (words[0].substring(0, 2) + words[1].substring(0, 2)).toUpperCase();
+            suggested = (words[0].substring(0, 3) + words[1].substring(0, 3)).toUpperCase();
         } else if (words.length === 1) {
-            suggested = words[0].substring(0, 4).toUpperCase();
+            suggested = words[0].substring(0, 6).toUpperCase();
         }
     }
+    // Common mappings
+    const lower = name.toLowerCase();
+    if (lower.includes('nairobi')) suggested = 'NRBSC';
+    else if (lower.includes('kitale')) suggested = 'KNSC';
+    else if (lower.includes('kisumu')) suggested = 'KISC';
+    else if (lower.includes('mombasa')) suggested = 'MSASC';
     codeInput.value = suggested;
     document.getElementById('sc-code-suggestion').textContent = suggested ? 'Suggested: ' + suggested : '';
     updateSCAdmissionPreview();
