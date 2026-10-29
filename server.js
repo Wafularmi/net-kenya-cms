@@ -7825,6 +7825,42 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                         if (_dupCode) return json(res, 400, { error: 'Center code already in use: ' + _dupCode });
                     }
                     db[store].push(toStore);
+                    if (store === 'submissions' && toStore && !((toStore.answers || []).some(a => a && a.type === 'essay'))) {
+                        const _marked = scoreSubmissionOnServer(toStore);
+                        if (_marked) {
+                            toStore.score = _marked.score;
+                            toStore.pointsEarned = _marked.pointsEarned;
+                            toStore.totalPoints = _marked.totalPoints;
+                            const _qrec = (db.quizzes || []).find(q => q && String(q.id) === String(toStore.quizId))
+                                || (db.exams || []).find(e => e && String(e.id) === String(toStore.quizId));
+                            const _pm = Number((_qrec && _qrec.passMark) != null ? _qrec.passMark : 50);
+                            toStore.status = _marked.score >= _pm ? 'pass' : 'fail';
+                            const _band = gradeBandForScore(_marked.score);
+                            toStore.grade = _band.grade;
+                            toStore.gpa = _band.gpa;
+                            toStore.scoredBy = 'server';
+                            try {
+                                const _gCourse = _qrec ? String(_qrec.courseId) : String(toStore.courseId || '');
+                                const _gExisting = (db.grades || []).find(x => x && String(x.studentId) === String(toStore.studentId) && String(x.quizId) === String(toStore.quizId));
+                                const _gId = _gExisting ? _gExisting.id : 'GRADE-' + Date.now().toString(36).toUpperCase();
+                                const _gEntry = {
+                                    id: _gId,
+                                    studentId: toStore.studentId,
+                                    submissionId: toStore.id,
+                                    courseId: _gCourse,
+                                    score: _marked.score,
+                                    grade: _band.grade,
+                                    gpa: _band.gpa,
+                                    type: (_qrec && _qrec.assessmentType) || 'exam',
+                                    quizId: String(toStore.quizId),
+                                    gradedAt: new Date().toISOString(),
+                                    scoredBy: 'server'
+                                };
+                                const _gi = (db.grades || []).findIndex(x => x && x.id === _gId);
+                                if (_gi >= 0) db.grades[_gi] = _gEntry; else db.grades.push(_gEntry);
+                            } catch (ge) { console.error('server grade upsert failed:', ge.message); }
+                        }
+                    }
                     mutate(toStore, 'insert');
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
