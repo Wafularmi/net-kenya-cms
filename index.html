@@ -1191,6 +1191,17 @@
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Seal / Stamp Options</div>
                          <div class="form-group"><label>Use</label><select id="seal-use-option"><option value="stamp">Use College Rubber Stamp Only</option><option value="seal">Use School Seal Only</option><option value="both">Use Both Seal & Stamp</option></select></div>
+                         <div class="form-group"><label>Seal/Stamp Position</label><select id="seal-position-option" onchange="onSealPositionChange()"><option value="between-signatures">Between Signatures (Centered, same line as signatures)</option><option value="bottom-center">Bottom Center</option><option value="bottom-right">Bottom Right</option><option value="bottom-left">Bottom Left</option><option value="custom">Custom Position</option></select></div>
+                         <div id="seal-custom-position" style="display:none;background:var(--bg-secondary);padding:10px;border-radius:8px;margin-top:8px;">
+                             <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Set position in mm from page edges (A4 approx 210mm x 297mm)</div>
+                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                                 <div class="form-group" style="margin:0;"><label style="font-size:11px;">Bottom (mm)</label><input type="number" id="seal-pos-bottom" value="70" step="1"></div>
+                                 <div class="form-group" style="margin:0;"><label style="font-size:11px;">Top (mm)</label><input type="number" id="seal-pos-top" value="" step="1" placeholder="leave empty"></div>
+                                 <div class="form-group" style="margin:0;"><label style="font-size:11px;">Left (mm)</label><input type="number" id="seal-pos-left" value="" step="1" placeholder="leave empty"></div>
+                                 <div class="form-group" style="margin:0;"><label style="font-size:11px;">Right (mm)</label><input type="number" id="seal-pos-right" value="" step="1" placeholder="leave empty"></div>
+                             </div>
+                             <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;"><input type="checkbox" id="seal-pos-centerx" checked> Center horizontally (left:50%, transform:translateX(-50%))</label>
+                         </div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Signature Preferences</div>
                          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Choose which signatures appear on each document type. Uncheck to hide.</div>
