@@ -10219,9 +10219,9 @@ function buildProfessionalTranscript(data) {
                 ${summaryBlock}
                 <div class="signatures-section">
                     <div class="signature-blocks">
-                        ${sig_registrar ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"></div><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                        ${sig_dean ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"></div><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                        ${sig_director ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"></div><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                        ${sig_registrar ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"></div><div class="signature-line"></div><div class="signature-title">Registrar</div></div>` : ''}
+                        ${sig_dean ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"></div><div class="signature-line"></div><div class="signature-title">Academic Dean</div></div>` : ''}
+                        ${sig_director ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"></div><div class="signature-line"></div><div class="signature-title">Director / Principal</div></div>` : ''}
                     </div>
                     ${isOfficial ? `<div class="issue-date">
                         <div class="issue-date-rule"></div>
@@ -11206,9 +11206,9 @@ function buildFinalTranscriptDocument(data) {
             </div>
             <div class="signatures-section">
                 <div class="signature-blocks">
-                    ${sig_registrar ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"></div><div class="signature-line"></div><div class="signature-title">Registrar</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                    ${sig_dean ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"></div><div class="signature-line"></div><div class="signature-title">Academic Dean</div><div class="signature-date">Date: _______________</div></div>` : ''}
-                    ${sig_director ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"></div><div class="signature-line"></div><div class="signature-title">Director / Principal</div><div class="signature-date">Date: _______________</div></div>` : ''}
+                    ${sig_registrar ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_registrar}" class="transcript-sig-img" alt="Registrar Signature"></div><div class="signature-line"></div><div class="signature-title">Registrar</div></div>` : ''}
+                    ${sig_dean ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_dean}" class="transcript-sig-img" alt="Dean Signature"></div><div class="signature-line"></div><div class="signature-title">Academic Dean</div></div>` : ''}
+                    ${sig_director ? `<div class="signature-block"><div class="signature-img-box"><img src="${sig_director}" class="transcript-sig-img" alt="Director Signature"></div><div class="signature-line"></div><div class="signature-title">Director / Principal</div></div>` : ''}
                 </div>
                 <div class="issue-date">
                     <div class="issue-date-rule"></div>
