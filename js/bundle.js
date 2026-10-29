@@ -2366,7 +2366,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -11318,6 +11318,9 @@ async function showBrochureDesigner() {
     const palette = await suggestDesignColors();
     const accent = palette.primary;
     const saved = await dbGet('settings', 'brochureDesign');
+    let programsList = [];
+    try { programsList = await getProgramsList(); } catch(e){}
+    const programsText = programsList.length ? programsList.join(', ') : 'Theology, Biblical Studies, Ministry, Christian Education';
     const content = `${getPaletteStripHtml(palette, 'brochure-color')}
     <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:6px;padding:4px 0;">📄 A4 Landscape Trifold — 3 panels per side, 2 sides</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -11326,11 +11329,11 @@ async function showBrochureDesigner() {
         <div class="form-group" style="grid-column:1/-1;"><label>Cover Subtitle</label><input type="text" id="br-subtitle" value="${saved && saved.subtitle ? saved.subtitle : tagline}" class="form-control"></div>
         <div class="form-group" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:8px;margin-top:4px;">
             <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 1 — Front Panel (Inside Flap)</div>
-            <textarea id="br-panel1" rows="2" class="form-control" placeholder="Welcome message, principal's address...">${saved && saved.panel1 ? saved.panel1 : 'Welcome to ${schoolName}. We are committed to academic excellence.'}</textarea>
+            <textarea id="br-panel1" rows="2" class="form-control" placeholder="Welcome message, principal's address...">${saved && saved.panel1 ? saved.panel1 : `Welcome to ${schoolName}. We are committed to academic excellence.`}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;">
-            <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 1 — Center Panel (Inside Middle)</div>
-            <textarea id="br-panel2" rows="2" class="form-control" placeholder="Programs, courses, mission...">${saved && saved.panel2 ? saved.panel2 : 'Programs: Theology, Biblical Studies, Ministry, Christian Education, Music & Worship.'}</textarea>
+            <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 1 — Center Panel (Inside Middle) — Programs from Registration</div>
+            <textarea id="br-panel2" rows="2" class="form-control" placeholder="Programs, courses, mission...">${saved && saved.panel2 ? saved.panel2 : `Programs: ${programsText}.`}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:8px;margin-top:4px;">
             <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 2 — Left Panel (Inside Right)</div>
@@ -11366,6 +11369,70 @@ async function saveBrochureDesign() {
     };
     await dbSet('settings', 'brochureDesign', d);
     showToast('Brochure design saved!');
+}
+
+async function loadBrochureUploadConfig() {
+    try {
+        const rec = await dbGet('settings', 'brochureUpload');
+        const config = (rec && rec.value) ? rec.value : rec;
+        if (!config) return;
+        const preview = document.getElementById('brochure-upload-preview');
+        if (preview && config.pdf) {
+            preview.textContent = 'Uploaded brochure ready';
+            preview.style.color = 'var(--success)';
+        }
+        const urlInput = document.getElementById('brochure-upload-url');
+        if (urlInput && config.url) urlInput.value = config.url;
+    } catch(e) {}
+}
+
+async function saveBrochureUpload() {
+    try {
+        const fileInput = document.getElementById('brochure-upload-file');
+        const urlInput = document.getElementById('brochure-upload-url');
+        const config = { updatedAt: new Date().toISOString(), updatedBy: (JSON.parse(sessionStorage.getItem('currentUser')||'{}').username||'') };
+        if (urlInput && urlInput.value.trim()) {
+            config.url = urlInput.value.trim();
+        }
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                config.pdf = e.target.result;
+                config.filename = file.name;
+                await dbSet('settings', 'brochureUpload', config);
+                showToast('Brochure uploaded/saved');
+                loadBrochureUploadConfig();
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+        await dbSet('settings', 'brochureUpload', config);
+        showToast('Brochure settings saved');
+        loadBrochureUploadConfig();
+    } catch(e) {
+        showToast('Error saving brochure: ' + e.message, { type: 'danger' });
+    }
+}
+
+function viewBrochure() {
+    dbGet('settings', 'brochureUpload').then(rec => {
+        const config = (rec && rec.value) ? rec.value : rec;
+        if (config && config.pdf) {
+            const w = window.open('', '_blank');
+            w.document.write('<html><head><title>Brochure</title></head><body style="margin:0;"><embed src="'+config.pdf+'" type="application/pdf" width="100%" height="100%"></embed></body></html>');
+            w.document.close();
+            return;
+        }
+        if (config && config.url) {
+            window.open(config.url, '_blank');
+            return;
+        }
+        showToast('No uploaded brochure found. Using system designer.', { type: 'info' });
+        try { showBrochureDesigner(); } catch(e){}
+    }).catch(() => {
+        try { showBrochureDesigner(); } catch(e){}
+    });
 }
 function previewBrochure() {
     const title = document.getElementById('br-title').value;
