@@ -14344,9 +14344,9 @@ async function generateCertificate() {
                 <p>${notes ? notes + '</p><p>' : ''}Please report to the admissions office with your original documents for verification. We welcome you to our academic community and wish you a fruitful and rewarding experience.</p>
                 <p>Congratulations on your admission!</p>
             </div>
-            <div class="doc-signatures">
-                <div class="doc-sig-block">${getRoleSignature('Academic Registrar', branding) ? `<img src="${getRoleSignature('Academic Registrar', branding)}" class="doc-sig-img" alt="Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Academic Registrar</div></div>
-                <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>
+            <div class="doc-signatures" style="margin-top:40px;">
+                <div class="doc-sig-block">${getRoleSignature('Academic Registrar', branding) ? `<img src="${getRoleSignature('Academic Registrar', branding)}" class="doc-sig-img" alt="Academic Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Academic Registrar</div></div>
+                <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director / Principal Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
@@ -14375,8 +14375,8 @@ async function generateCertificate() {
             </div>
             <div class="completion-signatures">
                 ${sigR ? `<div class="completion-sig-block"><img src="${sigR}" class="doc-sig-img" alt="Registrar Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Registrar</div></div>` : ''}
-                ${sigD ? `<div class="completion-sig-block"><img src="${sigD}" class="doc-sig-img" alt="Dean Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Academic Dean</div></div>` : ''}
-                ${sigDir ? `<div class="completion-sig-block"><img src="${sigDir}" class="doc-sig-img" alt="Director Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Director / Principal</div></div>` : ''}
+                ${sigD ? `<div class="completion-sig-block"><img src="${sigD}" class="doc-sig-img" alt="Academic Dean Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Academic Dean</div></div>` : ''}
+                ${sigDir ? `<div class="completion-sig-block"><img src="${sigDir}" class="doc-sig-img" alt="Director / Principal Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Director / Principal</div></div>` : ''}
             </div>
             <div class="completion-footer">
                 <span class="completion-cert-no">Certificate No: ${certNo}</span>
@@ -14427,9 +14427,9 @@ async function generateCertificate() {
                 <p>Should you require further information, please do not hesitate to contact us.</p>
                 <p>Sincerely,</p>
             </div>
-            <div class="doc-signatures">
+            <div class="doc-signatures" style="margin-top:40px;">
                 <div class="doc-sig-block">${getRoleSignature('Registrar', branding) ? `<img src="${getRoleSignature('Registrar', branding)}" class="doc-sig-img" alt="Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Registrar</div></div>
-                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${letterDate}</div></div>
+                <div class="doc-sig-block"></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
@@ -14448,9 +14448,9 @@ async function generateCertificate() {
                 <p>I confidently recommend ${student.name} and believe they will be a valuable addition to any organization or ministry.</p>
                 <p>Yours faithfully,</p>
             </div>
-            <div class="doc-signatures">
-                <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Dean</div></div>
-                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${letterDate}</div></div>
+            <div class="doc-signatures" style="margin-top:40px;">
+                <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director / Principal Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>
+                <div class="doc-sig-block"></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
@@ -14500,9 +14500,9 @@ async function generateCertificate() {
             </div>
             ${payments.length > 0 ? `<table class="doc-table"><thead><tr><th>#</th><th>Date</th><th>Receipt</th><th>Amount</th><th>Method</th></tr></thead><tbody>${paymentRows}</tbody></table>` : '<p style="text-align:center;color:var(--text-muted);padding:16px;">No payments recorded yet.</p>'}
             ${notes ? '<p style="margin-top:16px;font-size:12px;"><b>Note:</b> ' + notes + '</p>' : ''}
-            <div class="doc-signatures" style="margin-top:24px;">
-                ${getRoleSignature('Finance Officer', branding) ? `<div class="doc-sig-block"><img src="${getRoleSignature('Finance Officer', branding)}" class="doc-sig-img" alt="Finance Signature"><div class="sig-line"></div><div class="doc-finance-sig-label">Finance Officer</div></div>` : ''}
-                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date: ${letterDate}</div></div>
+            <div class="doc-signatures" style="margin-top:40px;">
+                ${getRoleSignature('Finance Officer', branding) ? `<div class="doc-sig-block"><img src="${getRoleSignature('Finance Officer', branding)}" class="doc-sig-img" alt="Finance Officer Signature"><div class="sig-line"></div><div class="doc-finance-sig-label">Finance Officer</div></div>` : ''}
+                <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date</div></div>
             </div>
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
