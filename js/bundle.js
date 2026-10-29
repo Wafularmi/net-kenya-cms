@@ -845,6 +845,12 @@ async function filterByRegion(arr, getCenterId) {
 }
 function getRoleSignature(title, branding) {
     if (!branding) return null;
+    // Respect signature preferences if enabled
+    try {
+        const prefs = branding.signaturePrefs || {};
+        // If preferences exist and are explicitly configured, we still return the image if present;
+        // callers can decide visibility, but better to also allow filtering by prefs
+    } catch (e) {}
     const map = {
         'Registrar': 'sig_registrar',
         'Academic Registrar': 'sig_registrar',
@@ -858,6 +864,50 @@ function getRoleSignature(title, branding) {
     };
     const key = map[title];
     return key && branding[key] ? branding[key] : null;
+}
+
+function shouldShowSignature(title, branding, docType) {
+    if (!branding) return true;
+    try {
+        const prefs = branding.signaturePrefs;
+        if (!prefs) return true;
+        const allowPrefs = branding.signaturePrefsEnabled;
+        if (allowPrefs === false) return true;
+        const map = {
+            'Registrar': 'registrar',
+            'Academic Registrar': 'registrar',
+            'Academic Dean': 'dean',
+            'Dean': 'dean',
+            'Director / Principal': 'director',
+            'Director': 'director',
+            'Principal': 'director',
+            'Finance Officer': 'finance',
+            'Finance': 'finance'
+        };
+        const role = map[title];
+        if (!role) return true;
+        const list = prefs[docType] || prefs[docType === 'fee-statement' ? 'feeStatement' : docType];
+        if (!Array.isArray(list)) return true;
+        return list.includes(role);
+    } catch (e) {
+        return true;
+    }
+}
+
+function getSealOrStampHtml(branding, position = 'bottom-right') {
+    if (!branding) return '';
+    const use = branding.useSealOrStamp || 'stamp';
+    const stamp = branding.college_stamp || branding.collegeStamp;
+    const seal = branding.schoolSeal || branding.officialSeal;
+    const parts = [];
+    if ((use === 'stamp' || use === 'both') && stamp) {
+        parts.push(`<img src="${stamp}" class="college-stamp-img" alt="College Rubber Stamp" style="max-width:90px;max-height:90px;opacity:0.95;">`);
+    }
+    if ((use === 'seal' || use === 'both') && seal) {
+        parts.push(`<img src="${seal}" class="school-seal-img" alt="School Seal" style="max-width:90px;max-height:90px;opacity:0.95;">`);
+    }
+    if (parts.length === 0) return '';
+    return `<div class="doc-seal-stamp" style="position:absolute;${position === 'bottom-right' ? 'bottom:40mm;right:20mm;' : position === 'bottom-left' ? 'bottom:40mm;left:20mm;' : position === 'bottom-center' ? 'bottom:40mm;left:50%;transform:translateX(-50%);' : 'bottom:40mm;right:20mm;'}display:flex;gap:10px;align-items:center;z-index:2;">${parts.join('')}</div>`;
 }
 function countWorkingDays(startDate, endDate) {
     const start = new Date(startDate);
@@ -14345,9 +14395,10 @@ async function generateCertificate() {
                 <p>Congratulations on your admission!</p>
             </div>
             <div class="doc-signatures" style="margin-top:40px;">
-                <div class="doc-sig-block">${getRoleSignature('Academic Registrar', branding) ? `<img src="${getRoleSignature('Academic Registrar', branding)}" class="doc-sig-img" alt="Academic Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Academic Registrar</div></div>
-                <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director / Principal Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>
+                ${shouldShowSignature('Academic Registrar', branding, 'admission') ? `<div class="doc-sig-block">${getRoleSignature('Academic Registrar', branding) ? `<img src="${getRoleSignature('Academic Registrar', branding)}" class="doc-sig-img" alt="Academic Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Academic Registrar</div></div>` : '<div class="doc-sig-block"></div>'}
+                ${shouldShowSignature('Director / Principal', branding, 'admission') ? `<div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director / Principal Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>` : '<div class="doc-sig-block"></div>'}
             </div>
+            ${getSealOrStampHtml(branding, 'bottom-right')}
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
     } else if (type === 'completion') {
@@ -14374,10 +14425,11 @@ async function generateCertificate() {
                 <p class="completion-text">In witness whereof, we have hereunto set our hands and affixed the official seal of the institution on this ${today}.</p>
             </div>
             <div class="completion-signatures">
-                ${sigR ? `<div class="completion-sig-block"><img src="${sigR}" class="doc-sig-img" alt="Registrar Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Registrar</div></div>` : ''}
-                ${sigD ? `<div class="completion-sig-block"><img src="${sigD}" class="doc-sig-img" alt="Academic Dean Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Academic Dean</div></div>` : ''}
-                ${sigDir ? `<div class="completion-sig-block"><img src="${sigDir}" class="doc-sig-img" alt="Director / Principal Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Director / Principal</div></div>` : ''}
+                ${shouldShowSignature('Registrar', branding, 'completion') && sigR ? `<div class="completion-sig-block"><img src="${sigR}" class="doc-sig-img" alt="Registrar Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Registrar</div></div>` : (shouldShowSignature('Registrar', branding, 'completion') ? `<div class="completion-sig-block"><div class="completion-sig-line"></div><div class="completion-sig-label">Registrar</div></div>` : '')}
+                ${shouldShowSignature('Academic Dean', branding, 'completion') && sigD ? `<div class="completion-sig-block"><img src="${sigD}" class="doc-sig-img" alt="Academic Dean Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Academic Dean</div></div>` : (shouldShowSignature('Academic Dean', branding, 'completion') ? `<div class="completion-sig-block"><div class="completion-sig-line"></div><div class="completion-sig-label">Academic Dean</div></div>` : '')}
+                ${shouldShowSignature('Director / Principal', branding, 'completion') && sigDir ? `<div class="completion-sig-block"><img src="${sigDir}" class="doc-sig-img" alt="Director / Principal Signature"><div class="completion-sig-line"></div><div class="completion-sig-label">Director / Principal</div></div>` : (shouldShowSignature('Director / Principal', branding, 'completion') ? `<div class="completion-sig-block"><div class="completion-sig-line"></div><div class="completion-sig-label">Director / Principal</div></div>` : '')}
             </div>
+            ${getSealOrStampHtml(branding, 'bottom-right')}
             <div class="completion-footer">
                 <span class="completion-cert-no">Certificate No: ${certNo}</span>
                 <span class="completion-date">Date Issued: ${today}</span>
@@ -14411,7 +14463,7 @@ async function generateCertificate() {
         await dbPut('certificates', cert);
         logAudit('generated', 'certificate', cert);
         renderDocumentHistory();
-        showToast(docTitle + ' generated for ' + student.name, { action: 'Print', actionFn: () => printCertificate(cert.id) });
+        showToast(docTitle + ' generated for ' + student.name, { action: 'Print/Download', actionFn: () => { try { printCertificate(cert.id); } catch(e){} setTimeout(() => { try { downloadCertificatePDF(cert.id); } catch(e){} }, 600); } });
         return;
     } else if (type === 'enrollment') {
         docTitle = 'Enrollment Letter';
@@ -14428,9 +14480,10 @@ async function generateCertificate() {
                 <p>Sincerely,</p>
             </div>
             <div class="doc-signatures" style="margin-top:40px;">
-                <div class="doc-sig-block">${getRoleSignature('Registrar', branding) ? `<img src="${getRoleSignature('Registrar', branding)}" class="doc-sig-img" alt="Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Registrar</div></div>
+                ${shouldShowSignature('Registrar', branding, 'enrollment') ? `<div class="doc-sig-block">${getRoleSignature('Registrar', branding) ? `<img src="${getRoleSignature('Registrar', branding)}" class="doc-sig-img" alt="Registrar Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Registrar</div></div>` : '<div class="doc-sig-block"></div>'}
                 <div class="doc-sig-block"></div>
             </div>
+            ${getSealOrStampHtml(branding, 'bottom-right')}
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
     } else if (type === 'recommendation') {
@@ -14449,9 +14502,10 @@ async function generateCertificate() {
                 <p>Yours faithfully,</p>
             </div>
             <div class="doc-signatures" style="margin-top:40px;">
-                <div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director / Principal Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>
+                ${shouldShowSignature('Director / Principal', branding, 'recommendation') ? `<div class="doc-sig-block">${getRoleSignature('Director / Principal', branding) ? `<img src="${getRoleSignature('Director / Principal', branding)}" class="doc-sig-img" alt="Director / Principal Signature">` : ''}<div class="sig-line"></div><div class="sig-label">Director / Principal</div></div>` : '<div class="doc-sig-block"></div>'}
                 <div class="doc-sig-block"></div>
             </div>
+            ${getSealOrStampHtml(branding, 'bottom-right')}
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
     } else if (type === 'transcript') {
@@ -14501,9 +14555,10 @@ async function generateCertificate() {
             ${payments.length > 0 ? `<table class="doc-table"><thead><tr><th>#</th><th>Date</th><th>Receipt</th><th>Amount</th><th>Method</th></tr></thead><tbody>${paymentRows}</tbody></table>` : '<p style="text-align:center;color:var(--text-muted);padding:16px;">No payments recorded yet.</p>'}
             ${notes ? '<p style="margin-top:16px;font-size:12px;"><b>Note:</b> ' + notes + '</p>' : ''}
             <div class="doc-signatures" style="margin-top:40px;">
-                ${getRoleSignature('Finance Officer', branding) ? `<div class="doc-sig-block"><img src="${getRoleSignature('Finance Officer', branding)}" class="doc-sig-img" alt="Finance Officer Signature"><div class="sig-line"></div><div class="doc-finance-sig-label">Finance Officer</div></div>` : ''}
+                ${shouldShowSignature('Finance Officer', branding, 'fee-statement') && getRoleSignature('Finance Officer', branding) ? `<div class="doc-sig-block"><img src="${getRoleSignature('Finance Officer', branding)}" class="doc-sig-img" alt="Finance Officer Signature"><div class="sig-line"></div><div class="doc-finance-sig-label">Finance Officer</div></div>` : (shouldShowSignature('Finance Officer', branding, 'fee-statement') ? `<div class="doc-sig-block"><div class="sig-line"></div><div class="doc-finance-sig-label">Finance Officer</div></div>` : '<div class="doc-sig-block"></div>')}
                 <div class="doc-sig-block"><div class="sig-line"></div><div class="sig-label">Date</div></div>
             </div>
+            ${getSealOrStampHtml(branding, 'bottom-right')}
             ${docFooter(vCode, docId)}
         ${a4PrintStyle}</div>`;
     }
@@ -14519,7 +14574,7 @@ async function generateCertificate() {
     }
     logAudit('generated', 'certificate', cert);
     renderDocumentHistory();
-    showToast(docTitle + ' generated for ' + student.name, { action: 'Print', actionFn: () => printCertificate(cert.id) });
+    showToast(docTitle + ' generated for ' + student.name, { action: 'Print/Download', actionFn: () => { try { printCertificate(cert.id); } catch(e){} setTimeout(() => { try { downloadCertificatePDF(cert.id); } catch(e){} }, 600); } });
     } catch (e) { console.error('generateCertificate error:', e); showToast('Error: ' + e.message, { type: 'danger' }); }
 }
 async function renderDocumentHistory() {
@@ -14536,7 +14591,7 @@ async function renderDocumentHistory() {
     certs.sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt)).forEach(c => {
         const date = new Date(c.generatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const studentName = c.studentName || studentMap[c.studentId] || 'Unknown';
-        html += `<tr><td>${date}</td><td>${typeIcons[c.type] || '📄'} ${typeLabels[c.type] || c.type}</td><td>${studentName}</td><td><button class="btn btn-sm btn-outline" onclick="viewCertificate('${c.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="printCertificate('${c.id}')">Print</button> <button class="btn btn-sm btn-success" onclick="sendDocWhatsApp('${c.id}')">WhatsApp</button> <button class="btn btn-sm" style="background:var(--danger);color:#fff;" onclick="deleteCertificate('${c.id}')">Delete</button></td></tr>`;
+        html += `<tr><td>${date}</td><td>${typeIcons[c.type] || '📄'} ${typeLabels[c.type] || c.type}</td><td>${studentName}</td><td><button class="btn btn-sm btn-outline" onclick="viewCertificate('${c.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="printCertificate('${c.id}')">Print</button> <button class="btn btn-sm btn-secondary" onclick="downloadCertificatePDF('${c.id}')">Download PDF</button> <button class="btn btn-sm btn-success" onclick="sendDocWhatsApp('${c.id}')">WhatsApp</button> <button class="btn btn-sm" style="background:var(--danger);color:#fff;" onclick="deleteCertificate('${c.id}')">Delete</button></td></tr>`;
     });
     html += '</tbody></table></div>';
     document.getElementById('certificates-list').innerHTML = html;
@@ -14818,6 +14873,49 @@ async function viewCertificate(certId) {
     }
     showModal(`${kind} — ${who}`, revokedBlock + metaBar + `<div style="max-height:68vh;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;">${cert.content || 'No content'}</div>`, `<button class="btn btn-outline" onclick="downloadCertificate('${cert.id}')">⬇️ Download</button><button class="btn btn-primary" onclick="printCertificate('${cert.id}')">🖨️ Print</button>`);
 }
+async function downloadCertificatePDF(certId) {
+    let content, certType, certRecord;
+    if (certId) {
+        const cert = await dbGet('certificates', certId);
+        content = cert ? cert.content : '';
+        certType = cert ? cert.type : '';
+        certRecord = cert;
+    } else {
+        content = document.querySelector('.modal-body') ? document.querySelector('.modal-body').innerHTML : '';
+    }
+    if (!content) return showToast('Nothing to download!');
+    if (certRecord && certContentIsPdf(certRecord)) {
+        const url = await resolvePdfBlobUrl(certRecord);
+        if (url) {
+            const a = document.createElement('a');
+            a.href = url;
+            const name = (certType || 'document').replace(/\s+/g, '_');
+            a.download = name + '_' + (certRecord.docId || certId || Date.now()) + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            return;
+        }
+    }
+    const el = document.createElement('div');
+    el.innerHTML = content;
+    el.style.background = '#fff';
+    document.body.appendChild(el);
+    try {
+        const opt = { margin: 0, filename: (certType || 'document').replace(/\s+/g, '_') + '_' + Date.now() + '.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'] } };
+        if (typeof html2pdf !== 'undefined') {
+            await html2pdf().set(opt).from(el).save();
+        } else {
+            showToast('PDF library not loaded');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('Error generating PDF');
+    } finally {
+        document.body.removeChild(el);
+    }
+}
+
 async function printCertificate(certId) {
     let content, certType, certRecord;
     if (certId) {
@@ -23213,9 +23311,25 @@ function handleStampUpload(event) {
     const reader = new FileReader();
     reader.onload = (e) => {
         const preview = document.getElementById('college-stamp-preview');
+        if (!preview) return;
         preview.src = e.target.result;
         preview.style.display = 'block';
-        preview.parentElement.querySelector('.sig-placeholder').style.display = 'none';
+        const placeholder = preview.parentElement.querySelector('.sig-placeholder');
+        if (placeholder) placeholder.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+}
+function handleSchoolSealUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const preview = document.getElementById('school-seal-preview');
+        if (!preview) return;
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+        const placeholder = preview.parentElement.querySelector('.sig-placeholder');
+        if (placeholder) placeholder.style.display = 'none';
     };
     reader.readAsDataURL(file);
 }
@@ -23232,10 +23346,29 @@ async function saveSignatures() {
     const stampPreview = document.getElementById('college-stamp-preview');
     if (stampPreview && stampPreview.src && stampPreview.style.display !== 'none') {
         branding['college_stamp'] = stampPreview.src;
+        branding.collegeStamp = stampPreview.src;
     }
+    // School seal
+    const sealPreview = document.getElementById('school-seal-preview');
+    if (sealPreview && sealPreview.src && sealPreview.style.display !== 'none') {
+        branding['schoolSeal'] = sealPreview.src;
+        branding.officialSeal = sealPreview.src;
+    }
+    const useSel = document.getElementById('seal-use-option');
+    if (useSel) branding.useSealOrStamp = useSel.value;
+    const prefsEnabled = document.getElementById('signature-prefs-enabled');
+    if (prefsEnabled) branding.signaturePrefsEnabled = !!prefsEnabled.checked;
+    const prefs = {};
+    document.querySelectorAll('.sig-pref').forEach(cb => {
+        const doc = cb.getAttribute('data-doc');
+        const role = cb.getAttribute('data-role');
+        if (!prefs[doc]) prefs[doc] = [];
+        if (cb.checked) prefs[doc].push(role);
+    });
+    branding.signaturePrefs = prefs;
     await dbPut('settings', branding);
     loadBranding();
-    showToast('Signatures & Stamp saved!');
+    showToast('Signatures, Seals & Preferences saved!');
     logAudit('updated', 'signatures', branding);
 }
 async function loadSignatures() {
@@ -23255,14 +23388,38 @@ async function loadSignatures() {
         }
     });
     // College stamp
-    if (branding.college_stamp) {
+    const stamp = branding.college_stamp || branding.collegeStamp;
+    if (stamp) {
         const preview = document.getElementById('college-stamp-preview');
         if (preview) {
-            preview.src = branding.college_stamp;
+            preview.src = stamp;
             preview.style.display = 'block';
             const placeholder = preview.parentElement.querySelector('.sig-placeholder');
             if (placeholder) placeholder.style.display = 'none';
         }
+    }
+    // School seal
+    const seal = branding.schoolSeal || branding.officialSeal;
+    if (seal) {
+        const preview = document.getElementById('school-seal-preview');
+        if (preview) {
+            preview.src = seal;
+            preview.style.display = 'block';
+            const placeholder = preview.parentElement.querySelector('.sig-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
+        }
+    }
+    const useSel = document.getElementById('seal-use-option');
+    if (useSel && branding.useSealOrStamp) useSel.value = branding.useSealOrStamp;
+    const prefsEnabled = document.getElementById('signature-prefs-enabled');
+    if (prefsEnabled && branding.signaturePrefsEnabled !== undefined) prefsEnabled.checked = !!branding.signaturePrefsEnabled;
+    if (branding.signaturePrefs) {
+        document.querySelectorAll('.sig-pref').forEach(cb => {
+            const doc = cb.getAttribute('data-doc');
+            const role = cb.getAttribute('data-role');
+            const list = branding.signaturePrefs[doc] || [];
+            cb.checked = Array.isArray(list) ? list.includes(role) : true;
+        });
     }
 }
 async function initSettings() {
