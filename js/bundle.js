@@ -366,16 +366,14 @@ async function hashPassword(password) {
 }
 const SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 function updateActivity() {
-    sessionStorage.setItem('lastActivity', Date.now());
+    // No-op: session expiry on inactivity/blur disabled
 }
 function isSessionExpired() {
-    const last = parseInt(sessionStorage.getItem('lastActivity'));
-    if (!last) return false;
-    return Date.now() - last > SESSION_TIMEOUT_MS;
+    return false;
 }
-document.addEventListener('click', updateActivity);
-document.addEventListener('keydown', updateActivity);
-document.addEventListener('mousemove', updateActivity);
+try { document.removeEventListener('click', updateActivity); } catch(e){}
+try { document.removeEventListener('keydown', updateActivity); } catch(e){}
+try { document.removeEventListener('mousemove', updateActivity); } catch(e){}
 function debounce(fn, ms) {
     let timer;
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
@@ -1871,79 +1869,10 @@ async function showApp(user) {
 }
 function initIdleSessionTimer() {
     try {
-        if (window.__idleSessionTimer) return;
-        const WARN_AFTER_MS = 10 * 60 * 1000;
-        const EXPIRE_AFTER_MS = 3 * 60 * 1000;
-        let lastActive = Date.now();
-        let warnActive = false;
-        let countdown = null;
-        let openedWindow = null;
-        function closeWarning() {
-            try { if (countdown) clearInterval(countdown); countdown = null; } catch {}
-            try { if (openedWindow) { openedWindow.remove(); openedWindow = null; } } catch {}
-            warnActive = false;
-        }
-        function renderWarning() {
-            if (warnActive) return;
-            warnActive = true;
-            const overlay = document.createElement('div');
-            overlay.id = 'session-idle-overlay';
-            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.72);z-index:999999;display:flex;align-items:center;justify-content:center;';
-            overlay.innerHTML = `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 25px 55px rgba(0,0,0,0.32);max-width:520px;width:92%;padding:24px;">
-                <h3 style="margin:0 0 10px;font-size:20px;">Session expiring soon</h3>
-                <p style="margin:0;color:#475569;line-height:1.5;">You have been inactive. The session will expire in <b id=\"idle-countdown\">3:00</b> unless you choose to stay signed in.</p>
-                <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:22px;">
-                  <button id=\"idle-stay-btn\" class=\"btn btn-primary\">Stay signed in</button>
-                  <button id=\"idle-logout-btn\" class=\"btn btn-outline\">Log out</button>
-                </div>
-            </div>`;
-            document.body.appendChild(overlay);
-            openedWindow = overlay;
-            let remaining = Math.round(EXPIRE_AFTER_MS / 1000);
-            const update = () => {
-                const el = document.getElementById('idle-countdown');
-                if (el) el.textContent = ' ' + Math.floor(remaining / 60) + ':' + String(remaining % 60).padStart(2, '0');
-                if (remaining <= 0) {
-                    closeWarning();
-                    try { logoutWithNotice('Your session expired because you were inactive. Please sign in again.'); } catch (e) { logout(); }
-                }
-                remaining--;
-            };
-            countdown = setInterval(update, 1000);
-            update();
-            document.getElementById('idle-stay-btn').onclick = async () => {
-                try {
-                    const res = await fetch('/api/session', { headers: getAuthHeaders() });
-                    if (res.ok) {
-                        const data = await res.json().catch(() => ({}));
-                        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-                        if (data && data.user) u.role = data.user.role || u.role;
-                        sessionStorage.setItem('currentUser', JSON.stringify(u));
-                        closeWarning();
-                        showToast('Session refreshed.', { type: 'success', duration: 2500 });
-                    } else {
-                        closeWarning();
-                        logoutWithNotice('Your session has expired. Please sign in again.');
-                    }
-                } catch (e) {
-                    showToast('Could not refresh session. Please try again or sign out.', { type: 'warning', duration: 5000 });
-                }
-            };
-            document.getElementById('idle-logout-btn').onclick = () => { closeWarning(); logout(); };
-        }
-        function scheduleWarning() {
-            if (window.__idleWarnTimer) clearTimeout(window.__idleWarnTimer);
-            window.__idleWarnTimer = setTimeout(() => {
-                if (!warnActive && Date.now() - lastActive >= WARN_AFTER_MS) renderWarning();
-            }, 30000);
-        }
-        function resetIdle() {
-            lastActive = Date.now();
-            if (!warnActive) scheduleWarning();
-        }
-        ['click','keydown','touchstart','mousemove','scroll'].forEach(evt => window.addEventListener(evt, () => { if (!warnActive) resetIdle(); }, { passive: true }));
-        scheduleWarning();
+        // Disabled: do not auto-logout on inactivity or screen focus loss.
+        // Sessions remain active until the user explicitly clicks the red Exit/Logout button.
         window.__idleSessionTimer = true;
+        return;
     } catch (e) { console.error('initIdleSessionTimer failed:', e); }
 }
 
