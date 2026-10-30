@@ -412,7 +412,7 @@ async function _hubLoadTabData(tab) {
     if (!studentHubCache) return;
     const needed = [];
     if (tab === 'overview' || !tab) { if (!studentHubCache.attendance) needed.push('attendance'); if (!studentHubCache.payments) needed.push('payments'); }
-    if (tab === 'exams') { if (!studentHubCache.retakeRequests) needed.push('retakeRequests'); if (!studentHubCache.seating) needed.push('seating'); }
+    if (tab === 'exams') { if (!studentHubCache.retakeRequests) needed.push('retakeRequests'); if (!studentHubCache.seating) needed.push('seating'); if (!studentHubCache.exams) needed.push('exams'); if (!studentHubCache.examRegistrations) needed.push('examRegistrations'); }
     if (tab === 'quizzes' || tab === 'overview' || !tab) { if (!studentHubCache.submissions) needed.push('submissions'); if (!studentHubCache.grades) needed.push('grades'); if (!studentHubCache.quizRegistrations) needed.push('quizRegistrations'); }
     if (!needed.length) return;
     const extra = await dbGetBatch(needed);
@@ -557,7 +557,7 @@ function _hubBuildComputed(data, me) {
     const today = new Date().toISOString().split('T')[0];
     const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today);
     const pastRegisteredExams = myRegisteredExams.filter(e => !!e.date && e.date < today);
-    const availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    let availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const missedDroppedIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'dropped').map(r => r.examId));
     // Drip: courses with incomplete drip lessons hide upcoming exam registration until lessons complete.
     const dripIncompleteCourseIds = new Set();
@@ -569,16 +569,26 @@ function _hubBuildComputed(data, me) {
             }
         });
     } catch {}
+    const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
+    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
+    // Exams filed in the quizzes store still belong on the Exams tab.
+    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false);
+    if (examTypedQuizzes.length && Array.isArray(availableExams)) {
+        examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || q.assessmentType || 'final' })); });
+    }
+    // Also include any exams from data.exams that might be missing from filtering
+    (data.exams || []).forEach(ex => {
+        if (ex.published === false) return;
+        if (!enrolledIds.has(ex.courseId)) return;
+        if (me.studyCenterId && ex.studyCenterId && ex.studyCenterId !== me.studyCenterId) return;
+        if (!availableExams.some(e => String(e.id) === String(ex.id)) && !examRegIds.has(ex.id)) {
+            availableExams.push(ex);
+        }
+    });
+    availableExams = availableExams.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today).map(e => (e._hubDripLocked = e.ungated !== true && dripIncompleteCourseIds.has(e.courseId), e));
     // A paper past its closing date is gone, not merely past.
     const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !missedDroppedIds.has(e.id));
-    const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
-    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
-    // Exams filed in the quizzes store still belong on the Exams tab.
-    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && enrolledIds.has(q.courseId));
-    if (examTypedQuizzes.length && typeof availableExams !== 'undefined' && Array.isArray(availableExams)) {
-        examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || 'final' })); });
-    }
     const allGrades = (data.grades || []).filter(g => allStudentIds.has(g.studentId));
     const allSubs = (data.submissions || []).filter(s => allStudentIds.has(s.studentId));
     const submittedQuizIds = new Set(allSubs.map(s => s.quizId));
@@ -3259,7 +3269,7 @@ let _hubPollInterval = null;
 let _hubTimestampInterval = null;
 let _hubLastUpdate = Date.now();
 let _hubRenderDebounce = null;
-const _hubRelevantStores = ['notes','lessons','courses','enrollments','exams','examRegistrations','quizzes','submissions','students','payments','attendance','grades','retakeRequests','meetings','events'];
+const _hubRelevantStores = ['notes','lessons','courses','enrollments','exams','examRegistrations','quizzes','submissions','students','payments','attendance','grades','retakeRequests','meetings','events','seating','courseCompletions','lessonCompletions','alumniEnrollments'];
 
 function _hubIsActive() {
     const el = document.getElementById('screen-student-hub');
