@@ -530,7 +530,7 @@ function _hubBuildComputed(data, me) {
     const enrolledIds = new Set(effectiveEnrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
     // Students with no enrolments still need to see available courses, exams and
     // quizzes for the whole published catalogue, so the Hub never shows all zeros.
-    const effectiveCourseIds = enrolledIds.size > 0 ? enrolledIds : new Set((data.courses || []).filter(c => c.published !== false).map(c => c.id));
+    if (enrolledIds.size === 0) (data.courses || []).filter(c => c.published !== false).forEach(c => enrolledIds.add(c.id));
     let myCourses = (data.courses || []).filter(c => enrolledIds.has(c.id));
     if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
     let availableCourses = (data.courses || []).filter(c => {
@@ -553,7 +553,7 @@ function _hubBuildComputed(data, me) {
     if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
     const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(r.studentId)).map(r => r.examId));
     const allCourseExams = (data.exams || []).filter(e =>
-        e.published !== false && effectiveCourseIds.has(e.courseId) &&
+        e.published !== false && enrolledIds.has(e.courseId) &&
         (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)
     );
     const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -573,9 +573,9 @@ function _hubBuildComputed(data, me) {
         });
     } catch {}
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
-    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && effectiveCourseIds.has(q.courseId) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
+    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     // Exams filed in the quizzes store still belong on the Exams tab.
-    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && effectiveCourseIds.has(q.courseId) && q.published !== false);
+    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false);
     if (examTypedQuizzes.length && Array.isArray(availableExams)) {
         examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || q.assessmentType || 'final' })); });
     }
@@ -623,8 +623,8 @@ function _hubBuildComputed(data, me) {
         });
     });
     allScores.sort((a, b) => (b.submission?.submittedAt || b.grade?.gradedAt || '').localeCompare(a.submission?.submittedAt || a.grade?.gradedAt || ''));
-    const myLessons = (data.lessons || []).filter(l => effectiveCourseIds.has(l.courseId) && (typeof lessonVisible === 'function' ? lessonVisible(l) : l.published !== false));
-    const myNotes = (data.notes || []).filter(n => effectiveCourseIds.has(n.courseId));
+    const myLessons = (data.lessons || []).filter(l => enrolledIds.has(l.courseId) && (typeof lessonVisible === 'function' ? lessonVisible(l) : l.published !== false));
+    const myNotes = (data.notes || []).filter(n => enrolledIds.has(n.courseId));
     const _courseName = cid => (data.courses || []).find(c => String(c.id) === String(cid))?.name || '';
     const todoItems = [
         // A newly published exam must reach the learner straight away, even
@@ -878,9 +878,9 @@ async function renderStudentHub() {
             const fb = await loadStudentHubData();
             const me = _hubFindStudent(fb.students || [], currentUser, fb.alumni || []);
             const enrolledIds = new Set((fb.enrollments || []).filter(e => e.studentId === (me?.id || '')).map(e => e.courseId));
-            const effectiveCourseIds = enrolledIds.size > 0 ? enrolledIds : new Set((fb.courses || []).filter(c => c.published !== false).map(c => c.id));
+            if (enrolledIds.size === 0) (fb.courses || []).filter(c => c.published !== false).forEach(c => enrolledIds.add(c.id));
             const examRegIds = new Set((fb.examRegistrations || []).filter(r => r.studentId === (me?.id || '')).map(r => r.examId));
-            const upcomingExams = (fb.exams || []).filter(e => e.published !== false && effectiveCourseIds.has(e.courseId) && (!me?.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
+            const upcomingExams = (fb.exams || []).filter(e => e.published !== false && enrolledIds.has(e.courseId) && (!me?.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
             const courses = (fb.courses || []);
             content.innerHTML = `
                 <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:24px;border-radius:12px;margin-bottom:16px;"><h2 style="margin:0 0 4px 0;">${me ? esc(me.name) : 'Student'}</h2><div style="font-size:13px;opacity:0.9;">${me ? esc(me.admissionNumber || '') : ''}</div></div>
