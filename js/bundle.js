@@ -2098,6 +2098,9 @@ async function reactivateUser(username) {
     delete user.lockedReason;
     delete user.warned1;
     delete user.warned2;
+    user.reactivatedAt = new Date().toISOString();
+    user.lastActivityAt = new Date().toISOString();
+    user.inactivityGraceUntil = Date.now() + 15 * 60 * 1000;
     await dbPut('users', user);
     const students = await dbGetAll('students');
     const student = students.find(s => s.id === user.studentId || s.id === username);
@@ -2106,8 +2109,8 @@ async function reactivateUser(username) {
         await dbPut('students', student);
     }
     renderUsers();
-    showToast(`Account ${username} reactivated!`);
-    logAudit('reactivated', 'user', { username });
+    showToast(`Account ${username} reactivated! 15 min grace period granted.`);
+    logAudit('reactivated', 'user', { username, reactivatedAt: user.reactivatedAt });
 }
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') login();
