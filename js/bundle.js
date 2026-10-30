@@ -615,8 +615,18 @@ function assessmentInStudentScope(rec, student, centers) {
 function canStudentAccessAssessment(rec, kind, ctx) {
     if (!rec || !ctx || !ctx.student) return false;
     if (rec.published === false) return false;
-    if (!ctx.courseIds || !ctx.courseIds.has(String(rec.courseId))) return false;
-    if (!assessmentInStudentScope(rec, ctx.student, ctx.centers || [])) return false;
+    // A student who is registered for an assessment (or has submitted/retaken it)
+    // must always see it, even if they are not formally enrolled in its course —
+    // registration is the authoritative signal of access.
+    const isRegistered = (ctx.examRegIds && ctx.examRegIds.has(String(rec.id))) ||
+        (ctx.quizRegIds && ctx.quizRegIds.has(String(rec.id))) ||
+        (ctx.submittedIds && ctx.submittedIds.has(String(rec.id))) ||
+        (ctx.retakeExamIds && ctx.retakeExamIds.has(String(rec.id)));
+    if (!isRegistered && (!ctx.courseIds || !ctx.courseIds.has(String(rec.courseId)))) return false;
+    if (!assessmentInStudentScope(rec, ctx.student, ctx.centers || [])) {
+        // Registered students keep access even if scope differs (admin registered them).
+        if (!isRegistered) return false;
+    }
     const id = String(rec.id);
     if (kind === 'exam') {
         if (!(rec.openWindow || (rec.date && rec.time))) return false;
@@ -3468,7 +3478,7 @@ async function adminRegisterStudentForExam(studentId) {
     const student = await dbGet('students', studentId);
     if (!student) return showToast('Student not found');
     const enrollments = await dbGetAll('enrollments');
-    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
     const exams = (await dbGetAll('exams')).filter(e => e.published !== false && enrolledCourseIds.has(e.courseId) && (!student.studyCenterId || !e.studyCenterId || e.studyCenterId === student.studyCenterId));
     const examRegs = await dbGetAll('examRegistrations');
     const registeredIds = new Set(examRegs.filter(r => r.studentId === studentId).map(r => r.examId));
@@ -3532,7 +3542,7 @@ async function adminEnrollStudentInQuiz(studentId) {
     const student = await dbGet('students', studentId);
     if (!student) return showToast('Student not found');
     const enrollments = await dbGetAll('enrollments');
-    const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+    const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
     const quizzes = (await dbGetAll('quizzes')).filter(q => q.published && enrolledCourseIds.has(q.courseId));
     const submissions = await dbGetAll('submissions');
     const submittedIds = new Set(submissions.filter(s => s.studentId === studentId).map(s => s.quizId));
@@ -6182,7 +6192,7 @@ async function renderExams(opts) {
         const students = await dbGetAll('students');
         const me = findStudentForCurrentUser(students, currentUser);
         const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
-        const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+        const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
         const myRegistrations = registrations.filter(r => String(r.studentId) === String(studentId));
         const myRetakeExamIds = new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => r.examId));
@@ -18592,7 +18602,7 @@ async function renderQuizzes() {
             dbGetAll('students'), dbGetAll('quizRegistrations'), dbGetAll('examRegistrations'),
             dbGetAll('retakeRequests').catch(() => []), getCenters()
         ]);
-        const enrolledCourseIds = new Set(enrollments.filter(e => e.studentId === studentId).map(e => e.courseId));
+        const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
         const publishedLessonIds = new Set(lessons.filter(lessonVisible).map(l => l.id));
         const availableQuizzes = quizzes.filter(q => enrolledCourseIds.has(q.courseId) && !inactiveCourseIds.has(q.courseId));
         const quizRegs = allQuizRegs.filter(r => String(r.studentId) === String(studentId));

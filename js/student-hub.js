@@ -265,7 +265,7 @@ async function hubCourseAccess(me, data) {
     const allowed = new Set();
     const locked = new Set();
     const reasons = {};
-    const enrolledIds = new Set((data.enrollments || []).filter(e => e.studentId === me.id).map(e => e.courseId));
+    const enrolledIds = new Set((data.enrollments || []).filter(e => String(e.studentId) === String(me.id)).map(e => e.courseId));
     (data.courses || []).forEach(c => {
         const st = statuses[c.id] || 'current';
         const lockState = locks[c.id] || 'auto';
@@ -533,7 +533,7 @@ function _hubBuildComputed(data, me) {
         me.id, me.admissionNumber, me.phone, me.email, alumniRecord.id, alumniRecord.studentId].filter(Boolean));
     const isAlumni = _hubIsAlumni(me, currentUser);
     const effectiveEnrollments = _hubEffectiveEnrollments(me, data);
-    const enrolledIds = new Set(effectiveEnrollments.filter(e => allStudentIds.has(e.studentId)).map(e => e.courseId));
+    const enrolledIds = new Set(effectiveEnrollments.filter(e => allStudentIds.has(String(e.studentId))).map(e => e.courseId));
     // Students with no enrolments still need to see available courses, exams and
     // quizzes for the whole published catalogue, so the Hub never shows all zeros.
     if (enrolledIds.size === 0) (data.courses || []).filter(c => c.published !== false).forEach(c => enrolledIds.add(c.id));
@@ -557,9 +557,9 @@ function _hubBuildComputed(data, me) {
         return true;
     });
     if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
-    const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(r.studentId)).map(r => r.examId));
+    const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(String(r.studentId))).map(r => r.examId));
     const allCourseExams = (data.exams || []).filter(e =>
-        e.published !== false && enrolledIds.has(e.courseId) &&
+        e.published !== false && (enrolledIds.has(e.courseId) || examRegIds.has(e.id)) &&
         (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)
     );
     const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -588,7 +588,7 @@ function _hubBuildComputed(data, me) {
     // Also include any exams from data.exams that might be missing from filtering
     (data.exams || []).forEach(ex => {
         if (ex.published === false) return;
-        if (!enrolledIds.has(ex.courseId)) return;
+        if (!enrolledIds.has(ex.courseId) && !examRegIds.has(ex.id)) return;
         if (me.studyCenterId && ex.studyCenterId && ex.studyCenterId !== me.studyCenterId) return;
         if (!availableExams.some(e => String(e.id) === String(ex.id)) && !examRegIds.has(ex.id)) {
             availableExams.push(ex);
@@ -884,9 +884,9 @@ async function renderStudentHub() {
         try {
             const fb = await loadStudentHubData();
             const me = _hubFindStudent(fb.students || [], currentUser, fb.alumni || []);
-            const enrolledIds = new Set((fb.enrollments || []).filter(e => e.studentId === (me?.id || '')).map(e => e.courseId));
+            const enrolledIds = new Set((fb.enrollments || []).filter(e => String(e.studentId) === String(me?.id || '')).map(e => e.courseId));
             if (enrolledIds.size === 0) (fb.courses || []).filter(c => c.published !== false).forEach(c => enrolledIds.add(c.id));
-            const examRegIds = new Set((fb.examRegistrations || []).filter(r => r.studentId === (me?.id || '')).map(r => r.examId));
+            const examRegIds = new Set((fb.examRegistrations || []).filter(r => String(r.studentId) === String(me?.id || '')).map(r => r.examId));
             const upcomingExams = (fb.exams || []).filter(e => e.published !== false && enrolledIds.has(e.courseId) && (!me?.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
             const courses = (fb.courses || []);
             content.innerHTML = `
@@ -947,15 +947,16 @@ async function switchHubTab(tab, btn) {
             lockedIds = access.locked || new Set();
             if (access.gated) {
                 const ok = access.allowed || new Set();
+                const regIds = (c.examRegIds instanceof Set) ? c.examRegIds : new Set(c.examRegIds || []);
                 rc = { ...c,
                     myLessons: (c.myLessons || []).filter(l => ok.has(l.courseId)),
                     myNotes: (c.myNotes || []).filter(n => ok.has(n.courseId)),
                     pendingQuizzes: (c.pendingQuizzes || []).filter(q => ok.has(q.courseId)),
                     completedQuizzes: (c.completedQuizzes || []).filter(q => ok.has(q.courseId)),
-                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId)),
-                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId)),
-                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId)),
-                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId))
+                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id)),
+                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id)),
+                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id)),
+                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id))
                 };
             }
         } catch {}
