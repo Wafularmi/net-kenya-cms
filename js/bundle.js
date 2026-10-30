@@ -11351,7 +11351,15 @@ async function showBrochureDesigner() {
     const saved = await dbGet('settings', 'brochureDesign');
     let programsList = [];
     try { programsList = await getProgramsList(); } catch(e){}
-    const programsText = programsList.length ? programsList.join(', ') : 'Theology, Biblical Studies, Ministry, Christian Education';
+    let programsText = '';
+    if (programsList.length) {
+        programsText = programsList.map(p => {
+            if (typeof p === 'string') return `• ${p} — Comprehensive biblical and practical ministry training`;
+            return `• ${p.name || p.title || p.program || ''}${p.duration ? ' (' + p.duration + ')' : ''}${p.description ? ' — ' + p.description : ' — Comprehensive biblical and practical ministry training'}`;
+        }).join('\n');
+    } else {
+        programsText = '• Diploma in Theology — Comprehensive biblical and practical ministry training\n• Certificate in Biblical Studies — Foundational scripture and doctrine\n• Diploma in Christian Education — Equipping teachers for Christian ministry\n• Certificate in Ministry — Practical ministry skills and leadership';
+    }
     const content = `${getPaletteStripHtml(palette, 'brochure-color')}
     <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:6px;padding:4px 0;">📄 A4 Landscape Trifold — 3 panels per side, 2 sides</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -11360,23 +11368,23 @@ async function showBrochureDesigner() {
         <div class="form-group" style="grid-column:1/-1;"><label>Cover Subtitle</label><input type="text" id="br-subtitle" value="${saved && saved.subtitle ? saved.subtitle : tagline}" class="form-control"></div>
         <div class="form-group" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:8px;margin-top:4px;">
             <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 1 — Front Panel (Inside Flap)</div>
-            <textarea id="br-panel1" rows="2" class="form-control" placeholder="Welcome message, principal's address...">${saved && saved.panel1 ? saved.panel1 : `Welcome to ${schoolName}. We are committed to academic excellence.`}</textarea>
+            <textarea id="br-panel1" rows="2" class="form-control" placeholder="Welcome message, principal's address...">${saved && saved.panel1 ? saved.panel1 : `Welcome to ${schoolName}. We are committed to academic excellence, spiritual growth, and preparing students for effective ministry and leadership.`}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;">
-            <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 1 — Center Panel (Inside Middle) — Programs from Registration</div>
-            <textarea id="br-panel2" rows="2" class="form-control" placeholder="Programs, courses, mission...">${saved && saved.panel2 ? saved.panel2 : `Programs: ${programsText}.`}</textarea>
+            <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 1 — Center Panel (Inside Middle) — Programs Offered</div>
+            <textarea id="br-panel2" rows="4" class="form-control" placeholder="Programs, courses, mission...">${saved && saved.panel2 ? saved.panel2 : programsText + '\n\nOur programs combine biblical foundation with practical ministry experience to equip students for service in the church and community.'}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:8px;margin-top:4px;">
             <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 2 — Left Panel (Inside Right)</div>
-            <textarea id="br-panel4" rows="2" class="form-control" placeholder="Additional info, achievements...">${saved && saved.panel4 ? saved.panel4 : 'Our graduates excel in ministry, education, and community leadership.'}</textarea>
+            <textarea id="br-panel4" rows="2" class="form-control" placeholder="Additional info, achievements...">${saved && saved.panel4 ? saved.panel4 : 'Our graduates excel in ministry, education, missions, and community leadership. We provide quality biblical education with affordable tuition and flexible learning options.'}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;">
             <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 2 — Center Panel (Contact & Info)</div>
-            <textarea id="br-panel5" rows="2" class="form-control" placeholder="Contact details, location...">${saved && saved.panel5 ? saved.panel5 : 'Phone: +254 XXX XXX XXX | Email: info@school.edu | Website: www.school.edu'}</textarea>
+            <textarea id="br-panel5" rows="2" class="form-control" placeholder="Contact details, location...">${saved && saved.panel5 ? saved.panel5 : (branding && branding.phone ? 'Phone: ' + branding.phone + ' | ' : 'Phone: +254 XXX XXX XXX | ') + (branding && branding.email ? 'Email: ' + branding.email + ' | ' : 'Email: info@school.edu | ') + (branding && branding.website ? 'Website: ' + branding.website : 'Website: www.netfoundation.ke') + '\nAdmissions Open | Apply Today'}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;">
             <div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Side 2 — Right Panel (Back Cover)</div>
-            <textarea id="br-panel6" rows="2" class="form-control" placeholder="Motto, scripture, closing...">${saved && saved.panel6 ? saved.panel6 : '"Train up a child in the way he should go..." — Proverbs 22:6'}</textarea>
+            <textarea id="br-panel6" rows="2" class="form-control" placeholder="Motto, scripture, closing...">${saved && saved.panel6 ? saved.panel6 : '"Train up a child in the way he should go; even when he is old he will not depart from it." — Proverbs 22:6 (ESV)'}</textarea>
         </div>
         <div class="form-group"><label>Accent Color</label><input type="color" id="brochure-color" value="${saved && saved.color ? saved.color : accent}" class="form-control" style="height:36px;padding:2px;"></div>
         <div class="form-group"><label>Side 1 Footer Text</label><input type="text" id="br-footer1" value="${saved && saved.footer1 ? saved.footer1 : 'Graduation Ceremony ' + new Date().getFullYear()}" class="form-control"></div>
@@ -11509,36 +11517,42 @@ function renderBrochureHtml(title, subtitle, year, panel1, panel2, panel4, panel
     const gold = '#d4a843';
     const panelStyle = (isCover) =>
         `width:99mm;height:210mm;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;${isCover ? '' : 'border-right:1px dashed ' + color + '44;'}`;
+    function formatText(text) {
+        if (!text) return '';
+        return text.replace(/\n/g, '<br>');
+    }
     function coverPanel() {
-        return `<div style="${panelStyle(true)};background:linear-gradient(160deg,${color},${color}dd);color:#fff;padding:14px 10px;text-align:center;justify-content:center;align-items:center;">
+        return `<div style="${panelStyle(true)};background:linear-gradient(160deg,${color},${color}dd);color:#fff;padding:14px 10px;text-align:center;justify-content:center;align-items:center;position:relative;">
             <div style="position:absolute;top:4px;left:4px;right:4px;height:40px;background:radial-gradient(ellipse at 50% 0,${gold}33,transparent 70%);"></div>
             <div style="font-size:22px;font-weight:900;letter-spacing:1px;text-shadow:0 1px 6px rgba(0,0,0,0.2);">${title}</div>
             <div style="margin:6px auto;width:50px;height:1px;background:${gold};"></div>
             <div style="font-size:10px;letter-spacing:1px;opacity:0.9;padding:0 4px;">${subtitle}</div>
-            <div style="margin-top:8px;font-size:8px;opacity:0.7;">✦ Graduation ${year} ✦</div>
+            <div style="margin-top:10px;font-size:9px;opacity:0.85;">NET FOUNDATION</div>
+            <div style="margin-top:6px;font-size:8px;opacity:0.7;">✦ Graduation ${year} ✦</div>
         </div>`;
     }
     function infoPanel(icon, heading, text) {
-        return `<div style="${panelStyle(false)};background:#fff;padding:12px 8px;justify-content:flex-start;">
+        return `<div style="${panelStyle(false)};background:#fff;padding:12px 8px;justify-content:flex-start;position:relative;">
             <div style="width:28px;height:28px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:6px;flex-shrink:0;">${icon}</div>
-            <div style="font-weight:700;color:${color};font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;flex-shrink:0;">${heading}</div>
-            <div style="font-size:8.5px;color:#475569;line-height:1.5;overflow:hidden;word-wrap:break-word;">${text}</div>
+            <div style="font-weight:700;color:${color};font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;flex-shrink:0;">${heading}</div>
+            <div style="font-size:8.2px;color:#475569;line-height:1.55;overflow:hidden;word-wrap:break-word;">${formatText(text)}</div>
         </div>`;
     }
     function backCoverPanel(text) {
-        return `<div style="${panelStyle(true)};background:${color};color:#fff;padding:14px 8px;text-align:center;justify-content:center;align-items:center;">
-            <div style="font-size:9px;line-height:1.5;opacity:0.9;font-style:italic;">${text}</div>
-            <div style="margin-top:6px;font-size:6px;opacity:0.5;">${title} — ${footer1}</div>
+        return `<div style="${panelStyle(true)};background:${color};color:#fff;padding:14px 8px;text-align:center;justify-content:center;align-items:center;position:relative;">
+            <div style="font-size:9px;line-height:1.55;opacity:0.92;font-style:italic;">${formatText(text)}</div>
+            <div style="margin-top:8px;font-size:6.5px;opacity:0.6;">${title} — ${footer1}</div>
+            <div style="position:absolute;bottom:6px;left:0;right:0;font-size:6px;opacity:0.5;">NET FOUNDATION</div>
         </div>`;
     }
     const side1 = `<div id="brochure-side1" style="display:flex;width:297mm;height:210mm;background:#fff;font-family:'Segoe UI',Arial,sans-serif;">
         ${infoPanel('✿', 'Welcome', panel1)}
-        ${infoPanel('◆', 'Programs', panel2)}
+        ${infoPanel('◆', 'Programs Offered', panel2)}
         ${coverPanel()}
     </div>`;
     const side2 = `<div id="brochure-side2" style="display:flex;width:297mm;height:210mm;background:#fff;font-family:'Segoe UI',Arial,sans-serif;">
-        ${infoPanel('✦', 'Highlights', panel4)}
-        ${infoPanel('✉', 'Contact', panel5)}
+        ${infoPanel('✦', 'Why Choose Us', panel4)}
+        ${infoPanel('✉', 'Contact & Admissions', panel5)}
         ${backCoverPanel(panel6)}
     </div>`;
     return { side1, side2 };
