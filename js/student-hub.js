@@ -209,6 +209,12 @@ async function hubContentGate() {
 async function hubCourseAccess(me, data) {
     const openAll = () => ({ gated: false, allowed: new Set((data.courses || []).map(c => c.id)), locked: new Set(), statuses: {} });
     if (!me || !data) return openAll();
+    // Unregistered students have no enrolment sequence to gate against, so they
+    // see the whole published catalogue (courses, exams, quizzes) like everyone
+    // else — never all zeros / never locked out.
+    const _hubLearnerIds = new Set([me.id, me.studentId, me.admissionNumber, me.phone, me.email, me.username].filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(String));
+    const _hubEnr = (data.enrollments || []).filter(e => _hubLearnerIds.has(String(e.studentId)));
+    if (!_hubEnr.length) return openAll();
     // Alumni access is per-course and already granted; the student sequence
     // gate belongs to the original programme and must not lock an alumnus out
     // of a course they are entitled to audit.
@@ -810,6 +816,7 @@ async function renderStudentHub() {
             (data.retakeRequests || []).filter(r => r.studentId === me.id).forEach(r => { _hubLastRetakeStatuses[r.id] = r.status; });
         }
         _hubRenderedTabs = {};
+        try { window._hubCourseAccess = null; } catch {}
         try { window._hubMpesaOn = await hubMpesaEnabled(); } catch { window._hubMpesaOn = false; }
         try {
             const prev = window._hubFeeLock;
