@@ -109,7 +109,7 @@ function _hubCacheKey() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         const id = u.studentId || u.username || u.id || 'anon';
-        return 'shub_cache_v3_' + id;
+        return 'shub_cache_v4_' + id;
     } catch (e) { return 'shub_cache_v3_anon'; }
 }
 
