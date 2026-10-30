@@ -92,17 +92,107 @@ function _hubIsAlumni(me, currentUser) {
         !!(currentUser && (currentUser.accountType === 'alumni' || currentUser.alumniId));
 }
 
-async function loadStudentHubData(force) {
-    if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000) return studentHubCache;
-    const core = ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
-    const batch = await dbGetBatch(core);
-    if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
-    studentHubCache = { ...batch, loadedAt: Date.now() };
-    // Lesson rollup index so course coverage matches the admin Coverage tab.
+let _hubLoadingPromise = null;
+
+function _hubIsSlowNetwork() {
     try {
-        if (typeof buildLessonCoverIndex === 'function') studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []);
+        const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (!conn) return false;
+        if (conn.saveData) return true;
+        const et = String(conn.effectiveType || '').toLowerCase();
+        if (et.includes('2g') || et.includes('slow-2g')) return true;
+        return false;
+    } catch (e) { return false; }
+}
+
+function _hubCacheKey() {
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const id = u.studentId || u.username || u.id || 'anon';
+        return 'shub_cache_v3_' + id;
+    } catch (e) { return 'shub_cache_v3_anon'; }
+}
+
+function _hubLoadFromLS() {
+    try {
+        const raw = localStorage.getItem(_hubCacheKey());
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.loadedAt) return null;
+        return parsed;
+    } catch (e) { return null; }
+}
+
+function _hubSaveToLS(data) {
+    try {
+        if (!data) return;
+        const slim = {
+            students: data.students,
+            courses: data.courses,
+            enrollments: data.enrollments,
+            alumniEnrollments: data.alumniEnrollments,
+            exams: data.exams,
+            examRegistrations: data.examRegistrations,
+            quizzes: data.quizzes,
+            lessons: data.lessons,
+            notes: data.notes,
+            quizRegistrations: data.quizRegistrations,
+            alumni: data.alumni,
+            courseCompletions: data.courseCompletions,
+            lessonCompletions: data.lessonCompletions,
+            meetings: data.meetings,
+            waivers: data.waivers,
+            events: data.events,
+            loadedAt: data.loadedAt
+        };
+        localStorage.setItem(_hubCacheKey(), JSON.stringify(slim));
     } catch (e) {}
-    return studentHubCache;
+}
+
+async function loadStudentHubData(force) {
+    const slow = _hubIsSlowNetwork();
+    const ttl = slow ? 600000 : 90000;
+    if (!force && studentHubCache && Date.now() - studentHubCache.loadedAt < ttl) return studentHubCache;
+    if (!force && !_hubLoadingPromise) {
+        const ls = _hubLoadFromLS();
+        if (ls && Date.now() - ls.loadedAt < ttl) {
+            studentHubCache = { ...studentHubCache, ...ls, loadedAt: ls.loadedAt };
+            if (!studentHubCache._lessonCoverIdx && typeof buildLessonCoverIndex === 'function') {
+                try { studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []); } catch (e) {}
+            }
+            _hubLoadingPromise = (async () => {
+                try {
+                    const core = slow 
+                        ? ['students','courses','enrollments','lessons','notes','courseCompletions','lessonCompletions']
+                        : ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
+                    const batch = await dbGetBatch(core);
+                    if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
+                    studentHubCache = { ...studentHubCache, ...batch, loadedAt: Date.now() };
+                    try { if (typeof buildLessonCoverIndex === 'function') studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []); } catch (e) {}
+                    _hubSaveToLS(studentHubCache);
+                } catch (e) {}
+                finally { _hubLoadingPromise = null; }
+            })();
+            return studentHubCache;
+        }
+    }
+    if (_hubLoadingPromise && !force) return _hubLoadingPromise;
+    _hubLoadingPromise = (async () => {
+        try {
+            const core = slow 
+                ? ['students','courses','enrollments','lessons','notes','courseCompletions','lessonCompletions']
+                : ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
+            const batch = await dbGetBatch(core);
+            if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
+            studentHubCache = { ...batch, loadedAt: Date.now() };
+            try { if (typeof buildLessonCoverIndex === 'function') studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []); } catch (e) {}
+            _hubSaveToLS(studentHubCache);
+            return studentHubCache;
+        } finally {
+            _hubLoadingPromise = null;
+        }
+    })();
+    return _hubLoadingPromise;
 }
 
 function invalidateStudentHubCache() { studentHubCache = null; _hubComputedCache = null; }
