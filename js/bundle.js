@@ -6405,7 +6405,7 @@ async function confirmApproveRetake(requestId) {
     const note = document.getElementById('supp-note').value.trim();
     if (!date || !time || !venue) return showToast('Date, time, and venue required', { type: 'danger' });
     const suppId = 'EXM-SUPP-' + Date.now();
-    const supplementary = { id: suppId, courseId: exam.courseId, studyCenterId: exam.studyCenterId, date, time, venue, invigilatorId: exam.invigilatorId || '', type: 'supplementary', duration: exam.duration || 180, passMark: exam.passMark || 50, totalMarks: exam.totalMarks || 100, questionIds: exam.questionIds || [], title: (exam.title || 'Exam') + ' — Supplementary', semester: exam.semester, published: true, linkedQuizId: exam.linkedQuizId || '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const supplementary = { id: suppId, courseId: exam.courseId, studyCenterId: exam.studyCenterId, studentId: request.studentId, date, time, venue, invigilatorId: exam.invigilatorId || '', type: 'supplementary', duration: exam.duration || 180, passMark: exam.passMark || 50, totalMarks: exam.totalMarks || 100, questionIds: exam.questionIds || [], title: (exam.title || 'Exam') + ' — Supplementary', semester: exam.semester, published: true, linkedQuizId: exam.linkedQuizId || '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     await dbPut('exams', supplementary);
     await dbPut('examRegistrations', { id: `EXREG-${suppId}-${request.studentId}`, examId: suppId, studentId: request.studentId, registeredAt: new Date().toISOString() });
     const allSeats = (await dbGetAll('seating')).filter(s => s.examId === suppId);
