@@ -576,8 +576,9 @@ function _hubBuildComputed(data, me) {
     });
     const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const today = new Date().toISOString().split('T')[0];
-    const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today);
-    const pastRegisteredExams = myRegisteredExams.filter(e => !!e.date && e.date < today);
+    const _examOpen = e => { try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); return !w || !w.closed; } catch { return true; } };
+    const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today || _examOpen(e));
+    const pastRegisteredExams = myRegisteredExams.filter(e => !!e.date && e.date < today && !_examOpen(e));
     let availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const missedDroppedIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'dropped').map(r => r.examId));
     // Drip: courses with incomplete drip lessons hide upcoming exam registration until lessons complete.
@@ -615,9 +616,12 @@ function _hubBuildComputed(data, me) {
         }
     });
     availableExams = availableExams.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today).map(e => (e._hubDripLocked = e.ungated !== true && dripIncompleteCourseIds.has(e.courseId), e));
+    // An exam is still "available" while its window is open, even if its
+    // scheduled date has passed — otherwise an ongoing exam wrongly lands in
+    // "Missed" and students can only request instead of register/take.
+    const upcomingAvailableExams = availableExams.filter(e => !e.date || e.date >= today || _examOpen(e)).map(e => (e._hubDripLocked = e.ungated !== true && dripIncompleteCourseIds.has(e.courseId), e));
     // A paper past its closing date is gone, not merely past.
-    const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !missedDroppedIds.has(e.id));
+    const pastAvailableExams = availableExams.filter(e => !!e.date && e.date < today && !_examOpen(e) && !missedDroppedIds.has(e.id));
     const allGrades = (data.grades || []).filter(g => allStudentIds.has(g.studentId));
     const allSubs = (data.submissions || []).filter(s => allStudentIds.has(s.studentId));
     const submittedQuizIds = new Set(allSubs.map(s => s.quizId));
