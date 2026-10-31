@@ -563,24 +563,16 @@ function _hubBuildComputed(data, me) {
     const allCourseExams = (data.exams || []).filter(e => {
         if (e.published === false) return false;
         if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-        // Be permissive - show if enrolled in course or registered or if course exists and student has access
-        if (enrolledIds.has(e.courseId) || examRegIds.has(e.id)) return true;
-        // An ongoing (still-open) exam must be visible to every student so those
-        // who have not yet sat it can register and take it, even if they are not
-        // formally enrolled in its course.
-        // Supplementary exams are student-specific; never auto-expose them to all.
-        if (String(e.type || '').toLowerCase() === 'supplementary') return false;
-        try {
-            const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null);
-            if (w && !w.closed && !w.notYetOpen) return true;
-        } catch {}
-        // Also show if student is enrolled in any course or is a student and course matches
-        if (enrolledIds.size === 0 && e.courseId) {
-            const c = (data.courses || []).find(cr => String(cr.id) === String(e.courseId));
-            if (c && c.published !== false) return true;
+        const exType = String(e.type || e.assessmentType || '').toLowerCase();
+        if (exType === 'supplementary') {
+            // Only show to students with approved supplementary
+            const myRetakeReqs = (data.retakeRequests || []).filter(r => allStudentIds.has(String(r.studentId)));
+            const suppOk = myRetakeReqs.some(r => r.status === 'approved' && String(r.supplementaryExamId) === String(e.id));
+            if (!suppOk) return false;
+            return true;
         }
-        if (enrolledIds.has(e.courseId)) return true;
-        return enrolledIds.size > 0 ? false : true;
+        // FORCE SHOW ALL EXAMS TO ALL STUDENTS
+        return true;
     });
     const myRegisteredExams = allCourseExams.filter(e => {
         if (!examRegIds.has(e.id)) return false;
@@ -610,9 +602,9 @@ function _hubBuildComputed(data, me) {
     const myRetakeRequestsAll = (data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId));
     const approvedSuppIds = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => String(r.supplementaryExamId)));
     const hasApprovedSuppForExam = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.examId).map(r => String(r.examId)));
-    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && q.published !== false && (enrolledIds.has(q.courseId) || enrolledIds.size === 0) && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
+    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     // Exams filed in the quizzes store still belong on the Exams tab.
-    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && q.published !== false && (enrolledIds.has(q.courseId) || enrolledIds.size === 0));
+    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && q.published !== false);
     if (examTypedQuizzes.length && Array.isArray(availableExams)) {
         examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || q.assessmentType || 'final' })); });
     }
