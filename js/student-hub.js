@@ -1659,7 +1659,11 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
     const examLinkedSubs = mySubmissions.filter(s => resolveExam(s));
     const examLinkedGrades = myGrades.filter(g => resolveExam(g));
     const approvedSuppIds = new Set(myRetakeRequests.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => r.supplementaryExamId));
-    const displayUpcomingReg = upcomingRegisteredExams.filter(e => !(e.type === 'supplementary' && approvedSuppIds.has(e.id)));
+    // Supplementary exams must remain visible to the targeted student. Only the
+    // original exam that an approved supplementary replaces is hidden from the
+    // "Upcoming Registered" list (its retake is settled).
+    const approvedOrigExamIds = new Set(myRetakeRequests.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => r.examId));
+    const displayUpcomingReg = upcomingRegisteredExams.filter(e => !approvedOrigExamIds.has(e.id));
     const pendingReqExamIds = new Set(myRetakeRequests.filter(r => r.status === 'pending').map(r => r.examId));
     const allRegistered = [...upcomingRegisteredExams, ...pastRegisteredExams];
     const passedCount = allRegistered.filter(e => { const s = mySubmissions.find(x => x.quizId === e.id || (e.linkedQuizId && x.quizId === e.linkedQuizId)); return s && s.status === 'pass'; }).length;
