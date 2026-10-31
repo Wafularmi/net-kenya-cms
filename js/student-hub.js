@@ -568,6 +568,8 @@ function _hubBuildComputed(data, me) {
         // An ongoing (still-open) exam must be visible to every student so those
         // who have not yet sat it can register and take it, even if they are not
         // formally enrolled in its course.
+        // Supplementary exams are student-specific; never auto-expose them to all.
+        if (String(e.type || '').toLowerCase() === 'supplementary') return false;
         try {
             const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null);
             if (w && !w.closed && !w.notYetOpen) return true;

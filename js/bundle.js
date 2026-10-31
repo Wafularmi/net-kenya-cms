@@ -642,7 +642,7 @@ function canStudentAccessAssessment(rec, kind, ctx) {
     // An exam that is currently open (within its window) is accessible to every
     // student so those who have not yet sat it can still take it.
     let isOpenNow = false;
-    if (kind === 'exam') { try { const w = assessmentWindow(rec); isOpenNow = !!w && !w.closed && !w.notYetOpen; } catch {} }
+    if (kind === 'exam' && String(rec.type || '').toLowerCase() !== 'supplementary') { try { const w = assessmentWindow(rec); isOpenNow = !!w && !w.closed && !w.notYetOpen; } catch {} }
     if (!isOpenNow && !isRegistered && (!ctx.courseIds || !ctx.courseIds.has(String(rec.courseId)))) return false;
     if (!isOpenNow && !assessmentInStudentScope(rec, ctx.student, ctx.centers || [])) {
         if (!isRegistered) return false;
