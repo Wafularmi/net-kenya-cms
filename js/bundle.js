@@ -23,7 +23,24 @@ function handleDeadSession() {
     try { sessionStorage.removeItem('currentUser'); } catch {}
     try { sessionStorage.removeItem('lastScreen'); } catch {}
     try { sessionStorage.setItem('loginNotice', 'Session expired — please sign in again.'); } catch {}
-    try { location.reload(); } catch {}
+    // Auto refresh on focus after logging out - refresh when page becomes visible
+    try {
+        const doRefresh = () => {
+            try { document.removeEventListener('visibilitychange', doRefresh); } catch {}
+            try { window.removeEventListener('focus', doRefresh); } catch {}
+            try { location.reload(); } catch {}
+        };
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                setTimeout(doRefresh, 100);
+            }
+        }, { once: true });
+        window.addEventListener('focus', doRefresh, { once: true });
+        // Also refresh immediately if already visible
+        if (document.visibilityState === 'visible') {
+            setTimeout(doRefresh, 200);
+        }
+    } catch {}
 }
 function noteAuthFailure(res) {
     try { if (res && res.status === 401 && storedToken()) handleDeadSession(); } catch {}
@@ -1924,11 +1941,28 @@ function logoutWithNotice(message) {
 
 function logout() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    logAudit('logout', 'user', { username: user.username });
+    try { logAudit('logout', 'user', { username: user.username }); } catch (e) {}
     sessionStorage.removeItem('currentUser');
     sessionStorage.removeItem('lastScreen');
     try { document.cookie = 'mt_bypass=; path=/; max-age=0; SameSite=Lax'; } catch (e) {}
-    location.reload();
+    if (window._logoutRefreshBound) {
+        try { location.reload(); } catch {}
+        return;
+    }
+    window._logoutRefreshBound = true;
+    try {
+        const doRefresh = () => {
+            try { document.removeEventListener('visibilitychange', doRefresh); } catch {}
+            try { window.removeEventListener('focus', doRefresh); } catch {}
+            try { location.reload(); } catch {}
+        };
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                setTimeout(doRefresh, 50);
+            }
+        }, { once: true });
+        window.addEventListener('focus', doRefresh, { once: true });
+    } catch {}
 }
 function buildNavigation(user) {
     const perms = getRolePermissions(user.role, user);
@@ -17342,7 +17376,7 @@ async function renderLessons() {
         const schedBadge = scheduled ? ' <span class="badge badge-info" style="font-size:9px;" title="Auto-publishes">⏳ ' + fmtPublishAt(l.publishAt) + '</span>' : '';
         const lmode = (l.releaseMode || (l.publishAt ? 'date' : 'immediate'));
         const modeBadge = lmode === 'drip' ? ' <span class="badge" style="font-size:9px;background:#e0e7ff;color:#3730a3;" title="Sequenced: unlocks per learner after the previous lesson + course pacing + fees">🔗 SEQUENCED</span>' : '';
-        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl ? ' <span style="font-size:13px;" title="Has video">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${l.videoUrl ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
+        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl || (Array.isArray(l.videos) && l.videos.length) ? ' <span style="font-size:13px;" title="Has video(s)">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${(l.videoUrl || (Array.isArray(l.videos) && l.videos.length)) ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No lessons yet. Click "+ Add Lesson" to create one.</td></tr>';
     courseSelect.addEventListener('change', renderLessons);
     document.getElementById('lesson-status-filter').addEventListener('change', renderLessons);
@@ -18213,6 +18247,9 @@ function questionSeqNumber(q) {
 }
 function orderQuestionsByBank(list) {
     return (list || []).slice().sort((a, b) => {
+        const af = Number(a && a.flowOrder) || 0;
+        const bf = Number(b && b.flowOrder) || 0;
+        if (af !== bf && (af !== 0 || bf !== 0)) return af - bf;
         const as = questionSeqNumber(a), bs = questionSeqNumber(b);
         if (as != null && bs != null && as !== bs) return as - bs;
         if (as != null && bs == null) return -1;
@@ -18363,7 +18400,8 @@ async function saveQuestion() {
     const id = editId || generateId('Q');
     const type = document.getElementById('q-type').value;
     const points = parseInt(document.getElementById('q-points').value) || 1;
-    const q = { id, courseId, lessonId: document.getElementById('q-lesson').value, type, question: questionEn || questionSw, questionEn, questionSw, points, seq: editId ? (Number((await dbGet('questionBank', id)).seq) || 0) || await nextQuestionSeq(courseId) : await nextQuestionSeq(courseId), createdAt: editId ? (await dbGet('questionBank', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const qFlowOrder = document.getElementById('q-flow-order') ? (parseInt(document.getElementById('q-flow-order').value) || 0) : 0;
+    const q = { id, courseId, lessonId: document.getElementById('q-lesson').value, type, question: questionEn || questionSw, questionEn, questionSw, points, seq: editId ? (Number((await dbGet('questionBank', id)).seq) || 0) || await nextQuestionSeq(courseId) : await nextQuestionSeq(courseId), flowOrder: qFlowOrder, createdAt: editId ? (await dbGet('questionBank', id)).createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
     if (type === 'mcq') {
         const optionsRaw = document.getElementById('q-options').value.trim();
         const options = optionsRaw.split('\n').map(o => o.trim()).filter(o => o);

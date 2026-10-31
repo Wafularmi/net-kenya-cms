@@ -2711,6 +2711,24 @@ async function previewMediaUpload() {
     window._mediaUploadData = dataUrl;
     if (btn) btn.disabled = false;
 }
+function hubLessonFlowOrder(lesson, data) {
+    try {
+        if (!lesson) return [];
+        const quizzes = (data.quizzes || []).filter(q => String(q.lessonId) === String(lesson.id) && q.published !== false).sort((a,b)=>{
+            const ao = Number(a.flowOrder)||0, bo = Number(b.flowOrder)||0;
+            if (ao!==bo && (ao!==0||bo!==0)) return ao-bo;
+            return String(a.title||'').localeCompare(String(b.title||''));
+        });
+        const items = [];
+        items.push({ type: 'notes', order: 0, title: 'Lesson Notes' });
+        const vids = (Array.isArray(lesson.videos) ? lesson.videos : []);
+        vids.forEach((v,i)=>{ items.push({ type: 'video', order: 1 + i, title: v.title || ('Video '+(i+1)), id: v.id }); });
+        if (!vids.length && lesson.videoUrl) items.push({ type: 'video', order: 1, title: 'Video 1' });
+        quizzes.forEach((q,qi)=>{ items.push({ type: 'quiz', order: 100 + (Number(q.flowOrder)||qi), title: q.title || 'Lesson Quiz', quizId: q.id }); });
+        items.sort((a,b)=>(a.order-b.order));
+        return items;
+    } catch(e){ return []; }
+}
 function clearMediaPreview() {
     try { document.getElementById('media-file').value = ''; } catch {}
     const p = document.getElementById('media-preview'); if (p) { p.style.display = 'none'; p.innerHTML = ''; }
