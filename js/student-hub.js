@@ -415,14 +415,16 @@ let _hubComputed = null;
 let _hubComputedCache = null;
 
 async function _hubLoadTabData(tab) {
+    if (!studentHubCache && typeof _hubData !== 'undefined' && _hubData) studentHubCache = _hubData;
     if (!studentHubCache) return;
     const needed = [];
     if (tab === 'overview' || !tab) { if (!studentHubCache.attendance) needed.push('attendance'); if (!studentHubCache.payments) needed.push('payments'); }
     if (tab === 'exams') { if (!studentHubCache.retakeRequests) needed.push('retakeRequests'); if (!studentHubCache.seating) needed.push('seating'); if (!studentHubCache.exams) needed.push('exams'); if (!studentHubCache.examRegistrations) needed.push('examRegistrations'); }
     if (tab === 'quizzes' || tab === 'overview' || !tab) { if (!studentHubCache.submissions) needed.push('submissions'); if (!studentHubCache.grades) needed.push('grades'); if (!studentHubCache.quizRegistrations) needed.push('quizRegistrations'); }
     if (!needed.length) return;
-    const extra = await dbGetBatch(needed);
-    Object.assign(studentHubCache, extra);
+    let extra = null;
+    try { extra = await dbGetBatch(needed); } catch (e) { extra = {}; }
+    if (extra && typeof extra === 'object') Object.assign(studentHubCache, extra);
 }
 
 function hubSkeleton() {
@@ -801,6 +803,7 @@ async function renderStudentHub() {
 
     try {
         const data = await loadStudentHubData();
+        if (!studentHubCache) studentHubCache = data;
         const me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
         if (!me) {
             console.warn('Profile not found debug:', { currentUser, studentsCount: (data.students||[]).length, alumniCount: (data.alumni||[]).length, studentIds: (data.students||[]).slice(0,3).map(s=>({id:s.id, adm:s.admissionNumber, phone:s.phone, email:s.email, name:s.name})) });
