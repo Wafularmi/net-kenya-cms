@@ -166,7 +166,7 @@ async function loadStudentHubData(force) {
                         ? ['students','courses','enrollments','lessons','notes','courseCompletions','lessonCompletions']
                         : ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
                     const batch = await dbGetBatch(core);
-                    if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
+                    if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests || batch.retakeRequests, seating: studentHubCache.seating || batch.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
                     studentHubCache = { ...studentHubCache, ...batch, loadedAt: Date.now() };
                     try { if (typeof buildLessonCoverIndex === 'function') studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []); } catch (e) {}
                     _hubSaveToLS(studentHubCache);
@@ -180,10 +180,10 @@ async function loadStudentHubData(force) {
     _hubLoadingPromise = (async () => {
         try {
             const core = slow 
-                ? ['students','courses','enrollments','lessons','notes','courseCompletions','lessonCompletions']
-                : ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events'];
+                ? ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','courseCompletions','lessonCompletions','meetings','waivers','events','retakeRequests','seating']
+                : ['students','courses','enrollments','alumniEnrollments','exams','examRegistrations','quizzes','lessons','notes','quizRegistrations','alumni','courseCompletions','lessonCompletions','meetings','waivers','events','retakeRequests','seating'];
             const batch = await dbGetBatch(core);
-            if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests, seating: studentHubCache.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
+            if (studentHubCache) Object.assign(batch, { attendance: studentHubCache.attendance, payments: studentHubCache.payments, retakeRequests: studentHubCache.retakeRequests || batch.retakeRequests, seating: studentHubCache.seating || batch.seating, submissions: studentHubCache.submissions, grades: studentHubCache.grades });
             studentHubCache = { ...batch, loadedAt: Date.now() };
             try { if (typeof buildLessonCoverIndex === 'function') studentHubCache._lessonCoverIdx = buildLessonCoverIndex(studentHubCache.lessons || [], studentHubCache.lessonCompletions || []); } catch (e) {}
             _hubSaveToLS(studentHubCache);
@@ -558,10 +558,20 @@ function _hubBuildComputed(data, me) {
     });
     if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
     const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(String(r.studentId))).map(r => r.examId));
-    const allCourseExams = (data.exams || []).filter(e =>
-        e.published !== false && (enrolledIds.has(e.courseId) || examRegIds.has(e.id)) &&
-        (!me.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)
-    );
+    const allCourseExams = (data.exams || []).filter(e => {
+        if (e.published === false) return false;
+        if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+        // Be permissive - show if enrolled in course or registered or if course exists and student has access
+        if (enrolledIds.has(e.courseId) || examRegIds.has(e.id)) return true;
+        // Also show if student is enrolled in any course or is a student and course matches
+        if (enrolledIds.size === 0 && e.courseId) {
+            // If no enrollments found but student exists, still show exams for their courses
+            const c = (data.courses || []).find(cr => String(cr.id) === String(e.courseId));
+            if (c && c.published !== false) return true;
+        }
+        if (enrolledIds.has(e.courseId)) return true;
+        return enrolledIds.size > 0 ? false : true;
+    });
     const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const today = new Date().toISOString().split('T')[0];
     const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today);
@@ -581,17 +591,25 @@ function _hubBuildComputed(data, me) {
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
     const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     // Exams filed in the quizzes store still belong on the Exams tab.
-    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false);
+    const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && q.published !== false && (enrolledIds.has(q.courseId) || enrolledIds.size === 0));
     if (examTypedQuizzes.length && Array.isArray(availableExams)) {
         examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || q.assessmentType || 'final' })); });
     }
     // Also include any exams from data.exams that might be missing from filtering
     (data.exams || []).forEach(ex => {
         if (ex.published === false) return;
-        if (!enrolledIds.has(ex.courseId) && !examRegIds.has(ex.id)) return;
         if (me.studyCenterId && ex.studyCenterId && ex.studyCenterId !== me.studyCenterId) return;
-        if (!availableExams.some(e => String(e.id) === String(ex.id)) && !examRegIds.has(ex.id)) {
-            availableExams.push(ex);
+        if (examRegIds.has(ex.id)) {
+            if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
+            return;
+        }
+        if (enrolledIds.has(ex.courseId)) {
+            if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
+            return;
+        }
+        // If no enrollments loaded, still show published exams
+        if (enrolledIds.size === 0) {
+            if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
         }
     });
     availableExams = availableExams.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
