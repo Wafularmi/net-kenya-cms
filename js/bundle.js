@@ -639,9 +639,12 @@ function canStudentAccessAssessment(rec, kind, ctx) {
         (ctx.quizRegIds && ctx.quizRegIds.has(String(rec.id))) ||
         (ctx.submittedIds && ctx.submittedIds.has(String(rec.id))) ||
         (ctx.retakeExamIds && ctx.retakeExamIds.has(String(rec.id)));
-    if (!isRegistered && (!ctx.courseIds || !ctx.courseIds.has(String(rec.courseId)))) return false;
-    if (!assessmentInStudentScope(rec, ctx.student, ctx.centers || [])) {
-        // Registered students keep access even if scope differs (admin registered them).
+    // An exam that is currently open (within its window) is accessible to every
+    // student so those who have not yet sat it can still take it.
+    let isOpenNow = false;
+    if (kind === 'exam') { try { const w = assessmentWindow(rec); isOpenNow = !!w && !w.closed && !w.notYetOpen; } catch {} }
+    if (!isOpenNow && !isRegistered && (!ctx.courseIds || !ctx.courseIds.has(String(rec.courseId)))) return false;
+    if (!isOpenNow && !assessmentInStudentScope(rec, ctx.student, ctx.centers || [])) {
         if (!isRegistered) return false;
     }
     const id = String(rec.id);

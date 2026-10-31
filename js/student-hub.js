@@ -565,9 +565,15 @@ function _hubBuildComputed(data, me) {
         if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
         // Be permissive - show if enrolled in course or registered or if course exists and student has access
         if (enrolledIds.has(e.courseId) || examRegIds.has(e.id)) return true;
+        // An ongoing (still-open) exam must be visible to every student so those
+        // who have not yet sat it can register and take it, even if they are not
+        // formally enrolled in its course.
+        try {
+            const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null);
+            if (w && !w.closed && !w.notYetOpen) return true;
+        } catch {}
         // Also show if student is enrolled in any course or is a student and course matches
         if (enrolledIds.size === 0 && e.courseId) {
-            // If no enrollments found but student exists, still show exams for their courses
             const c = (data.courses || []).find(cr => String(cr.id) === String(e.courseId));
             if (c && c.published !== false) return true;
         }
