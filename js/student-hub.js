@@ -582,7 +582,14 @@ function _hubBuildComputed(data, me) {
         if (enrolledIds.has(e.courseId)) return true;
         return enrolledIds.size > 0 ? false : true;
     });
-    const myRegisteredExams = allCourseExams.filter(e => examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const myRegisteredExams = allCourseExams.filter(e => {
+        if (!examRegIds.has(e.id)) return false;
+        const exType = String(e.type || e.assessmentType || '').toLowerCase();
+        if (exType === 'supplementary') {
+            return approvedSuppIds.has(String(e.id));
+        }
+        return true;
+    }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const today = new Date().toISOString().split('T')[0];
     const _examOpen = e => { try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); return !w || !w.closed; } catch { return true; } };
     const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today || _examOpen(e));
@@ -600,7 +607,10 @@ function _hubBuildComputed(data, me) {
         });
     } catch {}
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
-    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && enrolledIds.has(q.courseId) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
+    const myRetakeRequestsAll = (data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId));
+    const approvedSuppIds = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => String(r.supplementaryExamId)));
+    const hasApprovedSuppForExam = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.examId).map(r => String(r.examId)));
+    const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && q.published !== false && (enrolledIds.has(q.courseId) || enrolledIds.size === 0) && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     // Exams filed in the quizzes store still belong on the Exams tab.
     const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && q.published !== false && (enrolledIds.has(q.courseId) || enrolledIds.size === 0));
     if (examTypedQuizzes.length && Array.isArray(availableExams)) {
@@ -610,6 +620,11 @@ function _hubBuildComputed(data, me) {
     (data.exams || []).forEach(ex => {
         if (ex.published === false) return;
         if (me.studyCenterId && ex.studyCenterId && ex.studyCenterId !== me.studyCenterId) return;
+        const exType = String(ex.type || ex.assessmentType || '').toLowerCase();
+        if (exType === 'supplementary') {
+            // Only show supplementary to students who have approved retake request for it
+            if (!approvedSuppIds.has(String(ex.id))) return;
+        }
         if (examRegIds.has(ex.id)) {
             if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
             return;
@@ -618,10 +633,18 @@ function _hubBuildComputed(data, me) {
             if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
             return;
         }
-        // If no enrollments loaded, still show published exams
+        // If no enrollments loaded, still show published exams (non-supplementary)
         if (enrolledIds.size === 0) {
+            if (exType === 'supplementary') return;
             if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
         }
+    });
+    availableExams = availableExams.filter(e => {
+        const exType = String(e.type || e.assessmentType || '').toLowerCase();
+        if (exType === 'supplementary') {
+            return approvedSuppIds.has(String(e.id));
+        }
+        return true;
     });
     availableExams = availableExams.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     // An exam is still "available" while its window is open, even if its
@@ -667,15 +690,31 @@ function _hubBuildComputed(data, me) {
     const todoItems = [
         // A newly published exam must reach the learner straight away, even
         // before they register for it.
-        ...upcomingAvailableExams.map(e => ({ type: 'exam-new', id: e.id, title: e.title || 'New exam posted', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '', time: e.time || '', venue: e.venue || '' })),
-        ...upcomingRegisteredExams.map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '' })),
+        ...upcomingAvailableExams.filter(e => {
+            const exType = String(e.type || e.assessmentType || '').toLowerCase();
+            if (exType === 'supplementary') return approvedSuppIds.has(String(e.id));
+            return true;
+        }).map(e => ({ type: 'exam-new', id: e.id, title: e.title || 'New exam posted', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '', time: e.time || '', venue: e.venue || '' })),
+        ...upcomingRegisteredExams.filter(e => {
+            const exType = String(e.type || e.assessmentType || '').toLowerCase();
+            if (exType === 'supplementary') return approvedSuppIds.has(String(e.id));
+            return true;
+        }).map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '' })),
         ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: _courseName(q.courseId), date: q.dueDate || '' }))
     ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const _winOf = a => (typeof assessmentWindow === 'function' ? assessmentWindow(a) : { closesAt: '', closed: false, notYetOpen: false, opensAt: '' });
     const _stillVisible = e => !_winOf(e).closed;
-    const _openExams = upcomingRegisteredExams.filter(_stillVisible);
+    const _openExams = upcomingRegisteredExams.filter(_stillVisible).filter(e => {
+        const exType = String(e.type || e.assessmentType || '').toLowerCase();
+        if (exType === 'supplementary') return approvedSuppIds.has(String(e.id));
+        return true;
+    });
     const _closedExams = upcomingRegisteredExams.filter(e => !_stillVisible(e));
-    const myUpcomingExams = [..._openExams, ...upcomingAvailableExams.filter(e => _stillVisible(e) && !_openExams.some(r => String(r.id) === String(e.id)))];
+    const myUpcomingExams = [..._openExams, ...upcomingAvailableExams.filter(e => {
+        const exType = String(e.type || e.assessmentType || '').toLowerCase();
+        if (exType === 'supplementary') return approvedSuppIds.has(String(e.id));
+        return true;
+    }).filter(e => _stillVisible(e) && !_openExams.some(r => String(r.id) === String(e.id)))];
     return { me, data, studentId, isAlumni, effectiveEnrollments, enrolledIds, myCourses, availableCourses, examRegIds, myRegisteredExams, availableExams, myUpcomingExams, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, pendingQuizzes, completedQuizzes, allScores, myLessons, myNotes, todoItems };
 }
 
