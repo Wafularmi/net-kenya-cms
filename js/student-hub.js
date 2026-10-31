@@ -935,6 +935,7 @@ async function renderStudentHub() {
             <div id="hub-tab-live" style="display:none;"></div>
             <div id="hub-tab-discussions" style="display:none;"><div class="card"><p style="color:var(--text-muted);text-align:center;padding:40px;">Loading discussions...</p></div></div>
             <div id="hub-tab-media" style="display:none;"></div>
+            <div id="hub-tab-music" style="display:none;"></div>
         `;
         _hubRenderedTabs.overview = true;
 
@@ -1030,6 +1031,7 @@ async function switchHubTab(tab, btn) {
             else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(rc.me, rc.pendingQuizzes, rc.completedQuizzes, rc.data, rc.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
             else if (tab === 'notes') container.innerHTML = renderHubNotes(rc.me, rc.myCourses, rc.myLessons, rc.myNotes, rc.data);
             else if (tab === 'media') container.innerHTML = renderHubMedia(rc.me, studentHubCache || {});
+        else if (tab === 'music') { renderHubMusic(rc.me, rc.data || studentHubCache || {}); }
             else if (tab === 'live') container.innerHTML = renderHubLiveClasses(rc.me, rc.myCourses, rc.myLessons, (rc.data.meetings || studentHubCache.meetings || []));
             else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(rc.me, rc.data); return; }
         } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
@@ -3507,4 +3509,40 @@ if (typeof showModal === 'function') {
 if (typeof closeModal === 'function') {
     const _origCloseModal = closeModal;
     window.closeModal = function() { _hubModalOpen = false; return _origCloseModal.apply(this, arguments); };
+}
+
+
+async function renderHubMusic(me, data) {
+    const container = document.getElementById('hub-tab-music');
+    if (!container) return;
+    let regs = [];
+    let assigns = [];
+    let teachers = [];
+    let classes = [];
+    try {
+        const batch = await (typeof dbGetBatch==='function' ? dbGetBatch(['musicRegistrations','musicAssignments','musicTeachers','musicClasses']) : Promise.resolve({})).catch(()=>({}));
+        regs = batch.musicRegistrations || [];
+        assigns = batch.musicAssignments || [];
+        teachers = batch.musicTeachers || [];
+        classes = batch.musicClasses || [];
+    } catch(e){}
+    const sid = me && (me.id || me.admissionNumber);
+    const myRegs = (regs||[]).filter(r => r.studentId === sid || r.studentId === me?.id || r.studentId === me?.admissionNumber);
+    const myAssign = (assigns||[]).find(a => ((a.studentId === sid || a.studentId === me?.id || a.studentId === me?.admissionNumber)) && a.active);
+    const t = myAssign ? (teachers||[]).find(tt=>tt.id===myAssign.teacherId) : null;
+    const cc = myAssign ? (classes||[]).find(cl=>cl.id===myAssign.classId) : null;
+    let html = '<div style="margin-bottom:16px;"><h3 style="margin:0 0 8px 0;">🎸 Music Classes</h3><p style="color:var(--text-muted);margin:0;">Music is tied to the Music course. Students can only submit registration requests; Admin/Coordinator approves and designates. By default 1 class/teacher.</p></div>';
+    if (myAssign) {
+        html += '<div class="card"><div class="card-header"><h4>My Music Assignment</h4></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;"><div><div style="color:var(--text-muted);font-size:12px;">Status</div><div style="font-weight:600;color:var(--success);">Assigned</div></div><div><div style="color:var(--text-muted);font-size:12px;">Teacher</div><div>'+escapeHtml((t&&t.name)||myAssign.teacherId||'-')+'</div></div><div><div style="color:var(--text-muted);font-size:12px;">Class</div><div>'+escapeHtml((cc&&cc.name)||myAssign.classId||'-')+' '+((cc&&cc.subClass)?'('+cc.subClass+')':'')+'</div></div><div><div style="color:var(--text-muted);font-size:12px;">Assigned</div><div>'+(myAssign.assignedAt?new Date(myAssign.assignedAt).toLocaleDateString():'')+'</div></div></div></div></div>';
+    } else if (myRegs.find(r=>r.status==='pending')) {
+        html += '<div class="card"><div class="card-body" style="text-align:center;color:var(--text-muted);">Your music registration request is pending approval.</div></div>';
+    } else if (myRegs.find(r=>r.status==='approved')) {
+        html += '<div class="card"><div class="card-body" style="text-align:center;color:var(--text-muted);">Your registration was approved. Awaiting assignment by Admin/Coordinator.</div></div>';
+    } else if (myRegs.find(r=>r.status==='rejected')) {
+        html += '<div class="card"><div class="card-body" style="text-align:center;color:var(--danger);">Your registration was rejected.</div></div>';
+    } else {
+        html += '<div class="card"><div class="card-body" style="text-align:center;"><p style="color:var(--text-muted);margin-bottom:12px;">You have not submitted a music registration request yet.</p><button class="btn btn-primary" onclick="if(typeof submitMusicRegistration===\'function\'){submitMusicRegistration();try{showToast(\'Request submitted\');}catch(e){}setTimeout(()=>{try{if(typeof renderHubMusic===\'function\'){var mm=(typeof _hubGetMe===\'function\')?_hubGetMe():me; renderHubMusic(mm,(typeof _hubData!==\'undefined\')?_hubData:{});}}catch(e){}},900);}">Submit Music Registration Request</button></div></div>';
+    }
+    html += '<div class="card" style="margin-top:16px;"><div class="card-header"><h4>Music Course</h4></div><div class="card-body"><p style="color:var(--text-muted);">Music is tied to the Music course. Notes are readable like other courses; theory is downloadable where provided.</p></div></div>';
+    container.innerHTML = html;
 }

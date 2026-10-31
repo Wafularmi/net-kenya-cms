@@ -665,23 +665,26 @@ function getRoleColor(role) {
     const colors = { admin: 'danger', registrar: 'info', finance: 'success', lecturer: 'warning', student: 'info', librarian: 'success', coordinator: 'warning', assistant: 'info' };
     return colors[role] || 'info';
 }
-const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','lesson-pacing','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings','reports'];
+const ADMIN_TABS = ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','coordinator-mgmt','coordinator-manual','fee-gate','lesson-pacing','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','analytics','media','global-viewer','settings','verify','reprint','discussions','regions','coverage','compare','meetings','reports','music-classes'];
 function getRolePermissions(role, user) {
     if (role === 'coordinator' && user && user.country && !user.regionId) {
         const tabs = ADMIN_TABS.filter(t => t !== 'settings' && t !== 'compare');
         if (!tabs.includes('my-country')) tabs.push('my-country');
         ['coordinator-manual', 'fee-gate'].forEach(t => { if (!tabs.includes(t)) tabs.push(t); });
+        if (!tabs.includes('music-classes')) tabs.push('music-classes');
         return tabs;
     }
     const perms = {
         admin: ADMIN_TABS,
-        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports'],
+        registrar: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','graduation','hostel','library','alumni','certificates','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports','music-classes'],
         finance: ['dashboard','students','finance','hostel','portal','tickets','progress','settings','discussions','meetings','reports'],
-        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports'],
+        lecturer: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports','music-my-class'],
+        teacher: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','chapel','library','events','questions','quizzes','submissions','notes','portal','tickets','progress','discussions','meetings','reports','music-my-class'],
         student: ['student-hub','exams','library','tickets','discussions'],
         librarian: ['dashboard','library'],
-        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','lesson-pacing','meetings','reports'],
-        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings','reports']
+        coordinator: ['dashboard','students','attendance','grades','manuals','chapel','graduation','hostel','library','alumni','certificates','events','finance','portal','pending','tickets','progress','reprint','messages','discussions','coordinator-manual','fee-gate','lesson-pacing','meetings','reports','music-classes'],
+        assistant: ['dashboard','students','courses','lessons','attendance','grades','exams','manuals','staff','finance','communication','messages','sms','chapel','graduation','hostel','library','inventory','alumni','certificates','events','whatsapp','audit','idcards','questions','quizzes','submissions','notes','portal','pending','tickets','progress','settings','analytics','media','verify','reprint','discussions','regions','coverage','meetings','reports'],
+        music_teacher: ['dashboard','students','music-my-class','portal','tickets','discussions']
     };
     const base = perms[role] ? [...perms[role]] : [];
     if (role !== 'admin') { const gi = base.indexOf('global-viewer'); if (gi !== -1) base.splice(gi, 1); }
@@ -1974,6 +1977,7 @@ function buildNavigation(user) {
     const sections = [
         { label: 'Main', items: [{ id: 'dashboard', icon: '', text: 'Dashboard' }, { id: 'student-hub', icon: '', text: '🎓 My Hub' }, { id: 'portal', icon: '', text: 'Student Portal' }] },
         { label: 'Academic', items: [{ id: 'students', icon: '', text: 'Students' }, { id: 'courses', icon: '', text: 'Courses' }, { id: 'lessons', icon: '', text: 'Lessons' }, { id: 'attendance', icon: '', text: 'Attendance' }, { id: 'grades', icon: '', text: 'Grades' }, { id: 'exams', icon: '', text: 'Examinations' }, { id: 'manuals', icon: '', text: 'Manuals' }, { id: 'coordinator-manual', icon: '', text: '📘 Coordinator Manual' }, { id: 'chapel', icon: '', text: 'Chapel' }, { id: 'graduation', icon: '', text: 'Graduation' }, { id: 'discussions', icon: '', text: '💬 Discussions' }] },
+        { label: 'Music', items: [{ id: 'music-classes', icon: '', text: '🎸 Music Classes' }, { id: 'music-my-class', icon: '', text: '🎹 My Music Class' }] },
         { label: isStudent ? 'Assessments' : 'Assessments', items: [{ id: 'questions', icon: '', text: 'Question Bank' }, { id: 'quizzes', icon: '', text: isStudent ? 'Assessments' : 'Quiz & Exams' }, { id: 'submissions', icon: '', text: 'Results' }, { id: 'progress', icon: '', text: 'Progress' }] },
         { label: 'Administration', items: [{ id: 'staff', icon: '', text: 'Staff' }, { id: 'coordinator-mgmt', icon: '', text: '🤝 Coordinators' }, { id: 'finance', icon: '', text: 'Finance' }, { id: 'fee-gate', icon: '', text: '🔒 Fee Gate' }, { id: 'lesson-pacing', icon: '', text: '⏱ Lesson Pacing' }, { id: 'meetings', icon: '', text: '🏛 Boardroom & Hall' }, { id: 'hostel', icon: '', text: 'Hostel' }, { id: 'library', icon: '', text: 'Library' }, { id: 'inventory', icon: '', text: 'Inventory' }, { id: 'notes', icon: '', text: 'Study Notes' }, { id: 'regions', icon: '', text: '🗺 Regions' }, { id: 'my-country', icon: '', text: '🇺🇳 My Country' }, { id: 'compare', icon: '', text: '🌍 Compare Countries' }, { id: 'communication', icon: '', text: '📱 Communication Center' }, { id: 'messages', icon: '', text: '💬 Messages' }, { id: 'sms', icon: '', text: '📨 SMS' }] },
         { label: 'Other', items: [{ id: 'verify', icon: '', text: 'Verify Document' }, { id: 'reprint', icon: '', text: 'Reprint Document' }, { id: 'reports', icon: '', text: '📈 Reports' }, { id: 'pending', icon: '', text: 'Pending Registrations' }, { id: 'alumni', icon: '', text: 'Alumni' }, { id: 'certificates', icon: '', text: 'Certificates' }, { id: 'idcards', icon: '', text: 'ID Cards' }, { id: 'events', icon: '', text: 'Events' }, { id: 'whatsapp', icon: '', text: 'WhatsApp' }, { id: 'tickets', icon: '', text: 'Tickets' }, { id: 'audit', icon: '', text: 'Audit' }, { id: 'coverage', icon: '', text: '📊 Coverage' }, { id: 'analytics', icon: '', text: '📐 Analytics' }, { id: 'media', icon: '', text: '📸 Media' }, { id: 'global-viewer', icon: '', text: '🌐 Global Viewer' }, { id: 'settings', icon: '', text: 'Settings' }] }
@@ -1996,17 +2000,53 @@ function buildNavigation(user) {
 }
 async function updatePendingBadge() {
     try {
-        const badge = document.getElementById('pending-badge');
-        if (!badge) return;
-        const _pu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-        const perms = getRolePermissions(_pu.role, _pu);
-        if (!perms.includes('pending')) { badge.style.display = 'none'; return; }
-        const students = await dbGetAll('students');
-        const count = students.filter(s => s.status === 'pending').length;
-        badge.textContent = count;
-        badge.style.display = count > 0 ? 'inline' : 'none';
-    } catch {}
+        const token = (JSON.parse(sessionStorage.getItem('currentUser')||'{}').session_token || '');
+        let d = {};
+        if (token) {
+            try {
+                const res = await fetch('/api/pending-count', { headers: { 'Authorization': 'Bearer ' + token } });
+                if (res.ok) d = await res.json();
+            } catch(e){}
+        }
+        try {
+            const b2 = await dbGetBatch(['musicRegistrations']).catch(()=>({}));
+            const mpend = ((b2.musicRegistrations)||[]).filter(r=>r.status==='pending').length;
+            d.count = (d.count||0) + mpend;
+            const nav = document.getElementById('main-nav');
+            if (nav) {
+                let mb = nav.querySelector('.music-pending-badge');
+                const mlink = nav.querySelector('a[data-screen="music-classes"]');
+                if (mpend > 0) {
+                    if (!mb) {
+                        mb = document.createElement('span');
+                        mb.className = 'music-pending-badge';
+                        mb.style.cssText = 'background:#f59e0b;color:#000;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:8px;';
+                        if (mlink) mlink.appendChild(mb);
+                    }
+                    mb.textContent = mpend > 99 ? '99+' : String(mpend);
+                } else if (mb) {
+                    mb.remove();
+                }
+            }
+        } catch(e){}
+        const nav = document.getElementById('main-nav');
+        if (!nav) return;
+        let badge = nav.querySelector('.pending-badge');
+        if (d.count > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'pending-badge';
+                badge.style.cssText = 'background:#ef4444;color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:8px;';
+                const link = nav.querySelector('a[data-screen="pending"]');
+                if (link) { link.appendChild(badge); }
+            }
+            badge.textContent = d.count > 99 ? '99+' : String(d.count);
+        } else if (badge) {
+            badge.remove();
+        }
+    } catch(e) {}
 }
+
 async function checkAllAccountActivity() {
     const batch = await dbGetBatch(['users','students']);
     const users = batch.users, students = batch.students;
@@ -2440,6 +2480,8 @@ function showScreen(id) {
         case 'notes': renderNotes(); break;
         case 'portal': renderStudentPortal(); renderPortalNotes(); break;
         case 'pending': renderPendingRegistrations(); break;
+        case 'music-classes': if (typeof renderMusicClasses === 'function') renderMusicClasses(); break;
+        case 'music-my-class': if (typeof renderMusicMyClass === 'function') renderMusicMyClass(); break;
         case 'tickets': renderTickets(); break;
         case 'communication': loadCommunicationPage(); break;
         case 'messages': renderMessages(); break;
@@ -2447,7 +2489,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -28413,3 +28455,265 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('Failed to load diploma PDF config:', e);
     }
 });
+
+// ==================== MUSIC CLASSES ====================
+let _musicCache = { teachers: [], classes: [], assignments: [], registrations: [], settings: { allowMultipleClasses: false, autoEnrollInMusicCourse: true, allowSubClasses: true } };
+
+async function loadMusicData(force) {
+    try {
+        const batch = await dbGetBatch(['musicTeachers', 'musicClasses', 'musicAssignments', 'musicRegistrations', 'settings']);
+        if (batch.musicTeachers) _musicCache.teachers = batch.musicTeachers;
+        if (batch.musicClasses) _musicCache.classes = batch.musicClasses;
+        if (batch.musicAssignments) _musicCache.assignments = batch.musicAssignments;
+        if (batch.musicRegistrations) _musicCache.registrations = batch.musicRegistrations;
+        if (batch.settings) {
+            const ms = Array.isArray(batch.settings) ? batch.settings.find(s => s.key === 'music') : batch.settings.music;
+            if (ms && ms.value) _musicCache.settings = Object.assign(_musicCache.settings, ms.value);
+            else if (ms && !ms.value && typeof ms === 'object') _musicCache.settings = Object.assign(_musicCache.settings, ms);
+        }
+    } catch(e) {}
+}
+
+async function loadMusicSettings() {
+    try {
+        const s = await dbGet('settings', 'music');
+        if (s && s.value) _musicCache.settings = Object.assign(_musicCache.settings, s.value);
+        else if (s && typeof s === 'object' && !s.key) _musicCache.settings = Object.assign(_musicCache.settings, s);
+        const el = document.getElementById('music-allow-multi');
+        if (el) el.checked = !!_musicCache.settings.allowMultipleClasses;
+        const el2 = document.getElementById('music-auto-enroll');
+        if (el2) el2.checked = _musicCache.settings.autoEnrollInMusicCourse !== false;
+        const el3 = document.getElementById('music-allow-sub');
+        if (el3) el3.checked = _musicCache.settings.allowSubClasses !== false;
+        // inject settings card if missing
+        const grid = document.querySelector('#screen-settings .settings-grid') || document.querySelector('.settings-grid');
+        if (grid && !document.getElementById('music-settings-card')) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.id = 'music-settings-card';
+            card.innerHTML = `<h3>🎸 Music Settings</h3>
+                <div class="form-group"><label><input type="checkbox" id="music-allow-multi"> Allow students to belong to multiple classes/programs</label></div>
+                <div class="form-group"><label><input type="checkbox" id="music-auto-enroll"> Auto-enroll in Music course when assigned</label></div>
+                <div class="form-group"><label><input type="checkbox" id="music-allow-sub"> Allow sub-classes (Drums/Piano/Guitar/Vocals/Other)</label></div>
+                <button class="btn btn-primary" onclick="saveMusicSettings()">Save Music Settings</button>`;
+            grid.appendChild(card);
+            if (el) el.checked = !!_musicCache.settings.allowMultipleClasses;
+            if (el2) el2.checked = _musicCache.settings.autoEnrollInMusicCourse !== false;
+            if (el3) el3.checked = _musicCache.settings.allowSubClasses !== false;
+        }
+    } catch(e) {}
+}
+
+async function saveMusicSettings() {
+    try {
+        _musicCache.settings.allowMultipleClasses = !!document.getElementById('music-allow-multi')?.checked;
+        _musicCache.settings.autoEnrollInMusicCourse = !!document.getElementById('music-auto-enroll')?.checked;
+        _musicCache.settings.allowSubClasses = document.getElementById('music-allow-sub')?.checked !== false;
+        await dbPut('settings', { key: 'music', value: _musicCache.settings, updatedAt: new Date().toISOString() });
+        showToast('Music settings saved');
+    } catch(e) { showToast('Failed to save music settings', {type:'danger'}); }
+}
+
+function findMusicCourse() {
+    try {
+        const courses = JSON.parse(localStorage.getItem('nkcms_db_courses') || '[]');
+        return courses.find(c => /music/i.test(c.name || c.code || ''));
+    } catch(e) { return null; }
+}
+
+async function renderMusicClasses() {
+    await loadMusicData();
+    try { const b = await dbGetBatch(['musicTeachers','musicClasses','musicAssignments','musicRegistrations']); if(b){ if(b.musicTeachers)_musicCache.teachers=b.musicTeachers; if(b.musicClasses)_musicCache.classes=b.musicClasses; if(b.musicAssignments)_musicCache.assignments=b.musicAssignments; if(b.musicRegistrations)_musicCache.registrations=b.musicRegistrations; } } catch(e){}
+    const content = document.getElementById('music-classes-content') || document.getElementById('main-content');
+    if (!content) return;
+    const courses = await dbGetAll('courses').catch(()=>[]);
+    const musicCourse = courses.find(c => /music/i.test(c.name || c.code || '')) || { id: '', name: 'Music' };
+    const teachers = _musicCache.teachers;
+    const classes = _musicCache.classes;
+    const regs = (_musicCache.registrations||[]).filter(r => r.status === 'pending');
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    let html = `<div style="padding:20px;"><h2>🎸 Music Classes</h2>
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="openMusicTeacherModal()">+ Add Music Teacher</button>
+            <button class="btn btn-primary" onclick="openMusicClassModal()">+ Add Class</button>
+            <button class="btn btn-outline" onclick="openMusicAssignModal()">Assign Student</button>
+            <button class="btn btn-outline" onclick="openMusicMoveModal()">Move Student (pull from teacher)</button>
+            <button class="btn btn-outline" onclick="renderMusicClasses()">Refresh</button>
+        </div>
+        <div class="card" style="margin-bottom:16px;"><div class="card-header"><h3>Pending Registrations ${regs.length ? '('+regs.length+')' : ''}</h3></div><div class="card-body" style="overflow-x:auto;">
+            <table class="data-table"><thead><tr><th>Student</th><th>Contact</th><th>Requested</th><th>Action</th></tr></thead><tbody>
+            ${regs.length ? regs.map(r => `<tr><td>${escapeHtml(r.studentName||r.studentId)}</td><td>${escapeHtml(r.phone||'')}</td><td>${r.requestedAt?new Date(r.requestedAt).toLocaleString():''}</td><td><button class="btn btn-success btn-sm" onclick="approveMusicReg('${r.id}')">Approve & Assign</button> <button class="btn btn-outline btn-sm" onclick="rejectMusicReg('${r.id}')">Reject</button></td></tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);">No pending registrations</td></tr>'}
+            </tbody></table>
+        </div></div>
+        <div class="card" style="margin-bottom:16px;"><div class="card-header"><h3>Music Teachers</h3></div><div class="card-body" style="overflow-x:auto;">
+            <table class="data-table"><thead><tr><th>Name</th><th>Instrument/Specialty</th><th>Classes</th><th>Students</th></tr></thead><tbody>
+            ${(teachers||[]).map(t => {
+                const cls = (classes||[]).filter(c => c.teacherId === t.id);
+                const cnt = (_musicCache.assignments||[]).filter(a => a.teacherId === t.id && a.active).length;
+                return `<tr><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.specialty||t.instrument||'')}</td><td>${cls.length}</td><td>${cnt}</td></tr>`;
+            }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);">No teachers yet</td></tr>'}
+            </tbody></table>
+        </div></div>
+        <div class="card"><div class="card-header"><h3>Classes (Drums / Piano / Guitar / Vocals / Other)</h3></div><div class="card-body" style="overflow-x:auto;">
+            <table class="data-table"><thead><tr><th>Class</th><th>Sub-class</th><th>Teacher</th><th>Capacity</th><th>Students</th></tr></thead><tbody>
+            ${(classes||[]).map(c => {
+                const t = (teachers||[]).find(tt => tt.id === c.teacherId);
+                const cnt = (_musicCache.assignments||[]).filter(a => a.classId === c.id && a.active).length;
+                return `<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.subClass||c.instrument||'')}</td><td>${escapeHtml(t?.name||'')}</td><td>${c.capacity||'--'}</td><td>${cnt}</td></tr>`;
+            }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No classes yet</td></tr>'}
+            </tbody></table>
+        </div></div>
+    </div>`;
+    content.innerHTML = html;
+}
+
+async function renderMusicMyClass() {
+    await loadMusicData();
+    try { const b = await dbGetBatch(['musicTeachers','musicClasses','musicAssignments']); if(b){ if(b.musicTeachers)_musicCache.teachers=b.musicTeachers; if(b.musicClasses)_musicCache.classes=b.musicClasses; if(b.musicAssignments)_musicCache.assignments=b.musicAssignments; } } catch(e){}
+    const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const content = document.getElementById('music-my-class-content') || document.getElementById('main-content');
+    if (!content) return;
+    let teacher = (_musicCache.teachers||[]).find(t => t.userId === user.id || t.userId === user.username || t.id === user.musicTeacherId);
+    if (!teacher && user.role === 'music_teacher') {
+        teacher = { id: 'MT-'+user.id, userId: user.id, name: user.name || user.username };
+    }
+    if (!teacher) {
+        content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);">You are not assigned as a Music Teacher.</div>';
+        return;
+    }
+    const classes = (_musicCache.classes||[]).filter(c => c.teacherId === teacher.id);
+    const assignments = (_musicCache.assignments||[]).filter(a => a.teacherId === teacher.id && a.active);
+    const students = await dbGetAll('students').catch(()=>[]);
+    let html = `<div style="padding:20px;"><h2>🎹 My Music Class - ${escapeHtml(teacher.name)}</h2>
+        <div style="margin-bottom:12px;color:var(--text-muted);">Classes: ${classes.map(c=>c.name+' ('+(c.subClass||'General')+')').join(', ')||'None'}</div>
+        <div class="card"><div class="card-header"><h3>My Students (${assignments.length})</h3></div><div class="card-body" style="overflow-x:auto;">
+            <table class="data-table"><thead><tr><th>Student</th><th>Admission</th><th>Class</th><th>Sub-class</th><th>Phone</th><th>Assigned</th></tr></thead><tbody>
+            ${assignments.map(a => {
+                const s = (students||[]).find(st => st.id === a.studentId || st.admissionNumber === a.studentId);
+                const c = classes.find(cl => cl.id === a.classId);
+                return `<tr><td>${escapeHtml(s?.name||a.studentName||a.studentId)}</td><td>${escapeHtml(s?.admissionNumber||s?.id||'')}</td><td>${escapeHtml(c?.name||'')}</td><td>${escapeHtml(c?.subClass||c?.instrument||'')}</td><td>${escapeHtml(s?.phone||'')}</td><td>${a.assignedAt?new Date(a.assignedAt).toLocaleDateString():''}</td></tr>`;
+            }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No students assigned yet</td></tr>'}
+            </tbody></table>
+        </div></div>
+        <div style="margin-top:16px;padding:12px;background:var(--bg-input);border-radius:8px;font-size:12px;color:var(--text-muted);">Notes for Music are readable like other courses. Theory materials (downloadable) should be accessed via Courses/Notes. Students can only be pulled/moved between teachers/classes by Admin/Coordinator as configured.</div>
+    </div>`;
+    content.innerHTML = html;
+}
+
+function openMusicTeacherModal() {
+    const content = `<div class="form-group"><label>Teacher Name *</label><input type="text" id="mt-name"></div><div class="form-group"><label>Link to User (optional)</label><select id="mt-user"><option value="">--</option></select></div><div class="form-group"><label>Specialty/Instrument</label><input type="text" id="mt-spec" placeholder="e.g. Piano, Drums, Guitar"></div>`;
+    showModal('Add Music Teacher', content, `<button class="btn btn-primary" onclick="saveMusicTeacher()">Save</button>`);
+    dbGetAll('users').then(users => {
+        const sel = document.getElementById('mt-user');
+        if(sel) users.filter(u=>['lecturer','teacher','staff','music_teacher'].includes(u.role)).forEach(u=>{ const o=document.createElement('option'); o.value=u.id||u.username; o.textContent=u.name+' ('+u.role+')'; sel.appendChild(o); });
+    });
+}
+async function saveMusicTeacher() {
+    const name = document.getElementById('mt-name').value.trim();
+    if(!name) return showToast('Name required',{type:'warning'});
+    const t = { id: 'MT-'+Date.now(), name, userId: document.getElementById('mt-user').value||'', specialty: document.getElementById('mt-spec').value.trim(), createdAt: new Date().toISOString() };
+    await dbPut('musicTeachers', t);
+    _musicCache.teachers.push(t);
+    closeModal(); renderMusicClasses(); showToast('Teacher added');
+}
+
+function openMusicClassModal() {
+    const teachers = _musicCache.teachers;
+    const content = `<div class="form-group"><label>Class Name *</label><input type="text" id="mc-name" placeholder="e.g. Beginner Class"></div><div class="form-group"><label>Sub-class / Instrument</label><select id="mc-sub"><option value="">General</option><option value="Drums">Drums</option><option value="Piano">Piano</option><option value="Guitar">Guitar</option><option value="Vocals">Vocals</option><option value="Other">Other</option></select></div><div class="form-group"><label>Teacher *</label><select id="mc-teacher">${teachers.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div><div class="form-group"><label>Capacity</label><input type="number" id="mc-cap" min="0"></div>`;
+    showModal('Add Music Class', content, `<button class="btn btn-primary" onclick="saveMusicClass()">Save</button>`);
+}
+async function saveMusicClass() {
+    const name = document.getElementById('mc-name').value.trim();
+    const teacherId = document.getElementById('mc-teacher').value;
+    if(!name || !teacherId) return showToast('Name and teacher required',{type:'warning'});
+    const c = { id: 'MCLS-'+Date.now(), name, teacherId, subClass: document.getElementById('mc-sub').value, instrument: document.getElementById('mc-sub').value, capacity: parseInt(document.getElementById('mc-cap').value)||0, active: true, createdAt: new Date().toISOString() };
+    await dbPut('musicClasses', c);
+    _musicCache.classes.push(c);
+    closeModal(); renderMusicClasses(); showToast('Class added');
+}
+
+function openMusicAssignModal() {
+    const teachers = _musicCache.teachers;
+    const classes = _musicCache.classes;
+    const content = `<div class="form-group"><label>Student ID/Admission *</label><input type="text" id="ma-stu"></div><div class="form-group"><label>Teacher *</label><select id="ma-teach" onchange="updateMaClass()">${teachers.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div><div class="form-group"><label>Class *</label><select id="ma-class"></select></div>`;
+    showModal('Assign Student to Music Class', content, `<button class="btn btn-primary" onclick="saveMusicAssign()">Assign</button>`);
+    updateMaClass();
+}
+function updateMaClass() {
+    const tid = document.getElementById('ma-teach')?.value;
+    const sel = document.getElementById('ma-class');
+    if(!sel) return;
+    sel.innerHTML = _musicCache.classes.filter(c=>c.teacherId===tid).map(c=>`<option value="${c.id}">${c.name} (${c.subClass||'General'})</option>`).join('');
+}
+async function saveMusicAssign() {
+    const studentId = document.getElementById('ma-stu').value.trim();
+    const teacherId = document.getElementById('ma-teach').value;
+    const classId = document.getElementById('ma-class').value;
+    if(!studentId || !teacherId || !classId) return showToast('All fields required',{type:'warning'});
+    if(!_musicCache.settings.allowMultipleClasses) {
+        const existing = _musicCache.assignments.find(a => a.studentId===studentId && a.active);
+        if(existing) return showToast('Student already assigned to another class. Enable multiple classes in settings or move them.', {type:'warning'});
+    }
+    const a = { id: 'MASS-'+Date.now(), studentId, teacherId, classId, active: true, assignedBy: JSON.parse(sessionStorage.getItem('currentUser')||'{}').username, assignedAt: new Date().toISOString() };
+    await dbPut('musicAssignments', a);
+    _musicCache.assignments.push(a);
+    closeModal(); renderMusicClasses(); showToast('Student assigned');
+}
+
+function openMusicMoveModal() {
+    const teachers = _musicCache.teachers;
+    const content = `<div class="form-group"><label>Student ID/Admission *</label><input type="text" id="mm-stu"></div><div class="form-group"><label>Move To Teacher *</label><select id="mm-teach" onchange="updateMmClass()">${teachers.map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</select></div><div class="form-group"><label>Move To Class *</label><select id="mm-class"></select></div>`;
+    showModal('Move Student Between Teachers/Classes', content, `<button class="btn btn-warning" onclick="saveMusicMove()">Move</button>`);
+    updateMmClass();
+}
+function updateMmClass() {
+    const tid = document.getElementById('mm-teach')?.value;
+    const sel = document.getElementById('mm-class');
+    if(!sel) return;
+    sel.innerHTML = _musicCache.classes.filter(c=>c.teacherId===tid).map(c=>`<option value="${c.id}">${c.name} (${c.subClass||'General'})</option>`).join('');
+}
+async function saveMusicMove() {
+    const studentId = document.getElementById('mm-stu').value.trim();
+    const teacherId = document.getElementById('mm-teach').value;
+    const classId = document.getElementById('mm-class').value;
+    if(!studentId || !teacherId || !classId) return showToast('All fields required',{type:'warning'});
+    const existing = _musicCache.assignments.find(a => a.studentId===studentId && a.active);
+    if(existing) {
+        existing.active = false;
+        existing.endedAt = new Date().toISOString();
+        existing.movedAt = new Date().toISOString();
+        await dbPut('musicAssignments', existing);
+    }
+    const a = { id: 'MASS-'+Date.now(), studentId, teacherId, classId, active: true, assignedBy: JSON.parse(sessionStorage.getItem('currentUser')||'{}').username, assignedAt: new Date().toISOString(), movedFrom: existing?.id };
+    await dbPut('musicAssignments', a);
+    _musicCache.assignments.push(a);
+    closeModal(); renderMusicClasses(); showToast('Student moved');
+}
+
+async function approveMusicReg(id) {
+    const reg = _musicCache.registrations.find(r=>r.id===id);
+    if(!reg) return;
+    openMusicAssignModal();
+    setTimeout(()=>{ const el=document.getElementById('ma-stu'); if(el) el.value = reg.studentId; }, 100);
+    reg.status = 'approved';
+    reg.approvedAt = new Date().toISOString();
+    await dbPut('musicRegistrations', reg);
+}
+
+async function rejectMusicReg(id) {
+    const reg = _musicCache.registrations.find(r=>r.id===id);
+    if(!reg) return;
+    if(!await showConfirm('Reject', 'Reject this registration?')) return;
+    reg.status = 'rejected';
+    reg.rejectedAt = new Date().toISOString();
+    await dbPut('musicRegistrations', reg);
+    renderMusicClasses();
+    showToast('Registration rejected');
+}
+
+async function submitMusicRegistration() {
+    const user = JSON.parse(sessionStorage.getItem('currentUser')||'{}');
+    const reg = { id: 'MREG-'+Date.now(), studentId: user.studentId||user.id, studentName: user.name, phone: user.phone, status: 'pending', requestedAt: new Date().toISOString() };
+    await dbPut('musicRegistrations', reg);
+    showToast('Music registration request submitted. Awaiting admin approval.');
+}
