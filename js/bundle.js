@@ -28410,6 +28410,28 @@ window.renderLessons = async function () {
 };
 // ==================== End Virtual Classroom Module ====================
 
+// Auto-update: poll /api/version; if the server reports a new build, clear cached
+// data and reload so students/admins always run the latest code without a manual
+// hard-refresh.
+(function startVersionAutoUpdate() {
+    let initial = null;
+    async function check() {
+        try {
+            const r = await fetch('/api/version', { cache: 'no-store' });
+            if (!r.ok) return;
+            const d = await r.json();
+            if (!d || !d.version) return;
+            if (initial === null) { initial = d.version; return; }
+            if (d.version !== initial) {
+                try { localStorage.clear(); } catch (e) {}
+                try { sessionStorage.removeItem('studentHubCache'); } catch (e) {}
+                location.reload();
+            }
+        } catch (e) {}
+    }
+    check();
+    setInterval(check, 60000);
+})();
 // Live maintenance push: works even on the login screen (no session needed).
 // When the admin switches maintenance ON, non-admin pages reload into the
 // maintenance portal; when switched OFF, the maintenance page reloads back.

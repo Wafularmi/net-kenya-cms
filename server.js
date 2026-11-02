@@ -48,6 +48,9 @@ process.on('unhandledRejection', (reason) => { try { process.stderr.write('UNHAN
 process.stderr.write('SERVER_STARTING\n');
 
 const PORT = process.env.PORT || 3000;
+// Build version: changes on every server start (i.e. every deploy/restart), so
+// clients can detect a new deployment and auto-reload without a manual refresh.
+const BUILD_VERSION = process.env.BUILD_VERSION || ('build-' + Date.now());
 const HTTPS_PORT = parseInt(process.env.HTTPS_PORT) || 3443;
 const ROOT = __dirname;
 const DATA_ROOT = process.pkg ? path.dirname(process.execPath) : __dirname;
@@ -4363,6 +4366,12 @@ function handleAPI(req, res) {
     // GET /api/maintenance-status — public maintenance flag (login screen polling/SSE fallback)
     if (parts.length === 2 && parts[1] === 'maintenance-status' && req.method === 'GET') {
         return json(res, 200, { active: isMaintenanceActive() });
+    }
+    // GET /api/version — public build version (clients poll this to auto-reload on deploy)
+    if (parts.length === 2 && parts[1] === 'version' && req.method === 'GET') {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        return json(res, 200, { version: BUILD_VERSION });
     }
 
     // Country self-service (coordinator-only, scoped to their OWN country):
