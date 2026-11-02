@@ -583,7 +583,7 @@ function _hubBuildComputed(data, me) {
         return true;
     }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const today = new Date().toISOString().split('T')[0];
-    const _examOpen = e => { try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); return !w || !w.closed; } catch { return true; } };
+    const _examOpen = e => { if (e && e.openWindow === true) return true; try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); return !w || !w.closed; } catch { return true; } };
     const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today || _examOpen(e));
     const pastRegisteredExams = myRegisteredExams.filter(e => !!e.date && e.date < today && !_examOpen(e));
     let availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -695,7 +695,7 @@ function _hubBuildComputed(data, me) {
         ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: _courseName(q.courseId), date: q.dueDate || '' }))
     ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const _winOf = a => (typeof assessmentWindow === 'function' ? assessmentWindow(a) : { closesAt: '', closed: false, notYetOpen: false, opensAt: '' });
-    const _stillVisible = e => !_winOf(e).closed;
+    const _stillVisible = e => (e && e.openWindow === true) || !_winOf(e).closed;
     const _openExams = upcomingRegisteredExams.filter(_stillVisible).filter(e => {
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
         if (exType === 'supplementary') return approvedSuppIds.has(String(e.id));
@@ -1013,15 +1013,16 @@ async function switchHubTab(tab, btn) {
             if (access.gated) {
                 const ok = access.allowed || new Set();
                 const regIds = (c.examRegIds instanceof Set) ? c.examRegIds : new Set(c.examRegIds || []);
+                const _openNow = e => { try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); return !!w && !w.closed && !w.notYetOpen; } catch { return false; } };
                 rc = { ...c,
                     myLessons: (c.myLessons || []).filter(l => ok.has(l.courseId)),
                     myNotes: (c.myNotes || []).filter(n => ok.has(n.courseId)),
                     pendingQuizzes: (c.pendingQuizzes || []).filter(q => ok.has(q.courseId)),
                     completedQuizzes: (c.completedQuizzes || []).filter(q => ok.has(q.courseId)),
-                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id)),
-                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id)),
-                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id)),
-                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id))
+                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e)),
+                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e)),
+                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e)),
+                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e))
                 };
             }
         } catch {}

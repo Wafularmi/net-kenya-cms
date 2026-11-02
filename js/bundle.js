@@ -632,6 +632,10 @@ function assessmentInStudentScope(rec, student, centers) {
 function canStudentAccessAssessment(rec, kind, ctx) {
     if (!rec || !ctx || !ctx.student) return false;
     if (rec.published === false) return false;
+    // Open-ended exams are published to every student and can be sat any time
+    // until switched back to Draft — no enrollment/registration/scope gate.
+    // (Supplementary exams stay student-specific even when open-ended.)
+    if (rec.openWindow === true && String(rec.type || '').toLowerCase() !== 'supplementary') return true;
     // A student who is registered for an assessment (or has submitted/retaken it)
     // must always see it, even if they are not formally enrolled in its course —
     // registration is the authoritative signal of access.
@@ -6314,11 +6318,13 @@ async function renderExams(opts) {
             submittedIds: mySubmittedIds
         };
         const sorted = exams.filter(e => {
-            try {
-                const w = assessmentWindow(e);
-                if (w.closed) return false;
-                if (w.notYetOpen) return false;
-            } catch(e){}
+            if (!e.openWindow) {
+                try {
+                    const w = assessmentWindow(e);
+                    if (w.closed) return false;
+                    if (w.notYetOpen) return false;
+                } catch(e){}
+            }
             return !inactiveCourseIds.has(e.courseId) && semMatches(e) && canStudentAccessAssessment(e, 'exam', assessmentCtx);
         }).sort((a, b) => {
             const ad = a.date || '9999-12-31', bd = b.date || '9999-12-31';
