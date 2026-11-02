@@ -2445,7 +2445,23 @@ function showScreen(id) {
     try { trackAnalyticsEvent('page', id); } catch {}
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-    document.getElementById('screen-' + id).classList.add('active');
+    const scr = document.getElementById('screen-' + id);
+    if (scr) scr.classList.add('active');
+    else {
+        // Create a virtual screen container in main-content for custom screens
+        const main = document.getElementById('main-content');
+        if (main) {
+            let vs = document.getElementById('screen-' + id);
+            if (!vs) {
+                vs = document.createElement('section');
+                vs.id = 'screen-' + id;
+                vs.className = 'screen active';
+                main.appendChild(vs);
+            } else {
+                vs.classList.add('active');
+            }
+        }
+    }
     const tab = document.querySelector(`.nav-tab[data-screen="${id}"]`);
     if (tab) tab.classList.add('active');
     const sidebar = document.querySelector('.sidebar');
@@ -2480,8 +2496,20 @@ function showScreen(id) {
         case 'notes': renderNotes(); break;
         case 'portal': renderStudentPortal(); renderPortalNotes(); break;
         case 'pending': renderPendingRegistrations(); break;
-        case 'music-classes': if (typeof renderMusicClasses === 'function') renderMusicClasses(); break;
-        case 'music-my-class': if (typeof renderMusicMyClass === 'function') renderMusicMyClass(); break;
+        case 'music-classes': {
+            const main = document.getElementById('main-content');
+            let vs = document.getElementById('screen-music-classes');
+            if (!vs && main) { vs = document.createElement('section'); vs.id = 'screen-music-classes'; vs.className = 'screen active'; main.appendChild(vs); }
+            if (typeof renderMusicClasses === 'function') renderMusicClasses();
+            break;
+        }
+        case 'music-my-class': {
+            const main = document.getElementById('main-content');
+            let vs = document.getElementById('screen-music-my-class');
+            if (!vs && main) { vs = document.createElement('section'); vs.id = 'screen-music-my-class'; vs.className = 'screen active'; main.appendChild(vs); }
+            if (typeof renderMusicMyClass === 'function') renderMusicMyClass();
+            break;
+        }
         case 'tickets': renderTickets(); break;
         case 'communication': loadCommunicationPage(); break;
         case 'messages': renderMessages(); break;
@@ -28524,7 +28552,7 @@ function findMusicCourse() {
 async function renderMusicClasses() {
     await loadMusicData();
     try { const b = await dbGetBatch(['musicTeachers','musicClasses','musicAssignments','musicRegistrations']); if(b){ if(b.musicTeachers)_musicCache.teachers=b.musicTeachers; if(b.musicClasses)_musicCache.classes=b.musicClasses; if(b.musicAssignments)_musicCache.assignments=b.musicAssignments; if(b.musicRegistrations)_musicCache.registrations=b.musicRegistrations; } } catch(e){}
-    const content = document.getElementById('music-classes-content') || document.getElementById('main-content');
+    const content = document.getElementById('music-classes-content') || document.getElementById('screen-music-classes') || document.getElementById('main-content');
     if (!content) return;
     const courses = await dbGetAll('courses').catch(()=>[]);
     const musicCourse = courses.find(c => /music/i.test(c.name || c.code || '')) || { id: '', name: 'Music' };
@@ -28571,7 +28599,7 @@ async function renderMusicMyClass() {
     await loadMusicData();
     try { const b = await dbGetBatch(['musicTeachers','musicClasses','musicAssignments']); if(b){ if(b.musicTeachers)_musicCache.teachers=b.musicTeachers; if(b.musicClasses)_musicCache.classes=b.musicClasses; if(b.musicAssignments)_musicCache.assignments=b.musicAssignments; } } catch(e){}
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    const content = document.getElementById('music-my-class-content') || document.getElementById('main-content');
+    const content = document.getElementById('music-my-class-content') || document.getElementById('screen-music-my-class') || document.getElementById('main-content');
     if (!content) return;
     let teacher = (_musicCache.teachers||[]).find(t => t.userId === user.id || t.userId === user.username || t.id === user.musicTeacherId);
     if (!teacher && user.role === 'music_teacher') {
