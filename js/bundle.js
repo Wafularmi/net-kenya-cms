@@ -1010,43 +1010,57 @@ function _regionNameFromStudent(student) {
     if (regionId && window.__regionMap && window.__regionMap[regionId]) return window.__regionMap[regionId];
     return '';
 }
-function applyTemplateVars(message, student, schoolName, balance, admissionNumber, phone) {
+function applyTemplateVars(message, student, schoolName, balance, admissionNumber, phone, extra = {}) {
     const s = student || {};
     const admno = admissionNumber || s.admissionNumber || s.id || '';
     const centerObj = s.studyCenterId ? (_centerName(s.studyCenterId) || null) : null;
-    const centerName = centerObj ? centerObj.name : (s.studyCenterId ? 'Study Center' : 'Main Campus');
-    const centerCode = centerObj && centerObj.code ? centerObj.code : '';
-    const regionName = _regionNameFromStudent(s);
+    const centerName = extra.centerName || (centerObj ? (typeof centerObj === 'object' ? centerObj.name : centerObj) : (s.studyCenterId ? 'Study Center' : 'Main Campus'));
+    const centerCode = extra.centerCode || (centerObj && typeof centerObj === 'object' && centerObj.code ? centerObj.code : '');
+    const regionName = extra.regionName || _regionNameFromStudent(s);
     const requested = s.registrationRequestedAt ? new Date(s.registrationRequestedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : (s.enrollDate ? new Date(s.enrollDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
-    const fee = typeof s.feeAmount === 'number' ? formatCurrency(s.feeAmount) : '0';
+    const fee = typeof s.feeAmount === 'number' ? formatCurrency(s.feeAmount) : (extra.fee || '0');
     const login = phone || s.phone || '';
-    const portal = 'www.nefoundation.ke';
+    const portal = extra.portal || 'www.nefoundation.ke';
+    let courseName = extra.courseName || extra.course || '';
+    if (!courseName && extra.courseObj && extra.courseObj.name) courseName = extra.courseObj.name;
+    if (!courseName && s.course) courseName = s.course;
+    let examTitle = extra.examTitle || extra.event || extra.title || extra.exam || '';
+    if (!examTitle && extra.examObj) examTitle = extra.examObj.title || extra.examObj.name || '';
+    const examDate = extra.examDate || extra.date || (extra.examObj ? formatDate(extra.examObj.date) : '');
+    const examTime = extra.examTime || extra.time || (extra.examObj ? (extra.examObj.time || '') : '');
+    const examVenue = extra.examVenue || extra.venue || (extra.examObj ? (extra.examObj.venue || '') : '');
+    const examType = extra.examType || (extra.examObj && extra.examObj.type ? (extra.examObj.type.charAt(0).toUpperCase() + extra.examObj.type.slice(1)) : (extra.type || ''));
+    const minPass = extra.minPass || (extra.examObj && extra.examObj.passMark ? String(extra.examObj.passMark) : (extra.min || '75'));
     return message
-        .replace(/{{name}}/g, s.name)
-        .replace(/{{school}}/g, schoolName)
-        .replace(/{{program}}/g, s.program || 'program')
-        .replace(/{{balance}}/g, balance !== undefined ? formatCurrency(balance) : '0')
+        .replace(/{{name}}/g, s.name || extra.name || '')
+        .replace(/{{school}}/g, schoolName || extra.schoolName || '')
+        .replace(/{{program}}/g, s.program || extra.program || 'program')
+        .replace(/{{balance}}/g, balance !== undefined && balance !== null ? formatCurrency(balance) : (extra.balance || '0'))
         .replace(/{{admissionNumber}}/g, admno)
         .replace(/{{admission}}/g, admno)
         .replace(/{{phone}}/g, login)
         .replace(/{{username}}/g, login)
         .replace(/{{login}}/g, login)
         .replace(/{{password}}/g, admno)
-        .replace(/{{email}}/g, s.email || '')
-        .replace(/{{year}}/g, s.year || '1')
+        .replace(/{{email}}/g, s.email || extra.email || '')
+        .replace(/{{year}}/g, s.year || extra.year || '1')
         .replace(/{{region}}/g, regionName)
         .replace(/{{center}}/g, centerName)
         .replace(/{{centerCode}}/g, centerCode)
         .replace(/{{requested}}/g, requested)
         .replace(/{{fee}}/g, fee)
         .replace(/{{portal}}/g, portal)
-        .replace(/{{type}}/g, '')
-        .replace(/{{event}}/g, '')
-        .replace(/{{course}}/g, '')
-        .replace(/{{date}}/g, '')
-        .replace(/{{time}}/g, '')
-        .replace(/{{venue}}/g, '')
-        .replace(/{{min}}/g, '75');
+        .replace(/{{type}}/g, examType)
+        .replace(/{{event}}/g, examTitle || courseName || '')
+        .replace(/{{exam}}/g, examTitle || courseName || '')
+        .replace(/{{examTitle}}/g, examTitle || courseName || '')
+        .replace(/{{course}}/g, courseName || examTitle || '')
+        .replace(/{{courseTitle}}/g, courseName || examTitle || '')
+        .replace(/{{courseName}}/g, courseName || examTitle || '')
+        .replace(/{{date}}/g, examDate || '')
+        .replace(/{{time}}/g, examTime || '')
+        .replace(/{{venue}}/g, examVenue || '')
+        .replace(/{{min}}/g, minPass);
 }
 async function sha256(str) {
     // crypto.subtle only exists in a secure context (https) and is missing on
@@ -16330,16 +16344,23 @@ async function runCloudBroadcast(targets, template, message, schoolName, label) 
 async function loadCommunicationPage() {
     const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (u.role !== 'admin') return showToast('Admin only.', { type: 'danger' });
-    const [students, centers, programs, templates] = await Promise.all([
+    const [students, centers, programs, templates, exams, courses] = await Promise.all([
         dbGetAll('students'),
         getCenters(),
         getProgramsList(),
-        dbGetAll('whatsappTemplates')
+        dbGetAll('whatsappTemplates'),
+        dbGetAll('exams').catch(() => []),
+        dbGetAll('courses').catch(() => [])
     ]);
     const activeStudents = students.filter(s => s.status === 'active' && s.phone);
     const centerOptions = centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.code})</option>`).join('');
     const programOptions = programs.map(p => `<option value="${p}">${escapeHtml(p)}</option>`).join('');
     const templateOptions = templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    const examOptions = (exams || []).filter(e => e.published !== false).sort((a,b)=> (b.date||'').localeCompare(a.date||'')).map(e => {
+        const course = (courses||[]).find(c=>c.id===e.courseId);
+        const label = `${e.title || (course?course.name:e.courseId||'Exam')} ${e.date?(' - '+formatDate(e.date)):(e.time?' - '+e.time:'')}${course?(' ['+course.name+']'):''}`;
+        return `<option value="${escapeHtml(e.id)}" data-course-id="${escapeHtml(e.courseId||'')}" data-course-name="${escapeHtml(course?course.name:'')}" data-exam-title="${escapeHtml(e.title||course?course.name:'')}">${escapeHtml(label)}</option>`;
+    }).join('');
     document.getElementById('communication-content').innerHTML = `
         <div class="page-header">
             <h2>📱 Communication Center</h2>
@@ -16359,6 +16380,10 @@ async function loadCommunicationPage() {
                 <div class="form-group" style="flex:1;min-width:180px;">
                     <label>Course</label>
                     <select id="comm-course" class="form-control"><option value="">All Courses</option></select>
+                </div>
+                <div class="form-group" style="flex:1;min-width:220px;">
+                    <label>Scheduled Exam (auto-fill title/course)</label>
+                    <select id="comm-exam" class="form-control" onchange="onCommExamChange()"><option value="">None</option>${examOptions}</select>
                 </div>
                 <div class="form-group" style="flex:1;min-width:200px;">
                     <label>Search</label>

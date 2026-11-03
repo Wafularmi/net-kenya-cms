@@ -565,12 +565,13 @@ function _hubBuildComputed(data, me) {
         if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
         if (exType === 'supplementary') {
-            // Only show to students with approved supplementary
             const myRetakeReqs = (data.retakeRequests || []).filter(r => allStudentIds.has(String(r.studentId)));
-            const suppOk = myRetakeReqs.some(r => r.status === 'approved' && String(r.supplementaryExamId) === String(e.id));
+            const suppOk = myRetakeReqs.some(r => r.status === 'approved' && (String(r.supplementaryExamId) === String(e.id) || String(r.examId) === String(e.id)));
             if (!suppOk) return false;
+            if (!(e.openWindow || (e.date && e.time))) return false;
             return true;
         }
+        if (!(e.openWindow || (e.date && e.time))) return false;
         // FORCE SHOW ALL EXAMS TO ALL STUDENTS
         return true;
     });
