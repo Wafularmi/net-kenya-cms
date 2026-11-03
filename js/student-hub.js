@@ -969,7 +969,26 @@ async function renderStudentHub() {
             const enrolledIds = new Set((fb.enrollments || []).filter(e => String(e.studentId) === String(me?.id || '')).map(e => e.courseId));
             if (enrolledIds.size === 0) (fb.courses || []).filter(c => c.published !== false).forEach(c => enrolledIds.add(c.id));
             const examRegIds = new Set((fb.examRegistrations || []).filter(r => String(r.studentId) === String(me?.id || '')).map(r => r.examId));
-            const upcomingExams = (fb.exams || []).filter(e => e.published !== false && enrolledIds.has(e.courseId) && (!me?.studyCenterId || !e.studyCenterId || e.studyCenterId === me.studyCenterId)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
+            const upcomingExams = (fb.exams || []).filter(e => {
+                if (!e || e.published === false) return false;
+                const exType = String(e.type || e.assessmentType || '').toLowerCase();
+                if (exType === 'supplementary') {
+                    const appr = new Set((fb.retakeRequests||[]).filter(r => allStudentIds.has(String(r.studentId)) && r.status === 'approved').map(r => String(r.supplementaryExamId) || String(r.examId)));
+                    if (!appr.has(String(e.id))) return false;
+                } else {
+                    if (e.openWindow || (e.date && e.time)) {
+                        if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                        return true;
+                    }
+                    if (enrolledIds.has(e.courseId)) {
+                        if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                        return true;
+                    }
+                    return false;
+                }
+                if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                return true;
+            }).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
             const courses = (fb.courses || []);
             content.innerHTML = `
                 <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:24px;border-radius:12px;margin-bottom:16px;"><h2 style="margin:0 0 4px 0;">${me ? esc(me.name) : 'Student'}</h2><div style="font-size:13px;opacity:0.9;">${me ? esc(me.admissionNumber || '') : ''}</div></div>
