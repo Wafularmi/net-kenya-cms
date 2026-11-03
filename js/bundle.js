@@ -2198,14 +2198,24 @@ async function registerStudent() {
 async function reactivateUser(username) {
     const user = await dbGet('users', username);
     if (!user) return;
+    // Reactivation fully restores the account to its pre-lock state: active,
+    // with the inactivity timer reset so it is never re-locked by the
+    // background checker, and all grace/lock flags cleared.
     user.status = 'active';
     delete user.lockedAt;
     delete user.lockedReason;
     delete user.warned1;
     delete user.warned2;
+    delete user.inactivityGraceUntil;
     user.reactivatedAt = new Date().toISOString();
     user.lastActivityAt = new Date().toISOString();
-    user.inactivityGraceUntil = Date.now() + 15 * 60 * 1000;
+    user.lastLogin = new Date().toISOString();
+    // Keep the student record in sync so the exam engine sees an active learner.
+    try {
+        const students = await dbGetAll('students');
+        const st = students.find(s => s.id === user.studentId || s.id === 'STU-' + user.username);
+        if (st && st.status !== 'active') { st.status = 'active'; st.updatedAt = new Date().toISOString(); await dbPut('students', st); }
+    } catch (e) {};
     await dbPut('users', user);
     const students = await dbGetAll('students');
     const student = students.find(s => s.id === user.studentId || s.id === username);

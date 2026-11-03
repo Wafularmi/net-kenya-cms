@@ -5119,12 +5119,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                     saveDB();
                 }
                 if (user.status === 'locked') {
-                    // Allow grace period for reactivated accounts
-                    if (user.inactivityGraceUntil && Date.now() < user.inactivityGraceUntil) {
-                        // Still allow access during grace period
-                    } else {
-                        return json(res, 403, { error: 'Account locked due to inactivity. Contact administration to reactivate.' });
-                    }
+                    return json(res, 403, { error: 'Account locked due to inactivity. Contact administration to reactivate.' });
                 }
                 if (user.status === 'inactive') return json(res, 403, { error: 'Account is inactive. Contact administration.' });
                 if (user.status === 'pending') return json(res, 403, { error: 'Account pending approval. Please wait for admin confirmation.' });
