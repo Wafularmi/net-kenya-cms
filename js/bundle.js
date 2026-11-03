@@ -28486,7 +28486,13 @@ window.renderLessons = async function () {
             if (!d || !d.version) return;
             if (initial === null) { initial = d.version; return; }
             if (d.version !== initial) {
-                try { localStorage.clear(); } catch (e) {}
+                // Only drop cached app data — never wipe user preferences such
+                // as the privacy-analytics acknowledgement.
+                try {
+                    Object.keys(localStorage).forEach(k => {
+                        if (/shub_cache|studentHub|_hub/i.test(k)) localStorage.removeItem(k);
+                    });
+                } catch (e) {}
                 try { sessionStorage.removeItem('studentHubCache'); } catch (e) {}
                 location.reload();
             }
