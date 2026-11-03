@@ -28830,3 +28830,105 @@ async function submitMusicRegistration() {
     await dbPut('musicRegistrations', reg);
     showToast('Music registration request submitted. Awaiting admin approval.');
 }
+
+async function initReactivatedAccounts() {
+    try {
+        const dateInput = document.getElementById('init-reactivated-date');
+        const dateVal = dateInput && dateInput.value ? dateInput.value : '';
+        if (!dateVal) {
+            showToast('Select reactivation date to filter', { type: 'warning' });
+            return;
+        }
+        if (!await showConfirm('Re-initialize Accounts', `Reset accounts reactivated on ${dateVal} to fresh registration state while keeping admission number, program and contacts? This will relink resources.`)) {
+            return;
+        }
+        const [users, students] = await Promise.all([dbGetAll('users'), dbGetAll('students')]);
+        const targetUsers = users.filter(u => {
+            if (!u) return false;
+            if (u.reactivatedAt) {
+                try {
+                    const d = new Date(u.reactivatedAt);
+                    if (d.toISOString().split('T')[0] === dateVal) return true;
+                } catch {}
+            }
+            return false;
+        });
+        if (targetUsers.length === 0) {
+            showToast('No users found for that reactivation date', { type: 'info' });
+            return;
+        }
+        let count = 0;
+        for (const u of targetUsers) {
+            // keep core identifiers
+            const keepAdmission = u.admissionNumber || '';
+            const keepStudentId = u.studentId || '';
+            const keepPhone = u.phone || '';
+            const keepEmail = u.email || '';
+            const keepName = u.name || '';
+            const keepProgram = u.program || '';
+            const keepYear = u.year || u.class || '';
+            const keepCenter = u.studyCenterId || '';
+            const keepRegion = u.regionId || '';
+            const keepCountry = u.country || '';
+            // reset user to fresh-like state but preserve identity/contact/program
+            u.status = 'active';
+            delete u.lockedAt;
+            delete u.lockedReason;
+            delete u.warned1;
+            delete u.warned2;
+            delete u.inactivityGraceUntil;
+            delete u.locked;
+            delete u.suspended;
+            delete u.disabled;
+            u.mustChangePassword = false;
+            u.lastLogin = new Date().toISOString();
+            u.lastLoginAt = new Date().toISOString();
+            u.lastActivityAt = new Date().toISOString();
+            // preserve
+            if (keepAdmission) u.admissionNumber = keepAdmission;
+            if (keepStudentId) u.studentId = keepStudentId;
+            if (keepPhone) u.phone = keepPhone;
+            if (keepEmail) u.email = keepEmail;
+            if (keepName) u.name = keepName;
+            if (keepProgram) u.program = keepProgram;
+            if (keepYear) u.year = keepYear;
+            if (keepCenter) u.studyCenterId = keepCenter;
+            if (keepRegion) u.regionId = keepRegion;
+            if (keepCountry) u.country = keepCountry;
+            await dbPut('users', u);
+            // sync student
+            const st = students.find(s => s.id === (u.studentId || '') || s.id === u.username || (keepAdmission && s.admissionNumber === keepAdmission) || (keepPhone && s.phone === keepPhone));
+            if (st) {
+                const sKeepAdm = st.admissionNumber || keepAdmission;
+                const sKeepProg = st.program || keepProgram;
+                const sKeepPhone = st.phone || keepPhone;
+                const sKeepEmail = st.email || keepEmail;
+                const sKeepName = st.name || keepName;
+                const sKeepCenter = st.studyCenterId || keepCenter;
+                const sKeepRegion = st.regionId || keepRegion;
+                const sKeepYear = st.year || keepYear;
+                st.status = 'active';
+                delete st.locked;
+                delete st.suspended;
+                delete st.disabled;
+                if (sKeepAdm) st.admissionNumber = sKeepAdm;
+                if (sKeepProg) st.program = sKeepProg;
+                if (sKeepPhone) st.phone = sKeepPhone;
+                if (sKeepEmail) st.email = sKeepEmail;
+                if (sKeepName) st.name = sKeepName;
+                if (sKeepCenter) st.studyCenterId = sKeepCenter;
+                if (sKeepRegion) st.regionId = sKeepRegion;
+                if (sKeepYear) st.year = sKeepYear;
+                st.updatedAt = new Date().toISOString();
+                await dbPut('students', st);
+            }
+            count++;
+        }
+        showToast(`Re-initialized ${count} account(s)`, { type: 'success' });
+        try { renderUsers(); } catch {}
+        try { logAudit('updated', 'accounts-reinitialized', { count, date: dateVal }); } catch {}
+    } catch (e) {
+        showToast('Re-initialization failed', { type: 'danger' });
+        console.error(e);
+    }
+}
