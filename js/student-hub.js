@@ -846,6 +846,13 @@ async function renderStudentHub() {
         <style>@keyframes hub-load-spin{to{transform:rotate(360deg)}}</style>`;
 
     try {
+        // Reactivated accounts must not reuse a stale cache from before reactivation.
+        try {
+            const cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+            if (cu.reactivatedAt && (Date.now() - new Date(cu.reactivatedAt).getTime()) < 24 * 3600 * 1000) {
+                invalidateStudentHubCache();
+            }
+        } catch (e) {}
         const data = await loadStudentHubData();
         if (!studentHubCache) studentHubCache = data;
         const me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
@@ -1630,18 +1637,20 @@ async function hubDropCourse(courseId, studentName) {
 
         if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
         const enr = (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId);
-        if (enr) { await dbDelete('enrollments', enr.id); _hubCacheRemove('enrollments', enr.id); }
+        if (enr) { await dbDelete('enrollments', enr.id); }
         else {
-            // Fallback: try deterministic id even if not in cache (cache may be stale)
             const fallbackId = `ENR-${courseId}-${me.id}`;
-            try { await dbDelete('enrollments', fallbackId); _hubCacheRemove('enrollments', fallbackId); } catch (err) {
-                // No record on server either — still refresh to sync
+            try { await dbDelete('enrollments', fallbackId); } catch (err) {
                 console.warn('hubDropCourse fallback delete failed:', err);
             }
         }
+        // Force a fresh data load (bypass cache) so the dropped course
+        // actually disappears from "My Courses" and moves to "Available".
+        try { invalidateStudentHubCache(); } catch (e) {}
+        try { localStorage.removeItem(_hubCacheKey()); } catch (e) {}
         showToast('Course dropped');
         logAudit('deleted', 'enrollment', { studentId: me.id, courseId });
-        renderStudentHub();
+        await renderStudentHub();
     } catch (e) {
         console.error('hubDropCourse error:', e);
         showToast('Drop failed: ' + (e.message || 'Server denied'), { type: 'danger', duration: 6000 });
