@@ -563,20 +563,21 @@ function _hubBuildComputed(data, me) {
     const allCourseExams = (data.exams || []).filter(e => {
         if (!e) return false;
         if (e.published === false) return false;
-        if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
         if (exType === 'supplementary') {
             const myRetakeReqs = (data.retakeRequests || []).filter(r => allStudentIds.has(String(r.studentId)));
             const suppOk = myRetakeReqs.some(r => r.status === 'approved' && (String(r.supplementaryExamId) === String(e.id) || String(r.examId) === String(e.id)));
             if (!suppOk) return false;
             if (!(e.openWindow || (e.date && e.time))) return false;
+            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
             return true;
         }
         if (e.openWindow || (e.date && e.time)) {
+            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
             return true;
         }
-        if (!(e.openWindow || (e.date && e.time))) return false;
-        // FORCE SHOW ALL EXAMS TO ALL STUDENTS
+        if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+        if (!(e.openWindow || (e.date && e.time))) return true;
         return true;
     });
     const myRegisteredExams = allCourseExams.filter(e => {
@@ -975,18 +976,16 @@ async function renderStudentHub() {
                 if (exType === 'supplementary') {
                     const appr = new Set((fb.retakeRequests||[]).filter(r => allStudentIds.has(String(r.studentId)) && r.status === 'approved').map(r => String(r.supplementaryExamId) || String(r.examId)));
                     if (!appr.has(String(e.id))) return false;
-                } else {
-                    if (e.openWindow || (e.date && e.time)) {
-                        if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-                        return true;
-                    }
-                    if (enrolledIds.has(e.courseId)) {
-                        if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-                        return true;
-                    }
-                    return false;
+                    if (!(e.openWindow || (e.date && e.time))) return false;
+                    if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                    return true;
+                }
+                if (e.openWindow || (e.date && e.time)) {
+                    if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                    return true;
                 }
                 if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                if (!(e.openWindow || (e.date && e.time))) return true;
                 return true;
             }).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
             const courses = (fb.courses || []);
