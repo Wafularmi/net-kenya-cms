@@ -561,6 +561,7 @@ function _hubBuildComputed(data, me) {
     if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
     const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(String(r.studentId))).map(r => r.examId));
     const allCourseExams = (data.exams || []).filter(e => {
+        if (!e) return false;
         if (e.published === false) return false;
         if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
@@ -569,6 +570,9 @@ function _hubBuildComputed(data, me) {
             const suppOk = myRetakeReqs.some(r => r.status === 'approved' && (String(r.supplementaryExamId) === String(e.id) || String(r.examId) === String(e.id)));
             if (!suppOk) return false;
             if (!(e.openWindow || (e.date && e.time))) return false;
+            return true;
+        }
+        if (e.openWindow || (e.date && e.time)) {
             return true;
         }
         if (!(e.openWindow || (e.date && e.time))) return false;
@@ -633,9 +637,14 @@ function _hubBuildComputed(data, me) {
         }
     });
     availableExams = availableExams.filter(e => {
+        if (!e) return false;
+        if (e.published === false) return false;
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
         if (exType === 'supplementary') {
             return approvedSuppIds.has(String(e.id));
+        }
+        if (e.openWindow || (e.date && e.time)) {
+            return true;
         }
         return true;
     });
