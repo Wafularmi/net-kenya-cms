@@ -1494,6 +1494,7 @@ function _hubFindStudent(students, currentUser, alumniList) {
             )) || null;
             return normalizeAlumni(alumni, studentRecord);
         }
+        // Ensure reactivated/previously locked accounts are not treated as archived
         return studentRecord;
     }
 

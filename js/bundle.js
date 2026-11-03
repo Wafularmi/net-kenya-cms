@@ -632,10 +632,14 @@ function assessmentInStudentScope(rec, student, centers) {
 function canStudentAccessAssessment(rec, kind, ctx) {
     if (!rec || !ctx || !ctx.student) return false;
     if (rec.published === false) return false;
+    const exType = String(rec.type || rec.assessmentType || '').toLowerCase();
+    if (exType !== 'supplementary' && (rec.openWindow === true || (rec.date && rec.time))) {
+        return true;
+    }
     // Open-ended exams are published to every student and can be sat any time
     // until switched back to Draft — no enrollment/registration/scope gate.
     // (Supplementary exams stay student-specific even when open-ended.)
-    if (rec.openWindow === true && String(rec.type || '').toLowerCase() !== 'supplementary') return true;
+    if (rec.openWindow === true && exType !== 'supplementary') return true;
     // A student who is registered for an assessment (or has submitted/retaken it)
     // must always see it, even if they are not formally enrolled in its course —
     // registration is the authoritative signal of access.
@@ -2207,22 +2211,35 @@ async function reactivateUser(username) {
     delete user.warned1;
     delete user.warned2;
     delete user.inactivityGraceUntil;
+    delete user.locked;
+    delete user.suspended;
     user.reactivatedAt = new Date().toISOString();
     user.lastActivityAt = new Date().toISOString();
     user.lastLogin = new Date().toISOString();
+    user.lastLoginAt = new Date().toISOString();
     // Keep the student record in sync so the exam engine sees an active learner.
     try {
         const students = await dbGetAll('students');
-        const st = students.find(s => s.id === user.studentId || s.id === 'STU-' + user.username);
-        if (st && st.status !== 'active') { st.status = 'active'; st.updatedAt = new Date().toISOString(); await dbPut('students', st); }
-    } catch (e) {};
+        const st = students.find(s => s.id === user.studentId || s.id === 'STU-' + user.username || s.id === username || (user.admissionNumber && s.admissionNumber === user.admissionNumber));
+        if (st) {
+            st.status = 'active';
+            delete st.locked;
+            delete st.suspended;
+            st.updatedAt = new Date().toISOString();
+            await dbPut('students', st);
+        }
+    } catch (e) {}
     await dbPut('users', user);
-    const students = await dbGetAll('students');
-    const student = students.find(s => s.id === user.studentId || s.id === username);
-    if (student && student.status === 'inactive') {
-        student.status = 'active';
-        await dbPut('students', student);
-    }
+    try {
+        const students = await dbGetAll('students');
+        const student = students.find(s => s.id === user.studentId || s.id === username || (user.admissionNumber && s.admissionNumber === user.admissionNumber));
+        if (student) {
+            student.status = 'active';
+            delete student.locked;
+            delete student.suspended;
+            await dbPut('students', student);
+        }
+    } catch (e) {}
     renderUsers();
     showToast(`Account ${username} reactivated! 15 min grace period granted.`);
     logAudit('reactivated', 'user', { username, reactivatedAt: user.reactivatedAt });
@@ -6325,7 +6342,7 @@ async function renderExams(opts) {
         const moderationBtn = document.querySelector('#screen-exams .btn-success');
         if (moderationBtn) moderationBtn.style.display = 'none';
         const students = await dbGetAll('students');
-        const me = findStudentForCurrentUser(students, currentUser);
+        const me = findStudentForCurrentUser(students, currentUser) || students.find(s => (s.id && (s.id === currentUser.studentId || s.id === currentUser.username)) || (s.admissionNumber && (s.admissionNumber === currentUser.username || s.admissionNumber === currentUser.admissionNumber)) || (s.phone && currentUser.phone && String(s.phone) === String(currentUser.phone)));
         const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
         const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
@@ -6342,6 +6359,11 @@ async function renderExams(opts) {
             submittedIds: mySubmittedIds
         };
         const sorted = exams.filter(e => {
+            if (e.published === false) return false;
+            const exType = String(e.type || e.assessmentType || '').toLowerCase();
+            if (exType !== 'supplementary' && (e.openWindow || (e.date && e.time))) {
+                if (!inactiveCourseIds.has(e.courseId) && semMatches(e)) return true;
+            }
             if (!e.openWindow) {
                 try {
                     const w = assessmentWindow(e);
