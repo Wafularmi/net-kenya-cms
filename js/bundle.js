@@ -28852,7 +28852,9 @@ async function checkMaintenanceNow() {
     try {
         const r = await fetch('/api/maintenance-status', { cache: 'no-store' });
         if (!r.ok) return;
-        handleMaintenancePush((await r.json()).active);
+        const d = await r.json();
+        handleMaintenancePush(d.active);
+        if (typeof updateMaintenanceBanner === 'function') updateMaintenanceBanner();
     } catch {}
 }
 function startMaintenanceLiveSync() {
@@ -28860,7 +28862,11 @@ function startMaintenanceLiveSync() {
         if (_maintSSE) { try { _maintSSE.close(); } catch {} _maintSSE = null; }
         _maintSSE = new EventSource('/api/maintenance-events');
         _maintSSE.addEventListener('maintenance', (e) => {
-            try { handleMaintenancePush(JSON.parse(e.data || '{}').active); } catch {}
+            try { 
+                const d = JSON.parse(e.data || '{}'); 
+                handleMaintenancePush(d.active); 
+                if (typeof updateMaintenanceBanner === 'function') updateMaintenanceBanner();
+            } catch {}
         });
         _maintSSE.onerror = () => {
             try { if (_maintSSE && _maintSSE.readyState === EventSource.CLOSED) setTimeout(startMaintenanceLiveSync, 3000); } catch {}
@@ -29567,32 +29573,43 @@ function updateMaintenanceBanner() {
             .then(data => {
                 if (!data) { banner.style.display = 'none'; return; }
                 const now = Date.now();
-                if (data.active) {
-                    banner.style.display = 'none';
-                    return;
-                }
                 if (data.scheduledEnabled && data.scheduledStart) {
                     const start = new Date(data.scheduledStart).getTime();
-                    const end = data.scheduledEnd ? new Date(data.scheduledEnd).getTime() : start + 3600000;
-                    if (isNaN(start)) { banner.style.display = 'none'; return; }
-                    if (now >= start && now < end) {
-                        banner.style.display = 'none';
-                        return;
+                    const end = data.scheduledEnd ? new Date(data.scheduledEnd).getTime() : (start + 7200000);
+                    if (!isNaN(start)) {
+                        if (now >= start && now < end) {
+                            const msg = (data.scheduledMessage && data.scheduledMessage.trim()) ? data.scheduledMessage.trim() : (data.message && data.message.trim() ? data.message.trim() : 'System under scheduled maintenance');
+                            banner.innerHTML = '🔧 ' + escapeHtml(msg) + ' — Maintenance in progress. Please wait until it ends to login.';
+                            banner.style.display = 'block';
+                            banner.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
+                            banner.style.color = '#fff';
+                            return;
+                        }
+                        if (now < start) {
+                            const diff = start - now;
+                            const hours = Math.floor(diff / 3600000);
+                            const mins = Math.floor((diff % 3600000) / 60000);
+                            const days = Math.floor(hours / 24);
+                            let when = days > 0 ? days + 'd ' + (hours % 24) + 'h' : (hours > 0 ? hours + 'h ' + mins + 'm' : mins + 'm');
+                            const msg = (data.scheduledMessage && data.scheduledMessage.trim()) ? data.scheduledMessage.trim() : (data.message && data.message.trim() ? data.message.trim() : 'Scheduled maintenance coming up');
+                            banner.innerHTML = '⚠️ ' + escapeHtml(msg) + ' — Starts in ' + when + '. System will be unavailable during maintenance. You can wait until it ends to login.';
+                            banner.style.display = 'block';
+                            banner.style.background = 'linear-gradient(90deg,#f59e0b,#fbbf24)';
+                            banner.style.color = '#1f2937';
+                            return;
+                        }
+                        if (now >= end) {
+                            banner.style.display = 'none';
+                            return;
+                        }
                     }
-                    if (now < start) {
-                        const diff = start - now;
-                        const hours = Math.floor(diff / 3600000);
-                        const mins = Math.floor((diff % 3600000) / 60000);
-                        const when = hours > 0 ? hours + 'h ' + mins + 'm' : mins + 'm';
-                        const msg = (data.scheduledMessage && data.scheduledMessage.trim()) ? data.scheduledMessage.trim() : 'Scheduled maintenance coming up';
-                        banner.innerHTML = '⚠️ ' + escapeHtml(msg) + ' — starts in ' + when + '. System will be unavailable during this time. You can wait until it ends to login.';
-                        banner.style.display = 'block';
-                        return;
-                    }
-                    if (now >= end) {
-                        banner.style.display = 'none';
-                        return;
-                    }
+                }
+                if (data.active && !data.scheduledActive) {
+                    banner.innerHTML = '🔧 ' + escapeHtml((data.message && data.message.trim()) || 'System is under maintenance. Please check back later.') + ' — Only administrators can sign in.';
+                    banner.style.display = 'block';
+                    banner.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
+                    banner.style.color = '#fff';
+                    return;
                 }
                 banner.style.display = 'none';
             })
