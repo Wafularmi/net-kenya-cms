@@ -1015,17 +1015,21 @@ function _regionNameFromStudent(student) {
     return '';
 }
 function applyTemplateVars(message, student, schoolName, balance, admissionNumber, phone, extra = {}) {
+    try {
+        const g = (typeof window !== 'undefined') ? (window._commExamContext || window._commBulkContext || {}) : {};
+        extra = Object.assign({}, g, extra || {});
+    } catch (e) {}
     const s = student || {};
     const admno = admissionNumber || s.admissionNumber || s.id || '';
     const centerObj = s.studyCenterId ? (_centerName(s.studyCenterId) || null) : null;
-    const centerName = extra.centerName || (centerObj ? (typeof centerObj === 'object' ? centerObj.name : centerObj) : (s.studyCenterId ? 'Study Center' : 'Main Campus'));
+    const centerName = extra.centerName || extra.center || (centerObj ? (typeof centerObj === 'object' ? centerObj.name : centerObj) : (s.studyCenterId ? 'Study Center' : 'Main Campus'));
     const centerCode = extra.centerCode || (centerObj && typeof centerObj === 'object' && centerObj.code ? centerObj.code : '');
-    const regionName = extra.regionName || _regionNameFromStudent(s);
-    const requested = s.registrationRequestedAt ? new Date(s.registrationRequestedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : (s.enrollDate ? new Date(s.enrollDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
+    const regionName = extra.regionName || extra.region || _regionNameFromStudent(s);
+    const requested = s.registrationRequestedAt ? new Date(s.registrationRequestedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : (s.enrollDate ? new Date(s.enrollDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : (extra.requested || ''));
     const fee = typeof s.feeAmount === 'number' ? formatCurrency(s.feeAmount) : (extra.fee || '0');
-    const login = phone || s.phone || '';
+    const login = phone || s.phone || extra.phone || '';
     const portal = extra.portal || 'www.nefoundation.ke';
-    let courseName = extra.courseName || extra.course || '';
+    let courseName = extra.courseName || extra.course || extra.courseTitle || '';
     if (!courseName && extra.courseObj && extra.courseObj.name) courseName = extra.courseObj.name;
     if (!courseName && s.course) courseName = s.course;
     let examTitle = extra.examTitle || extra.event || extra.title || extra.exam || '';
@@ -1035,7 +1039,26 @@ function applyTemplateVars(message, student, schoolName, balance, admissionNumbe
     const examVenue = extra.examVenue || extra.venue || (extra.examObj ? (extra.examObj.venue || '') : '');
     const examType = extra.examType || (extra.examObj && extra.examObj.type ? (extra.examObj.type.charAt(0).toUpperCase() + extra.examObj.type.slice(1)) : (extra.type || ''));
     const minPass = extra.minPass || (extra.examObj && extra.examObj.passMark ? String(extra.examObj.passMark) : (extra.min || '75'));
-    return message
+    let examsList = extra.examsList || '';
+    if (!examsList && Array.isArray(extra.exams) && extra.exams.length) {
+        try { examsList = (typeof buildExamsList === 'function') ? buildExamsList(extra.exams) : ''; } catch (e) {}
+    }
+    let examsTable = extra.examsTable || '';
+    if (!examsTable && Array.isArray(extra.exams) && extra.exams.length) {
+        try {
+            const rows = extra.exams.map((ex, idx) => {
+                const course = ex.courseName || '';
+                const title = ex.examTitle || ex.title || course || ('Exam ' + (idx + 1));
+                const date = ex.examDate || ex.date || '';
+                const time = ex.examTime || ex.time || '';
+                const venue = ex.examVenue || ex.venue || '';
+                return `<tr><td>${idx+1}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(course)}</td><td>${escapeHtml(date)}</td><td>${escapeHtml(time)}</td><td>${escapeHtml(venue)}</td></tr>`;
+            }).join('');
+            examsTable = `<table><thead><tr><th>#</th><th>Exam</th><th>Course</th><th>Date</th><th>Time</th><th>Venue</th></tr></thead><tbody>${rows}</tbody></table>`;
+        } catch (e) {}
+    }
+    const examCount = extra.examCount || (Array.isArray(extra.exams) ? extra.exams.length : 0);
+    return String(message || '')
         .replace(/{{name}}/g, s.name || extra.name || '')
         .replace(/{{school}}/g, schoolName || extra.schoolName || '')
         .replace(/{{program}}/g, s.program || extra.program || 'program')
@@ -1055,16 +1078,20 @@ function applyTemplateVars(message, student, schoolName, balance, admissionNumbe
         .replace(/{{fee}}/g, fee)
         .replace(/{{portal}}/g, portal)
         .replace(/{{type}}/g, examType)
-        .replace(/{{event}}/g, examTitle || courseName || '')
-        .replace(/{{exam}}/g, examTitle || courseName || '')
-        .replace(/{{examTitle}}/g, examTitle || courseName || '')
-        .replace(/{{course}}/g, courseName || examTitle || '')
-        .replace(/{{courseTitle}}/g, courseName || examTitle || '')
-        .replace(/{{courseName}}/g, courseName || examTitle || '')
+        .replace(/{{event}}/g, examTitle || courseName || examsList || '')
+        .replace(/{{exam}}/g, examTitle || courseName || examsList || '')
+        .replace(/{{examTitle}}/g, examTitle || courseName || examsList || '')
+        .replace(/{{course}}/g, courseName || examTitle || examsList || '')
+        .replace(/{{courseTitle}}/g, courseName || examTitle || examsList || '')
+        .replace(/{{courseName}}/g, courseName || examTitle || examsList || '')
         .replace(/{{date}}/g, examDate || '')
         .replace(/{{time}}/g, examTime || '')
         .replace(/{{venue}}/g, examVenue || '')
-        .replace(/{{min}}/g, minPass);
+        .replace(/{{min}}/g, minPass)
+        .replace(/{{examsList}}/g, examsList || '')
+        .replace(/{{exams}}/g, examsList || examTitle || '')
+        .replace(/{{examsTable}}/g, examsTable || examsList || '')
+        .replace(/{{examCount}}/g, String(examCount || 0));
 }
 async function sha256(str) {
     // crypto.subtle only exists in a secure context (https) and is missing on
@@ -2562,7 +2589,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -10270,6 +10297,69 @@ function buildProfessionalTranscript(data) {
         return list;
     };
     const groupBySemester = (rows) => {
+        const isGrouped = String(grouping || 'group').toLowerCase() !== 'nogroup' && String(grouping || 'group').toLowerCase() !== 'none';
+        if (isGrouped) {
+            const getRowCourseLocal = r => r.course || courseMap[String(r.courseId)] || null;
+            const list = (rows || []).slice();
+            const courseList = list.map(r => getRowCourseLocal(r)).filter(Boolean);
+            let ordered = [];
+            try {
+                const tOrder = (typeof getTranscriptCourseOrder === 'function') ? getTranscriptCourseOrder().map(x => String(x).toUpperCase()) : [];
+                if (tOrder.length && courseList.length) {
+                    ordered = courseList.slice().sort((a,b) => {
+                        const an = String((a && (a.name || a.title)) || '').toUpperCase();
+                        const bn = String((b && (b.name || b.title)) || '').toUpperCase();
+                        const ia = tOrder.indexOf(an);
+                        const ib = tOrder.indexOf(bn);
+                        if (ia !== -1 && ib !== -1) return ia - ib;
+                        if (ia !== -1) return -1;
+                        if (ib !== -1) return 1;
+                        const ao = Number(a && a.order) || 0;
+                        const bo = Number(b && b.order) || 0;
+                        if (ao !== bo) return ao - bo;
+                        const ac = String((a && a.code) || (a && a.name) || (a && a.id));
+                        const bc = String((b && b.code) || (b && b.name) || (b && b.id));
+                        return ac.localeCompare(bc);
+                    });
+                }
+            } catch(e) {}
+            if (!ordered || !ordered.length) {
+                try {
+                    if (typeof sortCoursesBySequence === 'function' && courseList.length) ordered = sortCoursesBySequence(courseList);
+                    else if (typeof sortCoursesByTranscriptOrder === 'function' && courseList.length) ordered = sortCoursesByTranscriptOrder(courseList);
+                } catch(e) {}
+            }
+            if (!ordered || !ordered.length) {
+                ordered = courseList.slice().sort((a,b) => {
+                    const ao = Number(a && a.order) || 0;
+                    const bo = Number(b && b.order) || 0;
+                    if (ao !== bo) return ao - bo;
+                    const ac = String((a && a.code) || (a && a.name) || (a && a.id));
+                    const bc = String((b && b.code) || (b && b.name) || (b && b.id));
+                    return ac.localeCompare(bc);
+                });
+            }
+            const pos = new Map();
+            ordered.forEach((c,i)=>{ if(c&&c.id!=null) pos.set(String(c.id), i); });
+            const items = list.slice().sort((a,b)=>{
+                const ca=getRowCourseLocal(a), cb=getRowCourseLocal(b);
+                const ia = ca&&ca.id!=null?pos.get(String(ca.id)):undefined;
+                const ib = cb&&cb.id!=null?pos.get(String(cb.id)):undefined;
+                if(ia!==undefined && ib!==undefined) return ia-ib;
+                if(ia!==undefined) return -1;
+                if(ib!==undefined) return 1;
+                const sa=a.semester!=null?Number(a.semester):9999;
+                const sb=b.semester!=null?Number(b.semester):9999;
+                if(sa!==sb)return sa-sb;
+                return 0;
+            });
+            const groups=[];
+            for(let i=0;i<items.length;i+=3){
+                const chunk = items.slice(i,i+3);
+                groups.push({sem:String(Math.floor(i/3)+1), rows:chunk});
+            }
+            return groups;
+        }
         const groups = {};
         (rows || []).forEach(r => {
             const sem = r.semester != null && r.semester !== '' ? String(r.semester) : '1';
@@ -11197,7 +11287,7 @@ async function generateFinalTranscript() {
     const savedGrades = allGrades.filter(g => g.studentId === studentId);
     const fromSaved = savedGrades.map(g => g.courseId);
     const allCourseIds = new Set([...fromEnrollments, ...fromSaved]);
-    const courseOrder = [
+    const courseOrder = (typeof getTranscriptCourseOrder === 'function') ? getTranscriptCourseOrder().map(x => String(x).toUpperCase()) : [
         "GOD'S CALL TO MINISTRY",
         "GOD'S WAY OF SALVATION",
         "OLD TESTAMENT SURVEY",
@@ -11212,9 +11302,16 @@ async function generateFinalTranscript() {
         "THE CHURCH THE BODY OF CHRIST"
     ];
     const studentCourses = courses.filter(c => allCourseIds.has(c.id)).sort((a, b) => {
-        const ia = courseOrder.indexOf((a.name || '').toUpperCase());
-        const ib = courseOrder.indexOf((b.name || '').toUpperCase());
-        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        const ia = courseOrder.indexOf(String((a.name || a.title || '')).toUpperCase());
+        const ib = courseOrder.indexOf(String((b.name || b.title || '')).toUpperCase());
+        if (ia === -1 && ib === -1) {
+            const ac = String((a.code || a.name || a.id) || '');
+            const bc = String((b.code || b.name || b.id) || '');
+            return ac.localeCompare(bc);
+        }
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
     });
     if (!studentCourses.length) return showToast('No courses found for this student!');
     // RESULTS OF RECORD - resolved exactly as the Official Transcript resolves
@@ -11226,7 +11323,8 @@ async function generateFinalTranscript() {
     let totalCredits = 0;          // credits of RECORDED results (these drive the CGPA)
     let totalGPAPoints = 0;
     let autoCount = 0;
-    for (const course of studentCourses) {
+    for (let ci = 0; ci < studentCourses.length; ci++) {
+        const course = studentCourses[ci];
         const result = computeWeightedGrade(studentId, course.id, course, quizzes, submissions, attendance, users, exams, null);
         const recorded = recordedByCourse.get(course.id);
         const credits = course.credits || 3;
@@ -11246,7 +11344,8 @@ async function generateFinalTranscript() {
             source = 'auto';
             autoCount++;
         }
-        courseResults.push({ course, result, weightedScore, credits, gradeInfo, source, semester });
+        const assignedSemester = String(Math.floor(ci / 3) + 1);
+        courseResults.push({ course, result, weightedScore, credits, gradeInfo, source, semester: assignedSemester });
     }
     const cgpa = totalCredits > 0 ? totalGPAPoints / totalCredits : 0;
     const classification = getClassification(cgpa);
@@ -11296,31 +11395,70 @@ async function generateFinalTranscript() {
 function buildFinalTranscriptDocument(data) {
     const { student, courseResults, schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, center, academic, cgpa, classification, totalCredits, totalGPAPoints, docId, vCode, generatedDate, generatedTime, issueDate, feeBalance, postalAddress, city, phone, email, website, college_stamp } = data;
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
-    let rowsHtml = '';
-    courseResults.forEach((cr, idx) => {
-        const c = cr.course;
-        const r = cr.result;
-        const score = cr.weightedScore;
-        const gInfo = cr.gradeInfo;
-        const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
-        const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
-        const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
-        // Same rendering as the Official Transcript: the bare score (a recorded
-        // 0 is printed as 0), and '--' only when there is no score at all.
-        const hasScore = cr.source === 'recorded' || score > 0;
-        const scoreDisplay = hasScore ? score : '--';
-        const isAuto = cr.source === 'auto';
-        rowsHtml += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}">
-            <td class="col-no">${idx + 1}</td>
-            <td class="col-code">${c.code || '--'}</td>
-            <td class="col-title">${c.name || c.id}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
-            <td class="col-sem" style="text-align:center;">${cr.semester ? 'Sem ' + cr.semester : '--'}</td>
-            <td class="col-credits" style="text-align:center;">${cr.credits}</td>
-            <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
-            <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
-            <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
-        </tr>`;
+    const groups = [];
+    (courseResults || []).forEach((cr, idx) => {
+        const sem = cr.semester != null && cr.semester !== '' ? String(cr.semester) : String(Math.floor(idx / 3) + 1);
+        if (!groups.length || groups[groups.length - 1].sem !== sem) {
+            groups.push({ sem, rows: [] });
+        }
+        groups[groups.length - 1].rows.push(Object.assign({}, cr, { _idx: idx }));
     });
+    if (groups.length === 0) {
+        for (let i = 0; i < (courseResults || []).length; i += 3) {
+            const semNum = String(Math.floor(i / 3) + 1);
+            groups.push({ sem: semNum, rows: (courseResults || []).slice(i, i + 3).map((cr, j) => Object.assign({}, cr, { _idx: i + j })) });
+        }
+    }
+    let rowsHtml = '';
+    groups.forEach(group => {
+        rowsHtml += `<tr><td colspan="8" style="background:#f8fafc;font-weight:700;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Semester ${group.sem} Results</td></tr>`;
+        group.rows.forEach((cr, gidx) => {
+            const c = cr.course || {};
+            const r = cr.result;
+            const score = cr.weightedScore;
+            const gInfo = cr.gradeInfo;
+            const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
+            const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
+            const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
+            const hasScore = cr.source === 'recorded' || (score != null && score > 0);
+            const scoreDisplay = hasScore ? score : '--';
+            const isAuto = cr.source === 'auto';
+            const rowIdx = cr._idx != null ? cr._idx : gidx;
+            rowsHtml += `<tr class="${rowIdx % 2 === 1 ? 'alt-row' : ''}">
+                <td class="col-no">${rowIdx + 1}</td>
+                <td class="col-code">${(c.code || c.id) || '--'}</td>
+                <td class="col-title">${c.name || c.id || '--'}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
+                <td class="col-sem" style="text-align:center;">Sem ${group.sem}</td>
+                <td class="col-credits" style="text-align:center;">${cr.credits}</td>
+                <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
+                <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
+                <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
+            </tr>`;
+        });
+    });
+    if (!rowsHtml) {
+        (courseResults || []).forEach((cr, idx) => {
+            const c = cr.course || {};
+            const score = cr.weightedScore;
+            const gInfo = cr.gradeInfo;
+            const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
+            const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
+            const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
+            const hasScore = cr.source === 'recorded' || (score != null && score > 0);
+            const scoreDisplay = hasScore ? score : '--';
+            const isAuto = cr.source === 'auto';
+            rowsHtml += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}">
+                <td class="col-no">${idx + 1}</td>
+                <td class="col-code">${(c.code || c.id) || '--'}</td>
+                <td class="col-title">${c.name || c.id || '--'}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
+                <td class="col-sem" style="text-align:center;">${cr.semester ? 'Sem ' + cr.semester : '--'}</td>
+                <td class="col-credits" style="text-align:center;">${cr.credits}</td>
+                <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
+                <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
+                <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
+            </tr>`;
+        });
+    }
     const classificationLabel = classification.label;
     const classificationClass = classification.cssClass;
     const feeStatus = feeBalance <= 0 ? 'CLEARED' : 'OUTSTANDING';
@@ -16390,8 +16528,10 @@ async function loadCommunicationPage() {
     const templateOptions = templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
     const examOptions = (exams || []).filter(e => e.published !== false).sort((a,b)=> (b.date||'').localeCompare(a.date||'')).map(e => {
         const course = (courses||[]).find(c=>c.id===e.courseId);
-        const label = `${e.title || (course?course.name:e.courseId||'Exam')} ${e.date?(' - '+formatDate(e.date)):(e.time?' - '+e.time:'')}${course?(' ['+course.name+']'):''}`;
-        return `<option value="${escapeHtml(e.id)}" data-course-id="${escapeHtml(e.courseId||'')}" data-course-name="${escapeHtml(course?course.name:'')}" data-exam-title="${escapeHtml(e.title||course?course.name:'')}">${escapeHtml(label)}</option>`;
+        const examTitle = e.title || (course?course.name:e.courseId||'Exam');
+        const courseName = course ? course.name : (e.courseName || '');
+        const label = `${examTitle} ${e.date?(' - '+formatDate(e.date)):(e.time?' - '+e.time:'')}${courseName?(' ['+courseName+']'):''}`;
+        return `<option value="${escapeHtml(e.id)}" data-course-id="${escapeHtml(e.courseId||'')}" data-course-name="${escapeHtml(courseName)}" data-exam-title="${escapeHtml(examTitle)}" data-exam-date="${escapeHtml(e.date?formatDate(e.date):'')}" data-exam-time="${escapeHtml(e.time||'')}" data-exam-venue="${escapeHtml(e.venue||'')}">${escapeHtml(label)}</option>`;
     }).join('');
     document.getElementById('communication-content').innerHTML = `
         <div class="page-header">
@@ -16413,9 +16553,10 @@ async function loadCommunicationPage() {
                     <label>Course</label>
                     <select id="comm-course" class="form-control"><option value="">All Courses</option></select>
                 </div>
-                <div class="form-group" style="flex:1;min-width:220px;">
-                    <label>Scheduled Exam (auto-fill title/course)</label>
-                    <select id="comm-exam" class="form-control" onchange="onCommExamChange()"><option value="">None</option>${examOptions}</select>
+                <div class="form-group" style="flex:1;min-width:260px;">
+                    <label>Scheduled Exams (multi-select)</label>
+                    <select id="comm-exam" class="form-control" multiple size="4" onchange="onCommExamChange()"><option value="">None</option>${examOptions}</select>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Hold Ctrl/Cmd to select multiple exams</div>
                 </div>
                 <div class="form-group" style="flex:1;min-width:200px;">
                     <label>Search</label>
@@ -16433,7 +16574,7 @@ async function loadCommunicationPage() {
                 </select>
             </div>
             <div class="card-body">
-                <div class="form-group"><label>Message (variables: {{name}}, {{admission}}, {{program}}, {{center}}, {{centerCode}}, {{region}}, {{school}}, {{balance}}, {{fee}}, {{phone}}, {{login}}, {{email}}, {{year}}, {{requested}}, {{portal}})</label>
+                <div class="form-group"><label>Message (variables: {{name}}, {{admission}}, {{program}}, {{center}}, {{centerCode}}, {{region}}, {{school}}, {{balance}}, {{fee}}, {{phone}}, {{login}}, {{email}}, {{year}}, {{requested}}, {{portal}}, {{examTitle}}, {{courseTitle}}, {{date}}, {{time}}, {{venue}}, {{examsList}}, {{exams}}, {{examsTable}}, {{examCount}})</label>
                     <textarea id="comm-message" rows="4" class="form-control" style="font-family:monospace;font-size:13px;"></textarea>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -16529,11 +16670,19 @@ async function applyCommFilters() {
 function clearCommFilters() {
     document.getElementById('comm-center').value = '';
     document.getElementById('comm-program').value = '';
-    document.getElementById('comm-course').innerHTML = '<option value="">All Courses</option>';
+    const cc = document.getElementById('comm-course');
+    if (cc) cc.innerHTML = '<option value="">All Courses</option>';
     document.getElementById('comm-search').value = '';
-    document.getElementById('comm-template').value = '';
+    const ct = document.getElementById('comm-template');
+    if (ct) ct.value = '';
     document.getElementById('comm-message').value = '';
-    document.getElementById('comm-preview-area').style.display = 'none';
+    const pa = document.getElementById('comm-preview-area');
+    if (pa) pa.style.display = 'none';
+    const ce = document.getElementById('comm-exam');
+    if (ce) {
+        for (let i = 0; i < ce.options.length; i++) ce.options[i].selected = false;
+    }
+    try { window._commExamContext = {}; window._commExamContexts = []; window._commBulkContext = {}; } catch (e) {}
     applyCommFilters();
 }
 let commSearchTimer;
@@ -16557,16 +16706,17 @@ async function previewCommMessage() {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     const payments = await dbGetAll('payments');
+    const ctx = window._commExamContext || {};
     let preview = '';
     if (checked.length) {
         const s = students.find(st => st.id === checked[0]);
         if (s) {
             const paid = tuitionPaid(payments, s.id);
             const balance = getCachedStudentFee(s) - paid;
-            preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone);
+            preview = applyTemplateVars(msg, s, schoolName, balance, s.admissionNumber, s.phone, ctx);
         }
     } else {
-        preview = msg.replace(/{{name}}/g, 'John Doe').replace(/{{school}}/g, schoolName).replace(/{{program}}/g, 'Theology').replace(/{{admission}}/g, 'NF/CTR/01-24/001').replace(/{{admissionNumber}}/g, 'NF/CTR/01-24/001').replace(/{{phone}}/g, '2547XXXXXXXX').replace(/{{username}}/g, '2547XXXXXXXX').replace(/{{login}}/g, '2547XXXXXXXX').replace(/{{password}}/g, 'NF/CTR/01-24/001').replace(/{{balance}}/g, 'KES 15,000.00').replace(/{{email}}/g, 'student@example.com').replace(/{{year}}/g, '1').replace(/{{region}}/g, 'Coast Region').replace(/{{center}}/g, 'Mombasa Center').replace(/{{centerCode}}/g, 'MSA').replace(/{{requested}}/g, '01 Jul 2026').replace(/{{fee}}/g, 'KES 25,000.00').replace(/{{min}}/g, '75');
+        preview = applyTemplateVars(msg, { name: 'John Doe', program: 'Theology', admissionNumber: 'NF/CTR/01-24/001', year: '1', email: 'student@example.com' }, schoolName, 15000, 'NF/CTR/01-24/001', '2547XXXXXXXX', Object.assign({}, ctx, { balance: 'KES 15,000.00', fee: 'KES 25,000.00', region: 'Coast Region', center: ctx.centerName || 'Mombasa Center', centerCode: 'MSA', requested: '01 Jul 2026', min: '75' }));
     }
     const area = document.getElementById('comm-preview-area');
     area.textContent = preview;
@@ -16600,9 +16750,10 @@ async function sendCommSingle(studentId) {
     const payments = await dbGetAll('payments');
     const paid = tuitionPaid(payments, student.id);
     const balance = getCachedStudentFee(student) - paid;
-    const resolved = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone);
+    const ctx = window._commExamContext || {};
+    const resolved = applyTemplateVars(msg, student, schoolName, balance, student.admissionNumber, student.phone, ctx);
     sendWhatsApp(student.phone, resolved);
-    await logWhatsApp(student.phone, resolved, { student: student, name: student.name, template: 'Communication Center', status: 'sent' });
+    await logWhatsApp(student.phone, resolved, { student: student, name: student.name, template: 'Communication Center', status: 'sent', course: ctx.courseName || '', exam: ctx.examTitle || '' });
     showToast(`Sent to ${student.name}`);
     renderWhatsAppLog();
 }
@@ -16619,10 +16770,19 @@ async function sendCommBulk() {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College';
     const template = { name: 'Communication Center' };
+    const ctx = window._commExamContext || {};
+    try {
+        window._commBulkContext = ctx;
+    } catch (e) {}
     closeModal(); // close any open modal
     try {
         const st = await waCloudCall('/api/whatsapp-cloud/status');
-        if (st && st.configured) return runCloudBroadcast(students, template, msg, schoolName, 'Communication Center');
+        if (st && st.configured) {
+            // ensure context is available
+            const orig = applyTemplateVars;
+            // runCloudBroadcast uses applyTemplateVars; it will pick up ctx if passed differently - but easier to set global
+            return runCloudBroadcast(students, template, msg, schoolName, 'Communication Center');
+        }
     } catch (e) { /* fall through */ }
     if (await waAutoEnqueueTargets(students, template.name, msg, schoolName, 'Communication Center')) return;
     sendWhatsAppBroadcast(students, template, msg, schoolName);
@@ -16807,16 +16967,23 @@ async function verifyDocument() {
                 const fromEnroll = enrollments.filter(e => e.studentId === sid).map(e => e.courseId);
                 const allCourseIds = new Set([...fromEnroll, ...savedGrades.map(g => g.courseId)]);
                 const courses = await dbGetAll('courses');
-                const courseOrder = [
+                const courseOrder = (typeof getTranscriptCourseOrder === 'function') ? getTranscriptCourseOrder().map(x => String(x).toUpperCase()) : [
                     "GOD'S CALL TO MINISTRY", "GOD'S WAY OF SALVATION", "OLD TESTAMENT SURVEY",
                     "NEW TESTAMENT SURVEY", "PASTORAL CARE", "TEMPERAMENTS",
                     "CHRISTIAN MARRIAGE AND FAMILY", "TEACHING GOD'S WAY", "LIVING FOR CHRIST",
                     "DIACONAL MINISTRY", "PASSION FOR PREACHING", "THE CHURCH THE BODY OF CHRIST"
                 ];
                 const studentCours = courses.filter(c => allCourseIds.has(c.id)).sort((a, b) => {
-                    const ia = courseOrder.indexOf((a.name || '').toUpperCase());
-                    const ib = courseOrder.indexOf((b.name || '').toUpperCase());
-                    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+                    const ia = courseOrder.indexOf(String((a.name || a.title || '')).toUpperCase());
+                    const ib = courseOrder.indexOf(String((b.name || b.title || '')).toUpperCase());
+                    if (ia === -1 && ib === -1) {
+                        const ac = String((a.code || a.name || a.id) || '');
+                        const bc = String((b.code || b.name || b.id) || '');
+                        return ac.localeCompare(bc);
+                    }
+                    if (ia === -1) return 1;
+                    if (ib === -1) return -1;
+                    return ia - ib;
                 });
                 const submissions = await dbGetAll('submissions');
                 const quizzes = await dbGetAll('quizzes');
@@ -28937,4 +29104,138 @@ async function initReactivatedAccounts() {
         showToast('Re-initialization failed', { type: 'danger' });
         console.error(e);
     }
+}
+
+
+function getDefaultTranscriptCourseOrder() {
+    return [
+        "GOD'S CALL TO MINISTRY",
+        "GOD'S WAY OF SALVATION",
+        "OLD TESTAMENT SURVEY",
+        "NEW TESTAMENT SURVEY",
+        "PASTORAL CARE",
+        "TEMPERAMENTS",
+        "CHRISTIAN MARRIAGE AND FAMILY",
+        "TEACHING GOD'S WAY",
+        "LIVING FOR CHRIST",
+        "DIACONAL MINISTRY",
+        "PASSION FOR PREACHING",
+        "THE CHURCH THE BODY OF CHRIST"
+    ];
+}
+
+function getTranscriptCourseOrder() {
+    try {
+        const s = localStorage.getItem('nkcms_transcript_course_order');
+        if (s) {
+            const arr = JSON.parse(s);
+            if (Array.isArray(arr) && arr.length) return arr;
+        }
+    } catch (e) {}
+    return getDefaultTranscriptCourseOrder();
+}
+
+async function saveTranscriptCourseOrder() {
+    try {
+        const list = document.getElementById('transcript-course-order-list');
+        if (!list) return showToast('Order list not found', { type: 'danger' });
+        const items = Array.from(list.querySelectorAll('.transcript-order-item'));
+        const order = items.map(it => it.getAttribute('data-name') || (it.querySelector('span') ? it.querySelector('span').textContent.trim() : '')).filter(Boolean);
+        localStorage.setItem('nkcms_transcript_course_order', JSON.stringify(order));
+        showToast('Course order saved', { type: 'success' });
+        try { logAudit('updated', 'transcript-course-order', { count: order.length }); } catch (e) {}
+    } catch (e) {
+        showToast('Failed to save order', { type: 'danger' });
+        console.error(e);
+    }
+}
+
+function moveTranscriptCourseOrder(idx, dir) {
+    try {
+        const list = document.getElementById('transcript-course-order-list');
+        if (!list) return;
+        const items = Array.from(list.querySelectorAll('.transcript-order-item'));
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= items.length) return;
+        const parent = items[idx].parentNode;
+        if (dir === -1) {
+            parent.insertBefore(items[idx], items[newIdx]);
+        } else {
+            parent.insertBefore(items[newIdx], items[idx]);
+        }
+    } catch (e) {}
+}
+
+async function loadTranscriptCourseOrderSettings() {
+    try {
+        const list = document.getElementById('transcript-course-order-list');
+        if (!list) return;
+        let order = getTranscriptCourseOrder();
+        if (!Array.isArray(order) || order.length === 0) order = getDefaultTranscriptCourseOrder();
+        list.innerHTML = order.map((name, idx) => `<div class="transcript-order-item" data-name="${escapeHtml(name)}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;"><span style="flex:1;font-size:12px;">${escapeHtml(name)}</span><button type="button" class="btn btn-outline btn-xs" onclick="moveTranscriptCourseOrder(${idx}, -1)">↑</button><button type="button" class="btn btn-outline btn-xs" onclick="moveTranscriptCourseOrder(${idx}, 1)">↓</button></div>`).join('');
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+
+function buildExamsList(exams) {
+    try {
+        if (!Array.isArray(exams) || exams.length === 0) return '';
+        const lines = exams.map((ex, idx) => {
+            const course = ex.courseName ? ex.courseName : '';
+            const title = ex.examTitle || ex.title || course || ('Exam ' + (idx + 1));
+            const date = ex.examDate || ex.date || '';
+            const time = ex.examTime || ex.time || '';
+            const venue = ex.examVenue || ex.venue || '';
+            let line = '- ' + title;
+            if (course && course !== title) line += ' [' + course + ']';
+            if (date) line += ' - ' + date;
+            if (time) line += ' at ' + time;
+            if (venue) line += ' @ ' + venue;
+            return line;
+        });
+        return lines.join('\n');
+    } catch (e) {
+        return '';
+    }
+}
+
+function onCommExamChange() {
+    try {
+        const sel = document.getElementById('comm-exam');
+        if (!sel) return;
+        const exams = [];
+        for (let i = 0; i < sel.options.length; i++) {
+            const opt = sel.options[i];
+            if (opt.selected && opt.value) {
+                exams.push({
+                    examId: opt.value,
+                    examTitle: opt.getAttribute('data-exam-title') || opt.textContent || '',
+                    courseName: opt.getAttribute('data-course-name') || '',
+                    courseId: opt.getAttribute('data-course-id') || '',
+                    examDate: opt.getAttribute('data-exam-date') || '',
+                    examTime: opt.getAttribute('data-exam-time') || '',
+                    examVenue: opt.getAttribute('data-exam-venue') || ''
+                });
+            }
+        }
+        if (exams.length === 0) {
+            window._commExamContext = {};
+            window._commExamContexts = [];
+            return;
+        }
+        const examsList = buildExamsList(exams);
+        window._commExamContexts = exams;
+        window._commExamContext = {
+            exams: exams,
+            examsList: examsList,
+            examCount: exams.length,
+            examId: exams[0].examId,
+            examTitle: exams.length === 1 ? exams[0].examTitle : (exams.map(e=>e.examTitle).filter(Boolean).join(', ')),
+            courseName: exams.length === 1 ? exams[0].courseName : exams.map(e=>e.courseName).filter(Boolean).join(', '),
+            courseId: exams[0].courseId,
+            event: exams.length === 1 ? exams[0].examTitle : examsList
+        };
+    } catch (e) {}
 }
