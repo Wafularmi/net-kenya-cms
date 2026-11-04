@@ -2603,7 +2603,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -29469,3 +29469,48 @@ async function loadProgramSlotsSettings() {
     }
 }
 
+
+
+function initCollapsibleCards() {
+    try {
+        const container = document.getElementById('tab-settings');
+        if (!container) return;
+        const cards = Array.from(container.querySelectorAll('.card'));
+        cards.forEach((card, idx) => {
+            if (card.querySelector('.card-header-toggle')) return;
+            const h3 = card.querySelector('h3');
+            if (!h3) return;
+            const cardId = card.id && card.id.trim() ? card.id : ('settings-card-' + idx);
+            if (!card.id) card.id = cardId;
+            const toggle = document.createElement('div');
+            toggle.className = 'card-header-toggle';
+            toggle.innerHTML = '<span>' + h3.innerHTML + '</span><span class="toggle-icon">▾</span>';
+            h3.replaceWith(toggle);
+            const body = document.createElement('div');
+            body.className = 'card-body';
+            let node = toggle.nextSibling;
+            while (node) {
+                const next = node.nextSibling;
+                body.appendChild(node);
+                node = next;
+            }
+            card.appendChild(body);
+            try {
+                if (localStorage.getItem('nkcms_settings_card_' + cardId) === 'collapsed') {
+                    card.classList.add('collapsed');
+                }
+            } catch (e) {}
+            toggle.addEventListener('click', function (ev) {
+                if (ev.target && ev.target.closest && ev.target.closest('button,a,input,select,textarea')) {
+                    return;
+                }
+                card.classList.toggle('collapsed');
+                try {
+                    localStorage.setItem('nkcms_settings_card_' + cardId, card.classList.contains('collapsed') ? 'collapsed' : 'expanded');
+                } catch (e) {}
+            });
+        });
+    } catch (e) {
+        console.error(e);
+    }
+}

@@ -21,6 +21,10 @@
             .app-header, .sidebar, #main-nav, .screen-header, .toast { display: none !important; }
             @page { size: A4; margin: 16mm 14mm; }
         }
+        .card-header-toggle{cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none}
+        .card-header-toggle .toggle-icon{transition:transform .2s ease;font-size:12px;color:var(--text-muted)}
+        .card.collapsed .card-header-toggle .toggle-icon{transform:rotate(-90deg)}
+        .card.collapsed .card-body{display:none}
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
