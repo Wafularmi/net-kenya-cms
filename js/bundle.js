@@ -29566,12 +29566,16 @@ function initCollapsibleCards() {
 
 function updateMaintenanceBanner() {
     try {
-        const banner = document.getElementById('maintenance-banner');
-        if (!banner) return;
+        const banners = [];
+        const b1 = document.getElementById('maintenance-banner');
+        if (b1) banners.push(b1);
+        const b2 = document.getElementById('app-maintenance-banner');
+        if (b2) banners.push(b2);
+        if (banners.length === 0) return;
         fetch('/api/maintenance-status', { cache: 'no-store' })
             .then(r => r.ok ? r.json() : null)
             .then(data => {
-                if (!data) { banner.style.display = 'none'; return; }
+                if (!data) { banners.forEach(b => { b.style.display = 'none'; }); return; }
                 const now = Date.now();
                 if (data.scheduledEnabled && data.scheduledStart) {
                     const start = new Date(data.scheduledStart).getTime();
@@ -29579,10 +29583,12 @@ function updateMaintenanceBanner() {
                     if (!isNaN(start)) {
                         if (now >= start && now < end) {
                             const msg = (data.scheduledMessage && data.scheduledMessage.trim()) ? data.scheduledMessage.trim() : (data.message && data.message.trim() ? data.message.trim() : 'System under scheduled maintenance');
-                            banner.innerHTML = '🔧 ' + escapeHtml(msg) + ' — Maintenance in progress. Please wait until it ends to login.';
-                            banner.style.display = 'block';
-                            banner.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
-                            banner.style.color = '#fff';
+                            banners.forEach(banner => {
+                                banner.innerHTML = '🔧 ' + escapeHtml(msg) + ' — Maintenance in progress. System will be unavailable until maintenance ends.';
+                                banner.style.display = 'block';
+                                banner.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
+                                banner.style.color = '#fff';
+                            });
                             return;
                         }
                         if (now < start) {
@@ -29592,28 +29598,32 @@ function updateMaintenanceBanner() {
                             const days = Math.floor(hours / 24);
                             let when = days > 0 ? days + 'd ' + (hours % 24) + 'h' : (hours > 0 ? hours + 'h ' + mins + 'm' : mins + 'm');
                             const msg = (data.scheduledMessage && data.scheduledMessage.trim()) ? data.scheduledMessage.trim() : (data.message && data.message.trim() ? data.message.trim() : 'Scheduled maintenance coming up');
-                            banner.innerHTML = '⚠️ ' + escapeHtml(msg) + ' — Starts in ' + when + '. System will be unavailable during maintenance. You can wait until it ends to login.';
-                            banner.style.display = 'block';
-                            banner.style.background = 'linear-gradient(90deg,#f59e0b,#fbbf24)';
-                            banner.style.color = '#1f2937';
+                            banners.forEach(banner => {
+                                banner.innerHTML = '⚠️ ' + escapeHtml(msg) + ' — Starts in ' + when + '. System will be unavailable during maintenance.';
+                                banner.style.display = 'block';
+                                banner.style.background = 'linear-gradient(90deg,#f59e0b,#fbbf24)';
+                                banner.style.color = '#1f2937';
+                            });
                             return;
                         }
                         if (now >= end) {
-                            banner.style.display = 'none';
+                            banners.forEach(b => { b.style.display = 'none'; });
                             return;
                         }
                     }
                 }
                 if (data.active && !data.scheduledActive) {
-                    banner.innerHTML = '🔧 ' + escapeHtml((data.message && data.message.trim()) || 'System is under maintenance. Please check back later.') + ' — Only administrators can sign in.';
-                    banner.style.display = 'block';
-                    banner.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
-                    banner.style.color = '#fff';
+                    banners.forEach(banner => {
+                        banner.innerHTML = '🔧 ' + escapeHtml((data.message && data.message.trim()) || 'System is under maintenance. Please check back later.');
+                        banner.style.display = 'block';
+                        banner.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
+                        banner.style.color = '#fff';
+                    });
                     return;
                 }
-                banner.style.display = 'none';
+                banners.forEach(b => { b.style.display = 'none'; });
             })
-            .catch(() => { banner.style.display = 'none'; });
+            .catch(() => { banners.forEach(b => { b.style.display = 'none'; }); });
     } catch (e) {}
 }
 
