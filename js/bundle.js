@@ -29414,9 +29414,8 @@ async function saveProgramSlots() {
             const center = row.getAttribute('data-center') || '';
             const key = center ? (program + '||' + center) : program;
             const total = parseInt(row.querySelector('.prog-total').value) || 0;
-            const remaining = parseInt(row.querySelector('.prog-remaining').value) || 0;
             const available = row.querySelector('.prog-available').checked;
-            out[key] = { program, center, total, remaining, available: available && remaining > 0 };
+            out[key] = { program, center, total, available };
         });
         try {
             await dbPut('settings', { id: 'programSlots', key: 'programSlots', value: out, updatedAt: new Date().toISOString() });
@@ -29436,7 +29435,7 @@ async function loadProgramSlotsSettings() {
     try {
         const list = document.getElementById('program-slots-list');
         if (!list) return;
-        const [programs, centers] = await Promise.all([getProgramsList(), getCenters()]);
+        const [programs, centers, students] = await Promise.all([getProgramsList(), getCenters(), dbGetAll('students').catch(() => [])]);
         const slots = await getProgramSlots();
         const centerList = (centers && centers.length) ? centers : [{ id: '', name: 'Main Campus' }];
         if (!programs || programs.length === 0) {
@@ -29447,9 +29446,21 @@ async function loadProgramSlotsSettings() {
         programs.forEach(p => {
             centerList.forEach(c => {
                 const key = c.id ? (p + '||' + c.id) : p;
-                const st = slots[key] || slots[p] || { total: 0, remaining: 0, available: true };
-                const full = !st.available || (st.remaining <= 0 && st.total > 0);
-                html += '<div class="program-slot-row" data-program="' + escapeHtml(p) + '" data-center="' + escapeHtml(c.id || '') + '" style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><div style="font-weight:600;font-size:12px;">' + escapeHtml(p) + (c.name ? ' • ' + escapeHtml(c.name) : '') + '</div><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:' + (full?'var(--danger)':'var(--success)') + ';color:#fff;">' + (full?'Slots Full':'Available') + '</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><label style="font-size:11px;display:flex;gap:4px;align-items:center;">Total <input type="number" class="prog-total" value="' + (st.total||0) + '" min="0" style="width:70px;padding:4px 6px;"></label><label style="font-size:11px;display:flex;gap:4px;align-items:center;">Remaining <input type="number" class="prog-remaining" value="' + (st.remaining||0) + '" min="0" style="width:70px;padding:4px 6px;"></label><label style="font-size:11px;display:flex;gap:4px;align-items:center;"><input type="checkbox" class="prog-available" ' + ((st.available && (st.remaining > 0 || st.total === 0)) ? 'checked' : '') + '> Available</label></div></div>';
+                const st = slots[key] || slots[p] || { total: 0, available: true };
+                const total = parseInt(st.total) || 0;
+                let used = 0;
+                (students || []).forEach(s => {
+                    if (!s) return;
+                    const sProg = s.program || '';
+                    const sCenter = s.studyCenterId || '';
+                    if (sProg === p && sCenter === (c.id || '')) {
+                        if (s.status === 'active' || s.status === 'admitted' || s.status === 'enrolled') used++;
+                        else if (!s.status) used++;
+                    }
+                });
+                const remaining = total > 0 ? Math.max(0, total - used) : 0;
+                const full = total > 0 ? (remaining <= 0) : !(st.available);
+                html += '<div class="program-slot-row" data-program="' + escapeHtml(p) + '" data-center="' + escapeHtml(c.id || '') + '" style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><div style="font-weight:600;font-size:12px;">' + escapeHtml(p) + (c.name ? ' • ' + escapeHtml(c.name) : '') + '</div><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:' + (full?'var(--danger)':'var(--success)') + ';color:#fff;">' + (full?'Slots Full':'Available') + '</span></div><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11px;"><label style="display:flex;gap:4px;align-items:center;">Total <input type="number" class="prog-total" value="' + total + '" min="0" style="width:70px;padding:4px 6px;"></label><div>Used: <b>' + used + '</b></div><div>Remaining: <b>' + remaining + '</b></div><label style="display:flex;gap:4px;align-items:center;"><input type="checkbox" class="prog-available" ' + ((st.available !== false) ? 'checked' : '') + '> Available</label></div></div>';
             });
         });
         list.innerHTML = html;
