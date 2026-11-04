@@ -46,7 +46,6 @@
 </head>
 <body>
     <div id="login-screen" class="login-screen">
-        <div id="maintenance-banner" style="display:none;max-width:420px;width:100%;margin:0 auto 12px auto;background:linear-gradient(90deg,#f59e0b,#fbbf24);color:#1f2937;padding:10px 14px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25);font-size:12px;line-height:1.4;text-align:center;font-weight:600;"></div>
         <div class="login-card">
             <div id="login-logo" class="login-logo-placeholder">{{INITIALS}}</div>
             <h1 id="login-school-name">{{SCHOOL_NAME}}</h1>
@@ -57,6 +56,7 @@
                 <div class="form-group" style="display:none;"><input type="text" name="fakeuser" autocomplete="off"></div>
                 <div class="form-group"><label>Password / Admission No.</label><input type="password" id="login-pass" placeholder="Password (staff) or admission number (students)" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')"></div>
                 <button class="btn btn-full" id="login-btn" onclick="login()" style="background:var(--accent);border-color:var(--accent);color:#fff;">Sign In</button>
+                <div id="maintenance-banner" style="display:none;margin-top:10px;background:linear-gradient(90deg,#f59e0b,#fbbf24);color:#1f2937;padding:10px 12px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.2);font-size:11px;line-height:1.4;text-align:center;font-weight:600;"></div>
                 <p id="login-error" class="login-error" style="display:none;"></p>
                 <p id="login-admin-phone" style="{{CONTACT_PHONE_STYLE}}">{{CONTACT_PHONE}}</p>
                 <p class="login-hint" style="margin-top:12px;font-size:11px;color:var(--text-muted);">Don't have an account? <a href="#" onclick="showSignupForm(); return false;" style="color:var(--accent);font-weight:600;text-decoration:none;">Request Registration</a></p>
