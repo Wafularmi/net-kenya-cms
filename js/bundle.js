@@ -1029,10 +1029,24 @@ function applyTemplateVars(message, student, schoolName, balance, admissionNumbe
     const fee = typeof s.feeAmount === 'number' ? formatCurrency(s.feeAmount) : (extra.fee || '0');
     const login = phone || s.phone || extra.phone || '';
     const portal = extra.portal || 'www.nefoundation.ke';
-    let courseName = extra.courseName || extra.course || extra.courseTitle || '';
-    if (!courseName && extra.courseObj && extra.courseObj.name) courseName = extra.courseObj.name;
+    let courseName = extra.courseName || extra.course || extra.courseTitle || extra.course_name || '';
+    if (!courseName && Array.isArray(extra.exams) && extra.exams.length === 1) {
+        courseName = extra.exams[0].courseName || extra.exams[0].courseTitle || '';
+    }
+    if (!courseName && Array.isArray(extra.exams) && extra.exams.length > 1) {
+        const c = extra.exams.map(e=>e.courseName || e.courseTitle).filter(Boolean);
+        if (c.length) courseName = [...new Set(c)].join(', ');
+    }
+    if (!courseName && extra.courseObj && (extra.courseObj.name || extra.courseObj.title)) courseName = extra.courseObj.name || extra.courseObj.title;
     if (!courseName && s.course) courseName = s.course;
     let examTitle = extra.examTitle || extra.event || extra.title || extra.exam || '';
+    if (!examTitle && Array.isArray(extra.exams) && extra.exams.length === 1) {
+        examTitle = extra.exams[0].examTitle || extra.exams[0].title || '';
+    }
+    if (!examTitle && Array.isArray(extra.exams) && extra.exams.length > 1) {
+        const t = extra.exams.map(e=>e.examTitle || e.title).filter(Boolean);
+        if (t.length) examTitle = t.join(', ');
+    }
     if (!examTitle && extra.examObj) examTitle = extra.examObj.title || extra.examObj.name || '';
     const examDate = extra.examDate || extra.date || (extra.examObj ? formatDate(extra.examObj.date) : '');
     const examTime = extra.examTime || extra.time || (extra.examObj ? (extra.examObj.time || '') : '');
@@ -29214,16 +29228,18 @@ function buildExamsList(exams) {
     try {
         if (!Array.isArray(exams) || exams.length === 0) return '';
         const lines = exams.map((ex, idx) => {
-            const course = ex.courseName ? ex.courseName : '';
+            const course = ex.courseName || ex.courseTitle || '';
             const title = ex.examTitle || ex.title || course || ('Exam ' + (idx + 1));
             const date = ex.examDate || ex.date || '';
             const time = ex.examTime || ex.time || '';
             const venue = ex.examVenue || ex.venue || '';
             let line = '- ' + title;
-            if (course && course !== title) line += ' [' + course + ']';
-            if (date) line += ' - ' + date;
-            if (time) line += ' at ' + time;
-            if (venue) line += ' @ ' + venue;
+            if (course && course.toLowerCase() !== String(title).toLowerCase()) line += ' (' + course + ')';
+            const parts = [];
+            if (date) parts.push(date);
+            if (time) parts.push('at ' + time);
+            if (venue) parts.push('@ ' + venue);
+            if (parts.length) line += ' - ' + parts.join(' ');
             return line;
         });
         return lines.join('\n');
@@ -29232,7 +29248,7 @@ function buildExamsList(exams) {
     }
 }
 
-function onCommExamChange() {
+async function onCommExamChange() {
     try {
         const sel = document.getElementById('comm-exam');
         if (!sel) return;
@@ -29256,6 +29272,25 @@ function onCommExamChange() {
             window._commExamContexts = [];
             return;
         }
+        // Enrich with full exam/course data
+        try {
+            const [allExams, allCourses] = await Promise.all([dbGetAll('exams').catch(() => []), dbGetAll('courses').catch(() => [])]);
+            exams.forEach(ex => {
+                const fullExam = (allExams || []).find(e => e.id === ex.examId);
+                if (fullExam) {
+                    if (fullExam.title) ex.examTitle = fullExam.title;
+                    if (fullExam.date) ex.examDate = formatDate(fullExam.date);
+                    if (fullExam.time) ex.examTime = fullExam.time;
+                    if (fullExam.venue) ex.examVenue = fullExam.venue;
+                    if (fullExam.courseId) ex.courseId = fullExam.courseId;
+                }
+                const course = (allCourses || []).find(c => c.id === (ex.courseId || (fullExam && fullExam.courseId)));
+                if (course) {
+                    ex.courseName = course.name || course.title || ex.courseName;
+                    ex.courseTitle = course.name || course.title || ex.courseTitle;
+                }
+            });
+        } catch (e) {}
         const examsList = buildExamsList(exams);
         window._commExamContexts = exams;
         window._commExamContext = {
@@ -29263,9 +29298,16 @@ function onCommExamChange() {
             examsList: examsList,
             examCount: exams.length,
             examId: exams[0].examId,
-            examTitle: exams.length === 1 ? exams[0].examTitle : (exams.map(e=>e.examTitle).filter(Boolean).join(', ')),
-            courseName: exams.length === 1 ? exams[0].courseName : exams.map(e=>e.courseName).filter(Boolean).join(', '),
+            examTitle: exams.length === 1 ? exams[0].examTitle : exams.map(e=>e.examTitle).filter(Boolean).join(', '),
+            courseName: exams.length === 1 ? (exams[0].courseName || exams[0].courseTitle) : exams.map(e=>e.courseName || e.courseTitle).filter(Boolean).join(', '),
+            courseTitle: exams.length === 1 ? (exams[0].courseName || exams[0].courseTitle) : exams.map(e=>e.courseName || e.courseTitle).filter(Boolean).join(', '),
             courseId: exams[0].courseId,
+            examDate: exams.length === 1 ? exams[0].examDate : exams.map(e=>e.examDate).filter(Boolean).join(', '),
+            examTime: exams.length === 1 ? exams[0].examTime : exams.map(e=>e.examTime).filter(Boolean).join(', '),
+            examVenue: exams.length === 1 ? exams[0].examVenue : exams.map(e=>e.examVenue).filter(Boolean).join(', '),
+            date: exams.length === 1 ? exams[0].examDate : exams.map(e=>e.examDate).filter(Boolean).join(', '),
+            time: exams.length === 1 ? exams[0].examTime : exams.map(e=>e.examTime).filter(Boolean).join(', '),
+            venue: exams.length === 1 ? exams[0].examVenue : exams.map(e=>e.examVenue).filter(Boolean).join(', '),
             event: exams.length === 1 ? exams[0].examTitle : examsList
         };
     } catch (e) {}
