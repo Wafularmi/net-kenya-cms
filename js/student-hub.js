@@ -568,8 +568,11 @@ function _hubBuildComputed(data, me) {
             const myRetakeReqs = (data.retakeRequests || []).filter(r => allStudentIds.has(String(r.studentId)));
             const suppOk = myRetakeReqs.some(r => r.status === 'approved' && (String(r.supplementaryExamId) === String(e.id) || String(r.examId) === String(e.id)));
             if (!suppOk) return false;
-            if (!(e.openWindow || (e.date && e.time))) return false;
             if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+            if (!(e.openWindow || (e.date && e.time))) {
+                try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
+                return true;
+            }
             return true;
         }
         if (e.openWindow || (e.date && e.time)) {
@@ -577,7 +580,7 @@ function _hubBuildComputed(data, me) {
             return true;
         }
         if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-        if (!(e.openWindow || (e.date && e.time))) return true;
+        try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
         return true;
     });
     const myRegisteredExams = allCourseExams.filter(e => {
@@ -642,11 +645,16 @@ function _hubBuildComputed(data, me) {
         if (e.published === false) return false;
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
         if (exType === 'supplementary') {
-            return approvedSuppIds.has(String(e.id));
-        }
-        if (e.openWindow || (e.date && e.time)) {
+            if (!approvedSuppIds.has(String(e.id))) return false;
+            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
             return true;
         }
+        if (e.openWindow || (e.date && e.time)) {
+            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+            return true;
+        }
+        if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+        try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
         return true;
     });
     availableExams = availableExams.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -976,8 +984,11 @@ async function renderStudentHub() {
                 if (exType === 'supplementary') {
                     const appr = new Set((fb.retakeRequests||[]).filter(r => allStudentIds.has(String(r.studentId)) && r.status === 'approved').map(r => String(r.supplementaryExamId) || String(r.examId)));
                     if (!appr.has(String(e.id))) return false;
-                    if (!(e.openWindow || (e.date && e.time))) return false;
                     if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
+                    if (!(e.openWindow || (e.date && e.time))) {
+                        try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
+                        return true;
+                    }
                     return true;
                 }
                 if (e.openWindow || (e.date && e.time)) {
@@ -985,7 +996,7 @@ async function renderStudentHub() {
                     return true;
                 }
                 if (me?.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-                if (!(e.openWindow || (e.date && e.time))) return true;
+                try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
                 return true;
             }).sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(0, 10);
             const courses = (fb.courses || []);
