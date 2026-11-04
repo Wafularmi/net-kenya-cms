@@ -6779,6 +6779,16 @@ async function saveExam() {
     // enough to schedule, the venue may follow. Without them the exam is simply
     // "set" and stays out of student view until it is scheduled.
     const scheduled = !!date && !!time;
+    if (scheduled && date) {
+        try {
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const d = new Date(date + 'T00:00:00');
+            if (d < today) {
+                return showToast('Cannot schedule exams on past dates. Please select a future date.', { type: 'danger' });
+            }
+        } catch (e) {}
+    }
     const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time,
         opensAt: (document.getElementById('exam-opens') || {}).value || date || '',
         closesAt: (document.getElementById('exam-closes') || {}).value || '',
@@ -6832,6 +6842,16 @@ async function saveExamSchedule(examId) {
     // An open exam does not need a sitting slot - it stays available until the
     // staff switch it back to Draft. A dated exam still requires date + time.
     if (!openWindow && (!date || !time)) return showToast('Date and time are required to schedule.');
+    if (!openWindow && date) {
+        try {
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const d = new Date(date + 'T00:00:00');
+            if (d < today) {
+                return showToast('Cannot schedule exams on past dates. Please select a future date.', { type: 'danger' });
+            }
+        } catch (e) {}
+    }
     exam.date = openWindow ? (date || '') : date;
     exam.time = openWindow ? (time || '') : time;
     exam.venue = document.getElementById('exs-venue').value.trim();
@@ -16526,7 +16546,18 @@ async function loadCommunicationPage() {
     const centerOptions = centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.code})</option>`).join('');
     const programOptions = programs.map(p => `<option value="${p}">${escapeHtml(p)}</option>`).join('');
     const templateOptions = templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-    const examOptions = (exams || []).filter(e => e.published !== false).sort((a,b)=> (b.date||'').localeCompare(a.date||'')).map(e => {
+    const todayComm = new Date();
+    todayComm.setHours(0,0,0,0);
+    const examOptions = (exams || []).filter(e => {
+        if (e.published === false) return false;
+        if (e.openWindow) return true;
+        if (!e.date) return false;
+        try {
+            const d = new Date(e.date + 'T00:00:00');
+            if (d < todayComm) return false;
+        } catch (e2) {}
+        return true;
+    }).sort((a,b)=> (b.date||'').localeCompare(a.date||'')).map(e => {
         const course = (courses||[]).find(c=>c.id===e.courseId);
         const examTitle = e.title || (course?course.name:e.courseId||'Exam');
         const courseName = course ? course.name : (e.courseName || '');
