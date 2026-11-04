@@ -25253,22 +25253,99 @@ async function useSMSTemplate(id) {
 }
 function showSMSBroadcast(initialMessage = '') {
     (async () => {
-        const students = (await dbGetAll('students')).filter(s => s.status === 'active' && s.phone);
+        const [students, centers] = await Promise.all([(await dbGetAll('students')).filter(s => s.status === 'active' && s.phone), getCenters()]);
         const branding = await dbGet('settings', 'branding');
         const schoolName = branding ? branding.schoolName : 'College Management System';
-        const content = `<div class="form-group"><label>Recipients</label><select id="sms-recipients"><option value="all-active">All Active Students with phone (${students.length})</option></select></div><div class="form-group"><label>Message *</label><textarea id="sms-message" rows="5" placeholder="Enter your message... Use {{name}}, {{admission}}, {{program}}, {{center}}, {{school}}">${escapeHtml(initialMessage)}</textarea></div><div id="sms-preview" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"></div><p style="font-size:11px;color:var(--text-muted);">Send via Africa's Talking (configure SMS Settings in the Settings tab).</p>`;
-        showModal('Bulk SMS Broadcast', content, `<button class="btn btn-primary" onclick="sendSmsBroadcast('${escapeHtml(schoolName).replace(/'/g, '')}')">🚀 Send SMS (${students.length})</button>`);
+        const centerOptions = centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${escapeHtml(c.code||'')})</option>`).join('');
+        const content = `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+                <div class="form-group" style="flex:1;min-width:200px;margin:0;"><label>Filter by Center</label><select id="sms-filter-center" class="form-control"><option value="">All Centers</option>${centerOptions}</select></div>
+                <div class="form-group" style="flex:1;min-width:200px;margin:0;"><label>Search</label><input type="text" id="sms-filter-search" class="form-control" placeholder="Name, phone, admission..."></div>
+                <button class="btn btn-outline btn-sm" onclick="filterSMSTable()">Apply</button>
+                <button class="btn btn-outline btn-sm" onclick="selectAllSMS(true)">Select All</button>
+                <button class="btn btn-outline btn-sm" onclick="selectAllSMS(false)">Clear</button>
+            </div>
+            <div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);"><span id="sms-selected-count">0</span> selected / <span id="sms-total-count">${students.length}</span> with phone</div>
+            <div style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:12px;">
+                <table style="width:100%;font-size:12px;">
+                    <thead style="position:sticky;top:0;background:var(--bg-secondary);"><tr><th style="padding:6px;text-align:left;"><input type="checkbox" id="sms-select-all" onchange="toggleAllSMS(this.checked)"></th><th style="padding:6px;text-align:left;">Name</th><th style="padding:6px;text-align:left;">Admission</th><th style="padding:6px;text-align:left;">Program</th><th style="padding:6px;text-align:left;">Center</th><th style="padding:6px;text-align:left;">Phone</th></tr></thead>
+                    <tbody id="sms-student-tbody">${students.map(s => {
+                        const c = centers.find(x=>x.id===s.studyCenterId);
+                        return `<tr data-id="${s.id}" data-center="${s.studyCenterId||''}" data-search="${(s.name||'')+' '+(s.admissionNumber||'')+' '+(s.phone||'')}">
+                            <td style="padding:6px;"><input type="checkbox" class="sms-student-cb" value="${s.id}" onchange="updateSMSCount()"></td>
+                            <td style="padding:6px;">${escapeHtml(s.name)}</td>
+                            <td style="padding:6px;">${escapeHtml(s.admissionNumber||'--')}</td>
+                            <td style="padding:6px;">${escapeHtml(s.program||'--')}</td>
+                            <td style="padding:6px;">${c?escapeHtml(c.name):'--'}</td>
+                            <td style="padding:6px;">${escapeHtml(s.phone)}</td>
+                        </tr>`;
+                    }).join('')}</tbody>
+                </table>
+            </div>
+            <div class="form-group"><label>Message *</label><textarea id="sms-message" rows="5" placeholder="Enter your message... Use {{name}}, {{admission}}, {{program}}, {{center}}, {{school}}">${escapeHtml(initialMessage)}</textarea></div>
+            <div id="sms-preview" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"></div>
+            <p style="font-size:11px;color:var(--text-muted);">Send via Africa's Talking (configure SMS Settings in the Settings tab).</p>`;
+        showModal('Bulk SMS Broadcast', content, `<button class="btn btn-primary" onclick="sendSmsBroadcast('${escapeHtml(schoolName).replace(/'/g, "\\'")}')">🚀 Send SMS</button>`);
         document.getElementById('sms-message').addEventListener('input', () => {
             const val = document.getElementById('sms-message').value;
             document.getElementById('sms-preview').innerHTML = 'Character count: <b>' + val.length + '</b>' + (val.length > 160 ? ' <span style="color:var(--warning);">(multipart SMS: ~' + Math.ceil(val.length / 160) + ' parts)</span>' : '');
         });
+        document.getElementById('sms-filter-center').addEventListener('change', filterSMSTable);
+        document.getElementById('sms-filter-search').addEventListener('input', filterSMSTable);
+        updateSMSCount();
     })();
+}
+function filterSMSTable() {
+    const center = document.getElementById('sms-filter-center').value;
+    const search = (document.getElementById('sms-filter-search').value || '').toLowerCase();
+    document.querySelectorAll('#sms-student-tbody tr').forEach(tr => {
+        const okCenter = !center || tr.getAttribute('data-center') === center;
+        const okSearch = !search || (tr.getAttribute('data-search') || '').toLowerCase().includes(search);
+        tr.style.display = (okCenter && okSearch) ? '' : 'none';
+    });
+    updateSMSCount();
+}
+function toggleAllSMS(checked) {
+    document.querySelectorAll('#sms-student-tbody tr').forEach(tr => {
+        if (tr.style.display === 'none') return;
+        const cb = tr.querySelector('.sms-student-cb');
+        if (cb) cb.checked = checked;
+    });
+    updateSMSCount();
+}
+function selectAllSMS(checked) {
+    const cball = document.getElementById('sms-select-all');
+    if (cball) cball.checked = checked;
+    toggleAllSMS(checked);
+}
+function updateSMSCount() {
+    const checked = document.querySelectorAll('.sms-student-cb:checked').length;
+    const visible = Array.from(document.querySelectorAll('#sms-student-tbody tr')).filter(tr => tr.style.display !== 'none').length;
+    const el = document.getElementById('sms-selected-count');
+    if (el) el.textContent = checked;
+    const tel = document.getElementById('sms-total-count');
+    if (tel) tel.textContent = visible;
 }
 async function sendSmsBroadcast(schoolName) {
     const message = document.getElementById('sms-message').value.trim();
-    const students = (await dbGetAll('students')).filter(s => s.status === 'active' && s.phone);
     if (!message) return showToast('Enter a message first!');
-    if (!students.length) return showToast('No recipients with phone numbers!');
+    const checked = Array.from(document.querySelectorAll('.sms-student-cb:checked')).map(cb => cb.value);
+    let students = await dbGetAll('students');
+    students = students.filter(s => s.status === 'active' && s.phone);
+    if (checked.length) {
+        students = students.filter(s => checked.includes(s.id));
+    } else {
+        // if none checked, send to all visible? but be explicit
+        const visible = [];
+        document.querySelectorAll('#sms-student-tbody tr').forEach(tr => {
+            if (tr.style.display !== 'none') {
+                const cb = tr.querySelector('.sms-student-cb');
+                if (cb && cb.checked) visible.push(cb.value);
+            }
+        });
+        if (visible.length) students = students.filter(s => visible.includes(s.id));
+        // else send to all active with phone (current filtered view - apply current filters)
+    }
+    if (!students.length) return showToast('No recipients selected!');
     const centers = await getCenters();
     const recipients = students.map(s => {
         const center = centers.find(c => c.id === s.studyCenterId);
