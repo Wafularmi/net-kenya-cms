@@ -2603,7 +2603,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -29312,3 +29312,72 @@ async function onCommExamChange() {
         };
     } catch (e) {}
 }
+
+
+async function getProgramSlots() {
+    try {
+        const s = await dbGet('settings', 'programSlots');
+        if (s && s.value) return s.value;
+    } catch (e) {}
+    try {
+        const raw = localStorage.getItem('nkcms_program_slots');
+        if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+}
+
+async function saveProgramSlots() {
+    try {
+        const list = document.getElementById('program-slots-list');
+        if (!list) return showToast('Program slots list not found', { type: 'danger' });
+        const rows = Array.from(list.querySelectorAll('.program-slot-row'));
+        const out = {};
+        rows.forEach(row => {
+            const program = row.getAttribute('data-program') || '';
+            const center = row.getAttribute('data-center') || '';
+            const key = center ? (program + '||' + center) : program;
+            const total = parseInt(row.querySelector('.prog-total').value) || 0;
+            const remaining = parseInt(row.querySelector('.prog-remaining').value) || 0;
+            const available = row.querySelector('.prog-available').checked;
+            out[key] = { program, center, total, remaining, available: available && remaining > 0 };
+        });
+        try {
+            await dbPut('settings', { id: 'programSlots', key: 'programSlots', value: out, updatedAt: new Date().toISOString() });
+        } catch (e) {}
+        try {
+            localStorage.setItem('nkcms_program_slots', JSON.stringify(out));
+        } catch (e) {}
+        showToast('Program slots saved', { type: 'success' });
+        try { logAudit('updated', 'program-slots', { count: Object.keys(out).length }); } catch (e) {}
+    } catch (e) {
+        showToast('Failed to save program slots', { type: 'danger' });
+        console.error(e);
+    }
+}
+
+async function loadProgramSlotsSettings() {
+    try {
+        const list = document.getElementById('program-slots-list');
+        if (!list) return;
+        const [programs, centers] = await Promise.all([getProgramsList(), getCenters()]);
+        const slots = await getProgramSlots();
+        const centerList = (centers && centers.length) ? centers : [{ id: '', name: 'Main Campus' }];
+        if (!programs || programs.length === 0) {
+            list.innerHTML = '<div style="color:var(--text-muted);font-size:11px;">No programs found.</div>';
+            return;
+        }
+        let html = '';
+        programs.forEach(p => {
+            centerList.forEach(c => {
+                const key = c.id ? (p + '||' + c.id) : p;
+                const st = slots[key] || slots[p] || { total: 0, remaining: 0, available: true };
+                const full = !st.available || (st.remaining <= 0 && st.total > 0);
+                html += '<div class="program-slot-row" data-program="' + escapeHtml(p) + '" data-center="' + escapeHtml(c.id || '') + '" style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><div style="font-weight:600;font-size:12px;">' + escapeHtml(p) + (c.name ? ' • ' + escapeHtml(c.name) : '') + '</div><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:' + (full?'var(--danger)':'var(--success)') + ';color:#fff;">' + (full?'Slots Full':'Available') + '</span></div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><label style="font-size:11px;display:flex;gap:4px;align-items:center;">Total <input type="number" class="prog-total" value="' + (st.total||0) + '" min="0" style="width:70px;padding:4px 6px;"></label><label style="font-size:11px;display:flex;gap:4px;align-items:center;">Remaining <input type="number" class="prog-remaining" value="' + (st.remaining||0) + '" min="0" style="width:70px;padding:4px 6px;"></label><label style="font-size:11px;display:flex;gap:4px;align-items:center;"><input type="checkbox" class="prog-available" ' + ((st.available && (st.remaining > 0 || st.total === 0)) ? 'checked' : '') + '> Available</label></div></div>';
+            });
+        });
+        list.innerHTML = html;
+    } catch (e) {
+        console.error(e);
+    }
+}
+

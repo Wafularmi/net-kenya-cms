@@ -1515,6 +1515,14 @@
                             <button class="btn btn-outline btn-sm" onclick="loadTranscriptCourseOrderSettings()">Reset to Default</button>
                         </div>
                     </div>
+                    <div class="card"><h3>Program Availability & Slots (Per Center)</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Set total slots and remaining slots per program per study center. Mark programs as available or full.</div>
+                        <div id="program-slots-list" style="display:flex;flex-direction:column;gap:8px;max-height:340px;overflow:auto;margin-bottom:10px;"></div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-primary btn-sm" onclick="saveProgramSlots()">Save Program Slots</button>
+                            <button class="btn btn-outline btn-sm" onclick="loadProgramSlotsSettings()">Refresh</button>
+                        </div>
+                    </div>
                         <div class="form-group"><label>Clear All Data</label><button class="btn btn-danger" onclick="clearAllData()">Clear All Data</button></div>
                     </div>
                 </div>
