@@ -46,6 +46,7 @@
 </head>
 <body>
     <div id="login-screen" class="login-screen">
+        <div id="maintenance-banner" style="display:none;max-width:420px;width:100%;margin:0 auto 12px auto;background:linear-gradient(90deg,#f59e0b,#fbbf24);color:#1f2937;padding:10px 14px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25);font-size:12px;line-height:1.4;text-align:center;font-weight:600;"></div>
         <div class="login-card">
             <div id="login-logo" class="login-logo-placeholder">{{INITIALS}}</div>
             <h1 id="login-school-name">{{SCHOOL_NAME}}</h1>
@@ -1310,6 +1311,15 @@
                         </div>
                         <div class="form-group"><label>Custom Message (optional)</label><textarea id="settings-maintenance-message" rows="3" placeholder="e.g., We are upgrading our systems and will be back shortly. Thank you for your patience."></textarea></div>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">This message is shown on the maintenance page. Leave it empty to use the default text.</div>
+                        <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
+                        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">Scheduled Maintenance</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Schedule maintenance in advance. A banner will be shown to users before it starts, and they can wait until it's over to login.</div>
+                        <div class="form-group"><label><input type="checkbox" id="settings-maintenance-scheduled" style="margin-right:6px;"> Enable Scheduled Maintenance</label></div>
+                        <div class="form-row">
+                            <div class="form-group"><label>Start Date & Time</label><input type="datetime-local" id="settings-maintenance-start"></div>
+                            <div class="form-group"><label>End Date & Time</label><input type="datetime-local" id="settings-maintenance-end"></div>
+                        </div>
+                        <div class="form-group"><label>Scheduled Message (optional)</label><textarea id="settings-maintenance-scheduled-message" rows="2" placeholder="Message shown in the pre-maintenance banner..."></textarea></div>
                         <button class="btn btn-primary" onclick="saveMaintenanceMode()">Save Maintenance Settings</button>
                     </div>
                     <div class="card"><h3>Academic Settings</h3>

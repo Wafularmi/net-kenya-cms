@@ -402,17 +402,21 @@ let __lastBroadcast = null;
 // Public maintenance-status subscribers (login screen has no session token)
 const maintClients = [];
 function broadcastMaintenance(active) {
-    const msg = `event: maintenance\ndata: ${JSON.stringify({ active: !!active })}\n\n`;
-    for (const list of [sseClients, maintClients]) {
-        for (let i = list.length - 1; i >= 0; i--) {
-            const client = list[i];
-            if (!client.res.writableEnded) {
-                try { client.res.write(msg); } catch {}
-            } else {
-                list.splice(i, 1);
+    try {
+        const m = getMaintenanceSetting();
+        const scheduledActive = isScheduledMaintenanceActive();
+        const msg = `event: maintenance\ndata: ${JSON.stringify({ active: !!active, scheduledEnabled: !!m.scheduledEnabled, scheduledStart: m.scheduledStart || null, scheduledEnd: m.scheduledEnd || null, scheduledActive: scheduledActive })}\n\n`;
+        for (const list of [sseClients, maintClients]) {
+            for (let i = list.length - 1; i >= 0; i--) {
+                const client = list[i];
+                if (!client.res.writableEnded) {
+                    try { client.res.write(msg); } catch {}
+                } else {
+                    list.splice(i, 1);
+                }
             }
         }
-    }
+    } catch (e) {}
 }
 
 // WebSocket server for discussions
@@ -4080,7 +4084,21 @@ const maintenanceBypassTokens = new Map(); // token -> { username, expires }
 
 function getMaintenanceSetting() {
     const rec = (db.settings || []).find(s => s.key === 'maintenance');
-    return rec && rec.value && typeof rec.value === 'object' ? rec.value : { active: false, message: '' };
+    const v = rec && rec.value && typeof rec.value === 'object' ? rec.value : { active: false, message: '' };
+    return v;
+}
+
+function isScheduledMaintenanceActive() {
+    try {
+        const v = getMaintenanceSetting();
+        if (!v.scheduledEnabled) return false;
+        const now = Date.now();
+        const start = v.scheduledStart ? new Date(v.scheduledStart).getTime() : NaN;
+        const end = v.scheduledEnd ? new Date(v.scheduledEnd).getTime() : NaN;
+        if (isNaN(start)) return false;
+        if (isNaN(end)) return now >= start && now <= end;
+        return now >= start && now < end;
+    } catch (e) { return false; }
 }
 
 // The college's public contact number. One place decides what the login
@@ -4111,7 +4129,11 @@ function normaliseContactPhone(raw) {
 }
 
 function isMaintenanceActive() {
-    return getMaintenanceSetting().active === true;
+    try {
+        if (getMaintenanceSetting().active === true) return true;
+        if (isScheduledMaintenanceActive()) return true;
+    } catch (e) {}
+    return false;
 }
 
 function parseCookies(req) {
@@ -4365,7 +4387,10 @@ function handleAPI(req, res) {
 
     // GET /api/maintenance-status — public maintenance flag (login screen polling/SSE fallback)
     if (parts.length === 2 && parts[1] === 'maintenance-status' && req.method === 'GET') {
-        return json(res, 200, { active: isMaintenanceActive() });
+        const m = getMaintenanceSetting();
+        const scheduledActive = isScheduledMaintenanceActive();
+        const active = isMaintenanceActive();
+        return json(res, 200, { active: active, scheduledEnabled: !!m.scheduledEnabled, scheduledStart: m.scheduledStart || null, scheduledEnd: m.scheduledEnd || null, scheduledActive: scheduledActive, message: m.message || '', scheduledMessage: m.scheduledMessage || '' });
     }
     // GET /api/version — public build version (clients poll this to auto-reload on deploy)
     if (parts.length === 2 && parts[1] === 'version' && req.method === 'GET') {

@@ -1429,6 +1429,30 @@ async function setProtection() {
     showToast('Protection ' + (enabled ? 'ON' : 'OFF'));
 }
 
+function toLocalDateTimeInputValue(d) {
+    if (!d) return '';
+    try {
+        const date = new Date(d);
+        if (isNaN(date.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        const yyyy = date.getFullYear();
+        const mm = pad(date.getMonth() + 1);
+        const dd = pad(date.getDate());
+        const hh = pad(date.getHours());
+        const mi = pad(date.getMinutes());
+        return yyyy + '-' + mm + '-' + dd + 'T' + hh + ':' + mi;
+    } catch (e) { return ''; }
+}
+
+function fromLocalDateTimeInputValue(v) {
+    if (!v) return '';
+    try {
+        const date = new Date(v);
+        if (isNaN(date.getTime())) return '';
+        return date.toISOString();
+    } catch (e) { return ''; }
+}
+
 async function loadMaintenanceMode() {
     try {
         var rec = await dbGet('settings', 'maintenance');
@@ -1442,12 +1466,19 @@ async function loadMaintenanceMode() {
         }
         var msg = document.getElementById('settings-maintenance-message');
         if (msg) msg.value = v.message || '';
+        var schedCb = document.getElementById('settings-maintenance-scheduled');
+        if (schedCb) schedCb.checked = !!v.scheduledEnabled;
+        var schedStart = document.getElementById('settings-maintenance-start');
+        if (schedStart) schedStart.value = toLocalDateTimeInputValue(v.scheduledStart);
+        var schedEnd = document.getElementById('settings-maintenance-end');
+        if (schedEnd) schedEnd.value = toLocalDateTimeInputValue(v.scheduledEnd);
+        var schedMsg = document.getElementById('settings-maintenance-scheduled-message');
+        if (schedMsg) schedMsg.value = v.scheduledMessage || '';
     } catch (e) {}
 }
 
 async function setMaintenanceMode(checked) {
     var msg = document.getElementById('settings-maintenance-message');
-    // Optimistic UI: toggle + status update instantly (server round-trip lags on big DB writes)
     var cbEl = document.getElementById('settings-maintenance');
     var statusEl = document.getElementById('maintenance-status');
     function paintMaint(on) {
@@ -1459,15 +1490,25 @@ async function setMaintenanceMode(checked) {
         var rec = null;
         try { rec = await dbGet('settings', 'maintenance'); } catch (e) {}
         var cur = (rec && rec.value) || {};
-        var value = { active: !!checked, message: (msg && msg.value ? msg.value.trim() : '') || cur.message || '' };
-        await dbPut('settings', { key: 'maintenance', value: value, updatedAt: new Date().toISOString(), updatedBy: (JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || '') });
-        showToast(checked ? 'Maintenance mode ON — visitors will see the maintenance page.' : 'Maintenance mode OFF — the system is live again.', { type: checked ? 'warning' : 'success' });
+        var schedCb = document.getElementById('settings-maintenance-scheduled');
+        var schedStart = document.getElementById('settings-maintenance-start');
+        var schedEnd = document.getElementById('settings-maintenance-end');
+        var schedMsg = document.getElementById('settings-maintenance-scheduled-message');
+        var value = {
+            active: !!checked,
+            message: (msg && msg.value ? msg.value.trim() : '') || cur.message || '',
+            scheduledEnabled: !!(schedCb && schedCb.checked),
+            scheduledStart: fromLocalDateTimeInputValue(schedStart && schedStart.value),
+            scheduledEnd: fromLocalDateTimeInputValue(schedEnd && schedEnd.value),
+            scheduledMessage: (schedMsg && schedMsg.value ? schedMsg.value.trim() : '') || cur.scheduledMessage || '',
+            updatedAt: new Date().toISOString(),
+            updatedBy: (JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || '')
+        };
+        await dbPut('settings', { key: 'maintenance', value: value, updatedAt: new Date().toISOString(), updatedBy: value.updatedBy });
     } catch (e) {
-        paintMaint(!checked); // revert on failure so UI never lies
         showToast('Could not save maintenance mode: ' + (e && e.message ? e.message : e), { type: 'danger' });
-        return;
     }
-    loadMaintenanceMode(); // confirm final state from server
+    loadMaintenanceMode();
 }
 
 async function saveMaintenanceMode() {
@@ -28848,6 +28889,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { clearLoginForm(); } catch {}
     window.addEventListener('pageshow', () => { try { clearLoginForm(); } catch {} });
     try { startMaintenanceLiveSync(); } catch {}
+    try { if (typeof startMaintenanceBanner === 'function') startMaintenanceBanner(); } catch {}
     try { if (typeof loadCountries === 'function') loadCountries(); } catch {}
     // The contact number must not wait for any other download - it is shown on
     // the login screen and the server already rendered it.
@@ -29513,4 +29555,54 @@ function initCollapsibleCards() {
     } catch (e) {
         console.error(e);
     }
+}
+
+
+function updateMaintenanceBanner() {
+    try {
+        const banner = document.getElementById('maintenance-banner');
+        if (!banner) return;
+        fetch('/api/maintenance-status', { cache: 'no-store' })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data) { banner.style.display = 'none'; return; }
+                const now = Date.now();
+                if (data.active) {
+                    banner.style.display = 'none';
+                    return;
+                }
+                if (data.scheduledEnabled && data.scheduledStart) {
+                    const start = new Date(data.scheduledStart).getTime();
+                    const end = data.scheduledEnd ? new Date(data.scheduledEnd).getTime() : start + 3600000;
+                    if (isNaN(start)) { banner.style.display = 'none'; return; }
+                    if (now >= start && now < end) {
+                        banner.style.display = 'none';
+                        return;
+                    }
+                    if (now < start) {
+                        const diff = start - now;
+                        const hours = Math.floor(diff / 3600000);
+                        const mins = Math.floor((diff % 3600000) / 60000);
+                        const when = hours > 0 ? hours + 'h ' + mins + 'm' : mins + 'm';
+                        const msg = (data.scheduledMessage && data.scheduledMessage.trim()) ? data.scheduledMessage.trim() : 'Scheduled maintenance coming up';
+                        banner.innerHTML = '⚠️ ' + escapeHtml(msg) + ' — starts in ' + when + '. System will be unavailable during this time. You can wait until it ends to login.';
+                        banner.style.display = 'block';
+                        return;
+                    }
+                    if (now >= end) {
+                        banner.style.display = 'none';
+                        return;
+                    }
+                }
+                banner.style.display = 'none';
+            })
+            .catch(() => { banner.style.display = 'none'; });
+    } catch (e) {}
+}
+
+function startMaintenanceBanner() {
+    try {
+        updateMaintenanceBanner();
+        setInterval(updateMaintenanceBanner, 60000);
+    } catch (e) {}
 }
