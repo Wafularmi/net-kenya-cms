@@ -28840,10 +28840,27 @@ function handleMaintenancePush(active) {
         const onMaintPage = /maintenance\.html/.test(location.pathname);
         const role = (JSON.parse(sessionStorage.getItem('currentUser') || '{}').role) || '';
         if (active && !onMaintPage && role !== 'admin') {
-            try { sessionStorage.setItem('lastScreen', 'dashboard'); } catch {}
+            try {
+                let current = sessionStorage.getItem('lastScreen') || 'dashboard';
+                try {
+                    const activeTab = document.querySelector('.tab-content.active');
+                    if (activeTab && activeTab.id && activeTab.id.startsWith('tab-')) {
+                        current = activeTab.id.replace('tab-', '');
+                    }
+                } catch (e) {}
+                sessionStorage.setItem('preMaintenanceScreen', current);
+                sessionStorage.setItem('lastScreen', current);
+            } catch (e) {}
             location.reload();
-        } else if (!active && onMaintPage) {
+            return;
+        }
+        if (!active && onMaintPage) {
+            try {
+                const pre = sessionStorage.getItem('preMaintenanceScreen') || sessionStorage.getItem('lastScreen') || 'dashboard';
+                sessionStorage.setItem('lastScreen', pre);
+            } catch (e) {}
             location.reload();
+            return;
         }
     } catch {}
 }
