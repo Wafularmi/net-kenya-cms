@@ -3390,42 +3390,66 @@ try { const n = stripStoredInlineBlobs(); if (n) console.log('stripStoredInlineB
 
 // Brute-force protection for /api/login
 const loginAttempts = new Map(); // ip -> { count, windowStart, blockedUntil }
+const loginIdAttempts = new Map(); // ip:identifier -> { count, windowStart, blockedUntil }
 // Throttle for the public login-country smart-filter (per IP, per minute).
 // Lookups never count as login attempts and never create sessions.
 const loginCountryHits = new Map(); // ip -> { count, windowStart }
 const LOGIN_COUNTRY_MAX = parseInt(process.env.LOGIN_COUNTRY_MAX) || 60;
 const LOGIN_MAX_ATTEMPTS = parseInt(process.env.LOGIN_MAX_ATTEMPTS) || 10;
+const LOGIN_ID_MAX_ATTEMPTS = parseInt(process.env.LOGIN_ID_MAX_ATTEMPTS) || 5;
 const LOGIN_WINDOW_MS = (parseInt(process.env.LOGIN_WINDOW_MS) || 15) * 60 * 1000;
 const LOGIN_BLOCK_MS = (parseInt(process.env.LOGIN_BLOCK_MS) || 15) * 60 * 1000;
 
 function clientIp(req) {
-    return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+    const fwd = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const real = String(req.headers['x-real-ip'] || '').trim();
+    return fwd || real || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
 }
-
-function loginRateBlocked(req) {
+function loginRateKey(req, input) {
     const ip = clientIp(req);
-    const rec = loginAttempts.get(ip);
+    const id = String(input || '').trim().toLowerCase().slice(0, 120);
+    return id ? `${ip}::${id}` : '';
+}
+function _rateRecBlocked(map, key) {
+    if (!key) return false;
+    const rec = map.get(key);
     if (!rec) return false;
     if (rec.blockedUntil && rec.blockedUntil > Date.now()) return true;
     if (Date.now() - rec.windowStart > LOGIN_WINDOW_MS) {
-        loginAttempts.delete(ip);
+        map.delete(key);
         return false;
     }
     return false;
 }
-
-function loginRateFail(req) {
-    const ip = clientIp(req);
+function _rateRecFail(map, key, maxAttempts) {
+    if (!key) return;
     const now = Date.now();
-    let rec = loginAttempts.get(ip);
+    let rec = map.get(key);
     if (!rec || now - rec.windowStart > LOGIN_WINDOW_MS) rec = { count: 0, windowStart: now, blockedUntil: 0 };
     rec.count++;
-    if (rec.count >= LOGIN_MAX_ATTEMPTS) rec.blockedUntil = now + LOGIN_BLOCK_MS;
-    loginAttempts.set(ip, rec);
+    if (rec.count >= maxAttempts) rec.blockedUntil = now + LOGIN_BLOCK_MS;
+    map.set(key, rec);
+}
+function _rateRecClear(map, key) {
+    if (key) map.delete(key);
 }
 
-function loginRateSuccess(req) {
-    loginAttempts.delete(clientIp(req));
+function loginRateBlocked(req, input) {
+    const ip = clientIp(req);
+    if (_rateRecBlocked(loginAttempts, ip)) return true;
+    return _rateRecBlocked(loginIdAttempts, loginRateKey(req, input));
+}
+
+function loginRateFail(req, input) {
+    const ip = clientIp(req);
+    _rateRecFail(loginAttempts, ip, LOGIN_MAX_ATTEMPTS);
+    _rateRecFail(loginIdAttempts, loginRateKey(req, input), LOGIN_ID_MAX_ATTEMPTS);
+}
+
+function loginRateSuccess(req, input) {
+    const ip = clientIp(req);
+    _rateRecClear(loginAttempts, ip);
+    _rateRecClear(loginIdAttempts, loginRateKey(req, input));
 }
 
 // Rate limiting for public /api/verify (separate from login)
@@ -5146,6 +5170,9 @@ ${verified ? `<a class="btn sec" href="/#verify">✓ Verify this document</a>` :
 let { input, password, country } = JSON.parse(body);
                 process.stderr.write('LOGIN_TRY input=' + String(input).slice(0, 40) + ' country=' + String(country).slice(0, 20) + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n');
                 if (!input || !password) return json(res, 400, { error: 'Enter username and password' });
+                if (loginRateBlocked(req, input)) {
+                    return json(res, 429, { error: 'Too many failed attempts. Please try again in 15 minutes.' });
+                }
                 const countriesSetting = (db.settings || []).find(s => s.key === 'countries');
                 const countriesList = countriesSetting ? (countriesSetting.value || countriesSetting) : [];
                 // Country validation is done AFTER user lookup so admin can bypass (see below)
@@ -5183,7 +5210,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                     }
                 }
 
-                if (!user) { loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
+                if (!user) { loginRateFail(req, input); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
                 // The owner is authorised as an admin; the stored record keeps role 'owner'.
                 if (user.role === 'owner') user = Object.assign({}, user, { role: 'admin', isOwner: true });
@@ -5196,7 +5223,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                     if (s && s.admissionNumber) pwMatch = verifyPassword(s.admissionNumber, user.password) || s.admissionNumber === password;
                 }
 
-                if (!pwMatch) { process.stderr.write('LOGIN_FAIL_PW input=' + String(input).slice(0, 40) + '\n'); loginRateFail(req); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
+                if (!pwMatch) { process.stderr.write('LOGIN_FAIL_PW input=' + String(input).slice(0, 40) + '\n'); loginRateFail(req, input); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
 
                 // Lifelong learners keep their original student id as the link
                 // to academic history, but the login is marked as alumni so the
@@ -5274,7 +5301,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 // Server-verified session token for ALL authenticated API calls.
                 safeUser.session_token = issueSession(user.username);
 
-                loginRateSuccess(req);
+                loginRateSuccess(req, input);
                 auditLog('login', 'user', { username: user.username, role: user.role }, user.username);
 
                 json(res, 200, { user: safeUser });
@@ -5574,6 +5601,61 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
         });
         return true;
     }
+    if (parts.length === 3 && parts[1] === 'owner' && parts[2] === 'login-rate' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser || (authUser.role !== 'admin' && !authUser.isOwner && !isOwnerUser(authUser))) return json(res, 403, { error: 'Admin access required' });
+        const now = Date.now();
+        const ips = [];
+        for (const [ip, rec] of loginAttempts.entries()) {
+            if (rec.blockedUntil && rec.blockedUntil <= now && (now - (rec.windowStart || 0) > LOGIN_WINDOW_MS)) continue;
+            ips.push({ ip, count: rec.count || 0, blockedUntil: rec.blockedUntil || 0, blocked: !!(rec.blockedUntil && rec.blockedUntil > now) });
+        }
+        const identifiers = [];
+        for (const [key, rec] of loginIdAttempts.entries()) {
+            if (rec.blockedUntil && rec.blockedUntil <= now && (now - (rec.windowStart || 0) > LOGIN_WINDOW_MS)) continue;
+            const [ip, ...rest] = String(key).split('::');
+            identifiers.push({ ip, identifier: rest.join('::'), count: rec.count || 0, blockedUntil: rec.blockedUntil || 0, blocked: !!(rec.blockedUntil && rec.blockedUntil > now) });
+        }
+        return json(res, 200, { ok: true, now, limits: { LOGIN_MAX_ATTEMPTS, LOGIN_ID_MAX_ATTEMPTS, LOGIN_WINDOW_MS, LOGIN_BLOCK_MS }, ips, identifiers });
+    }
+    if (parts.length === 4 && parts[1] === 'owner' && parts[2] === 'login-rate' && parts[3] === 'reset' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!authUser || (authUser.role !== 'admin' && !authUser.isOwner && !isOwnerUser(authUser))) return json(res, 403, { error: 'Admin access required' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body || '{}');
+                const ip = String(parsed.ip || '').trim();
+                const identifier = String(parsed.identifier || parsed.username || '').trim().toLowerCase();
+                const all = !!parsed.all || (!ip && !identifier);
+                let cleared = 0;
+                if (all) {
+                    cleared = loginAttempts.size + loginIdAttempts.size;
+                    loginAttempts.clear();
+                    loginIdAttempts.clear();
+                } else {
+                    if (ip) { if (loginAttempts.delete(ip)) cleared++; }
+                    if (ip && identifier) {
+                        const k = `${ip}::${identifier.slice(0,120)}`;
+                        if (loginIdAttempts.delete(k)) cleared++;
+                    } else if (ip) {
+                        for (const key of [...loginIdAttempts.keys()]) {
+                            if (String(key).startsWith(ip + '::')) { loginIdAttempts.delete(key); cleared++; }
+                        }
+                    } else if (identifier) {
+                        for (const key of [...loginIdAttempts.keys()]) {
+                            if (String(key).endsWith('::' + identifier.slice(0,120))) { loginIdAttempts.delete(key); cleared++; }
+                        }
+                    }
+                }
+                auditLog('login-rate-reset', 'security', { ip: ip || null, identifier: identifier || null, all, cleared }, authUser.username);
+                return json(res, 200, { ok: true, cleared });
+            } catch { return json(res, 400, { error: 'Invalid request' }); }
+        });
+        return true;
+    }
+
     if (parts.length === 3 && parts[1] === 'owner' && parts[2] === 'encrypt-secrets' && req.method === 'POST') {
         const authUser = getRequestUser(req);
         if (!isOwnerUser(authUser)) return json(res, 403, { error: 'Only the owner can do this' });
