@@ -842,7 +842,7 @@ function estimateReadTime(text) {
     return Math.max(1, Math.ceil(text.split(/\s+/).filter(Boolean).length / 200));
 }
 
-async function renderStudentHub() {
+async function renderStudentHub(force) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const content = document.getElementById('student-hub-content');
     if (!content) return;
@@ -851,7 +851,7 @@ async function renderStudentHub() {
         return;
     }
 
-    const hasCache = studentHubCache && Date.now() - studentHubCache.loadedAt < 60000;
+    const hasCache = !force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000;
 
     if (!hasCache) content.innerHTML = `
         <div style="position:relative;min-height:400px;display:flex;align-items:center;justify-content:center;">
@@ -869,9 +869,10 @@ async function renderStudentHub() {
             const cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
             if (cu.reactivatedAt && (Date.now() - new Date(cu.reactivatedAt).getTime()) < 24 * 3600 * 1000) {
                 invalidateStudentHubCache();
+                force = true;
             }
         } catch (e) {}
-        const data = await loadStudentHubData();
+        const data = await loadStudentHubData(force);
         if (!studentHubCache) studentHubCache = data;
         const me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
         if (!me) {
@@ -1675,21 +1676,37 @@ async function hubDropCourse(courseId, studentName) {
         }
 
         if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
-        const enr = (data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId);
-        if (enr) { await dbDelete('enrollments', enr.id); }
-        else {
-            const fallbackId = `ENR-${courseId}-${me.id}`;
-            try { await dbDelete('enrollments', fallbackId); } catch (err) {
-                console.warn('hubDropCourse fallback delete failed:', err);
+        const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
+        let enr = (data.enrollments || []).find(e => myIds.has(String(e.studentId)) && String(e.courseId) === String(courseId));
+        if (!enr) {
+            // Try fetching fresh enrollments in case cache is stale
+            try {
+                const freshEnrollments = await dbGetAll('enrollments');
+                enr = (freshEnrollments || []).find(e => myIds.has(String(e.studentId)) && String(e.courseId) === String(courseId));
+            } catch (e) {}
+        }
+        if (enr) {
+            await dbDelete('enrollments', enr.id);
+        } else {
+            // Try all possible ID formats
+            const candidates = [me.id, me.admissionNumber].filter(Boolean).map(id => `ENR-${courseId}-${id}`);
+            let deleted = false;
+            for (const fid of candidates) {
+                try { await dbDelete('enrollments', fid); deleted = true; break; } catch (e) {}
+            }
+            if (!deleted) {
+                showToast('Could not find this enrollment to drop. Please refresh and try again.', { type: 'warning', duration: 5000 });
+                return;
             }
         }
         // Force a fresh data load (bypass cache) so the dropped course
         // actually disappears from "My Courses" and moves to "Available".
         try { invalidateStudentHubCache(); } catch (e) {}
         try { localStorage.removeItem(_hubCacheKey()); } catch (e) {}
+        studentHubCache = null;
         showToast('Course dropped');
         logAudit('deleted', 'enrollment', { studentId: me.id, courseId });
-        await renderStudentHub();
+        await renderStudentHub(true);
     } catch (e) {
         console.error('hubDropCourse error:', e);
         showToast('Drop failed: ' + (e.message || 'Server denied'), { type: 'danger', duration: 6000 });
