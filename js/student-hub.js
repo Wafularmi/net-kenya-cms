@@ -1677,22 +1677,21 @@ async function hubDropCourse(courseId, studentName) {
 
         if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
         const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
-        let enr = (data.enrollments || []).find(e => myIds.has(String(e.studentId)) && String(e.courseId) === String(courseId));
-        if (!enr) {
-            // Try fetching fresh enrollments in case cache is stale
-            try {
-                const freshEnrollments = await dbGetAll('enrollments');
-                enr = (freshEnrollments || []).find(e => myIds.has(String(e.studentId)) && String(e.courseId) === String(courseId));
-            } catch (e) {}
-        }
-        if (enr) {
-            await dbDelete('enrollments', enr.id);
+        const courseIdStr = String(courseId);
+        // Fetch fresh enrollments to find all matching records (avoid stale cache)
+        let freshEnrollments = [];
+        try { freshEnrollments = await dbGetAll('enrollments') || []; } catch (e) { freshEnrollments = data.enrollments || []; }
+        const matches = (freshEnrollments || []).filter(e => myIds.has(String(e.studentId)) && String(e.courseId) === courseIdStr);
+        if (matches.length) {
+            for (const enr of matches) {
+                try { await dbDelete('enrollments', enr.id); } catch (e) { console.warn('drop enrollment delete failed', enr && enr.id, e); }
+            }
         } else {
             // Try all possible ID formats
-            const candidates = [me.id, me.admissionNumber].filter(Boolean).map(id => `ENR-${courseId}-${id}`);
+            const candidates = [me.id, me.admissionNumber].filter(Boolean).flatMap(id => [`ENR-${courseId}-${id}`, `ENR-${courseIdStr}-${String(id)}`]);
             let deleted = false;
-            for (const fid of candidates) {
-                try { await dbDelete('enrollments', fid); deleted = true; break; } catch (e) {}
+            for (const fid of [...new Set(candidates)]) {
+                try { await dbDelete('enrollments', fid); deleted = true; } catch (e) {}
             }
             if (!deleted) {
                 showToast('Could not find this enrollment to drop. Please refresh and try again.', { type: 'warning', duration: 5000 });
