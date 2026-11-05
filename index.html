@@ -1482,6 +1482,19 @@
                         <div class="form-group"><label>Sender ID</label><input type="text" id="settings-sms-senderid" placeholder="e.g., NETCMS (optional)"></div>
                         <button class="btn btn-primary" onclick="saveSMSSettings()">Save SMS Settings</button>
                     </div>
+                    <div class="card"><h3>External SMS API</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Generate an API key to send SMS from external systems. The API works as long as this server is online and uses your configured SMS provider (Africa's Talking).</div>
+                        <div class="form-group"><label>API Key</label><div style="display:flex;gap:8px;align-items:center;"><input type="text" id="settings-sms-api-key" readonly style="flex:1;" placeholder="No API key generated"><button class="btn btn-outline btn-sm" onclick="copySmsApiKey()">Copy</button></div></div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="generateSmsApiKey()">Generate/Regenerate API Key</button>
+                            <button class="btn btn-outline btn-sm" onclick="revokeSmsApiKey()">Revoke API Key</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);background:var(--bg-secondary);padding:8px;border-radius:6px;line-height:1.5;">
+                            <div style="font-weight:600;margin-bottom:4px;">Usage Example (curl):</div>
+                            <code style="display:block;word-break:break-all;">curl -X POST {{BASE_URL}}/api/v1/sms/send -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" -d '{"to":"2547XXXXXXXX","message":"Hello"}'</code>
+                            <div style="margin-top:6px;">Or: <code>{"recipients":[{"phone":"2547...","message":"..."},{"phone":"2547...","message":"..."}]}</code></div>
+                        </div>
+                    </div>
 
                                         <div class="card"><h3>Translation Provider</h3><div class="form-group"><label>Provider</label><select id="settings-translation-provider"><option value="mymemory">MyMemory (free, works with no key)</option><option value="libretranslate">LibreTranslate (self-hosted URL required)</option><option value="google">Google Cloud Translation</option></select></div><div class="form-group"><label>LibreTranslate URL</label><input type="text" id="settings-translation-libre-url" placeholder="https://libretranslate.com/translate" autocomplete="off"></div><div class="form-group"><label>LibreTranslate API key (optional)</label><input type="password" id="settings-translation-libre-key" placeholder="Leave blank if public/self-hosted" autocomplete="off"></div><div class="form-group"><label>Google API key</label><input type="password" id="settings-translation-google-key" placeholder="Google Cloud Translation API key" autocomplete="off"></div><button class="btn btn-primary" onclick="saveTranslationSettings()">Save Translation Settings</button></div>
 

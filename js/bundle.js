@@ -2644,7 +2644,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -29677,4 +29677,59 @@ function startMaintenanceBanner() {
         updateMaintenanceBanner();
         setInterval(updateMaintenanceBanner, 60000);
     } catch (e) {}
+}
+
+
+async function loadSmsApiKey() {
+    try {
+        const rec = await dbGet('settings', 'smsApiKey');
+        const el = document.getElementById('settings-sms-api-key');
+        if (!el) return;
+        if (rec && rec.value) {
+            if (typeof rec.value === 'string') el.value = rec.value;
+            else if (typeof rec.value === 'object') el.value = rec.value.key || rec.value.apiKey || rec.value.value || '';
+            else el.value = '';
+        } else {
+            el.value = '';
+        }
+    } catch (e) {}
+}
+
+async function generateSmsApiKey() {
+    try {
+        const key = 'sk_live_' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2,'0')).join('');
+        await dbPut('settings', { key: 'smsApiKey', value: { key: key, createdAt: new Date().toISOString() }, updatedAt: new Date().toISOString() });
+        const el = document.getElementById('settings-sms-api-key');
+        if (el) el.value = key;
+        showToast('SMS API key generated', { type: 'success' });
+        try { logAudit('created', 'sms-api-key', {}); } catch (e) {}
+    } catch (e) {
+        showToast('Failed to generate API key', { type: 'danger' });
+    }
+}
+
+async function revokeSmsApiKey() {
+    try {
+        await dbPut('settings', { key: 'smsApiKey', value: null, updatedAt: new Date().toISOString() });
+        const el = document.getElementById('settings-sms-api-key');
+        if (el) el.value = '';
+        showToast('SMS API key revoked', { type: 'success' });
+        try { logAudit('deleted', 'sms-api-key', {}); } catch (e) {}
+    } catch (e) {
+        showToast('Failed to revoke API key', { type: 'danger' });
+    }
+}
+
+function copySmsApiKey() {
+    try {
+        const el = document.getElementById('settings-sms-api-key');
+        if (!el || !el.value) return showToast('No API key to copy');
+        navigator.clipboard.writeText(el.value).then(() => showToast('API key copied', { type: 'success' })).catch(() => {
+            el.select();
+            document.execCommand('copy');
+            showToast('API key copied', { type: 'success' });
+        });
+    } catch (e) {
+        showToast('Failed to copy', { type: 'danger' });
+    }
 }

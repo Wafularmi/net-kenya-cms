@@ -4088,6 +4088,32 @@ function getMaintenanceSetting() {
     return v;
 }
 
+function getSmsApiKey() {
+    try {
+        const rec = (db.settings || []).find(s => s.key === 'smsApiKey' || s.key === 'sms_api_key');
+        if (rec && rec.value) {
+            if (typeof rec.value === 'string') return rec.value;
+            if (typeof rec.value === 'object') return rec.value.key || rec.value.apiKey || rec.value.value || '';
+        }
+    } catch (e) {}
+    return '';
+}
+
+function checkSmsApiKey(req) {
+    try {
+        const key = getSmsApiKey();
+        if (!key) return false;
+        const headerKey = req.headers['x-api-key'] || req.headers['x-sms-api-key'];
+        if (headerKey && headerKey === key) return true;
+        const auth = req.headers['authorization'] || '';
+        if (auth.toLowerCase().startsWith('bearer ')) {
+            const token = auth.slice(7).trim();
+            if (token === key) return true;
+        }
+        return false;
+    } catch (e) { return false; }
+}
+
 function isScheduledMaintenanceActive() {
     try {
         const v = getMaintenanceSetting();
@@ -6634,6 +6660,75 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
             totals: { runs: runs.length, log: log.length, outbox: outbox.length }
         });
     }
+    // POST /api/v1/sms/send or /api/external/sms/send - API key auth for external SMS
+    if ((parts.length === 4 && parts[1] === 'api' && parts[2] === 'v1' && parts[3] === 'sms' && req.method === 'POST') ||
+        (parts.length === 4 && parts[1] === 'api' && parts[2] === 'external' && parts[3] === 'sms' && req.method === 'POST') ||
+        (parts.length === 4 && parts[1] === 'api' && parts[2] === 'sms' && parts[3] === 'external' && req.method === 'POST') ||
+        (parts.length === 3 && parts[1] === 'api' && parts[2] === 'sms-send' && req.method === 'POST')) {
+        if (isMaintenanceActive()) {
+            // allow API key auth even during maintenance? but be strict
+        }
+        if (!checkSmsApiKey(req)) {
+            return json(res, 401, { error: 'Invalid or missing API key. Provide X-API-Key or Authorization: Bearer <key>' });
+        }
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', async () => {
+            try {
+                const data = JSON.parse(body || '{}');
+                let recipients = [];
+                if (Array.isArray(data.recipients)) {
+                    recipients = data.recipients.map(r => ({ phone: r.phone || r.to || r.number, message: r.message || r.text || data.message || '' }));
+                } else if (data.to || data.phone || data.number) {
+                    recipients = [{ phone: data.to || data.phone || data.number, message: data.message || data.text || '' }];
+                } else if (Array.isArray(data.to)) {
+                    recipients = data.to.map((p, i) => ({ phone: p, message: Array.isArray(data.message) ? (data.message[i] || data.message[0] || '') : (data.message || data.text || '') }));
+                }
+                recipients = recipients.filter(r => r.phone && r.message);
+                if (!recipients.length) return json(res, 400, { error: 'No valid recipients or message provided' });
+                const smsSettings = db.settings && db.settings.find(s => s.key === 'smsSettings');
+                if (!smsSettings || !smsSettings.value) return json(res, 400, { error: 'SMS not configured. Save settings first.' });
+                const cfg = { ...smsSettings.value, apiKey: decryptSecret(smsSettings.value.apiKey) };
+                if (!cfg.apiKey || !cfg.username) return json(res, 400, { error: 'SMS API key or username missing.' });
+                if (!db.smsLog) db.smsLog = [];
+                let sent = 0, failed = 0;
+                async function sendOne(phone, message) {
+                    if (!phone || !message) { return false; }
+                    try {
+                        const postData = querystring.stringify({ username: cfg.username, to: String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, ''), message: message, from: cfg.senderId || '' });
+                        const result = await new Promise((resolve, reject) => {
+                            const opts = { hostname: 'api.africastalking.com', port: 443, path: '/version1/messaging', method: 'POST', headers: { 'apiKey': cfg.apiKey, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData), 'Accept': 'application/json' } };
+                            const req2 = https.request(opts, res2 => {
+                                let data = '';
+                                res2.on('data', c => data += c);
+                                res2.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ SMSMessageData: { Message: data } }); } });
+                            });
+                            req2.on('error', reject);
+                            req2.write(postData);
+                            req2.end();
+                        });
+                        if (result && result.SMSMessageData && result.SMSMessageData.Recipients) {
+                            const r = result.SMSMessageData.Recipients[0];
+                            return !!(r && (r.status === 'Success' || r.statusCode === '101'));
+                        }
+                        return false;
+                    } catch { return false; }
+                }
+                for (let i = 0; i < recipients.length; i += 10) {
+                    const wave = recipients.slice(i, i + 10).map(({ phone, message }) => sendOne(phone, message));
+                    const results = await Promise.all(wave);
+                    results.forEach(ok => { if (ok) sent++; else failed++; });
+                }
+                const logEntries = recipients.map(r => ({ name: r.name || '', phone: r.phone, message: r.message, source: 'api' }));
+                for (const entry of logEntries) { entry.createdAt = new Date().toISOString(); db.smsLog.push(entry); }
+                saveDB();
+                try { broadcastEvent('db-change', { store: 'smsLog' }); } catch (e) {}
+                return json(res, 200, { success: true, sent, failed, total: recipients.length });
+            } catch (e) { return json(res, 500, { error: e.message || e }); }
+        });
+        return true;
+    }
+
     // POST /api/send-sms - send bulk SMS via Africa's Talking
     if (parts.length === 2 && parts[1] === 'send-sms' && req.method === 'POST') {
         if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
