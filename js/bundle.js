@@ -718,10 +718,13 @@ function getRolePermissions(role, user) {
     if (role === 'admin' && _adminAccessCache) {
         // The owner decides which tabs the overall admin may open. The owner
         // signs in with the admin role but is never limited by this.
-        if (!(user && user.isOwner)) {
+        if (!(user && (user.isOwner || user.role === 'owner'))) {
             const filtered = base.filter(tab => _adminAccessCache[tab] !== false);
             return filtered;
         }
+    }
+    if (role === 'admin' && (user && (user.isOwner || user.role === 'owner'))) {
+        return [...ADMIN_TABS];
     }
     return base;
 }
@@ -2075,7 +2078,10 @@ function logout() {
     } catch {}
 }
 function buildNavigation(user) {
-    const perms = getRolePermissions(user.role, user);
+    let perms = getRolePermissions(user.role, user);
+    if ((!perms || perms.length === 0) && user && user.role === 'admin') {
+        perms = [...ADMIN_TABS];
+    }
     const nav = document.getElementById('main-nav');
     const isStudent = user.role === 'student';
     const sections = [
