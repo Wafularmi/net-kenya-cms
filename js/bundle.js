@@ -29741,8 +29741,12 @@ async function loadSmsModemSettings() {
         const v = (rec && rec.value) || {};
         const cb = document.getElementById('settings-sms-modem-enabled');
         const dev = document.getElementById('settings-sms-modem-device');
+        const meth = document.getElementById('settings-sms-modem-method');
+        const adb = document.getElementById('settings-sms-modem-adb');
         if (cb) cb.checked = !!v.enabled;
         if (dev) dev.value = v.device || '/dev/ttyUSB0';
+        if (meth) meth.value = v.method || 'auto';
+        if (adb) adb.value = v.adbDevice || '';
     } catch (e) {}
 }
 
@@ -29750,10 +29754,12 @@ async function saveSmsModemSettings() {
     try {
         const cb = document.getElementById('settings-sms-modem-enabled');
         const dev = document.getElementById('settings-sms-modem-device');
-        const value = { enabled: !!(cb && cb.checked), device: (dev && dev.value ? dev.value.trim() : '/dev/ttyUSB0') };
+        const meth = document.getElementById('settings-sms-modem-method');
+        const adb = document.getElementById('settings-sms-modem-adb');
+        const value = { enabled: !!(cb && cb.checked), device: (dev && dev.value ? dev.value.trim() : '/dev/ttyUSB0'), method: (meth && meth.value) || 'auto', adbDevice: (adb && adb.value ? adb.value.trim() : '') };
         await dbPut('settings', { key: 'smsModem', value: value, updatedAt: new Date().toISOString() });
-        showToast('Modem settings saved', { type: 'success' });
+        showToast('Direct SMS settings saved', { type: 'success' });
     } catch (e) {
-        showToast('Failed to save modem settings', { type: 'danger' });
+        showToast('Failed to save direct SMS settings', { type: 'danger' });
     }
 }

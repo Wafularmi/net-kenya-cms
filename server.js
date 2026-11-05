@@ -4112,24 +4112,27 @@ async function sendSmsViaModem(phone, message) {
         const modem = getModemSmsSettings();
         if (!modem.enabled) return { ok: false, error: 'modem_disabled' };
         const { spawn } = require('child_process');
-        const device = modem.device || '/dev/ttyUSB0';
         const number = String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, '');
-        // Try using 'gammu sendsms' if available
-        return new Promise((resolve) => {
+        // Try ADB if enabled
+        if (modem.method === 'adb' || modem.adbEnabled) {
             try {
-                const p = spawn('gammu', ['sendsms', 'TEXT', number, '-text', message], { timeout: 30000 });
-                let out = '', err = '';
-                p.stdout.on('data', d => out += d);
-                p.stderr.on('data', d => err += d);
+                const args = ['shell', 'am', 'start', '-a', 'android.intent.action.SENDTO', '-d', 'smsto:' + number, '--es', 'sms_body', message, '--ez', 'exit_on_sent', 'true'];
+                if (modem.adbDevice) args.unshift('-s', modem.adbDevice);
+                spawn('adb', args, { timeout: 10000 });
+            } catch (e) {}
+        }
+        try {
+            const p = spawn('gammu', ['sendsms', 'TEXT', number, '-text', message], { timeout: 30000 });
+            return await new Promise((resolve) => {
                 p.on('close', code => {
                     if (code === 0) resolve({ ok: true });
-                    else resolve({ ok: false, error: err || out });
+                    else resolve({ ok: false, error: 'gammu_failed' });
                 });
                 p.on('error', e => resolve({ ok: false, error: e.message }));
-            } catch (e) {
-                resolve({ ok: false, error: e.message });
-            }
-        });
+            });
+        } catch (e) {
+            return { ok: false, error: e.message };
+        }
     } catch (e) {
         return { ok: false, error: e.message };
     }
