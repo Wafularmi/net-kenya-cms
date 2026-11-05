@@ -1759,9 +1759,19 @@ async function hubDropCourse(courseId, studentName) {
 }
 
 function _hubExamStatus(exam) {
-    if (!exam.date) return { status: 'upcoming', label: 'No date set', color: 'var(--text-muted)' };
+    const openWindow = exam && (exam.openWindow === true || exam.openWindow === 'true' || exam.openWindow === 1 || exam.openWindow === '1');
+    if (openWindow) return { status: 'active', label: 'Open-ended — Take Now', color: 'var(--success)' };
+    if (typeof assessmentWindow === 'function') {
+        try {
+            const w = assessmentWindow(exam);
+            if (w && w.openWindow) return { status: 'active', label: 'Open-ended — Take Now', color: 'var(--success)' };
+            if (w && w.closed) return { status: 'ended', label: 'Exam ended', color: 'var(--text-muted)' };
+            if (w && w.notYetOpen) return { status: 'upcoming', label: 'Opens ' + (w.opensAt || '') + (w.startTime ? ' at ' + w.startTime : ''), color: 'var(--accent)' };
+            if (w && !w.closed && !w.notYetOpen) return { status: 'active', label: 'In Progress — Take Now!', color: 'var(--success)' };
+        } catch (e) {}
+    }
+    if (!exam || !exam.date) return { status: 'upcoming', label: 'No date set', color: 'var(--text-muted)' };
     const now = new Date();
-    const examDate = new Date(exam.date);
     let examStart = null, examEnd = null;
     if (exam.time) {
         const parts = exam.time.replace(/\s/g, '').split('-');
@@ -1771,7 +1781,7 @@ function _hubExamStatus(exam) {
         if (parts[1]) {
             const [eh, em] = parts[1].split(':').map(Number);
             examEnd = new Date(exam.date);
-            examEnd.setHours(eh || 23, em || 59, 59, 999);
+            examEnd.setHours(eh || 23, em || 59, 999);
         } else {
             const dur = (exam.duration || 180) * 60000;
             examEnd = new Date(examStart.getTime() + dur);
@@ -1783,9 +1793,9 @@ function _hubExamStatus(exam) {
         examEnd = new Date(examStart.getTime() + dur);
     }
     const msUntil = examStart - now;
-    const msAfter = now - examEnd;
+    const msAfter = examEnd ? (now - examEnd) : -1;
     if (msAfter > 0) return { status: 'ended', label: 'Exam ended', color: 'var(--text-muted)', examStart, examEnd };
-    if (msUntil <= 0 && msAfter <= 0) return { status: 'active', label: 'In Progress — Take Now!', color: 'var(--success)', examStart, examEnd };
+    if (examStart && examEnd && msUntil <= 0 && msAfter <= 0) return { status: 'active', label: 'In Progress — Take Now!', color: 'var(--success)', examStart, examEnd };
     const mins = Math.floor(msUntil / 60000);
     if (mins <= 30) return { status: 'soon', label: `Starts in ${mins} min`, color: 'var(--warning)', examStart, examEnd };
     if (mins <= 1440) return { status: 'today', label: `Starts in ${Math.floor(mins / 60)}h ${mins % 60}m`, color: 'var(--accent)', examStart, examEnd };

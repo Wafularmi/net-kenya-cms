@@ -2779,7 +2779,8 @@ function assessmentEpoch(day, clock, timeZone) {
 // 4-day default. The Time field also sets the earliest start of the day.
 function assessmentWindowServer(a, user) {
     const now = Date.now();
-    if (!a) return { opensAtISO: '', closesAtISO: '', closesAt: '', closed: false, notYetOpen: false, timeZone: ASSESSMENT_DEFAULT_TIME_ZONE };
+    if (!a) return { opensAtISO: '', closesAtISO: '', closesAt: '', closed: false, notYetOpen: false, timeZone: ASSESSMENT_DEFAULT_TIME_ZONE, openWindow: false };
+    const openWindow = a.openWindow === true || a.openWindow === 'true' || a.openWindow === 1 || a.openWindow === '1';
     const timeZone = assessmentTimeZone(a, user);
     const t = assessmentTimePartsServer(a.time);
     const baseDay = String(a.opensAt || a.date || '').slice(0, 10);
@@ -2811,10 +2812,10 @@ function assessmentWindowServer(a, user) {
         }
     }
     return {
-        opensAtISO, closesAtISO, closesAt, timeZone,
+        opensAtISO, closesAtISO, closesAt, timeZone, openWindow,
         opensAtEpoch, closesAtEpoch,
-        closed: Number.isFinite(closesAtEpoch) && now > closesAtEpoch,
-        notYetOpen: Number.isFinite(opensAtEpoch) && now < opensAtEpoch
+        closed: openWindow ? false : (Number.isFinite(closesAtEpoch) && now > closesAtEpoch),
+        notYetOpen: openWindow ? false : (Number.isFinite(opensAtEpoch) && now < opensAtEpoch)
     };
 }
 
