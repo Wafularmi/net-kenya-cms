@@ -1653,31 +1653,41 @@ async function hubDropCourse(courseId, studentName) {
         const me = _hubGetMe();
         if (!me) return showToast('Student profile not found', { type: 'danger' });
 
+        const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
+        const courseIdStr = String(courseId);
         if (_hubIsAlumni(me)) {
             const grant = _hubGrantForCourse(me, data, courseId);
-            if (!grant) {
+            if (grant) {
+                const invited = String(grant.status || '').toLowerCase() === 'invited';
+                const ok = await showConfirm(
+                    invited ? 'Decline Invitation' : 'Leave Alumni Course',
+                    invited
+                        ? 'Decline this course invitation? You can ask the alumni office to invite you again.'
+                        : 'Leave this alumni course? Your learning access will be removed, but your academic history is kept.'
+                );
+                if (!ok) return;
+                await dbDelete('alumniEnrollments', grant.id);
+                _hubCacheRemove('alumniEnrollments', grant.id);
+                _hubCacheRemove('enrollments', 'ALUMNI-' + String(grant.id));
+                try { invalidateStudentHubCache(); } catch (e) {}
+                try { localStorage.removeItem(_hubCacheKey()); } catch (e) {}
+                studentHubCache = null;
+                showToast(invited ? 'Invitation declined' : 'You have left the alumni course');
+                logAudit(invited ? 'declined' : 'deleted', 'alumni-enrollment', { studentId: me.id, courseId });
+                await renderStudentHub(true);
+                return;
+            }
+            // No alumni grant for this course: allow dropping a regular enrollment if present
+            let freshEnrollments = [];
+            try { freshEnrollments = await dbGetAll('enrollments') || []; } catch (e) { freshEnrollments = data.enrollments || []; }
+            const hasRegular = (freshEnrollments || []).some(e => myIds.has(String(e.studentId)) && String(e.courseId) === courseIdStr);
+            if (!hasRegular) {
                 return showToast('This course is part of your academic record and cannot be removed here.', { type: 'warning', duration: 6000 });
             }
-            const invited = String(grant.status || '').toLowerCase() === 'invited';
-            const ok = await showConfirm(
-                invited ? 'Decline Invitation' : 'Leave Alumni Course',
-                invited
-                    ? 'Decline this course invitation? You can ask the alumni office to invite you again.'
-                    : 'Leave this alumni course? Your learning access will be removed, but your academic history is kept.'
-            );
-            if (!ok) return;
-            await dbDelete('alumniEnrollments', grant.id);
-            _hubCacheRemove('alumniEnrollments', grant.id);
-            _hubCacheRemove('enrollments', 'ALUMNI-' + String(grant.id));
-            showToast(invited ? 'Invitation declined' : 'You have left the alumni course');
-            logAudit(invited ? 'declined' : 'deleted', 'alumni-enrollment', { studentId: me.id, courseId });
-            renderStudentHub();
-            return;
+            // fall through to regular enrollment drop
         }
 
         if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
-        const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
-        const courseIdStr = String(courseId);
         // Fetch fresh enrollments to find all matching records (avoid stale cache)
         let freshEnrollments = [];
         try { freshEnrollments = await dbGetAll('enrollments') || []; } catch (e) { freshEnrollments = data.enrollments || []; }
