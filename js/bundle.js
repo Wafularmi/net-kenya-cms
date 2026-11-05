@@ -26016,7 +26016,7 @@ async function renderCoverage() {
         return `<td style="text-align:center;"><b>${n}/${students.length}</b></td>`;
     }).join('')}<td></td><td></td></tr>`;
     const coverageFooter = '✅ covered (* = manual override) · 📖 current · 🔒 future · status chip shown for non-active students — click a pill to toggle manual override';
-    const tableHead = `<div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead><tr><th>Student (Adm#)</th>${seqCourses.map(c => `<th style="text-align:center;">${escapeHtml(c.code || c.name)}<br><span style="font-weight:400;font-size:10px;">#${courseSeq(c, seqCourses)}</span></th>`).join('')}<th>Attend%</th><th>Avg%</th></tr></thead><tbody>`;
+    const tableHead = `<div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead><tr><th>Student (Adm#)</th>${seqCourses.map(c => `<th style="text-align:center;">${escapeHtml(c.name || c.title || c.code || '')}</th>`).join('')}<th>Attend%</th><th>Avg%</th></tr></thead><tbody>`;
     const unassigned = d.students.filter(s => !centerSet.has(s.studyCenterId || ''));
     let html = '';
     (fCenter ? list : list).forEach(center => {
