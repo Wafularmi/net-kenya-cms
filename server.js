@@ -2913,9 +2913,10 @@ function publicSettingsView(rows) {
 
 // Check if user can access a store
 function canAccessStore(user, store, method) {
+    if (user && (user.isOwner || user.role === 'owner')) return true;
     // Sensitive internal stores - admin only, never via API
     if (store === 'sessions' || store === 'maintenanceBypassTokens') {
-        return user && user.role === 'admin';
+        return user && (user.role === 'admin' || user.isOwner || user.role === 'owner');
     }
     // Allow unauthenticated reads for login screen / registration.
     // The ROWS that come back are filtered by the public allowlists above
@@ -2934,10 +2935,10 @@ function canAccessStore(user, store, method) {
     // store, checked before any role/country/assistant rule below can apply.
     // The one exception: the owner decides which tabs the admin may open, and
     // a tab that is switched off removes the write access behind it.
-    if (user.role === 'admin' && !user.isOwner) {
+    if (user.role === 'admin' && !user.isOwner && user.role !== 'owner') {
         if (method !== 'GET' && adminTabBlocked(store)) return false;
     }
-    if (user.role === 'admin') return true;
+    if (user.role === 'admin' || user.isOwner || user.role === 'owner') return true;
     // Students store: only admin and assistant (if enabled) may create/update/delete
     if (store === 'students' && method !== 'GET') {
         if (user.role === 'admin' || countryScopeOf(user)) return true;
