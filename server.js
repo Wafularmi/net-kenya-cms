@@ -4099,6 +4099,42 @@ function getSmsApiKey() {
     return '';
 }
 
+function getModemSmsSettings() {
+    try {
+        const rec = (db.settings || []).find(s => s.key === 'smsModem');
+        if (rec && rec.value && typeof rec.value === 'object') return rec.value;
+    } catch (e) {}
+    return {};
+}
+
+async function sendSmsViaModem(phone, message) {
+    try {
+        const modem = getModemSmsSettings();
+        if (!modem.enabled) return { ok: false, error: 'modem_disabled' };
+        const { spawn } = require('child_process');
+        const device = modem.device || '/dev/ttyUSB0';
+        const number = String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, '');
+        // Try using 'gammu sendsms' if available
+        return new Promise((resolve) => {
+            try {
+                const p = spawn('gammu', ['sendsms', 'TEXT', number, '-text', message], { timeout: 30000 });
+                let out = '', err = '';
+                p.stdout.on('data', d => out += d);
+                p.stderr.on('data', d => err += d);
+                p.on('close', code => {
+                    if (code === 0) resolve({ ok: true });
+                    else resolve({ ok: false, error: err || out });
+                });
+                p.on('error', e => resolve({ ok: false, error: e.message }));
+            } catch (e) {
+                resolve({ ok: false, error: e.message });
+            }
+        });
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+}
+
 function checkSmsApiKey(req) {
     try {
         const key = getSmsApiKey();
@@ -6695,6 +6731,11 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 async function sendOne(phone, message) {
                     if (!phone || !message) { return false; }
                     try {
+                        const modem = getModemSmsSettings();
+                        if (modem && modem.enabled) {
+                            const mres = await sendSmsViaModem(phone, message);
+                            if (mres && mres.ok) return true;
+                        }
                         const postData = querystring.stringify({ username: cfg.username, to: String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, ''), message: message, from: cfg.senderId || '' });
                         const result = await new Promise((resolve, reject) => {
                             const opts = { hostname: 'api.africastalking.com', port: 443, path: '/version1/messaging', method: 'POST', headers: { 'apiKey': cfg.apiKey, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData), 'Accept': 'application/json' } };
@@ -6753,9 +6794,14 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 async function sendOne(phone, message) {
                     if (!phone || !message) { return false; }
                     try {
+                        const modem = getModemSmsSettings();
+                        if (modem && modem.enabled) {
+                            const mres = await sendSmsViaModem(phone, message);
+                            if (mres && mres.ok) return true;
+                        }
                         const postData = querystring.stringify({
                             username: cfg.username,
-                            to: phone,
+                            to: String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, ''),
                             message: message,
                             from: cfg.senderId || ''
                         });

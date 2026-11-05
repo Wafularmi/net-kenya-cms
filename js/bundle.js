@@ -2644,7 +2644,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -29731,5 +29731,29 @@ function copySmsApiKey() {
         });
     } catch (e) {
         showToast('Failed to copy', { type: 'danger' });
+    }
+}
+
+
+async function loadSmsModemSettings() {
+    try {
+        const rec = await dbGet('settings', 'smsModem');
+        const v = (rec && rec.value) || {};
+        const cb = document.getElementById('settings-sms-modem-enabled');
+        const dev = document.getElementById('settings-sms-modem-device');
+        if (cb) cb.checked = !!v.enabled;
+        if (dev) dev.value = v.device || '/dev/ttyUSB0';
+    } catch (e) {}
+}
+
+async function saveSmsModemSettings() {
+    try {
+        const cb = document.getElementById('settings-sms-modem-enabled');
+        const dev = document.getElementById('settings-sms-modem-device');
+        const value = { enabled: !!(cb && cb.checked), device: (dev && dev.value ? dev.value.trim() : '/dev/ttyUSB0') };
+        await dbPut('settings', { key: 'smsModem', value: value, updatedAt: new Date().toISOString() });
+        showToast('Modem settings saved', { type: 'success' });
+    } catch (e) {
+        showToast('Failed to save modem settings', { type: 'danger' });
     }
 }

@@ -1482,6 +1482,15 @@
                         <div class="form-group"><label>Sender ID</label><input type="text" id="settings-sms-senderid" placeholder="e.g., NETCMS (optional)"></div>
                         <button class="btn btn-primary" onclick="saveSMSSettings()">Save SMS Settings</button>
                     </div>
+                    <div class="card"><h3>SMS via GSM Modem (Direct Phone SMS)</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Send as normal SMS directly through a GSM modem/phone attached to the server (via gammu/AT). No third-party app required.</div>
+                        <div class="form-group"><label><input type="checkbox" id="settings-sms-modem-enabled" style="margin-right:6px;"> Enable GSM Modem</label></div>
+                        <div class="form-group"><label>Modem Device</label><input type="text" id="settings-sms-modem-device" placeholder="/dev/ttyUSB0 or /dev/ttyACM0"></div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-primary btn-sm" onclick="saveSmsModemSettings()">Save Modem Settings</button>
+                            <button class="btn btn-outline btn-sm" onclick="loadSmsModemSettings()">Refresh</button>
+                        </div>
+                    </div>
                     <div class="card"><h3>External SMS API</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Generate an API key to send SMS from external systems. The API works as long as this server is online and uses your configured SMS provider (Africa's Talking).</div>
                         <div class="form-group"><label>API Key</label><div style="display:flex;gap:8px;align-items:center;"><input type="text" id="settings-sms-api-key" readonly style="flex:1;" placeholder="No API key generated"><button class="btn btn-outline btn-sm" onclick="copySmsApiKey()">Copy</button></div></div>
