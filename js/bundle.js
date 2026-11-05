@@ -149,6 +149,7 @@ async function dbDelete(store, key) {
         headers: getAuthHeaders()
     });
     if (!res.ok) { noteAuthFailure(res); throw new Error(`dbDelete ${store}:${key} failed: ${res.status}`); }
+    try { return await res.json(); } catch (e) { return { ok: true }; }
 }
 async function dbClear(store) {
     const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}`, {

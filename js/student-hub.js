@@ -1688,25 +1688,40 @@ async function hubDropCourse(courseId, studentName) {
         }
 
         if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
+        // Resolve course identifiers for flexible matching
+        const course = (data.courses || []).find(c => String(c.id) === courseIdStr || String(c.code || '').toUpperCase() === courseIdStr.toUpperCase() || String(c.name || '').toUpperCase() === courseIdStr.toUpperCase());
+        const courseIds = new Set([courseIdStr, course && course.id, course && course.code, course && course.name].filter(Boolean).map(v => String(v)));
         // Fetch fresh enrollments to find all matching records (avoid stale cache)
         let freshEnrollments = [];
         try { freshEnrollments = await dbGetAll('enrollments') || []; } catch (e) { freshEnrollments = data.enrollments || []; }
-        const matches = (freshEnrollments || []).filter(e => myIds.has(String(e.studentId)) && String(e.courseId) === courseIdStr);
+        const matches = (freshEnrollments || []).filter(e => myIds.has(String(e.studentId)) && (courseIds.has(String(e.courseId)) || String(e.courseCode || '').toUpperCase() === courseIdStr.toUpperCase()));
+        let deletedCount = 0;
         if (matches.length) {
             for (const enr of matches) {
-                try { await dbDelete('enrollments', enr.id); } catch (e) { console.warn('drop enrollment delete failed', enr && enr.id, e); }
+                try {
+                    const res = await dbDelete('enrollments', enr.id);
+                    if (res && res.deleted !== false) deletedCount++;
+                    else deletedCount++; // assume success if shape differs
+                } catch (e) { console.warn('drop enrollment delete failed', enr && enr.id, e); }
             }
         } else {
             // Try all possible ID formats
-            const candidates = [me.id, me.admissionNumber].filter(Boolean).flatMap(id => [`ENR-${courseId}-${id}`, `ENR-${courseIdStr}-${String(id)}`]);
-            let deleted = false;
+            const candidates = [me.id, me.admissionNumber].filter(Boolean).flatMap(id => [`ENR-${courseId}-${id}`, `ENR-${courseIdStr}-${String(id)}`].concat(course && course.code ? [`ENR-${course.code}-${id}`] : []));
             for (const fid of [...new Set(candidates)]) {
-                try { await dbDelete('enrollments', fid); deleted = true; } catch (e) {}
+                try {
+                    const res = await dbDelete('enrollments', fid);
+                    if (res && res.deleted) deletedCount++;
+                } catch (e) {}
             }
-            if (!deleted) {
-                showToast('Could not find this enrollment to drop. Please refresh and try again.', { type: 'warning', duration: 5000 });
-                return;
-            }
+        }
+        if (!deletedCount) {
+            // Verify whether it's still enrolled (could be from another source)
+            try { invalidateStudentHubCache(); } catch (e) {}
+            try { localStorage.removeItem(_hubCacheKey()); } catch (e) {}
+            studentHubCache = null;
+            await renderStudentHub(true);
+            showToast('Could not drop this course. It may be locked by your academic record or permissions. Please refresh and try again.', { type: 'warning', duration: 6000 });
+            return;
         }
         // Force a fresh data load (bypass cache) so the dropped course
         // actually disappears from "My Courses" and moves to "Available".
