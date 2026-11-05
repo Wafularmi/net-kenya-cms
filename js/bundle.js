@@ -639,14 +639,22 @@ function canStudentAccessAssessment(rec, kind, ctx) {
         try {
             const studentId = String(ctx.student.id || ctx.student.admissionNumber || '');
             const courseId = String(rec.courseId);
-            const lessons = Array.isArray(ctx.lessons) ? ctx.lessons.filter(l => String(l.courseId) === courseId) : [];
-            if (lessons.length > 0) {
-                const comps = Array.isArray(ctx.lessonCompletions) ? ctx.lessonCompletions : [];
-                const done = new Set(comps.filter(c => String(c.studentId) === studentId && c && c.completedAt).map(c => String(c.lessonId)));
-                const allDone = lessons.every(l => done.has(String(l.id)));
-                if (!allDone) {
-                    const isRegistered = (ctx.examRegIds && ctx.examRegIds.has(String(rec.id))) || (ctx.submittedIds && ctx.submittedIds.has(String(rec.id)));
-                    if (!isRegistered) return false;
+            const isRegistered = (ctx.examRegIds && ctx.examRegIds.has(String(rec.id))) || (ctx.submittedIds && ctx.submittedIds.has(String(rec.id)));
+            if (!isRegistered) {
+                let covered = false;
+                const covData = ctx && ctx.data ? ctx.data : ctx;
+                if (typeof isCourseCovered === 'function' && covData) {
+                    try { covered = !!isCourseCovered(studentId, courseId, covData); } catch (e) {}
+                }
+                if (!covered) {
+                    const lessons = Array.isArray(ctx.lessons) ? ctx.lessons.filter(l => String(l.courseId) === courseId) : (Array.isArray(covData && covData.lessons) ? covData.lessons.filter(l => String(l.courseId) === courseId) : []);
+                    if (lessons.length > 0) {
+                        const comps = Array.isArray(ctx.lessonCompletions) ? ctx.lessonCompletions : (Array.isArray(covData && covData.lessonCompletions) ? covData.lessonCompletions : []);
+                        const myIds = new Set([ctx.student.id, ctx.student.admissionNumber, ctx.student.phone, ctx.student.email].filter(Boolean).map(String));
+                        const done = new Set(comps.filter(c => myIds.has(String(c.studentId)) && c && c.completedAt).map(c => String(c.lessonId)));
+                        const allDone = lessons.every(l => done.has(String(l.id)));
+                        if (!allDone) return false;
+                    }
                 }
             }
         } catch (e) {}
