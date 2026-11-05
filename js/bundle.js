@@ -632,7 +632,24 @@ function assessmentInStudentScope(rec, student, centers) {
 function canStudentAccessAssessment(rec, kind, ctx) {
     if (!rec || !ctx || !ctx.student) return false;
     if (rec.published === false) return false;
+    if (rec.ungated === true) return true;
     const exType = String(rec.type || rec.assessmentType || '').toLowerCase();
+    if (kind === 'exam' && rec.courseId && exType !== 'supplementary') {
+        try {
+            const studentId = String(ctx.student.id || ctx.student.admissionNumber || '');
+            const courseId = String(rec.courseId);
+            const lessons = Array.isArray(ctx.lessons) ? ctx.lessons.filter(l => String(l.courseId) === courseId) : [];
+            if (lessons.length > 0) {
+                const comps = Array.isArray(ctx.lessonCompletions) ? ctx.lessonCompletions : [];
+                const done = new Set(comps.filter(c => String(c.studentId) === studentId && c && c.completedAt).map(c => String(c.lessonId)));
+                const allDone = lessons.every(l => done.has(String(l.id)));
+                if (!allDone) {
+                    const isRegistered = (ctx.examRegIds && ctx.examRegIds.has(String(rec.id))) || (ctx.submittedIds && ctx.submittedIds.has(String(rec.id)));
+                    if (!isRegistered) return false;
+                }
+            }
+        } catch (e) {}
+    }
     if (exType !== 'supplementary' && (rec.openWindow === true || (rec.date && rec.time))) {
         return true;
     }
