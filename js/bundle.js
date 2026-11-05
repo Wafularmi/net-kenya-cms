@@ -13016,6 +13016,7 @@ async function saveDiplomaPdfConfig() {
     };
     try {
         await dbSet('settings', 'diplomaPdfConfig', config);
+        try { localStorage.setItem('nkcms_diplomaPdfConfig_backup', JSON.stringify(config)); } catch (e) {}
         try { tplCacheClear('diplomaPdfConfig'); } catch {}
         showToast('Diploma PDF configuration saved!', { type: 'success' });
         if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
@@ -13397,6 +13398,7 @@ async function saveCompletionPdfConfig() {
     };
     try {
         await dbSet('settings', 'completionPdfConfig', config);
+        try { localStorage.setItem('nkcms_completionPdfConfig_backup', JSON.stringify(config)); } catch (e) {}
         try { tplCacheClear('completionPdfConfig'); } catch {}
         showToast('Completion Certificate PDF configuration saved!', { type: 'success' });
         if (statusEl) { statusEl.textContent = '✓ Saved successfully'; statusEl.style.color = 'var(--success)'; }
@@ -13410,9 +13412,22 @@ async function saveCompletionPdfConfig() {
     }
 }
 async function loadCompletionPdfConfig() {
-    const rec = await dbGet('settings', 'completionPdfConfig');
-    const config = (rec && rec.value) ? rec.value : rec;
-    if (!config) return showToast('No saved config found');
+    let rec = null;
+    try { rec = await dbGet('settings', 'completionPdfConfig'); } catch (e) {}
+    let config = (rec && rec.value) ? rec.value : rec;
+    if (!config || !config.template) {
+        try {
+            const raw = localStorage.getItem('nkcms_completionPdfConfig_backup');
+            if (raw) {
+                config = JSON.parse(raw);
+            }
+        } catch (e) {}
+    }
+    if (!config || !config.template) {
+        try { showToast('No saved config found'); } catch (e) {}
+        return;
+    }
+    try { localStorage.setItem('nkcms_completionPdfConfig_backup', JSON.stringify(config)); } catch (e) {}
     window._completionPdfTemplate = config.template;
     window._completionSigs = config.sigs || {};
     const f = config.fields || {};
@@ -13880,9 +13895,22 @@ async function restoreSelectedFromAlumni() {
     showToast(checkboxes.length + ' student(s) restored', { type: 'success' });
 }
 async function loadDiplomaPdfConfig() {
-    const rec = await dbGet('settings', 'diplomaPdfConfig');
-    const config = (rec && rec.value) ? rec.value : rec;
-    if (!config) return showToast('No saved config found');
+    let rec = null;
+    try { rec = await dbGet('settings', 'diplomaPdfConfig'); } catch (e) {}
+    let config = (rec && rec.value) ? rec.value : rec;
+    if (!config || !config.template) {
+        try {
+            const raw = localStorage.getItem('nkcms_diplomaPdfConfig_backup');
+            if (raw) {
+                config = JSON.parse(raw);
+            }
+        } catch (e) {}
+    }
+    if (!config || !config.template) {
+        try { showToast('No saved config found'); } catch (e) {}
+        return;
+    }
+    try { localStorage.setItem('nkcms_diplomaPdfConfig_backup', JSON.stringify(config)); } catch (e) {}
     window._diplomaPdfTemplate = config.template;
     window._diplomaSigs = config.sigs || {};
     const f = config.fields;
@@ -28914,18 +28942,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { startMaintenanceLiveSync(); } catch {}
     try { if (typeof startMaintenanceBanner === 'function') startMaintenanceBanner(); } catch {}
     try { if (typeof loadCountries === 'function') loadCountries(); } catch {}
-    // The contact number must not wait for any other download - it is shown on
-    // the login screen and the server already rendered it.
     try {
         if (typeof loadPublicContact === 'function') loadPublicContact();
     } catch (e) {}
-    // The diploma template is a ~1MB download that the login screen does not
-    // need. It is loaded when the Settings screen is opened, so only warm it
-    // up for a signed-in session.
     try {
-        if (sessionStorage.getItem('currentUser')) await loadDiplomaPdfConfig();
+        if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig();
     } catch (e) {
         console.error('Failed to load diploma PDF config:', e);
+    }
+    try {
+        if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig();
+    } catch (e) {
+        console.error('Failed to load completion PDF config:', e);
     }
 });
 
