@@ -18744,7 +18744,8 @@ function assessmentTimeParts(time) {
 }
 function assessmentWindow(a) {
     const now = new Date();
-    if (!a) return { opensAt: '', opensAtISO: '', closesAt: '', closesAtISO: '', closed: false, notYetOpen: false, autoClose: false, closeReason: '', graceDays: ASSESSMENT_GRACE_DAYS, startTime: '', endTime: '' };
+    if (!a) return { opensAt: '', opensAtISO: '', closesAt: '', closesAtISO: '', closed: false, notYetOpen: false, autoClose: false, closeReason: '', graceDays: ASSESSMENT_GRACE_DAYS, startTime: '', endTime: '', openWindow: false };
+    const openWindow = a.openWindow === true || a.openWindow === 'true' || a.openWindow === 1 || a.openWindow === '1';
     const t = assessmentTimeParts(a.time);
     const baseDay = String(a.opensAt || a.date || '').slice(0, 10);
     let opensAt = a.opensAt || a.date || '';
@@ -18787,15 +18788,17 @@ function assessmentWindow(a) {
             closeReason = closeReason || 'default';
         }
     }
+    const closed = openWindow ? false : (!!closesAtISO && now > new Date(closesAtISO));
+    const notYetOpen = openWindow ? false : (!!opensAtISO && now < new Date(opensAtISO));
     return {
-        opensAt, opensAtISO, closesAt, closesAtISO, autoClose, closeReason,
+        opensAt, opensAtISO, closesAt, closesAtISO, autoClose, closeReason, openWindow,
         graceDays: ASSESSMENT_GRACE_DAYS, startTime: t.start, endTime: t.end,
-        closed: !!closesAtISO && now > new Date(closesAtISO),
-        notYetOpen: !!opensAtISO && now < new Date(opensAtISO)
+        closed, notYetOpen
     };
 }
 function assessmentWindowText(a) {
     const w = assessmentWindow(a);
+    if (w && w.openWindow) return 'Open-ended (no time limit)';
     const bits = [];
     if (w.opensAt) bits.push('Opens ' + w.opensAt + (w.startTime ? ' at ' + w.startTime : ''));
     if (w.closesAt) bits.push('Disappears ' + w.closesAt + (w.closesAtISO ? ' at ' + w.closesAtISO.slice(11, 16) : '') + (w.closeReason === 'default' ? ' (4-day default)' : w.closeReason === 'time' ? ' (end time)' : w.closeReason === 'manual' ? ' (your date)' : ''));
