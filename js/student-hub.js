@@ -1653,7 +1653,9 @@ async function hubDropCourse(courseId, studentName) {
         const me = _hubGetMe();
         if (!me) return showToast('Student profile not found', { type: 'danger' });
 
-        const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
+        const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const alumniRecord = me._alumniRecord || {};
+        const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email, currentUser.username, currentUser.studentId, currentUser.alumniId, alumniRecord.id, alumniRecord.studentId].filter(Boolean).map(String));
         const courseIdStr = String(courseId);
         if (_hubIsAlumni(me)) {
             const grant = _hubGrantForCourse(me, data, courseId);
@@ -1690,23 +1692,42 @@ async function hubDropCourse(courseId, studentName) {
         if (!await showConfirm('Drop Course', `Drop this course for ${studentName}?`)) return;
         // Resolve course identifiers for flexible matching
         const course = (data.courses || []).find(c => String(c.id) === courseIdStr || String(c.code || '').toUpperCase() === courseIdStr.toUpperCase() || String(c.name || '').toUpperCase() === courseIdStr.toUpperCase());
-        const courseIds = new Set([courseIdStr, course && course.id, course && course.code, course && course.name].filter(Boolean).map(v => String(v)));
+        const courseIds = new Set([courseIdStr, course && course.id, course && course.code, course && course.name].filter(Boolean).map(v => String(v).trim()));
+        const norm = v => String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
+        const myIdNorms = new Set([...myIds].map(norm));
         // Fetch fresh enrollments to find all matching records (avoid stale cache)
         let freshEnrollments = [];
         try { freshEnrollments = await dbGetAll('enrollments') || []; } catch (e) { freshEnrollments = data.enrollments || []; }
-        const matches = (freshEnrollments || []).filter(e => myIds.has(String(e.studentId)) && (courseIds.has(String(e.courseId)) || String(e.courseCode || '').toUpperCase() === courseIdStr.toUpperCase()));
+        const courseMatch = (e) => {
+            const ec = String(e && e.courseId != null ? e.courseId : '').trim();
+            if (courseIds.has(ec)) return true;
+            const ecNorm = norm(ec);
+            for (const id of courseIds) { if (norm(id) === ecNorm) return true; }
+            if (course && course.code && norm(e && e.courseCode) === norm(course.code)) return true;
+            return false;
+        };
+        const studentMatch = (e) => {
+            const sid = String(e && e.studentId != null ? e.studentId : '').trim();
+            if (myIds.has(sid)) return true;
+            if (myIdNorms.has(norm(sid))) return true;
+            return false;
+        };
+        let matches = (freshEnrollments || []).filter(e => studentMatch(e) && courseMatch(e));
+        // Extra fallback: if this course appears in the student's enrolled list, try to find enrollment by course only among plausible records
+        // (kept conservative - only when exactly one student-like match context; not used to avoid deleting others' records)
         let deletedCount = 0;
         if (matches.length) {
             for (const enr of matches) {
                 try {
                     const res = await dbDelete('enrollments', enr.id);
                     if (res && res.deleted !== false) deletedCount++;
-                    else deletedCount++; // assume success if shape differs
+                    else if (res && res.deleted === false) { /* not found */ }
+                    else deletedCount++;
                 } catch (e) { console.warn('drop enrollment delete failed', enr && enr.id, e); }
             }
         } else {
             // Try all possible ID formats
-            const candidates = [me.id, me.admissionNumber].filter(Boolean).flatMap(id => [`ENR-${courseId}-${id}`, `ENR-${courseIdStr}-${String(id)}`].concat(course && course.code ? [`ENR-${course.code}-${id}`] : []));
+            const candidates = [me.id, me.admissionNumber].filter(Boolean).flatMap(id => [`ENR-${courseId}-${id}`, `ENR-${courseIdStr}-${String(id)}`].concat(course && course.code ? [`ENR-${course.code}-${id}`, `ENR-${course.code}-${String(id).replace(/\//g,'-')}`] : []));
             for (const fid of [...new Set(candidates)]) {
                 try {
                     const res = await dbDelete('enrollments', fid);
