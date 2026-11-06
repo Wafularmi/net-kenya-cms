@@ -920,8 +920,9 @@ async function renderStudentHub(force) {
             }
         } catch { window._hubFeeLock = { locked: false }; }
 
-        const c = _hubComputed;
-        content.innerHTML = `
+        const c = _hubComputed || {};
+        try {
+                content.innerHTML = `
             <div style="background:linear-gradient(135deg,#1e3c72 0%,#2a5298 50%,#3a6ab8 100%);color:#fff;padding:28px 24px;border-radius:14px;margin-bottom:20px;box-shadow:0 6px 20px rgba(30,60,114,0.25);position:relative;overflow:hidden;">
                 <div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;background:rgba(255,255,255,0.06);border-radius:50%;"></div>
                 <div style="position:absolute;bottom:-60px;right:60px;width:120px;height:120px;background:rgba(255,255,255,0.04);border-radius:50%;"></div>
@@ -935,7 +936,7 @@ async function renderStudentHub(force) {
                     <span id="hub-live-text">Live</span>
                 </div>
             </div>
-            ${hubLiveBanner(c)}
+            ${(typeof hubLiveBanner==='function'?(()=>{try{return hubLiveBanner(c)}catch(e){return ''}})():'')}
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;">
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('courses')"><div class="stat-label">${_isAlumniHub ? '🎓 Alumni Courses' : '📚 Enrolled Courses'}</div><div class="stat-value" style="color:var(--success);">${c.myCourses.length}</div></div>
@@ -967,6 +968,13 @@ async function renderStudentHub(force) {
             <div id="hub-tab-music" style="display:none;"></div>
         `;
         _hubRenderedTabs.overview = true;
+        } catch (renderErr) {
+            console.error('Student Hub render error:', renderErr);
+            if (c && c.me) {
+                content.innerHTML = '<div style="padding:16px;"><div class="card" style="border-left:4px solid var(--danger);"><b>Dashboard partially unavailable</b><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Please refresh. If this continues, contact support.</div></div><div style="display:flex;gap:4px;margin:12px 0;border-bottom:2px solid var(--border);overflow-x:auto;"><button class="hub-tab active" data-tab="overview" onclick="switchHubTab(\'overview\',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid var(--accent);color:var(--accent);font-weight:600;cursor:pointer;">Overview</button><button class="hub-tab" data-tab="courses" onclick="switchHubTab(\'courses\',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;">📚 Courses</button><button class="hub-tab" data-tab="exams" onclick="switchHubTab(\'exams\',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;">📝 Exams</button><button class="hub-tab" data-tab="quizzes" onclick="switchHubTab(\'quizzes\',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;">📋 Quizzes</button><button class="hub-tab" data-tab="notes" onclick="switchHubTab(\'notes\',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;">📄 Notes</button><button class="hub-tab" data-tab="live" onclick="switchHubTab(\'live\',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;">🎥 Live</button></div><div id="hub-tab-overview"></div><div id="hub-tab-courses" style="display:none;"></div><div id="hub-tab-exams" style="display:none;"></div><div id="hub-tab-quizzes" style="display:none;"></div><div id="hub-tab-notes" style="display:none;"></div><div id="hub-tab-live" style="display:none;"></div><div id="hub-tab-discussions" style="display:none;"></div><div id="hub-tab-media" style="display:none;"></div><div id="hub-tab-music" style="display:none;"></div></div>';
+                _hubRenderedTabs = { overview: true };
+            } else { throw renderErr; }
+        }
 
         setTimeout(() => { _hubLastUpdate = Date.now(); _updateHubRefreshButton(); }, 0);
     } catch (err) {
