@@ -876,10 +876,35 @@ async function renderStudentHub(force) {
         } catch (e) {}
         const data = await loadStudentHubData(force);
         if (!studentHubCache) studentHubCache = data;
-        const me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
+        let me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
+        if (!me) {
+            // Emergency fallback: targeted lookups for accounts not present in the batch
+            // (e.g., scoped responses or ID-format mismatches).
+            try {
+                const candidates = [currentUser.studentId, currentUser.id, currentUser.alumniId, currentUser.username,
+                    currentUser.username ? 'STU-' + currentUser.username : null,
+                    currentUser.studentId ? 'STU-' + currentUser.studentId : null]
+                    .filter((v, i, a) => v && a.indexOf(v) === i).map(String);
+                for (const store of ['students', 'alumni']) {
+                    if (me) break;
+                    for (const key of candidates) {
+                        try {
+                            const rec = await dbGet(store, key);
+                            if (rec) {
+                                if (store === 'students') { data.students = data.students || []; if (!data.students.find(s => s && String(s.id) === String(rec.id))) data.students.push(rec); }
+                                else { data.alumni = data.alumni || []; if (!data.alumni.find(a => a && String(a.id) === String(rec.id))) data.alumni.push(rec); }
+                                me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
+                                if (me) break;
+                            }
+                        } catch (e) {}
+                    }
+                }
+                if (me && studentHubCache) { studentHubCache.students = data.students; studentHubCache.alumni = data.alumni; }
+            } catch (e) { console.warn('Hub profile fallback lookup failed:', e); }
+        }
         if (!me) {
             console.warn('Profile not found debug:', { currentUser, studentsCount: (data.students||[]).length, alumniCount: (data.alumni||[]).length, studentIds: (data.students||[]).slice(0,3).map(s=>({id:s.id, adm:s.admissionNumber, phone:s.phone, email:s.email, name:s.name})) });
-            content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Profile not found</h3><p>Please contact the administrator to link your account.</p><button class="btn btn-outline btn-sm" onclick="renderStudentHub()" style="margin-top:12px;">Retry</button></div>'; return; }
+            content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Profile not found</h3><p>Please contact the administrator to link your account (' + esc(String(currentUser.username || currentUser.studentId || '')) + ').</p><button class="btn btn-outline btn-sm" onclick="invalidateStudentHubCache&&invalidateStudentHubCache();renderStudentHub(true)" style="margin-top:12px;">Retry</button></div>'; return; }
 
         _hubStudent = me;
         _hubData = data;
@@ -1477,20 +1502,33 @@ function _hubFindStudent(students, currentUser, alumniList) {
     if (!currentUser) return null;
     const uid = String(currentUser.username || '').trim();
     const sid = String(currentUser.studentId || '').trim();
+    const cid = String(currentUser.id || '').trim();
     const requestedAlumniId = String(currentUser.alumniId || '').trim();
     const accountIsAlumni = currentUser.accountType === 'alumni' || !!requestedAlumniId;
     const uidDigits = uid.replace(/[^0-9]/g, '').slice(-9);
+    const sidDigits = sid.replace(/[^0-9]/g, '').slice(-9);
+    const cidDigits = cid.replace(/[^0-9]/g, '').slice(-9);
     const nameLower = String(currentUser.name || '').trim().toLowerCase();
+    const ids = [uid, sid, cid].filter(Boolean);
+    const idsLower = ids.map(v => v.toLowerCase());
     const check = (s) => {
         if (!s) return false;
-        if (requestedAlumniId && s.id && String(s.id) === requestedAlumniId) return true;
-        if (s.id && (String(s.id) === sid || String(s.id) === uid || String(s.id) === 'STU-' + uid || String(s.id) === 'STU-' + sid)) return true;
-        if (s.admissionNumber && (String(s.admissionNumber) === uid || String(s.admissionNumber) === sid)) return true;
-        if (s.studentId && (String(s.studentId) === sid || String(s.studentId) === uid)) return true;
-        if (s.phone && uidDigits && String(s.phone).replace(/[^0-9]/g,'').slice(-9) === uidDigits) return true;
-        if (s.phone && String(s.phone) === uid) return true;
-        if (s.email && String(s.email).toLowerCase() === uid.toLowerCase()) return true;
-        if (s.email && sid && String(s.email).toLowerCase() === String(sid).toLowerCase()) return true;
+        const sId = s.id != null ? String(s.id) : '';
+        const sIdLower = sId.toLowerCase();
+        const sAdm = s.admissionNumber != null ? String(s.admissionNumber) : '';
+        const sAdmLower = sAdm.toLowerCase();
+        const sStu = s.studentId != null ? String(s.studentId) : '';
+        if (requestedAlumniId && sId === requestedAlumniId) return true;
+        if (sId && ids.some(v => sId === v || sIdLower === v.toLowerCase() || sId === 'STU-' + v)) return true;
+        if (sAdm && ids.some(v => sAdm === v || sAdmLower === v.toLowerCase())) return true;
+        if (sStu && ids.some(v => sStu === v)) return true;
+        const sPhone = s.phone != null ? String(s.phone) : '';
+        const sPhoneDigits = sPhone.replace(/[^0-9]/g, '').slice(-9);
+        if (sPhoneDigits && (sPhoneDigits === uidDigits || sPhoneDigits === sidDigits || sPhoneDigits === cidDigits)) return true;
+        if (sPhone && ids.includes(sPhone)) return true;
+        const sEmail = s.email != null ? String(s.email).toLowerCase() : '';
+        if (sEmail && (idsLower.includes(sEmail) || (s.username && sEmail === String(s.username).toLowerCase()))) return true;
+        if (s.username && idsLower.includes(String(s.username).toLowerCase())) return true;
         if (nameLower && s.name && String(s.name).trim().toLowerCase() === nameLower) return true;
         return false;
     };
