@@ -850,6 +850,8 @@ async function renderStudentHub(force) {
         content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Student Hub</h3><p>This area is for students only.</p></div>';
         return;
     }
+    _hubActiveTab = 'overview';
+    _hubRenderedTabs = {};
 
     const hasCache = !force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000;
 
@@ -965,10 +967,6 @@ async function renderStudentHub(force) {
             <div id="hub-tab-music" style="display:none;"></div>
         `;
         _hubRenderedTabs.overview = true;
-
-        if (_hubActiveTab && _hubActiveTab !== 'overview') {
-            switchHubTab(_hubActiveTab, null);
-        }
 
         setTimeout(() => { _hubLastUpdate = Date.now(); _updateHubRefreshButton(); }, 0);
     } catch (err) {
