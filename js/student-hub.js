@@ -547,9 +547,9 @@ function _hubBuildComputed(data, me) {
         // lifelong-learning catalogue, not the active-student enrolment list.
         // An invitation-only course is invisible until that alumnus is invited.
         if (isAlumni) {
-            const access = _hubAlumniAccess(c);
+            const access = _hubAlumniAccess(c) || {};
             if (!access.enabled) return false;
-            if (access.mode === 'invite') {
+            if ((access && access.mode) === 'invite') {
                 const grant = _hubGrantForCourse(me, data, c.id);
                 const status = String((grant && grant.status) || '').toLowerCase();
                 if (!['invited', 'active'].includes(status)) return false;
@@ -1054,8 +1054,10 @@ async function switchHubTab(tab, btn) {
         if (!c) return;
         if (tab !== 'overview') await _hubLoadTabData(tab);
         if (tab !== 'overview' && studentHubCache && studentHubCache.loadedAt !== c.data?.loadedAt) {
-            const me = _hubGetMe();
-            if (me) { c = _hubBuildComputed(studentHubCache, me); _hubComputed = c; _hubComputedCache = { computed: c, dataVersion: studentHubCache.loadedAt, meId: me.id }; }
+            try {
+                const me = _hubGetMe();
+                if (me) { c = _hubBuildComputed(studentHubCache, me); _hubComputed = c; _hubComputedCache = { computed: c, dataVersion: studentHubCache.loadedAt, meId: me.id }; }
+            } catch (e) { console.warn('hub recompute failed', e); c = c || _hubComputed || {}; }
         }
         // Content gate: filter to allowed courses (covered + current + unlocked)
         let rc = c;
@@ -1448,8 +1450,8 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
                 const grant = isAlumni ? grantFor(c.id) : null;
                 const grantStatus = String((grant && grant.status) || '').toLowerCase();
                 const invited = grantStatus === 'invited';
-                const expiredInvite = isAlumni && access.mode === 'invite' && grantStatus === 'active' && !_hubAlumniGrantActive(grant);
-                const badge = expiredInvite ? 'INVITATION EXPIRED' : (invited ? 'INVITED' : (access.mode === 'invite' ? 'INVITATION ONLY' : 'OPEN TO ALUMNI'));
+                const expiredInvite = isAlumni && (access && access.mode) === 'invite' && grantStatus === 'active' && !_hubAlumniGrantActive(grant);
+                const badge = expiredInvite ? 'INVITATION EXPIRED' : (invited ? 'INVITED' : ((access && access.mode) === 'invite' ? 'INVITATION ONLY' : 'OPEN TO ALUMNI'));
                 return `
                 <div class="card" style="border-left:4px solid ${invited ? 'var(--success)' : 'var(--accent)'};">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -1591,10 +1593,10 @@ async function hubEnrollCourse(courseId, studentName) {
             const grant = _hubGrantForCourse(me, data, courseId);
             const status = String((grant && grant.status) || '').toLowerCase();
             if (_hubAlumniGrantActive(grant)) return showToast('Already enrolled in this course');
-            if (access.mode === 'invite' && status === 'active') {
+            if ((access && access.mode) === 'invite' && status === 'active') {
                 return showToast('Your invitation has expired — ask the alumni office to invite you again', { type: 'danger', duration: 7000 });
             }
-            if (access.mode === 'invite' && status !== 'invited') {
+            if ((access && access.mode) === 'invite' && status !== 'invited') {
                 return showToast('This course is invitation-only', { type: 'danger' });
             }
             const invited = status === 'invited';
