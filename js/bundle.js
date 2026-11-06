@@ -15481,6 +15481,49 @@ async function printCertificate(certId) {
     w.document.close();
     setTimeout(() => w.print(), 500);
 }
+async function getCertificatePdfBlob(cert) {
+    if (!cert) throw new Error('Document not found');
+    const filename = (typeof buildCertDownloadName === 'function'
+        ? buildCertDownloadName(cert).replace(/\.html$/i, '.pdf')
+        : ((cert.type || 'document').replace(/\s+/g, '_') + '_' + (cert.docId || cert.id || Date.now()) + '.pdf'));
+    if (typeof certContentIsPdf === 'function' && certContentIsPdf(cert)) {
+        const url = await resolvePdfBlobUrl(cert);
+        if (!url) throw new Error('Could not load the PDF document');
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Could not read the PDF document');
+            const blob = await res.blob();
+            return { blob: (blob && blob.type === 'application/pdf') ? blob : new Blob([blob], { type: 'application/pdf' }), filename };
+        } finally {
+            try { URL.revokeObjectURL(url); } catch (e) {}
+        }
+    }
+    const content = cert.content || '';
+    if (!content) throw new Error('Nothing to generate');
+    if (typeof html2pdf === 'undefined') throw new Error('PDF library not loaded');
+    const el = document.createElement('div');
+    el.innerHTML = content;
+    el.style.background = '#fff';
+    el.style.position = 'fixed';
+    el.style.left = '-99999px';
+    el.style.top = '0';
+    document.body.appendChild(el);
+    try {
+        const opt = { margin: 0, filename, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'] } };
+        const worker = html2pdf().set(opt).from(el);
+        let blob = null;
+        if (typeof worker.outputPdf === 'function') blob = await worker.outputPdf('blob');
+        else if (typeof worker.output === 'function') blob = await worker.output('blob');
+        else if (typeof worker.toPdf === 'function') {
+            blob = await worker.toPdf().get('pdf').then(pdf => pdf.output('blob'));
+        }
+        if (!(blob instanceof Blob)) throw new Error('Could not generate PDF file');
+        return { blob: blob.type ? blob : new Blob([blob], { type: 'application/pdf' }), filename };
+    } finally {
+        try { document.body.removeChild(el); } catch (e) {}
+    }
+}
+
 async function sendDocWhatsApp(certId) {
     const cert = await dbGet('certificates', certId);
     if (!cert) return showToast('Document not found!');
@@ -15512,8 +15555,52 @@ async function sendDocWhatsApp(certId) {
     msg += `\nPlease keep this link private. Contact the administration office for any inquiries.\n\n${schoolName}`;
     // Strip markdown and non-ASCII symbols for clean WhatsApp
     msg = msg.replace(/\*+/g, '').replace(/_+/g, '').replace(/`+/g, '').replace(/[^\x00-\x7F]/g, '');
+
+    try { if (typeof showToast === 'function') showToast('Generating PDF for WhatsApp...'); } catch (e) {}
+    let pdf = null;
+    try {
+        pdf = await getCertificatePdfBlob(cert);
+    } catch (e) {
+        console.warn('PDF generation for WhatsApp failed, falling back to link:', e);
+    }
+
+    if (pdf && pdf.blob) {
+        try {
+            const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' });
+            const shareData = { files: [file], title: docType, text: `${docType} - ${name || 'Student'}${cert.docId ? ' (' + cert.docId + ')' : ''}\n${link}` };
+            if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
+                await navigator.share(shareData);
+                try { if (typeof logAudit === 'function') logAudit('shared', 'document-whatsapp-pdf', { id: cert.id, docId: cert.docId }); } catch (e) {}
+                showToast('PDF shared via WhatsApp/share sheet');
+                return;
+            }
+        } catch (e) {
+            if (e && e.name === 'AbortError') {
+                showToast('Share cancelled');
+                return;
+            }
+            console.warn('Web Share failed, falling back:', e);
+        }
+        // Fallback: download generated PDF and open WhatsApp chat to student with message/link
+        try {
+            const a = document.createElement('a');
+            const url = URL.createObjectURL(pdf.blob);
+            a.href = url;
+            a.download = pdf.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 1500);
+        } catch (e) { console.warn('PDF download fallback failed:', e); }
+        sendWhatsApp(person.phone, msg);
+        try { if (typeof logAudit === 'function') logAudit('sent', 'document-whatsapp', { id: cert.id, docId: cert.docId, pdfDownloadedFallback: true }); } catch (e) {}
+        showToast('PDF downloaded. WhatsApp opened to ' + (name || 'student') + ' — attach the PDF if needed.');
+        return;
+    }
+
+    // Final fallback: keep existing link-based WhatsApp behavior
     sendWhatsApp(person.phone, msg);
-    logAudit('sent', 'document-whatsapp', { id: cert.id, docId: cert.docId });
+    try { if (typeof logAudit === 'function') logAudit('sent', 'document-whatsapp', { id: cert.id, docId: cert.docId }); } catch (e) {}
     showToast('Document link sent to ' + (name || 'student'));
 }
 async function deleteCertificate(certId) {
