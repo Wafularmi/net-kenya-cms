@@ -1080,15 +1080,18 @@ async function switchHubTab(tab, btn) {
             }
         } catch {}
         try {
-            if (tab === 'courses') container.innerHTML = renderHubCourses(rc.me, rc.myCourses, rc.availableCourses, rc.data, lockedIds);
-            else if (tab === 'exams') container.innerHTML = renderHubExams(rc.me, rc.upcomingRegisteredExams, rc.pastRegisteredExams, rc.upcomingAvailableExams, rc.pastAvailableExams, rc.data);
-            else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(rc.me, rc.pendingQuizzes, rc.completedQuizzes, rc.data, rc.allScores); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
-            else if (tab === 'notes') container.innerHTML = renderHubNotes(rc.me, rc.myCourses, rc.myLessons, rc.myNotes, rc.data);
-            else if (tab === 'media') container.innerHTML = renderHubMedia(rc.me, studentHubCache || {});
-        else if (tab === 'music') { renderHubMusic(rc.me, rc.data || studentHubCache || {}); }
-            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(rc.me, rc.myCourses, rc.myLessons, (rc.data.meetings || studentHubCache.meetings || []));
-            else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(rc.me, rc.data); return; }
-        } catch (e) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section.</div>'; }
+            const _rc = rc || _hubComputed || {};
+            const _me = _rc.me || _hubGetMe() || _hubStudent || {};
+            const _data = _rc.data || studentHubCache || {};
+            if (tab === 'courses') container.innerHTML = renderHubCourses(_me, _rc.myCourses || [], _rc.availableCourses || [], _data, lockedIds || new Set());
+            else if (tab === 'exams') container.innerHTML = renderHubExams(_me, _rc.upcomingRegisteredExams || [], _rc.pastRegisteredExams || [], _rc.upcomingAvailableExams || [], _rc.pastAvailableExams || [], _data);
+            else if (tab === 'quizzes') { container.innerHTML = renderHubQuizzes(_me, _rc.pendingQuizzes || [], _rc.completedQuizzes || [], _data, _rc.allScores || []); if (!container.dataset.hubQuizBound) { container.dataset.hubQuizBound = '1'; container.addEventListener('click', function(e) { const btn = e.target.closest('[data-action]'); if (!btn) return; const qid = btn.dataset.quizId; const action = btn.dataset.action; if (action === 'register') hubRegisterQuiz(qid); else if (action === 'drop') hubDropQuiz(qid); else if (action === 'take') hubGoToQuiz(qid); }); } }
+            else if (tab === 'notes') container.innerHTML = renderHubNotes(_me, _rc.myCourses || [], _rc.myLessons || [], _rc.myNotes || [], _data);
+            else if (tab === 'media') container.innerHTML = renderHubMedia(_me, studentHubCache || _data || {});
+            else if (tab === 'music') { renderHubMusic(_me, _data || studentHubCache || {}); }
+            else if (tab === 'live') container.innerHTML = renderHubLiveClasses(_me, _rc.myCourses || [], _rc.myLessons || [], (_data.meetings || (studentHubCache && studentHubCache.meetings) || []));
+            else if (tab === 'discussions') { delete _hubRenderedTabs.discussions; container.style.display = 'block'; renderHubDiscussions(_me, _data); return; }
+        } catch (e) { console.error('Hub tab render failed', tab, e); container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Unable to load this section. <span style="font-size:11px;">(' + esc(String(e && e.message || e || 'error')) + ')</span> <button class="btn btn-outline btn-sm" onclick="delete _hubRenderedTabs[\''+tab+'\'];switchHubTab(\''+tab+'\')" style="margin-left:8px;">Retry</button></div>'; }
         _hubRenderedTabs[tab] = true;
     }
     container.style.display = 'block';
