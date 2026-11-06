@@ -6640,6 +6640,75 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
         return true;
     }
 
+    // POST /api/whatsapp-cloud/send-certificate — send a certificate PDF to a
+    // student's WhatsApp number via Cloud API (document message). Meta fetches the
+    // PDF from the public, verification-code-protected certificate URL.
+    if (parts.length === 3 && parts[1] === 'whatsapp-cloud' && parts[2] === 'send-certificate' && req.method === 'POST') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const su = getRequestUser(req);
+        if (!su) return json(res, 401, { error: 'Not authenticated' });
+        if (!canAccessStore(su, 'whatsappLog', 'POST')) return json(res, 403, { error: 'Insufficient permissions' });
+        let body = '';
+        req.on('data', ch => body += ch);
+        req.on('end', async () => {
+            try {
+                const c = waCloudSettings();
+                if (!waCloudReady(c)) return json(res, 400, { configured: false, error: 'WhatsApp Cloud API is not configured.' });
+                const d = JSON.parse(body);
+                const certId = String((d && (d.certId || d.id || d.docId)) || '').trim();
+                if (!certId) return json(res, 400, { error: 'Certificate ID required' });
+                const cert = (db.certificates || []).find(x => x && (String(x.id) === certId || String(x.docId || '') === certId));
+                if (!cert) return json(res, 404, { error: 'Certificate not found' });
+                if (!cert.vCode) return json(res, 400, { error: 'This document has no verification code; regenerate or reissue it before sending.' });
+                let person = (db.students || []).find(s => s && String(s.id) === String(cert.studentId)) || null;
+                if (!person) person = (db.alumni || []).find(a => a && String(a.id) === String(cert.studentId)) || null;
+                const rawPhone = String((person && (person.phone || person.phoneNumber || person.whatsapp || person.whatsApp)) || d.to || '').trim();
+                let to = rawPhone.replace(/[^0-9]/g, '');
+                if (to.startsWith('0')) to = '254' + to.substring(1);
+                if (!to) return json(res, 400, { error: 'No phone number on file for this student' });
+                const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+                if (!host) return json(res, 400, { error: 'Could not determine server address for the document link' });
+                const xfProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+                const proto = xfProto || ((req.socket && req.socket.encrypted) ? 'https' : (/localhost|127\.0\.0\.1/i.test(host) ? 'http' : 'https'));
+                const base = proto + '://' + host;
+                const pdfUrl = base + '/api/certificate/' + encodeURIComponent(cert.docId || cert.id) + '/pdf?v=' + encodeURIComponent(cert.vCode);
+                const typeLabels = { 'diploma': 'Diploma Certificate', 'admission': 'Admission Letter', 'completion': 'Completion Certificate', 'enrollment': 'Enrollment Letter', 'recommendation': 'Recommendation Letter', 'fee-statement': 'Fee Statement', 'transcript': 'Official Transcript', 'final-transcript': 'Final Academic Transcript' };
+                const docType = cert.docTitle || typeLabels[cert.type] || 'Document';
+                const name = cert.studentName || (person && (person.name || person.fullName)) || 'Student';
+                const filename = String((cert.docId || cert.id || 'document')).replace(/[^A-Za-z0-9._-]+/g, '_') + '.pdf';
+                let caption = String(d.caption || (docType + ' - ' + name + (cert.docId ? ' (ID: ' + cert.docId + ')' : ''))).replace(/[\r\n]+/g, ' ').trim();
+                if (caption.length > 1024) caption = caption.slice(0, 1021) + '...';
+                const payload = {
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to: to,
+                    type: 'document',
+                    document: { link: pdfUrl, filename: filename, caption: caption }
+                };
+                const r = await waGraphPost(c, '/' + c.phoneNumberId + '/messages', payload);
+                const ok = !!(r && r.messages && r.messages[0] && r.messages[0].id);
+                if (su.user) {
+                    db.whatsappLog = db.whatsappLog || [];
+                    db.whatsappLog.push({
+                        id: 'WA-' + Date.now(), phone: to, name: name,
+                        message: caption.substring(0, 200),
+                        date: new Date().toISOString().split('T')[0],
+                        time: new Date().toLocaleTimeString(), template: '',
+                        status: ok ? 'sent' : 'failed',
+                        sentBy: su.username, createdAt: new Date().toISOString(),
+                        country: su.user.country,
+                        type: 'document', certId: cert.id, docId: cert.docId
+                    });
+                    saveDB();
+                }
+                if (!ok) return json(res, 502, { error: (r && (r.error && r.error.message)) || 'WhatsApp rejected the document message' });
+                try { auditLog('sent', 'document-whatsapp-cloud', { id: cert.id, docId: cert.docId, to: to }, su.username); } catch (e) {}
+                return json(res, 200, { id: r.messages[0].id, to: to, name: name, configured: true });
+            } catch (e) { json(res, 500, { error: e.message || e }); }
+        });
+        return true;
+    }
+
 
 // POST /api/send-sms â€” send bulk SMS via Africa's Talking
     // -----------------------------------------------------------

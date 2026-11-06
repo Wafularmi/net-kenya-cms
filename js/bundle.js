@@ -15556,6 +15556,32 @@ async function sendDocWhatsApp(certId) {
     // Strip markdown and non-ASCII symbols for clean WhatsApp
     msg = msg.replace(/\*+/g, '').replace(/_+/g, '').replace(/`+/g, '').replace(/[^\x00-\x7F]/g, '');
 
+    // Primary (when configured): automatic server-side WhatsApp Cloud API document send
+    // to the student's number — no share sheet.
+    try {
+        if (typeof showToast === 'function') showToast('Sending PDF to WhatsApp...');
+        const res = await fetch('/api/whatsapp-cloud/send-certificate', {
+            method: 'POST',
+            headers: { ...((typeof getAuthHeaders === 'function') ? getAuthHeaders() : {}), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ certId: cert.id || cert.docId || certId })
+        });
+        let data = null; try { data = await res.json(); } catch (e) {}
+        if (res.ok && data && data.id) {
+            showToast('PDF sent to ' + (data.name || name || 'student') + ' on WhatsApp');
+            return;
+        }
+        const notConfigured = (data && data.configured === false) || (res.status === 400 && data && /not configured/i.test(String(data.error || '')));
+        if (!notConfigured) {
+            const err = (data && (data.error || data.message)) || ('HTTP ' + res.status);
+            console.warn('WhatsApp Cloud certificate send failed:', err, data);
+            showToast('Automatic WhatsApp send failed: ' + err);
+            return;
+        }
+    } catch (e) {
+        // Network/server unavailable: fall back to client-side sharing below.
+        console.warn('WhatsApp Cloud certificate send unavailable, using fallback:', e);
+    }
+
     try { if (typeof showToast === 'function') showToast('Generating PDF for WhatsApp...'); } catch (e) {}
     let pdf = null;
     try {
