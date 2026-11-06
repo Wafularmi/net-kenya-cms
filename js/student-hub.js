@@ -1589,6 +1589,13 @@ function _hubFindStudent(students, currentUser, alumniList) {
     // No students-store row: a linked/legacy alumnus is a full lifelong learner.
     const alumni = (alumniList || []).find(check) || null;
     if (alumni) return normalizeAlumni(alumni, findStudentForAlumni(alumni));
+    // Targeted fallback: never leave a logged-in student without a profile, so
+    // the Hub (and its exams) still render. Use the session identity as the
+    // student id; exams that are open-ended are visible to everyone anyway.
+    const fallbackId = sid || uid || (currentUser && currentUser.studentId) || (currentUser && currentUser.username) || 'anon';
+    if (fallbackId && fallbackId !== 'anon') {
+        return { id: fallbackId, studentId: fallbackId, name: (currentUser && currentUser.name) || fallbackId, status: 'active', studyCenterId: '', program: '', year: 1, admissionNumber: (currentUser && currentUser.studentId) || '', phone: '', email: '', _fallback: true };
+    }
     return null;
 }
 function _hubGetMe() {
