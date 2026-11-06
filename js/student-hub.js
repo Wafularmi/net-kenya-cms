@@ -220,7 +220,7 @@ async function hubCourseAccess(me, data) {
     // of a course they are entitled to audit.
     if (_hubIsAlumni(me)) return openAll();
     const gate = await hubContentGate();
-    if (!gate) return openAll();
+    if (!gate || typeof gate !== 'object') return openAll();
     try {
         if (!_hubCenterRegionCache) {
             const centers = await dbGetAll('studyCenters');
@@ -241,11 +241,11 @@ async function hubCourseAccess(me, data) {
     const studentLocks = migrateLocks(sOv);
     let eff = { enabled: !!gate.enabled, locks: migrateLocks(gate) };
     if (me.studyCenterId) {
-        if (gate.mode === 'per-center' && gate.centers && gate.centers[me.studyCenterId]) {
+        if (gate && gate.mode === 'per-center' && gate.centers && gate.centers[me.studyCenterId]) {
             const rc = gate.centers[me.studyCenterId];
             if (!rc.enabled) { eff = { enabled: false, locks: {} }; }
             else eff = { enabled: true, locks: migrateLocks(rc) };
-        } else if (gate.mode === 'per-region' && _hubCenterRegionCache) {
+        } else if (gate && gate.mode === 'per-region' && _hubCenterRegionCache) {
             const rid = _hubCenterRegionCache[me.studyCenterId] || '';
             const rr = rid && gate.regions ? gate.regions[rid] : null;
             if (rr) {
@@ -296,7 +296,7 @@ async function hubFeeGateConfig() {
     return _hubFeeGateCache;
 }
 function hubEffectiveGate(me, gate) {
-    if (!gate) return null;
+    if (!gate || typeof gate !== 'object') return null;
     if (gate.mode === 'per-region' && me && me.studyCenterId && _hubCenterRegionCache) {
         const rid = _hubCenterRegionCache[me.studyCenterId] || '';
         const rc = rid && gate.regions ? gate.regions[rid] : null;
@@ -1813,9 +1813,12 @@ function _hubExamStatus(exam) {
 }
 
 function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, data) {
+    data = data || {};
     let myCourses = (data.courses || []);
     if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
-    const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
+    const myIds = new Set([me && me.id, me && me.admissionNumber, me && me.phone, me && me.email].filter(Boolean).map(String));
+    const _allIds = typeof _hubLearnerIds === 'function' ? _hubLearnerIds(me) : myIds;
+    const examRegIds = new Set((data.examRegistrations || []).filter(r => _allIds.has(String(r.studentId))).map(r => r.examId));
     const mySubmissions = (data.submissions || []).filter(s => myIds.has(String(s.studentId)));
     const myGrades = (data.grades || []).filter(g => myIds.has(String(g.studentId)));
     const myRetakeRequests = (data.retakeRequests || []).filter(r => myIds.has(String(r.studentId)));
