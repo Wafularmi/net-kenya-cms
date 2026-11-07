@@ -43,7 +43,20 @@ function handleDeadSession() {
     } catch {}
 }
 function noteAuthFailure(res) {
-    try { if (res && res.status === 401 && storedToken()) handleDeadSession(); } catch {}
+    try {
+        if (!res || res.status !== 401) return;
+        const token = storedToken();
+        if (!token) return;
+        // A 401 from a request that started before sign-in can land after the
+        // new session is created. Do not let that stale failure clear a valid
+        // session: confirm the current token is really dead first.
+        if (window._authVerifyInFlight) return;
+        window._authVerifyInFlight = true;
+        fetch('/api/session', { headers: getAuthHeaders() })
+            .then(r => { if (!r.ok && storedToken() === token) handleDeadSession(); })
+            .catch(() => {})
+            .finally(() => { window._authVerifyInFlight = false; });
+    } catch {}
 }
 async function openDB() {
     try {
@@ -29131,7 +29144,7 @@ function clearLoginForm() {
         if (p) p.value = '';
     } catch {}
 }
-// Initialize diploma PDF template on page load
+// Login-page initialization
 document.addEventListener('DOMContentLoaded', async () => {
     try { clearLoginForm(); } catch {}
     window.addEventListener('pageshow', () => { try { clearLoginForm(); } catch {} });
@@ -29141,16 +29154,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         if (typeof loadPublicContact === 'function') loadPublicContact();
     } catch (e) {}
-    try {
-        if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig();
-    } catch (e) {
-        console.error('Failed to load diploma PDF config:', e);
-    }
-    try {
-        if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig();
-    } catch (e) {
-        console.error('Failed to load completion PDF config:', e);
-    }
+    // Diploma/completion PDF templates are staff-only Settings data. Loading
+    // them here, before sign-in, produced two unauthenticated 401s that could
+    // resolve AFTER a successful login and clear the new session. The Settings
+    // screen and the PDF generators load them on demand.
 });
 
 // ==================== MUSIC CLASSES ====================
