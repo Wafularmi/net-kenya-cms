@@ -76,9 +76,13 @@ async function dbGetBatch(stores) {
     }
     throw lastErr || new Error('dbGetBatch failed');
 }
-async function dbGet(store, key) {
+async function dbGet(store, key, opts) {
     const pvOne = (typeof previewCountry === 'function' ? previewCountry() : '');
-    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}${pvOne ? '?preview=' + encodeURIComponent(pvOne) : ''}`, { headers: getAuthHeaders() });
+    const qs = [];
+    if (pvOne) qs.push('preview=' + encodeURIComponent(pvOne));
+    if (opts && opts.query) qs.push(String(opts.query));
+    const q = qs.length ? '?' + qs.join('&') : '';
+    const res = await fetch(`${API_BASE}/${encodeURIComponent(store)}/${encodeURIComponent(String(key))}${q}`, { headers: getAuthHeaders() });
     if (res.status === 404) return null;
     if (!res.ok) { noteAuthFailure(res); throw new Error(`dbGet ${store}:${key} failed: ${res.status}`); }
     return res.json();
@@ -1556,7 +1560,8 @@ async function initAuth() {
     // real admin account with a fresh default one, destroying its password and
     // profile. Account creation must never happen as a side effect of loading a
     // page. Admin accounts are created deliberately, from the Users screen.
-    try { await loadBranding(); } catch (e) { console.error('initAuth loadBranding failed:', e); }
+    // init() has already loaded branding before calling initAuth(). Do not
+    // download the 1.16 MB record a second time just to show the login screen.
     try { await initAcademicCache(); } catch (e) { console.error('initAuth initAcademicCache failed:', e); }
     try { await checkAllAccountActivity(); } catch (e) { console.error('initAuth checkAllAccountActivity failed:', e); }
     try { await syncUserAccounts(); } catch (e) { console.error('initAuth syncUserAccounts failed:', e); }
@@ -1577,7 +1582,9 @@ async function initAuth() {
             if (effUser) {
                 // Terms & Conditions check — version-aware
                 const key = 'terms_accepted_' + (effUser.username || effUser.id);
-                const brandingCheck = await dbGet('settings', 'branding');
+                const brandingCheck = (typeof window !== 'undefined' && window._brandingSettings)
+                    ? window._brandingSettings
+                    : await dbGet('settings', 'branding');
                 const currentVersion = brandingCheck && brandingCheck.termsContent ? (brandingCheck.termsVersion || 1) : 0;
                 if (currentVersion > 0 && effUser.termsVersion !== currentVersion) {
                     localStorage.removeItem(key);
@@ -1598,7 +1605,7 @@ async function initAuth() {
                     return;
                 }
                 try { if (typeof startAutoRefresh === 'function') startAutoRefresh(); } catch {}
-                try { if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect(); } catch {}
+                try { if (typeof loadPayrollStaffSelect === 'function' && effUser.role !== 'student') loadPayrollStaffSelect(); } catch {}
                 return showApp(effUser);
             }
         }
@@ -1745,8 +1752,16 @@ async function login() {
         showLoginError('');
         document.getElementById('login-pass').value = '';
         var key = 'terms_accepted_' + (user.username || user.id);
-        var brandingCheck = await dbGet('settings', 'branding');
-        var currentVersion = brandingCheck && brandingCheck.termsContent ? (brandingCheck.termsVersion || 1) : 0;
+        var currentVersion;
+        if (data && Object.prototype.hasOwnProperty.call(data, 'termsVersion')) {
+            // The login response now carries the live terms version, so a
+            // 1.1 MB branding download no longer blocks every student sign-in.
+            // The modal still fetches the full terms text on demand.
+            currentVersion = Number(data.termsVersion) || 0;
+        } else {
+            var brandingCheck = await dbGet('settings', 'branding');
+            currentVersion = brandingCheck && brandingCheck.termsContent ? (brandingCheck.termsVersion || 1) : 0;
+        }
         if (currentVersion > 0 && user.termsVersion !== currentVersion) {
             localStorage.removeItem(key);
             showTermsModalApp(user);
@@ -1770,7 +1785,7 @@ async function login() {
         // Live updates (SSE + polling) are skipped on the login screen, so start
         // them once there is a session.
         try { if (typeof startAutoRefresh === 'function') startAutoRefresh(); } catch {}
-        try { if (typeof loadPayrollStaffSelect === 'function') loadPayrollStaffSelect(); } catch {}
+        try { if (typeof loadPayrollStaffSelect === 'function' && user.role !== 'student') loadPayrollStaffSelect(); } catch {}
     } catch (err) {
         showLoginError('Login failed. Please try again.');
         console.error('Login error:', err);
@@ -1972,9 +1987,12 @@ function adjustHeaderPadding() {
 async function showApp(user) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    // Warm the diploma template for the signed-in session (it is also loaded
-    // when the Settings screen is opened).
-    try { if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); } catch (e) {}
+    // Warm the diploma template for staff sessions. Students load it on demand
+    // when they open certificates/documents; preloading it here delayed the Hub
+    // with a large PDF config download.
+    if (user.role !== 'student') {
+        try { if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); } catch (e) {}
+    }
     // Header badge removed — guard so stale/missing nodes never crash login flow
     try {
         const nameEl = document.getElementById('user-name-display');
@@ -2000,58 +2018,74 @@ async function showApp(user) {
             manualLink.title = 'Open the ' + (user.role === 'admin' ? 'Administrator' : user.role === 'assistant' ? 'Assistant Administrator' : user.role === 'coordinator' ? 'Coordinator' : user.role === 'student' ? 'Student' : 'Staff') + ' Manual';
         }
     } catch {}
-    initCoordinatorAccessCache();
-    initAssistantAccessCache();
-    initAdminAccessCache();
+    // Only the role that actually uses an access cache should fetch it. Doing
+    // all three for every student added three pointless requests to sign-in.
     // For assistant AND coordinator AND the overall admin, navigation must wait
     // for the access cache, which is loaded asynchronously — rebuild after load
     // so their tabs reflect the real permissions immediately instead of a stale
     // default.
     if (user.role === 'assistant') {
-        initAssistantAccessCache().then(() => buildNavigation(user));
+        initAssistantAccessCache().then(() => buildNavigation(user)).catch(() => {});
     } else if (user.role === 'coordinator') {
-        initCoordinatorAccessCache().then(() => buildNavigation(user));
+        initCoordinatorAccessCache().then(() => buildNavigation(user)).catch(() => {});
     } else if (user.role === 'admin') {
-        initAdminAccessCache().then(() => buildNavigation(user));
+        initAdminAccessCache().then(() => buildNavigation(user)).catch(() => {});
     }
     buildNavigation(user);
     const msgBtn = document.querySelector('[onclick*="showScreen.*messages"]') || document.querySelector('[onclick="showScreen(\'messages\')"]');
     if (msgBtn) msgBtn.style.display = (user.role === 'admin' || user.role === 'coordinator') ? '' : 'none';
     updateHeaderDate();
     setInterval(updateHeaderDate, 60000);
-    loadBranding();
+    if (user.role === 'student') {
+        // The server-rendered school name/initials are already visible. Defer
+        // the light branding refresh so it does not compete with the Hub's
+        // first data load (full branding is ~1.1 MB of seals/signatures).
+        setTimeout(() => { try { loadBranding(true); } catch (e) {} }, 2500);
+    } else {
+        loadBranding();
+    }
     adjustHeaderPadding();
     loadAcademicSettings();
     initTabs();
-    document.getElementById('attendance-date').value = new Date().toISOString().split('T')[0];
-    document.getElementById('chapel-date').value = new Date().toISOString().split('T')[0];
-    document.getElementById('audit-from').value = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
-    document.getElementById('audit-to').value = new Date().toISOString().split('T')[0];
-    renderDashboard().catch(() => {});
-    renderStudents().catch(() => {});
-    renderCourses().catch(() => {});
-    renderStaff().catch(() => {});
-    renderFinance().catch(() => {});
-    renderPayroll().catch(() => {});
-    renderLibrary().catch(() => {});
-    renderEvents().catch(() => {});
-    renderHostels().catch(() => {});
-    renderInventory().catch(() => {});
-    renderAlumni().catch(() => {});
-    renderExams().catch(() => {});
-    renderWhatsAppTemplates().catch(() => {});
-    renderWhatsAppLog().catch(() => {});
-    renderTickets().catch(() => {});
-    updateTicketBadge().catch(() => {});
-    renderStudyCenters().catch(() => {});
-    renderUsers().catch(() => {});
-    renderGradRequirements().catch(() => {});
-    renderAudit().catch(() => {});
+    const _setDateValue = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+    _setDateValue('attendance-date', new Date().toISOString().split('T')[0]);
+    _setDateValue('chapel-date', new Date().toISOString().split('T')[0]);
+    _setDateValue('audit-from', new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]);
+    _setDateValue('audit-to', new Date().toISOString().split('T')[0]);
+    if (user.role !== 'student') {
+        // Staff screens are warmed in the background as before.
+        renderDashboard().catch(() => {});
+        renderStudents().catch(() => {});
+        renderCourses().catch(() => {});
+        renderStaff().catch(() => {});
+        renderFinance().catch(() => {});
+        renderPayroll().catch(() => {});
+        renderLibrary().catch(() => {});
+        renderEvents().catch(() => {});
+        renderHostels().catch(() => {});
+        renderInventory().catch(() => {});
+        renderAlumni().catch(() => {});
+        renderExams().catch(() => {});
+        renderWhatsAppTemplates().catch(() => {});
+        renderWhatsAppLog().catch(() => {});
+        renderTickets().catch(() => {});
+        updateTicketBadge().catch(() => {});
+        renderStudyCenters().catch(() => {});
+        renderUsers().catch(() => {});
+        renderGradRequirements().catch(() => {});
+        renderAudit().catch(() => {});
+    } else {
+        // Students only need their own Hub data and nav badges. Firing every
+        // admin/staff screen here produced a burst of 403s and delayed the Hub.
+        renderTickets().catch(() => {});
+        updateTicketBadge().catch(() => {});
+    }
     initSmartSearch();
     renderAlertBell();
     initBackgroundRefresh();
     try { if (typeof initIdleSessionTimer === 'function') initIdleSessionTimer(); } catch (e) {}
-    document.getElementById('login-user').value = '';
+    const _loginUserEl = document.getElementById('login-user');
+    if (_loginUserEl) _loginUserEl.value = '';
     window.removeEventListener('resize', adjustHeaderPadding);
     window.addEventListener('resize', adjustHeaderPadding);
     setTimeout(adjustHeaderPadding, 100);
@@ -2132,7 +2166,7 @@ function buildNavigation(user) {
         tab.addEventListener('click', (e) => { e.preventDefault(); showScreen(tab.dataset.screen); });
     });
     try { if (typeof renderPreviewBanner === 'function') renderPreviewBanner(); } catch {}
-    updatePendingBadge();
+    if (perms.includes('pending') || perms.includes('music-classes')) updatePendingBadge();
 }
 async function updatePendingBadge() {
     try {
@@ -2709,7 +2743,10 @@ function updateHeaderDate() {
 async function init() {
     try {
         await openDB();
-        try { await loadBranding(); } catch (e) { console.error('init loadBranding:', e); }
+        // The login screen only needs identity/theme/logo fields. Seals,
+        // signatures and partner logos are for documents and Settings, which
+        // request the full record when opened.
+        try { await loadBranding(true); } catch (e) { console.error('init loadBranding:', e); }
         try {
             const [cMap, rMap] = await Promise.all([dbGetAll('studyCenters'), dbGetAll('regions')]);
             window.__centerMap = {}; cMap.forEach(c => { window.__centerMap[c.id] = c; });
@@ -3280,8 +3317,8 @@ if (store === 'settings') {
     // the server already enforces them, this keeps the screen honest too.
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-        if (u.role === 'admin' && !u.isOwner) initAdminAccessCache().then(() => buildNavigation(u));
-        else if (u.role === 'assistant') initAssistantAccessCache().then(() => buildNavigation(u));
+        if (u.role === 'admin' && !u.isOwner) initAdminAccessCache().then(() => buildNavigation(u)).catch(() => {});
+        else if (u.role === 'assistant') initAssistantAccessCache().then(() => buildNavigation(u)).catch(() => {});
     } catch (e) {}
 }
 const fn = _refreshMap[store];
@@ -23856,9 +23893,20 @@ function deleteManual(id) {
         });
     });
 }
-async function loadBranding() {
-    const settings = await dbGet('settings', 'branding');
+let _brandingCache = null;
+let _brandingCacheAt = 0;
+async function loadBranding(light) {
+    // The login screen and the student Hub both request the light record. If
+    // init() already loaded it, reuse it instead of downloading it again.
+    if (light && _brandingCache && Date.now() - _brandingCacheAt < 60000) {
+        try { window._brandingSettings = _brandingCache; } catch (e) {}
+        return;
+    }
+    const settings = await dbGet('settings', 'branding', light ? { query: 'light=1' } : undefined);
     if (settings) {
+        _brandingCache = settings;
+        _brandingCacheAt = Date.now();
+        try { window._brandingSettings = settings; } catch (e) {}
         if (settings.schoolName) {
             document.getElementById('school-name').textContent = settings.schoolName;
             document.getElementById('page-title').textContent = settings.schoolName + ' - Management System';

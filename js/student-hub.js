@@ -413,6 +413,41 @@ function hubLockedPanel(lock, tabLabel) {
 
 let _hubComputed = null;
 let _hubComputedCache = null;
+let _hubRenderSeq = 0;
+
+// The Hub must never sit on a spinner forever. A slow/failed batch is retried
+// by dbGetBatch itself; this is the final safety net, with a visible Retry.
+function _hubWithTimeout(promise, ms) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            const err = new Error('Student Hub load timed out');
+            err.code = 'HUB_LOAD_TIMEOUT';
+            reject(err);
+        }, ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+        try { if (timer) clearTimeout(timer); } catch (e) {}
+    });
+}
+
+function _hubStartupShell(currentUser) {
+    const name = esc(String((currentUser && (currentUser.name || currentUser.username)) || 'Student'));
+    const sid = esc(String((currentUser && (currentUser.studentId || currentUser.username)) || ''));
+    return `
+        <div style="background:linear-gradient(135deg,#1e3c72 0%,#2a5298 50%,#3a6ab8 100%);color:#fff;padding:28px 24px;border-radius:14px;margin-bottom:20px;box-shadow:0 6px 20px rgba(30,60,114,0.25);">
+            <div style="font-size:13px;opacity:0.85;margin-bottom:4px;">Welcome back,</div>
+            <h1 style="margin:0 0 6px 0;font-size:26px;font-weight:700;">${name}</h1>
+            <div style="font-size:13px;opacity:0.9;">${sid}</div>
+        </div>
+        <div class="card" style="text-align:center;padding:48px 24px;">
+            <div style="width:36px;height:36px;border:4px solid #e2e8f0;border-top-color:var(--accent,#2563eb);border-radius:50%;animation:hub-load-spin 0.8s linear infinite;margin:0 auto 14px;"></div>
+            <div style="font-size:14px;color:#475569;font-weight:500;">Loading your courses and exams…</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">This usually takes a few seconds.</div>
+            <button class="btn btn-outline btn-sm" onclick="invalidateStudentHubCache&&invalidateStudentHubCache();renderStudentHub(true)" style="margin-top:16px;">Retry</button>
+        </div>
+        <style>@keyframes hub-load-spin{to{transform:rotate(360deg)}}</style>`;
+}
 
 async function _hubLoadTabData(tab) {
     if (!studentHubCache && typeof _hubData !== 'undefined' && _hubData) studentHubCache = _hubData;
@@ -583,6 +618,9 @@ function _hubBuildComputed(data, me) {
         try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
         return true;
     });
+    const myRetakeRequestsAll = (data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId));
+    const approvedSuppIds = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => String(r.supplementaryExamId)));
+    const hasApprovedSuppForExam = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.examId).map(r => String(r.examId)));
     const myRegisteredExams = allCourseExams.filter(e => {
         if (!examRegIds.has(e.id)) return false;
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
@@ -608,9 +646,6 @@ function _hubBuildComputed(data, me) {
         });
     } catch {}
     const _isExamTyped = a => String((a && (a.assessmentType || a.type)) || '').toLowerCase() === 'exam';
-    const myRetakeRequestsAll = (data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId));
-    const approvedSuppIds = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => String(r.supplementaryExamId)));
-    const hasApprovedSuppForExam = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.examId).map(r => String(r.examId)));
     const activeQuizzes = (data.quizzes || []).filter(q => !_isExamTyped(q) && q.published !== false && (!q.lessonId || hubLessonVisibleById(q.lessonId, data)));
     // Exams filed in the quizzes store still belong on the Exams tab.
     const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && q.published !== false);
@@ -850,20 +885,13 @@ async function renderStudentHub(force) {
         content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Student Hub</h3><p>This area is for students only.</p></div>';
         return;
     }
+    const _renderSeq = ++_hubRenderSeq;
     _hubActiveTab = 'overview';
     _hubRenderedTabs = {};
 
     const hasCache = !force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000;
 
-    if (!hasCache) content.innerHTML = `
-        <div style="position:relative;min-height:400px;display:flex;align-items:center;justify-content:center;">
-            <div style="position:absolute;inset:0;background:rgba(255,255,255,0.7);backdrop-filter:blur(2px);border-radius:12px;z-index:5;"></div>
-            <div style="position:relative;z-index:6;text-align:center;padding:40px;">
-                <div style="width:40px;height:40px;border:4px solid #e2e8f0;border-top-color:var(--accent,#2563eb);border-radius:50%;animation:hub-load-spin 0.8s linear infinite;margin:0 auto 16px;"></div>
-                <div style="font-size:14px;color:#475569;font-weight:500;">Preparing your dashboard...</div>
-            </div>
-        </div>
-        <style>@keyframes hub-load-spin{to{transform:rotate(360deg)}}</style>`;
+    if (!hasCache) content.innerHTML = _hubStartupShell(currentUser);
 
     try {
         // Reactivated accounts must not reuse a stale cache from before reactivation.
@@ -874,7 +902,8 @@ async function renderStudentHub(force) {
                 force = true;
             }
         } catch (e) {}
-        const data = await loadStudentHubData(force);
+        const data = await _hubWithTimeout(loadStudentHubData(force), 20000);
+        if (_renderSeq !== _hubRenderSeq) return;
         if (!studentHubCache) studentHubCache = data;
         let me = _hubFindStudent(data.students || [], currentUser, data.alumni || []);
         if (!me) {
@@ -902,6 +931,7 @@ async function renderStudentHub(force) {
                 if (me && studentHubCache) { studentHubCache.students = data.students; studentHubCache.alumni = data.alumni; }
             } catch (e) { console.warn('Hub profile fallback lookup failed:', e); }
         }
+        if (_renderSeq !== _hubRenderSeq) return;
         if (!me) {
             console.warn('Profile not found debug:', { currentUser, studentsCount: (data.students||[]).length, alumniCount: (data.alumni||[]).length, studentIds: (data.students||[]).slice(0,3).map(s=>({id:s.id, adm:s.admissionNumber, phone:s.phone, email:s.email, name:s.name})) });
             content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted);"><h3>Profile not found</h3><p>Please contact the administrator to link your account (' + esc(String(currentUser.username || currentUser.studentId || '')) + ').</p><button class="btn btn-outline btn-sm" onclick="invalidateStudentHubCache&&invalidateStudentHubCache();renderStudentHub(true)" style="margin-top:12px;">Retry</button></div>'; return; }
@@ -915,14 +945,22 @@ async function renderStudentHub(force) {
             const navText = document.querySelector('.nav-tab[data-screen="student-hub"] .nav-text');
             if (navText && _isAlumniHub) navText.textContent = '🎓 Alumni Learning';
         } catch {}
-        // Drip: load unlock maps + auto-unlock whatever is due BEFORE anything renders.
-        try {
-            if (typeof loadDripMaps === 'function' && me && me.id) {
-                await loadDripMaps(me.id);
-                if (typeof ensureDripUnlocks === 'function') await ensureDripUnlocks(me.id);
-            }
-        } catch {}
-        await _hubLoadTabData('overview');
+        // Drip, tab data, M-Pesa and the fee gate are independent. They used to
+        // run one after another, so a slow fee/agreement call could keep the
+        // whole Hub on its loading screen for 20+ seconds. Start them together.
+        const _hubMpesaTask = hubMpesaEnabled().catch(() => false);
+        const _hubFeeTask = hubFeeLockInfo(me, data).catch(() => ({ locked: false }));
+        const _hubDripTask = (async () => {
+            try {
+                if (typeof loadDripMaps === 'function' && me && me.id) {
+                    await loadDripMaps(me.id);
+                    if (typeof ensureDripUnlocks === 'function') await ensureDripUnlocks(me.id);
+                }
+            } catch (e) {}
+        })();
+        const _hubTabTask = _hubLoadTabData('overview').catch(() => {});
+        await Promise.allSettled([_hubDripTask, _hubTabTask]);
+        if (_renderSeq !== _hubRenderSeq) return;
         const _dripN = (typeof _dripU !== 'undefined' && _dripU) ? Object.keys(_dripU).length : -1;
         if (_hubComputedCache && _hubComputedCache.dataVersion === studentHubCache?.loadedAt && _hubComputedCache.meId === me.id && _hubComputedCache.dripN === _dripN) {
             _hubComputed = _hubComputedCache.computed;
@@ -935,16 +973,17 @@ async function renderStudentHub(force) {
         }
         _hubRenderedTabs = {};
         try { window._hubCourseAccess = null; } catch {}
-        try { window._hubMpesaOn = await hubMpesaEnabled(); } catch { window._hubMpesaOn = false; }
-        try {
-            const prev = window._hubFeeLock;
-            const next = await hubFeeLockInfo(me, data);
-            window._hubFeeLock = next;
-            if (prev && prev.locked && !next.locked && next.target > 0) {
-                if (typeof showToast === 'function') showToast('✅ Weekly target met — your tabs are unlocked!', { type: 'success', duration: 4000 });
-            }
-        } catch { window._hubFeeLock = { locked: false }; }
+        const _mpesaFeeResults = await Promise.allSettled([_hubMpesaTask, _hubFeeTask]);
+        if (_renderSeq !== _hubRenderSeq) return;
+        window._hubMpesaOn = _mpesaFeeResults[0].status === 'fulfilled' ? _mpesaFeeResults[0].value : false;
+        const _prevFeeLock = window._hubFeeLock;
+        const _nextFeeLock = (_mpesaFeeResults[1].status === 'fulfilled' && _mpesaFeeResults[1].value) ? _mpesaFeeResults[1].value : { locked: false };
+        window._hubFeeLock = _nextFeeLock;
+        if (_prevFeeLock && _prevFeeLock.locked && !_nextFeeLock.locked && _nextFeeLock.target > 0) {
+            if (typeof showToast === 'function') showToast('✅ Weekly target met — your tabs are unlocked!', { type: 'success', duration: 4000 });
+        }
 
+        if (_renderSeq !== _hubRenderSeq) return;
         const c = _hubComputed || {};
         try {
                 content.innerHTML = `
@@ -1004,9 +1043,16 @@ async function renderStudentHub(force) {
         setTimeout(() => { _hubLastUpdate = Date.now(); _updateHubRefreshButton(); }, 0);
     } catch (err) {
         console.error('Student Hub error:', err);
+        if (_renderSeq !== _hubRenderSeq) return;
+        if (err && err.code === 'HUB_LOAD_TIMEOUT') {
+            content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);"><h3 style="margin-bottom:6px;">Student Hub is taking longer than usual</h3><p>Please retry — your account and records are safe.</p><button class="btn btn-primary btn-sm" onclick="invalidateStudentHubCache&&invalidateStudentHubCache();renderStudentHub(true)" style="margin-top:12px;">Retry</button></div>';
+            return;
+        }
         try {
-            const fb = await loadStudentHubData();
+            const fb = await _hubWithTimeout(loadStudentHubData(), 15000);
+            if (_renderSeq !== _hubRenderSeq) return;
             const me = _hubFindStudent(fb.students || [], currentUser, fb.alumni || []);
+            const allStudentIds = new Set([currentUser.id, currentUser.studentId, currentUser.username, currentUser.alumniId, me && me.id, me && me.studentId, me && me.admissionNumber, me && me.phone, me && me.email].filter(Boolean).map(String));
             const enrolledIds = new Set((fb.enrollments || []).filter(e => String(e.studentId) === String(me?.id || '')).map(e => e.courseId));
             if (enrolledIds.size === 0) (fb.courses || []).filter(c => c.published !== false).forEach(c => enrolledIds.add(c.id));
             const examRegIds = new Set((fb.examRegistrations || []).filter(r => String(r.studentId) === String(me?.id || '')).map(r => r.examId));

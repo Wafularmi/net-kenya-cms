@@ -5305,7 +5305,14 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 loginRateSuccess(req, input);
                 auditLog('login', 'user', { username: user.username, role: user.role }, user.username);
 
-                json(res, 200, { user: safeUser });
+                // Include the live terms version so the client can decide whether
+                // the terms modal is needed without downloading the full (1+ MB)
+                // branding record on every sign-in.
+                const _brandingSetting = (db.settings || []).find(s => s && s.key === 'branding');
+                const _brandingHolder = _brandingSetting && _brandingSetting.value && typeof _brandingSetting.value === 'object' ? _brandingSetting.value : _brandingSetting;
+                const _liveTermsVersion = _brandingHolder && _brandingHolder.termsContent ? (_brandingHolder.termsVersion || 1) : 0;
+
+                json(res, 200, { user: safeUser, termsVersion: _liveTermsVersion });
             } catch (e) { process.stderr.write('LOGIN_ERROR: ' + (e && e.stack || e) + '\n'); json(res, 500, { error: 'Login failed' }); }
         });
         return true;
@@ -7789,6 +7796,19 @@ const LIVE_PUSH_STORES = new Set([
                 if (!user && store === 'settings' && item) item = stripPrivateBranding(item);
                 if (item && store === 'settings' && key === 'mpesa' && (!user || user.role !== 'admin')) {
                     item = { key: 'mpesa', payButtonEnabled: !!((item.value || item).payButtonEnabled) };
+                }
+                // Light branding: the login/header only needs identity, theme and
+                // the small logo fields. Seals/signatures/partner logos are for
+                // documents and Settings, which still request the full record.
+                if (item && store === 'settings' && key === 'branding' && urlObj.searchParams.get('light') === '1') {
+                    const _lightDrop = new Set(['schoolSeal', 'officialSeal', 'sig_registrar', 'sig_dean', 'sig_director', 'college_stamp', 'signaturePrefs', 'partner1Logo', 'partner2Logo']);
+                    const _stripLightBranding = (rec) => {
+                        const out = Object.assign({}, rec);
+                        _lightDrop.forEach(k => { try { delete out[k]; } catch (e) {} });
+                        return out;
+                    };
+                    if (item.value && typeof item.value === 'object') item = Object.assign({}, item, { value: _stripLightBranding(item.value) });
+                    else item = _stripLightBranding(item);
                 }
             }
             return json(res, 200, item);
