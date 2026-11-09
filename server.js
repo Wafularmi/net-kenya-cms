@@ -2715,7 +2715,9 @@ function filterCourseLockedRows(user, store, rows, lookup) {
 
 function courseGateReadDenied(user, store, rec, lookup) {
     if (!user || user.role !== 'student' || !rec || !COURSE_GATED_READ_STORES.has(store)) return null;
-    if ((store === 'exams' || store === 'quizzes') && rec.ungated === true) return null;
+    if ((store === 'exams' || store === 'quizzes') && (rec.ungated === true || rec.openWindow === true)) return null;
+    // An exam whose window is currently open is readable by every student.
+    if (store === 'exams' && courseGate.isUngatedAssessment(db, store, rec)) return null;
     const sid = serverStudentId(user);
     if (!sid) return null;
     const cid = courseGate.resolveCourseId(store, rec, lookup || courseGateLookup());
@@ -3337,12 +3339,44 @@ function filterLearnerAssessments(user, store, rows) {
         .map(c => String(c.id)));
     return (rows || []).filter(rec => {
         if (!rec || rec.published === false) return false;
+        // Exams that are open-ended or whose window is currently open are
+        // accessible to every student, even without an active enrolment.
+        if (store === 'exams' && rec.openWindow === true) return true;
+        if (store === 'exams') {
+            try {
+                const now = Date.now();
+                const base = String(rec.date || '').slice(0,10);
+                if (base) {
+                    const t = rec.time ? String(rec.time).split('-')[0].trim() : '00:00';
+                    const start = new Date(base + 'T' + t + ':00');
+                    if (!isNaN(start.getTime()) && rec.date && rec.time) {
+                        const durMins = (rec.durationDays||0)*1440 + (rec.durationHours||0)*60 + (rec.durationMinutes||0) + (rec.timeLimitDays||0)*1440 + (rec.timeLimitHours||0)*60 + (rec.timeLimitMinutes||0) || parseInt(rec.duration||rec.timeLimit||0)||0;
+                        const close = durMins > 0 ? start.getTime() + durMins*60000 : start.getTime() + 4*86400000;
+                        if (now >= start.getTime() && now <= close) return true;
+                    }
+                }
+            } catch (e) {}
+        }
         if (!ctx.enrolledCourseIds.has(String(rec.courseId))) return false;
         if (!activeCourses.has(String(rec.courseId))) return false;
         if (!assessmentInLearnerScope(ctx, rec)) return false;
         const id = String(rec.id);
         if (store === 'exams') {
+            // Open-ended exams are published to every student and can be sat
+            // any time until switched back to Draft — no enrolment required.
+            if (rec.openWindow === true) return true;
             if (!(rec.openWindow || (rec.date && rec.time))) return false;
+            // An exam whose window is currently open is accessible to everyone.
+            try {
+                const now = Date.now();
+                const start = new Date(String(rec.date).slice(0,10) + 'T' + String(rec.time).split('-')[0].trim() + ':00');
+                if (!isNaN(start.getTime())) {
+                    const durMins = (rec.durationDays||0)*1440 + (rec.durationHours||0)*60 + (rec.durationMinutes||0) + (rec.timeLimitDays||0)*1440 + (rec.timeLimitHours||0)*60 + (rec.timeLimitMinutes||0) || parseInt(rec.duration||rec.timeLimit||0)||0;
+                    const close = durMins > 0 ? start.getTime() + durMins*60000 : start.getTime() + 4*86400000;
+                    if (rec.closesAt) { const cd = new Date(String(rec.closesAt).slice(0,10)+'T23:59:59'); if (!isNaN(cd.getTime())) { /* use closesAt if set */ } }
+                    if (now >= start.getTime() && now <= close) return true;
+                }
+            } catch (e) {}
             return !!(rec.openWindow || ctx.examRegIds.has(id) || ctx.retakeExamIds.has(id) || ctx.submittedIds.has(id));
         }
         if (store === 'quizzes') {

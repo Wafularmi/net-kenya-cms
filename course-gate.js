@@ -338,7 +338,25 @@ function assessmentForRecord(db, store, rec) {
 
 function isUngatedAssessment(db, store, rec) {
     const target = assessmentForRecord(db, store, rec);
-    return !!(target && target.ungated === true);
+    if (!target) return false;
+    if (target.ungated === true) return true;
+    // Open-ended exams are published to every student and can be sat any time.
+    if (target.openWindow === true) return true;
+    // An exam whose window is currently open is accessible to everyone.
+    if (target.date && target.time) {
+        try {
+            const now = Date.now();
+            const start = new Date(String(target.date).slice(0,10) + 'T' + String(target.time).split('-')[0].trim() + ':00');
+            if (!isNaN(start.getTime())) {
+                const durMins = (target.durationDays||0)*1440 + (target.durationHours||0)*60 + (target.durationMinutes||0) + (target.timeLimitDays||0)*1440 + (target.timeLimitHours||0)*60 + (target.timeLimitMinutes||0) || parseInt(target.duration||target.timeLimit||0)||0;
+                const close = durMins > 0 ? start.getTime() + durMins*60000 : start.getTime() + 4*86400000;
+                if (target.closesAt) { const cd = new Date(String(target.closesAt).slice(0,10)+'T23:59:59'); if (!isNaN(cd.getTime())) { /* use closesAt if later */ } }
+                if (now >= start.getTime() && now <= close) return true;
+            }
+        } catch (e) {}
+    }
+    if (target.openWindow === true) return true;
+    return false;
 }
 
 function resolveCourseId(store, rec, lookup) {
