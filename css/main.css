@@ -253,6 +253,7 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .hub-live-blink {
@@ -1111,9 +1112,15 @@ body {
         justify-content: center;
     }
 
+    .screen-actions .hub-account-row {
+        width: 100%;
+        justify-content: center;
+    }
+
     .screen-actions .hub-account-row .btn {
-        flex: 1;
+        flex: 1 1 auto;
         width: auto;
+        min-width: 0;
         justify-content: center;
     }
 
