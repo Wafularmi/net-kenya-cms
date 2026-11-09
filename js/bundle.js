@@ -1329,6 +1329,12 @@ function isTotCourse(course) {
 function isStudentGraduated(studentId, students, alumni) {
     const sid = String(studentId || '');
     if (!sid) return false;
+    // An alumni session is a graduate even if the scoped students/alumni
+    // payloads do not carry the original academic row.
+    try {
+        const cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (cu && (cu.accountType === 'alumni' || cu.alumniId)) return true;
+    } catch (e) {}
     const student = (students || []).find(s => s && String(s.id) === sid) || null;
     const status = String((student && student.status) || '').toLowerCase();
     if (status === 'graduated' || status === 'alumni') return true;
