@@ -268,8 +268,10 @@ function courseAccess(db, studentId, courseId) {
     if (lockState === 'unlocked') return { ok: true, gated: true, status, override: true };
     if (status === 'covered') return { ok: true, gated: true, status };
     if (lockState === 'locked') return { ok: false, gated: true, status, reason: 'manual' };
-    if (status === 'current') return { ok: true, gated: true, status };
-    return { ok: false, gated: true, status, reason: 'sequence' };
+    // Sequence ('future') courses are NOT blocked for the Student Hub —
+    // every student can see every course/exam; the gate only honours an
+    // explicit manual lock set by an administrator.
+    return { ok: true, gated: true, status };
 }
 
 function lockedMessage(access) {
