@@ -94,6 +94,27 @@ function _hubIsAlumni(me, currentUser) {
     return !!(me && (me._isAlumni || me.accountType === 'alumni')) ||
         !!(currentUser && (currentUser.accountType === 'alumni' || currentUser.alumniId));
 }
+// TOT-prefixed courses are the final practicum. They are locked for every
+// learner until they have finished the programme and graduated, independently
+// of the Content Gating master switch. Administrators can still release one
+// learner via a per-student contentGate override ('unlocked' or 'exempt').
+function _hubIsTotCourse(course) {
+    return !!(course && /^TOT/i.test(String(course.code || '').trim()));
+}
+function _hubIsGraduated(me, data) {
+    if (_hubIsAlumni(me)) return true;
+    const student = me && (me._studentRecord || me);
+    const status = String((student && student.status) || '').toLowerCase();
+    if (status === 'graduated' || status === 'alumni') return true;
+    const ids = new Set([
+        me && me.id, me && me.studentId,
+        me && me._alumniRecord && me._alumniRecord.id,
+        me && me._alumniRecord && me._alumniRecord.studentId
+    ].filter(Boolean).map(String));
+    return ((data && data.alumni) || []).some(a => a && (
+        ids.has(String(a.studentId || '')) || ids.has(String(a.id || ''))
+    ));
+}
 
 let _hubLoadingPromise = null;
 
@@ -215,37 +236,49 @@ async function hubContentGate() {
 // lesson rules still apply within an unlocked course. Current students are enforced unless
 // an explicit override is already applied.
 async function hubCourseAccess(me, data) {
-    const openAll = () => ({ gated: false, allowed: new Set((data.courses || []).map(c => c.id)), locked: new Set(), statuses: {} });
-    if (!me || !data) return openAll();
+    const openAll = () => ({
+        gated: false,
+        allowed: new Set(((data && data.courses) || []).map(c => c.id)),
+        locked: new Set(),
+        reasons: {},
+        statuses: {},
+        totAllowed: new Set(((data && data.courses) || []).filter(_hubIsTotCourse).map(c => c.id))
+    });
+    const finish = (res) => { window._hubCourseAccess = res; return res; };
+    if (!me || !data) return finish(openAll());
+    const courses = data.courses || [];
+    // Alumni are graduates and keep lifelong access. Never gate them.
+    if (_hubIsAlumni(me)) return finish(openAll());
     // Unregistered students have no enrolment sequence to gate against, so they
     // see the whole published catalogue (courses, exams, quizzes) like everyone
-    // else — never all zeros / never locked out.
+    // else — except TOT courses, which are locked until graduation.
     const _hubLearnerIds = new Set([me.id, me.studentId, me.admissionNumber, me.phone, me.email, me.username].filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(String));
     const _hubEnr = (data.enrollments || []).filter(e => _hubLearnerIds.has(String(e.studentId)));
-    if (!_hubEnr.length) return openAll();
-    // Alumni access is per-course and already granted; the student sequence
-    // gate belongs to the original programme and must not lock an alumnus out
-    // of a course they are entitled to audit.
-    if (_hubIsAlumni(me)) return openAll();
+    const enrolledIds = new Set(_hubEnr.map(e => String(e.courseId)));
+    const graduated = _hubIsGraduated(me, data);
+    const totCourses = courses.filter(_hubIsTotCourse);
+    const hasTot = totCourses.length > 0;
+
+    // Read overrides even while the master switch is OFF: per-student TOT
+    // unlocks must keep working when Content Gating is disabled.
     const gate = await hubContentGate();
-    if (!gate || typeof gate !== 'object') return openAll();
-    try {
-        if (!_hubCenterRegionCache) {
-            const centers = await dbGetAll('studyCenters').catch(()=>[]);
-            _hubCenterRegionCache = {};
-            (centers || []).forEach(c => { if (c && c.id) _hubCenterRegionCache[c.id] = c.regionId || ''; });
-        }
-    } catch {}
     const migrateLocks = (o) => {
         const m = { ...((o && o.locks) || {}) };
         ((o && o.unlocked) || []).forEach(id => { if (!m[id]) m[id] = 'unlocked'; });
         return m;
     };
     const sOv = gate && gate.students ? (gate.students[me.id] || null) : null;
-    if (sOv && sOv.exempt) return openAll();
-    const studentLocks = migrateLocks(sOv);
-    let eff = { enabled: !!gate.enabled, locks: migrateLocks(gate) };
+    const exempt = !!(sOv && sOv.exempt);
+    const studentLocks = exempt ? {} : migrateLocks(sOv);
+    let eff = { enabled: !!(gate && gate.enabled), locks: gate ? migrateLocks(gate) : {} };
     if (me.studyCenterId) {
+        if (!_hubCenterRegionCache) {
+            try {
+                const centers = await dbGetAll('studyCenters').catch(()=>[]);
+                _hubCenterRegionCache = {};
+                (centers || []).forEach(c => { if (c && c.id) _hubCenterRegionCache[c.id] = c.regionId || ''; });
+            } catch {}
+        }
         if (gate && gate.mode === 'per-center' && gate.centers && gate.centers[me.studyCenterId]) {
             const rc = gate.centers[me.studyCenterId];
             if (!rc.enabled) { eff = { enabled: false, locks: {} }; }
@@ -261,40 +294,49 @@ async function hubCourseAccess(me, data) {
     }
     eff = { enabled: !!eff.enabled, locks: { ...eff.locks } };
     Object.entries(studentLocks).forEach(([cid, st]) => { eff.locks[cid] = st; });
-    // Respect the master/scope switch. The previous code forced enabled=true,
-    // which enforced the sequence even when Content Gating was turned OFF in
-    // Admin Settings. The server now honours the switch too.
-    if (!eff.enabled) {
-        const open = openAll();
-        window._hubCourseAccess = open;
-        return open;
-    }
+    const locks = eff.locks || {};
+    const totUnlocked = c => exempt || graduated || locks[String(c.id)] === 'unlocked' || locks[c.id] === 'unlocked';
+    const totLocked = c => _hubIsTotCourse(c) && !totUnlocked(c);
+    const hasLockedTot = totCourses.some(totLocked);
+    // Nothing to enforce: gate off and no locked TOT course.
+    if (!eff.enabled && !hasLockedTot) return finish(openAll());
+    const sequenceOn = !!eff.enabled && _hubEnr.length > 0;
+    const needStatuses = sequenceOn || hasLockedTot;
     // Ensure data needed for completion/sequence (combination)
-    if (!data.grades || !data.submissions || !data.lessonCompletions || !data.courseCompletions) {
+    if (needStatuses && (!data.grades || !data.submissions || !data.lessonCompletions || !data.courseCompletions)) {
         try { await _hubLoadTabData('overview'); await dbGetBatch(['courseCompletions','lessonCompletions','submissions','grades']).then(x=>Object.assign(studentHubCache||{},x,data)); } catch {}
     }
     const dataForStatus = Object.assign({}, data, studentHubCache || {});
-    const statuses = (typeof studentCourseStatuses === 'function') ? studentCourseStatuses(me.id, dataForStatus.courses || [], dataForStatus) : {};
-    const locks = eff.locks || {};
+    const statuses = needStatuses && (typeof studentCourseStatuses === 'function')
+        ? studentCourseStatuses(me.id, dataForStatus.courses || [], dataForStatus)
+        : {};
     const allowed = new Set();
     const locked = new Set();
     const reasons = {};
-    const enrolledIds = new Set((data.enrollments || []).filter(e => String(e.studentId) === String(me.id)).map(e => e.courseId));
-    (data.courses || []).forEach(c => {
-        const st = statuses[c.id] || 'current';
-        const lockState = locks[c.id] || 'auto'; // course override (admin/owner): unlocked/locked/auto
-        if (st === 'covered') { allowed.add(c.id); return; }
-        if (lockState === 'unlocked') { allowed.add(c.id); return; } // manual override; drip-per-lesson still applies within
-        if (lockState === 'locked') { if (enrolledIds.has(c.id)) { locked.add(c.id); reasons[c.id] = 'manual'; } return; }
+    const totAllowed = new Set();
+    courses.forEach(c => {
+        const cid = String(c.id);
+        const enrolled = enrolledIds.has(cid);
+        // TOT graduation rule: applies even when the sequence gate is off.
+        if (_hubIsTotCourse(c)) {
+            const st = statuses[cid] || statuses[c.id] || 'current';
+            if (st === 'covered' || !totLocked(c)) { allowed.add(cid); totAllowed.add(cid); return; }
+            if (enrolled || !sequenceOn) { locked.add(cid); reasons[cid] = locks[cid] === 'locked' ? 'manual' : 'tot'; }
+            return;
+        }
+        if (!sequenceOn) { allowed.add(cid); return; }
+        const st = statuses[cid] || statuses[c.id] || 'current';
+        const lockState = locks[cid] || 'auto'; // course override (admin/owner): unlocked/locked/auto
+        if (st === 'covered') { allowed.add(cid); return; }
+        if (lockState === 'unlocked') { allowed.add(cid); return; } // manual override; drip-per-lesson still applies within
+        if (lockState === 'locked') { if (enrolled) { locked.add(cid); reasons[cid] = 'manual'; } return; }
         // Sequence enforcement (transcript order): only accessible if previous completed => status current.
         // No access to first/any lesson until course is accessible (current/covered) or overridden.
-        if (st === 'current') { allowed.add(c.id); return; }
-        if (enrolledIds.has(c.id)) { locked.add(c.id); reasons[c.id] = 'sequence'; }
-        else { allowed.add(c.id); } // not enrolled: catalog visibility handled elsewhere
+        if (st === 'current') { allowed.add(cid); return; }
+        if (enrolled) { locked.add(cid); reasons[cid] = 'sequence'; }
+        else { allowed.add(cid); } // not enrolled: catalog visibility handled elsewhere
     });
-    const res = { gated: true, allowed, locked, reasons, statuses };
-    window._hubCourseAccess = res;
-    return res;
+    return finish({ gated: true, allowed, locked, reasons, statuses, totAllowed });
 }
 let _hubFeeGateCache = null;
 let _hubFeeGateAt = 0;
@@ -1523,6 +1565,7 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
             ? `Course certificate: KES ${access.certificateFee.toLocaleString()} after assessment`
             : 'Course certificate and continuing-education record on completion';
     };
+    const totAllowed = (window._hubCourseAccess && window._hubCourseAccess.totAllowed) || new Set();
     return `
         <div style="margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1534,7 +1577,7 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
                 const isCovered = coveredIds.has(String(c.id));
                 const coveredCount = myCourses.filter(x => coveredIds.has(String(x.id))).length;
                 const reason = (window._hubCourseAccess && window._hubCourseAccess.reasons && window._hubCourseAccess.reasons[c.id]) || 'sequence';
-                const reasonTxt = reason === 'manual' ? 'Locked by administrator' : 'Locked — complete earlier courses first';
+                const reasonTxt = reason === 'manual' ? 'Locked by administrator' : (reason === 'tot' ? 'Locked — available after all courses and graduation' : 'Locked — complete earlier courses first');
                 const borderColor = isCovered ? 'var(--success)' : (isLocked ? 'var(--text-muted)' : 'var(--accent)');
                 const grant = isAlumni ? grantFor(c.id) : null;
                 const access = isAlumni ? _hubAlumniAccess(c) : null;
@@ -1568,6 +1611,7 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
                 const grant = isAlumni ? grantFor(c.id) : null;
                 const grantStatus = String((grant && grant.status) || '').toLowerCase();
                 const invited = grantStatus === 'invited';
+                const totLock = _hubIsTotCourse(c) && !totAllowed.has(c.id);
                 const expiredInvite = isAlumni && (access && access.mode) === 'invite' && grantStatus === 'active' && !_hubAlumniGrantActive(grant);
                 const badge = expiredInvite ? 'INVITATION EXPIRED' : (invited ? 'INVITED' : ((access && access.mode) === 'invite' ? 'INVITATION ONLY' : 'OPEN TO ALUMNI'));
                 return `
@@ -1580,9 +1624,11 @@ function renderHubCourses(me, myCourses, availableCourses, data, lockedIds) {
                     ${c.description ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.5;">${esc(c.description.substring(0, 120))}${c.description.length > 120 ? '...' : ''}</div>` : ''}
                     ${isAlumni ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">${access.accessDays}-day access window · ${esc(certificateText(access))}</div>` : ''}
                     <div style="margin-top:12px;">
-                        ${expiredInvite
-                            ? `<button class="btn btn-outline btn-sm" disabled style="opacity:.65;cursor:not-allowed;">Invitation expired</button><div style="font-size:10px;color:var(--text-muted);margin-top:5px;">Ask the alumni office to invite you again.</div>`
-                            : `<button class="btn ${invited ? 'btn-success' : 'btn-primary'} btn-sm" onclick="hubEnrollCourse('${c.id}','${esc(me.name)}')">${invited ? '✅ Accept Invitation' : (isAlumni ? '🎓 Start Free Audit' : '➕ Enroll Now')}</button>`}
+                        ${totLock
+                            ? `<button class="btn btn-outline btn-sm" disabled style="opacity:.65;cursor:not-allowed;">🔒 Available after graduation</button><div style="font-size:10px;color:var(--text-muted);margin-top:5px;">Unlocks after you finish all programme courses and graduate.</div>`
+                            : (expiredInvite
+                                ? `<button class="btn btn-outline btn-sm" disabled style="opacity:.65;cursor:not-allowed;">Invitation expired</button><div style="font-size:10px;color:var(--text-muted);margin-top:5px;">Ask the alumni office to invite you again.</div>`
+                                : `<button class="btn ${invited ? 'btn-success' : 'btn-primary'} btn-sm" onclick="hubEnrollCourse('${c.id}','${esc(me.name)}')">${invited ? '✅ Accept Invitation' : (isAlumni ? '🎓 Start Free Audit' : '➕ Enroll Now')}</button>`)}
                     </div>
                 </div>`;
             }).join('')}</div>` : `<div class="card" style="text-align:center;padding:40px;color:var(--text-muted);">${isAlumni ? 'No alumni courses are open right now. Please check back later.' : 'No more courses available for enrollment.'}</div>`}
@@ -1783,6 +1829,15 @@ async function hubEnrollCourse(courseId, studentName) {
         }
 
         if (!await showConfirm('Enroll in Course', `Enroll ${studentName} in this course?`)) return;
+        const _enrollCourse = (data.courses || []).find(c => String(c.id) === String(courseId));
+        if (_enrollCourse && _hubIsTotCourse(_enrollCourse) && !_hubIsGraduated(me, data)) {
+            const gate = await hubContentGate();
+            const sOv = gate && gate.students ? (gate.students[me.id] || null) : null;
+            const lockMap = { ...((sOv && sOv.locks) || {}) };
+            ((sOv && sOv.unlocked) || []).forEach(id => { if (!lockMap[id]) lockMap[id] = 'unlocked'; });
+            const unlocked = !!(sOv && sOv.exempt) || lockMap[String(courseId)] === 'unlocked' || lockMap[courseId] === 'unlocked';
+            if (!unlocked) return showToast('🔒 TOT courses unlock after you finish all programme courses and graduate. Ask an admin/owner for early access.', { type: 'warning', duration: 7000 });
+        }
         if ((data.enrollments || []).find(e => e.studentId === me.id && e.courseId === courseId)) return showToast('Already enrolled');
         const record = { id: `ENR-${courseId}-${me.id}`, courseId, studentId: me.id, enrolledAt: new Date().toISOString() };
         await dbPut('enrollments', record);

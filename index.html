@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=484" as="script">
+    <link rel="preload" href="js/bundle.js?v=485" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -1477,7 +1477,7 @@
                         <div id="feegate-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
                     </div>
                     <div class="card"><h3>📖 Content Access Gate</h3>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now — tick Unlock per course to release it early. Works globally or per study center.</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, learners only open covered + current courses (future courses stay locked). Load all content now — tick Unlock per course to release it early. Works globally or per study center.<br><b>TOT courses are always locked until the learner graduates</b>, even when this switch is OFF. To release one learner early, choose Mode <b>Per student</b>, pick the learner and tick <b>✅ Unlocked</b> for the TOT course.</div>
                         <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="contentgate-enabled" onchange="toggleContentGateOptions()" style="width:18px;height:18px;"> Enable content gating</label></div>
                         <div id="contentgate-options" style="display:none;">
                             <div class="form-row"><div class="form-group"><label>Mode</label><select id="contentgate-mode" onchange="onContentGateModeChange()"><option value="global">Global (one rule for all)</option><option value="per-region">Per region</option><option value="per-center">Per study center</option><option value="per-student">Per student</option></select></div><div class="form-group"><label>Edit Scope</label><select id="contentgate-center" onchange="selectContentGateCenter()"><option value="">Global default</option></select></div></div>
@@ -1485,6 +1485,7 @@
                             <div class="form-group" id="contentgate-student-group" style="display:none;"><label>Student (per-student unlocks add onto their region/center rule; tick Exempt to free them fully)</label><div style="display:flex;gap:6px;"><input type="text" id="contentgate-student-search" placeholder="🔍 Search name/admission..." oninput="renderContentGateStudentOptions()" style="flex:1;"><label style="display:flex;align-items:center;gap:4px;font-size:12px;">Exempt<input type="checkbox" id="contentgate-student-exempt" style="width:16px;height:16px;"></label></div><select id="contentgate-student" onchange="selectContentGateCenter()" style="width:100%;margin-top:6px;"><option value="">— Select student —</option></select></div>
                             <div class="form-group"><label>Courses (tick Unlock to release a future course early)</label><div id="contentgate-courses" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-input);"></div></div>
                         </div>
+                        <div id="contentgate-off-note" style="display:none;font-size:11px;color:var(--warning);margin:4px 0 8px;line-height:1.4;">Master gating is OFF. Per-student <b>✅ Unlocked</b> ticks still apply to <b>TOT</b> courses, which stay locked until graduation.</div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             <button class="btn btn-primary" onclick="saveContentGate()">Save Content Gate</button>
                             <button class="btn btn-outline" onclick="resetContentGateScope()">↺ Reset Scope to Auto</button>
@@ -1709,8 +1710,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=484"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=92"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=485"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=93"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

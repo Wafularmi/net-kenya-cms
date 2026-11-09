@@ -2697,7 +2697,7 @@ function markAlumniAccount(user, storedUser) {
 const COURSE_GATED_READ_STORES = new Set(['lessons', 'quizzes', 'exams', 'notes', 'questionBank']);
 const COURSE_GATED_WRITE_STORES = new Set(['submissions', 'examRegistrations', 'quizRegistrations', 'retakeRequests']);
 const COURSE_GATE_INVALIDATE_STORES = new Set([
-    'settings', 'students', 'studyCenters', 'courses', 'enrollments',
+    'settings', 'students', 'alumni', 'studyCenters', 'courses', 'enrollments',
     'grades', 'submissions', 'quizzes', 'exams', 'lessons',
     'lessonCompletions', 'courseCompletions'
 ]);

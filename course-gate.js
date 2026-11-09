@@ -41,6 +41,26 @@ const _cache = new Map();
 
 function arr(v) { return Array.isArray(v) ? v : []; }
 
+// TOT-prefixed courses are the final practicum. They stay locked for every
+// learner until they have finished the programme and graduated. The rule is
+// independent of the Content Gating master switch: it is a graduation rule,
+// not a sequence rule. An administrator can still release one learner early
+// with the per-student contentGate override ('unlocked'/'exempt').
+function isTotCourse(course) {
+    return !!(course && /^TOT/i.test(String(course.code || '').trim()));
+}
+
+function isGraduated(db, studentId) {
+    const sid = String(studentId || '');
+    if (!sid) return false;
+    const student = arr(db && db.students).find(s => s && String(s.id) === sid) || null;
+    const status = String((student && student.status) || '').toLowerCase();
+    if (status === 'graduated' || status === 'alumni') return true;
+    return arr(db && db.alumni).some(a => a && (
+        String(a.studentId || '') === sid || String(a.id || '') === sid
+    ));
+}
+
 function settingRecord(db, key) {
     return arr(db && db.settings).find(s => s && s.key === key) || null;
 }
@@ -209,10 +229,15 @@ function effectiveGate(db, studentId) {
 function buildContext(db, studentId) {
     const sid = String(studentId);
     const gate = effectiveGate(db, sid);
-    if (!gate.gated) {
-        return { gated: false, gate, statuses: null, allowed: null, enrolled: new Set() };
-    }
     const courses = arr(db.courses);
+    const hasTot = courses.some(isTotCourse);
+    const graduated = isGraduated(db, sid);
+    // A non-graduate must not reach a TOT course even when Content Gating is
+    // switched off, so TOT activates the context on its own.
+    const totRuleActive = hasTot && !graduated && !gate.exempt;
+    if (!gate.gated && !totRuleActive) {
+        return { gated: false, gate, statuses: null, allowed: null, enrolled: new Set(), graduated };
+    }
     const enrollments = arr(db.enrollments).filter(e => String(e.studentId) === sid);
     const enrolled = new Set(enrollments.map(e => String(e.courseId)));
     const lessonIdx = buildLessonCoverIndex(db.lessons, db.lessonCompletions);
@@ -230,22 +255,31 @@ function buildContext(db, studentId) {
         _transcriptOrder: transcriptOrder(db)
     };
     const statuses = studentCourseStatuses(sid, courses, data);
+    const sequenceOn = !!gate.gated;
     const allowed = new Set();
     courses.forEach(c => {
         const cid = String(c.id);
-        const st = statuses[cid] || statuses[c.id] || 'current';
         const lockState = gate.locks[cid] || gate.locks[c.id] || 'auto';
+        // TOT: graduation rule (manual override wins). Applies even when the
+        // normal sequence gate is off. Completed work is never hidden.
+        if (isTotCourse(c)) {
+            const st = statuses[cid] || statuses[c.id] || 'current';
+            if (gate.exempt || graduated || lockState === 'unlocked' || st === 'covered') allowed.add(cid);
+            return;
+        }
+        if (!sequenceOn) { allowed.add(cid); return; }
+        const st = statuses[cid] || statuses[c.id] || 'current';
         if (!enrolled.has(cid)) { allowed.add(cid); return; } // catalog visibility only
         if (st === 'covered' || lockState === 'unlocked') { allowed.add(cid); return; }
         if (lockState === 'locked') return;
         if (st === 'current') allowed.add(cid);
     });
-    return { gated: true, gate, statuses, allowed, enrolled };
+    return { gated: true, gate, statuses, allowed, enrolled, graduated, totRuleActive };
 }
 
 function contextFor(db, studentId) {
     const sid = String(studentId || '');
-    if (!sid) return { gated: false, gate: { gated: false, locks: {} }, statuses: null, allowed: null, enrolled: new Set() };
+    if (!sid) return { gated: false, gate: { gated: false, locks: {} }, statuses: null, allowed: null, enrolled: new Set(), graduated: false };
     const now = Date.now();
     const hit = _cache.get(sid);
     if (hit && (now - hit.at) < CACHE_TTL_MS) return hit.value;
@@ -260,6 +294,23 @@ function invalidate() { _cache.clear(); }
 function courseAccess(db, studentId, courseId) {
     if (!studentId || !courseId) return { ok: true, gated: false };
     const ctx = contextFor(db, studentId);
+    const course = arr(db.courses).find(c => String(c.id) === String(courseId)) || null;
+    // TOT courses are a graduation gate, enforced even when Content Gating is
+    // off. A per-student 'unlocked' (or exempt) override releases one learner.
+    if (isTotCourse(course)) {
+        const cid = String(courseId);
+        const gateLocks = (ctx.gate && ctx.gate.locks) || {};
+        const lockState = gateLocks[cid] || gateLocks[courseId] || 'auto';
+        const exempt = !!(ctx.gate && ctx.gate.exempt);
+        const graduated = (ctx.graduated !== undefined) ? ctx.graduated : isGraduated(db, studentId);
+        const status = (ctx.statuses && (ctx.statuses[cid] || ctx.statuses[courseId])) || 'current';
+        if (status === 'covered') return { ok: true, gated: true, status, reason: 'tot', tot: true };
+        if (exempt || graduated || lockState === 'unlocked') {
+            return { ok: true, gated: true, status: 'covered', reason: 'tot', tot: true, override: exempt || lockState === 'unlocked' };
+        }
+        if (lockState === 'locked') return { ok: false, gated: true, reason: 'manual', tot: true };
+        return { ok: false, gated: true, reason: 'tot', tot: true };
+    }
     if (!ctx.gated) return { ok: true, gated: false };
     const cid = String(courseId);
     if (!ctx.enrolled.has(cid)) return { ok: true, gated: true, reason: 'not-enrolled' };
@@ -275,6 +326,9 @@ function courseAccess(db, studentId, courseId) {
 }
 
 function lockedMessage(access) {
+    if (access && access.reason === 'tot') {
+        return 'This TOT course unlocks after you finish all programme courses and graduate. Contact the administrator if you need early access.';
+    }
     if (access && access.reason === 'manual') {
         return 'This course has been locked by an administrator. Contact the administrator if you need access.';
     }
@@ -434,6 +488,8 @@ function gateDiff(oldGate, newGate) {
 
 module.exports = {
     arr,
+    isTotCourse,
+    isGraduated,
     transcriptOrder,
     courseSeq,
     sortCoursesBySequence,

@@ -1323,31 +1323,70 @@ function studentCourseStatuses(studentId, courses, data) {
 // Locked unless previous courses completed (combination via isCourseCovered) or admin/owner
 // manual course override (contentGate students[].locks[courseId]='unlocked'). Drip-per-
 // lesson still applies within an accessible course.
+function isTotCourse(course) {
+    return !!(course && /^TOT/i.test(String(course.code || '').trim()));
+}
+function isStudentGraduated(studentId, students, alumni) {
+    const sid = String(studentId || '');
+    if (!sid) return false;
+    const student = (students || []).find(s => s && String(s.id) === sid) || null;
+    const status = String((student && student.status) || '').toLowerCase();
+    if (status === 'graduated' || status === 'alumni') return true;
+    return (alumni || []).some(a => a && (
+        String(a.studentId || '') === sid || String(a.id || '') === sid
+    ));
+}
 async function checkStudentCourseSequenceAccess(studentId, courseId, preloaded) {
     try {
         if (!studentId || !courseId) return { ok: true };
         // load data
-        let courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions, gate;
+        let courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions, gate, students, alumni;
         if (preloaded && preloaded.courses && preloaded.enrollments) {
-            ({courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions} = preloaded);
+            ({courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions, students, alumni} = preloaded);
             gate = preloaded._contentGate;
         } else {
-            const batch = await dbGetBatch(['courses','enrollments','grades','submissions','quizzes','exams','lessons','lessonCompletions','courseCompletions']).catch(()=>({}));
-            ({courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions} = batch);
+            const batch = await dbGetBatch(['courses','enrollments','grades','submissions','quizzes','exams','lessons','lessonCompletions','courseCompletions','students','alumni']).catch(()=>({}));
+            ({courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions, students, alumni} = batch);
         }
         if (!gate) { try { const r = await dbGet('settings','contentGate'); gate = r && (r.value||r); } catch{} }
+        courses = courses || []; enrollments = enrollments || [];
+        const migrateLocks = (o)=>{ const m={...((o&&o.locks)||{})}; ((o&&o.unlocked)||[]).forEach(id=>{ if(!m[id]) m[id]='unlocked'; }); return m; };
+        // TOT courses are a graduation gate, not a sequence rule: enforce it
+        // even when Content Gating is OFF. A per-student 'unlocked' or 'exempt'
+        // override still releases that one learner.
+        const course = courses.find(c => String(c.id) === String(courseId)) || null;
+        if (isTotCourse(course)) {
+            if (students === undefined && alumni === undefined) {
+                try {
+                    const [s, a] = await Promise.all([dbGetAll('students'), dbGetAll('alumni')]);
+                    students = s || []; alumni = a || [];
+                } catch {}
+            }
+            const sOv = gate && gate.students ? (gate.students[String(studentId)] || gate.students[studentId] || null) : null;
+            if (sOv && sOv.exempt) return { ok: true, override: true, tot: true };
+            const totLock = migrateLocks(sOv)[String(courseId)] || 'auto';
+            if (totLock === 'unlocked') return { ok: true, override: true, tot: true };
+            if (isStudentGraduated(studentId, students, alumni)) return { ok: true, tot: true, status: 'covered' };
+            // Completed work is never hidden, even before graduation is recorded.
+            try {
+                const data = { courses, grades: grades||[], submissions: submissions||[], quizzes: quizzes||[], exams: exams||[], lessons: lessons||[], lessonCompletions: lessonCompletions||[], courseCompletions: courseCompletions||[] };
+                if (typeof buildLessonCoverIndex==='function') data._lessonCoverIdx = buildLessonCoverIndex(data.lessons, data.lessonCompletions);
+                const statuses = (typeof studentCourseStatuses==='function') ? studentCourseStatuses(studentId, courses, data) : {};
+                if ((statuses[String(courseId)] || statuses[courseId]) === 'covered') return { ok: true, tot: true, status: 'covered' };
+            } catch (e) {}
+            if (totLock === 'locked') return { ok: false, reason: 'manual', tot: true };
+            return { ok: false, reason: 'tot', tot: true };
+        }
         // Content Gating is OFF unless the administrator enabled it. For
         // per-center/per-region modes the server resolves the effective
         // scope, so this client guard must not guess and block a student
         // whose center/region has gating disabled.
         if (!gate || gate.enabled !== true) return { ok: true };
         if (gate.mode === 'per-center' || gate.mode === 'per-region') return { ok: true };
-        courses = courses || []; enrollments = enrollments || [];
         // only enforce for enrolled students/courses
         const enrolled = (enrollments||[]).some(e => String(e.studentId)===String(studentId) && String(e.courseId)===String(courseId));
         if (!enrolled) return { ok: true };
         // per-student override
-        const migrateLocks = (o)=>{ const m={...((o&&o.locks)||{})}; ((o&&o.unlocked)||[]).forEach(id=>{ if(!m[id]) m[id]='unlocked'; }); return m; };
         const sOv = gate && gate.students ? (gate.students[String(studentId)] || gate.students[studentId] || null) : null;
         if (sOv && sOv.exempt) return { ok: true };
         const studentLocks = migrateLocks(sOv);
@@ -1367,6 +1406,7 @@ async function checkStudentCourseSequenceAccess(studentId, courseId, preloaded) 
     } catch(e) { console.warn('checkStudentCourseSequenceAccess', e); return { ok: true }; } // fail-open on errors to avoid breaking
 }
 function studentCourseLockedToast(res) {
+    if (res && res.reason === 'tot') return showToast('🔒 This TOT course unlocks after you finish all programme courses and graduate. Ask an admin/owner if you need early access.', { type: 'warning', duration: 7000 });
     if (res && res.reason === 'manual') return showToast('🔒 This course is locked by an administrator.', { type: 'warning', duration: 5000 });
     return showToast('🔒 Complete the previous course(s) first to unlock this course. If you need access now, ask an admin/owner for a course override.', { type: 'warning', duration: 6000 });
 }
@@ -5733,6 +5773,14 @@ async function renderSchedule() {
 async function viewStudentCourse(courseId) {
     const course = await dbGet('courses', courseId);
     if (!course) return showToast('Course not found');
+    // TOT courses are locked to current learners until graduation.
+    const _cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (_cu && _cu.role === 'student' && typeof isTotCourse === 'function' && isTotCourse(course)) {
+        try {
+            const seq = await checkStudentCourseSequenceAccess(_cu.studentId || _cu.username, courseId);
+            if (!seq.ok) return studentCourseLockedToast(seq);
+        } catch (e) {}
+    }
     const lessons = await dbGetAll('lessons');
     const courseLessons = lessons.filter(l => l.courseId === courseId && l.published).sort((a, b) => (a.order || 0) - (b.order || 0));
     const notes = await dbGetAll('notes');
@@ -25754,7 +25802,11 @@ let _contentGateFull = null;
 function toggleContentGateOptions() {
     const on = document.getElementById('contentgate-enabled')?.checked;
     const box = document.getElementById('contentgate-options');
-    if (box) box.style.display = on ? '' : 'none';
+    // Keep the per-student override controls reachable even when the master
+    // switch is OFF: TOT unlocks must be settable without enabling gating.
+    if (box) box.style.display = '';
+    const note = document.getElementById('contentgate-off-note');
+    if (note) note.style.display = on ? 'none' : '';
 }
 function onContentGateModeChange() {
     const mode = document.getElementById('contentgate-mode')?.value || 'global';
