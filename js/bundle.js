@@ -5660,7 +5660,7 @@ function buildWeightageRow(label, value, type) {
     const opts = types.map(t => `<option value="${t}" ${t === type ? 'selected' : ''}>${typeLabels[t]}</option>`).join('');
     return `<div class="form-row" style="align-items:end;gap:6px;">
         <div class="form-group" style="flex:2;"><label>Name</label><input type="text" class="wt-label" value="${escapeHtml(label || '')}" placeholder="e.g., Lab"></div>
-        <div class="form-group" style="flex:1;"><label>%</label><input type="number" class="wt-value" value="${value || ''}" min="0" max="100"></div>
+        <div class="form-group" style="flex:1;"><label>%</label><input type="number" class="wt-value" value="${value || ''}" min="0" max="100" oninput="updateWeightTotal()"></div>
         <div class="form-group" style="flex:1.5;"><label>Type</label><select class="wt-type">${opts}</select></div>
         <button class="btn btn-danger btn-sm" style="margin-bottom:8px;padding:2px 6px;" onclick="this.closest('.form-row').remove();updateWeightTotal()">X</button>
     </div>`;
@@ -5674,7 +5674,7 @@ window.addWeightageItem = function(label, value, type) {
     updateWeightTotal();
 };
 function updateWeightTotal() {
-    const inputs = document.querySelectorAll('.wt-value');
+    const inputs = document.querySelectorAll('#weightage-items .wt-value');
     const total = Array.from(inputs).reduce((sum, inp) => sum + (parseInt(inp.value) || 0), 0);
     const el = document.getElementById('wt-total');
     const status = document.getElementById('wt-status');
