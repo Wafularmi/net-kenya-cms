@@ -1340,6 +1340,13 @@ function isOwnerUser(user) {
     const name = ownerUsername();
     return !!name && String(u.username || '').toLowerCase() === name.toLowerCase();
 }
+// Only the owner and the overall administrator may issue OFFICIAL / FINAL
+// documents. Coordinators and assistants may still issue their own letters.
+function isOwnerOrAdminUser(user) {
+    if (!user) return false;
+    const u = user.user || user;
+    return u.role === 'admin' || u.role === 'owner' || u.isOwner === true || isOwnerUser(user);
+}
 function asAuthorisedUser(u) {
     if (!u) return u;
     if (u.role === 'owner') return Object.assign({}, u, { role: 'admin', isOwner: true });
@@ -8660,6 +8667,12 @@ return json(res, 200, result);
                 const records = parsed.records;
                 if (!store || !Array.isArray(records)) return json(res, 400, { error: 'Expected { store, records[] }' });
                 if (!canAccessStore(user, store, 'PUT')) return json(res, 403, { error: 'Insufficient permissions for this resource' });
+                // Official/final transcript records are issued ONLY by the owner
+                // or the overall administrator. Coordinators/assistants can still
+                // generate their other letters/certificates.
+                if (store === 'transcriptVerifications' && !isOwnerOrAdminUser(user)) {
+                    return json(res, 403, { error: 'Only the owner or an administrator can write transcript verification records' });
+                }
                 const KEY_PATHS = { settings: 'key', counters: 'key', users: 'username', transcriptVerifications: 'docId', manuals: 'id' };
                 const keyPath = KEY_PATHS[store] || 'id';
                 if (!db[store]) db[store] = [];
@@ -8667,6 +8680,10 @@ return json(res, 200, result);
                 const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
                 for (const rec of records) {
                     if (!rec || typeof rec !== 'object') { result.errors.push({ error: 'Not an object' }); continue; }
+                    if (store === 'certificates' && (rec.type === 'transcript' || rec.type === 'final-transcript') && !isOwnerOrAdminUser(user)) {
+                        result.errors.push({ error: 'Only the owner or an administrator can generate official/final transcripts' });
+                        continue;
+                    }
                     if ((store === 'alumniEnrollments' || store === 'enrollments') && user && user.role === 'student' && (store === 'alumniEnrollments' || isAlumniAccount(user))) {
                         result.errors.push({ error: store === 'alumniEnrollments' ? 'Use single-record alumni enrollment' : 'Alumni course access is managed through alumni enrolment' });
                         continue;
@@ -9008,10 +9025,16 @@ const parsed = JSON.parse(body);
                     // Document records get their PDF content parked on disk and their
                     // long HTML content archived to disk (re-injected on read) so the
                     // field cap NEVER truncates a generated letter mid-image-tag.
+                    if (store === 'transcriptVerifications' && !isOwnerOrAdminUser(user)) {
+                        return json(res, 403, { error: 'Only the owner or an administrator can write transcript verification records' });
+                    }
                     const isDocStore = store === 'certificates' || store === 'idCards' || store === 'idcards';
                     let toStore = value;
                     if (isDocStore) {
                         toStore = archiveHtmlContent(externalizeCertificate(value).record);
+                    }
+                    if (isDocStore && (toStore.type === 'transcript' || toStore.type === 'final-transcript') && !isOwnerOrAdminUser(user)) {
+                        return json(res, 403, { error: 'Only the owner or an administrator can generate official/final transcripts' });
                     }
                     if (isDocStore && (toStore.type === 'diploma' || toStore.type === 'completion') && !docTypeEnabledFor(user, toStore.type)) {
                         return json(res, 403, { error: 'Generate ' + toStore.type + ' is disabled for your country by the administrator' });
@@ -9419,6 +9442,9 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
         if (req.method === 'DELETE' && key) {
             const idx = db[store].findIndex(r => String(r[keyPath]) === key);
             const doomed = idx >= 0 ? db[store][idx] : null;
+            if (doomed && (store === 'transcriptVerifications' || (store === 'certificates' && (doomed.type === 'transcript' || doomed.type === 'final-transcript'))) && !isOwnerOrAdminUser(user)) {
+                return json(res, 403, { error: 'Only the owner or an administrator can delete official/final transcript records' });
+            }
             if (store === 'alumniEnrollments' && user && user.role === 'student' && doomed) {
                 const alumniDelErr = studentAlumniGrantDeleteError(user, doomed);
                 if (alumniDelErr) return json(res, 403, { error: alumniDelErr });

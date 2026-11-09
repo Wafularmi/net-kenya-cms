@@ -10988,13 +10988,31 @@ async function deleteGradReqModal(id) {
 }
 async function showTranscriptForm(preselectedId) {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (currentUser.role === 'student') return showToast('Students cannot generate transcripts. Please contact the administration office.');
-    const students = await dbGetAll('students');
-    const portalId = document.getElementById('portal-student')?.value || '';
-    const selectedId = preselectedId || portalId;
+    const role = String(currentUser.role || '').toLowerCase();
+    const isStudent = role === 'student';
+    // Official transcripts are restricted to the owner and administrators.
+    const canOfficial = role === 'owner' || role === 'admin' || currentUser.isOwner === true;
+    let students = [];
+    let selectedId = preselectedId || document.getElementById('portal-student')?.value || '';
+    if (isStudent) {
+        // A student may generate ONLY their own unofficial transcript.
+        let ownId = '';
+        try { ownId = (typeof resolveStudentId === 'function') ? await resolveStudentId(currentUser) : (currentUser.studentId || currentUser.username || ''); } catch (e) {}
+        selectedId = String(ownId || currentUser.studentId || currentUser.username || '');
+        const own = selectedId ? await dbGet('students', selectedId) : null;
+        students = own ? [own] : [{ id: selectedId, name: currentUser.name || 'My Transcript', admissionNumber: currentUser.admissionNumber || currentUser.studentId || '' }];
+    } else {
+        students = await dbGetAll('students');
+    }
+    const studentField = isStudent
+        ? `<div class="form-group"><label>Student</label><input type="hidden" id="transcript-student" value="${escapeHtml(selectedId)}"><input type="text" value="${escapeHtml((students[0] && students[0].name) || currentUser.name || '')}${students[0] && students[0].admissionNumber ? ' — ' + escapeHtml(students[0].admissionNumber) : ''}" disabled></div>`
+        : `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div>`;
+    const docTypeOptions = canOfficial
+        ? `<option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option>`
+        : `<option value="unofficial" selected>Unofficial / Student Copy</option>`;
     const issueDefault = todayDateInputValue();
-    const content = `<div class="form-group"><label>Student</label><select id="transcript-student"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.name}${s.admissionNumber ? ' — ' + s.admissionNumber : ''}</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type"><option value="official">Official Transcript</option><option value="unofficial">Unofficial / Student Copy</option><option value="summary">Summary Report Card</option></select></div></div>`;
-    showModal('Generate Transcript', content, `<button class="btn btn-primary" onclick="generateTranscript()">Generate</button>`);
+    const content = `${studentField}<div class="form-row"><div class="form-group"><label>Semester</label><select id="transcript-semester"><option value="1">Semester 1</option><option value="2">Semester 2</option><option value="3">Semester 3</option><option value="4">Semester 4</option><option value="all">All Semesters</option></select></div><div class="form-group"><label>Academic Year</label><input type="text" id="transcript-year" placeholder="e.g., 2024-2025"></div></div><div class="form-row"><div class="form-group"><label>Date of Issue</label><input type="date" id="transcript-issue-date" value="${issueDefault}" style="width:100%;"></div><div class="form-group"><label>Document Type</label><select id="transcript-doc-type" ${canOfficial ? '' : 'disabled'}>${docTypeOptions}</select>${canOfficial ? '' : '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Official transcripts are issued by the owner or an administrator.</div>'}</div></div>`;
+    showModal(isStudent ? 'Generate Unofficial Transcript' : 'Generate Transcript', content, `<button class="btn btn-primary" onclick="generateTranscript()">Generate</button>`);
     setTimeout(() => {
         try {
             if (document.getElementById('transcript-grouping')) return;
@@ -11025,15 +11043,26 @@ async function showTranscriptForm(preselectedId) {
 }
 async function generateTranscript() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (currentUser.role === 'student') return showToast('Students cannot generate transcripts. Please contact the administration office.');
-    const studentId = document.getElementById('transcript-student').value;
+    const role = String(currentUser.role || '').toLowerCase();
+    const isStudent = role === 'student';
+    const canOfficial = role === 'owner' || role === 'admin' || currentUser.isOwner === true;
+    let studentId = document.getElementById('transcript-student').value;
+    if (isStudent) {
+        // Never trust the DOM: a student's transcript is always their own.
+        try { studentId = (typeof resolveStudentId === 'function') ? await resolveStudentId(currentUser) : (currentUser.studentId || currentUser.username || ''); } catch (e) {}
+    }
     if (!studentId) return showToast('Select a student!');
     const semester = document.getElementById('transcript-semester').value;
     const year = document.getElementById('transcript-year').value;
-    const docType = document.getElementById('transcript-doc-type').value;
+    let docType = document.getElementById('transcript-doc-type').value;
+    if (isStudent) docType = 'unofficial';
+    if (docType === 'official' && !canOfficial) {
+        return showToast('Only the owner or an administrator can generate an official transcript.');
+    }
     const grouping = document.getElementById('transcript-grouping')?.value || 'group';
     const issue = issueDateInfo(document.getElementById('transcript-issue-date')?.value || '');
     const student = await dbGet('students', studentId);
+    if (!student) return showToast('Student record not found.');
     const courses = await dbGetAll('courses');
     // Transcript semesters are curriculum groups of 3 courses in settings order.
     // For a specific group, resolve across all stored grade semesters for those courses.
@@ -11074,13 +11103,19 @@ async function generateTranscript() {
         allGrades, academicSettings: academic,
         resultRows: results.rows
     });
-    const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'transcript', content: html, docId, vCode, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label };
-    await dbPut('certificates', cert);
-    // The verification record must describe the SAME document: same rows, same
-    // credits, same CGPA - otherwise /api/verify contradicts the printed page.
-    const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: results.totalCredits, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label, courseHash: '' };
-    await dbPut('transcriptVerifications', verification);
-    showModal('Official Transcript — ' + student.name, `<div id="transcript-print-area">${html}</div>`, `<button class="btn btn-primary" onclick="printTranscript()">🖨️ Print / PDF</button> <button class="btn btn-outline" onclick="downloadTranscriptPDF()">Download PDF</button>`);
+    // Only OFFICIAL transcripts are recorded/verifiable. Unofficial and summary
+    // copies are rendered for the student only and are never persisted, so they
+    // can never be presented as (or verified as) an official document.
+    if (docType === 'official') {
+        const cert = { id: 'CERT-' + Date.now() + Math.random().toString(36).substr(2, 6).toUpperCase(), studentId, type: 'transcript', docType, content: html, docId, vCode, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label };
+        await dbPut('certificates', cert);
+        // The verification record must describe the SAME document: same rows, same
+        // credits, same CGPA - otherwise /api/verify contradicts the printed page.
+        const verification = { docId, vCode, studentId, studentName: student.name, admission: student.admissionNumber || student.id, cgpa, classification: getClassification(cgpa).label, totalCredits: results.totalCredits, generatedAt: new Date().toISOString(), issueDate: issue.iso, issueDateFormatted: issue.label, courseHash: '' };
+        await dbPut('transcriptVerifications', verification);
+    }
+    const modalTitle = (docType === 'official' ? 'Official Transcript' : (docType === 'summary' ? 'Summary Report Card' : 'Unofficial Transcript')) + ' — ' + student.name;
+    showModal(modalTitle, `<div id="transcript-print-area">${html}</div>`, `<button class="btn btn-primary" onclick="printTranscript()">🖨️ Print / PDF</button> <button class="btn btn-outline" onclick="downloadTranscriptPDF()">Download PDF</button>`);
     logAudit('generated', 'transcript', { studentId, docId, docType });
 }
 function buildProfessionalTranscript(data) {
@@ -11323,12 +11358,12 @@ function buildProfessionalTranscript(data) {
                     </div>
                     <div class="header-right-info">
                         <div class="doc-id">Doc ID: ${docId}</div>
-                        <div class="verify-code"><span class="vc-label">Verify:</span> ${vCode}</div>
+                        ${isOfficial ? `<div class="verify-code"><span class="vc-label">Verify:</span> ${vCode}</div>` : `<div class="verify-code" style="color:#b91c1c;font-weight:700;">UNOFFICIAL — NOT VERIFIABLE</div>`}
                     </div>
                 </div>
                 <div class="header-divider"></div>
                 <div class="header-title-row">
-                    <h2 class="document-title">Official Academic Transcript</h2>
+                    <h2 class="document-title">${isSummary ? 'Summary Report Card' : (isOfficial ? 'Official Academic Transcript' : 'Unofficial Academic Transcript')}</h2>
                     ${isOfficial ? '' : `<div class="doc-meta">Generated: ${generatedDate} at ${generatedTime}</div>`}
                 </div>
             </div>
@@ -12103,7 +12138,9 @@ function printTranscriptWindow(download) {
 }
 async function showFinalTranscriptForm() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-    if (currentUser.role === 'student') return showToast('Students cannot generate transcripts.');
+    const role = String(currentUser.role || '').toLowerCase();
+    const canFinal = role === 'owner' || role === 'admin' || currentUser.isOwner === true;
+    if (!canFinal) return showToast('Final transcripts can only be generated by the owner or an administrator.');
     const students = await dbGetAll('students');
     const portalId = document.getElementById('portal-student')?.value || '';
     const issueDefault = todayDateInputValue();
@@ -12112,6 +12149,10 @@ async function showFinalTranscriptForm() {
 }
 async function generateFinalTranscript() {
     try {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const role = String(currentUser.role || '').toLowerCase();
+    const canFinal = role === 'owner' || role === 'admin' || currentUser.isOwner === true;
+    if (!canFinal) return showToast('Final transcripts can only be generated by the owner or an administrator.');
     const studentId = document.getElementById('final-transcript-student').value;
     if (!studentId) return showToast('Select a student!');
     const issue = issueDateInfo(document.getElementById('final-transcript-issue-date')?.value || '');
@@ -15536,9 +15577,13 @@ async function showCertificateForm() {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const portalId = document.getElementById('portal-student')?.value || '';
+    const _cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const _role = String(_cu.role || '').toLowerCase();
+    const canOfficial = _role === 'owner' || _role === 'admin' || _cu.isOwner === true;
+    const transcriptOption = canOfficial ? '<option value="transcript">Official Transcript</option>' : '';
     // Pre-fill date with today; will auto-update to registration date when student selected
     const todayIso = new Date().toISOString().split('T')[0];
-    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option><option value="transcript">Official Transcript</option></select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group" id="cert-issue-date-group" style="display:none;"><label>Date of Issue <span style="font-size:11px;color:var(--text-muted);">(printed above the official seal — editable)</span></label><input type="date" id="cert-issue-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Defaults to today. Past and future dates are allowed for scheduled issuance.</div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
+    const content = `<div class="form-group"><label>Student</label><select id="cert-student" onchange="onCertStudentChange()"><option value="">Select student...</option>${students.map(s => `<option value="${s.id}" ${s.id === portalId ? 'selected' : ''}>${s.name} ${s.admissionNumber ? '(' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Document Type</label><select id="cert-type-select" onchange="onCertTypeChange()">        <option value="admission">Admission Letter</option><option value="completion">Completion Certificate</option><option value="enrollment">Enrollment Letter</option><option value="recommendation">Recommendation Letter</option><option value="fee-statement">Fee Statement</option>${transcriptOption}</select></div><div class="form-group" id="cert-date-group"><label>Letter Date <span style="font-size:11px;color:var(--text-muted);">(auto: registration date — editable)</span></label><input type="date" id="cert-letter-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cert-date-hint"></div></div><div class="form-group" id="cert-issue-date-group" style="display:none;"><label>Date of Issue <span style="font-size:11px;color:var(--text-muted);">(printed above the official seal — editable)</span></label><input type="date" id="cert-issue-date" value="${todayIso}"><div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Defaults to today. Past and future dates are allowed for scheduled issuance.</div></div><div class="form-group"><label>Additional Notes</label><textarea id="cert-notes" placeholder="Any specific details to include"></textarea></div>`;
     showModal('Generate Document', content, `<button class="btn btn-primary" onclick="generateCertificate()">Generate</button>`);
     setTimeout(() => { onCertStudentChange(); onCertTypeChange(); }, 50);
 }
@@ -15578,6 +15623,9 @@ async function generateCertificate() {
     const tagline = branding ? branding.tagline : '';
     const initials = branding ? branding.initials : 'CM';
     const type = document.getElementById('cert-type-select').value;
+    if (type === 'transcript' && !(currentUser.role === 'owner' || currentUser.role === 'admin' || currentUser.isOwner === true)) {
+        return showToast('Only the owner or an administrator can generate an official transcript.');
+    }
     const notes = document.getElementById('cert-notes').value.trim();
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
     const vCode = generateVerificationCode();
