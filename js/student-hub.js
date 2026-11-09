@@ -668,7 +668,7 @@ function _hubBuildComputed(data, me) {
     const upcomingRegisteredExams = myRegisteredExams.filter(_isCurrentOrUpcoming);
     const pastRegisteredExams = myRegisteredExams.filter(e => !_isCurrentOrUpcoming(e));
     const _deletedTakenExamIds = new Set(placeholderExams.filter(function(p){ return mySubs.some(function(s){ var q=String(s.quizId||s.examId||''); return q===String(p.id); }) || myRegExamIds.has(String(p.id)); }).map(function(p){ return String(p.id); }));
-    const availableExams = allCourseExams.filter(e => !myRegExamIds.has(String(e.id))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    let availableExams = allCourseExams.filter(e => !myRegExamIds.has(String(e.id))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const missedDroppedIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'dropped').map(r => r.examId));
     // Drip: courses with incomplete drip lessons hide upcoming exam registration until lessons complete.
     const dripIncompleteCourseIds = new Set();
