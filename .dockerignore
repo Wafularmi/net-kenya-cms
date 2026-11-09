@@ -3,11 +3,15 @@ node_modules
 .gitignore
 *.md
 *.exe
+# Precompressed assets are generated inside the image by scripts/precompress.js.
 *.gz
 server-data.backup.json
 server-data-backups
 # The live database and its runtime state must never be baked into an image.
 server-data.json
+server-data.json.pre-split
+db-stores
+db-logs
 integrity.json
 sessions.json
 # Runtime document store and local TLS material.

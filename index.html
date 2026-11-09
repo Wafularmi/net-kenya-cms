@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=150">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=478" as="script">
+    <link rel="preload" href="js/bundle.js?v=479" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -28,22 +28,25 @@
         .card.collapsed .card-header-toggle .toggle-icon{transform:rotate(-90deg)}
         .card.collapsed .card-body{display:none}
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
-    window.addEventListener('load', function() {
-        if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    (function initPdfWorker(){
+        function setWorker(){
+            if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                return true;
+            }
+            if (typeof pdfjsDistBuildPdf !== 'undefined') {
+                window.pdfjsLib = pdfjsDistBuildPdf;
+                if (pdfjsLib.GlobalWorkerOptions) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                return true;
+            }
+            return false;
         }
-        if (typeof pdfjsLib === 'undefined' && typeof pdfjsDistBuildPdf !== 'undefined') {
-            window.pdfjsLib = pdfjsDistBuildPdf;
-            if (pdfjsLib.GlobalWorkerOptions) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        }
-    });
-    if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    }
+        if (!setWorker()) { document.addEventListener('DOMContentLoaded', setWorker); window.addEventListener('load', setWorker); }
+    })();
 </script>
 </head>
 <body>
@@ -138,6 +141,7 @@
                     <button class="btn btn-primary" onclick="showStudentForm()">+ Add Student</button>
                     <button class="btn btn-outline" onclick="showStudentDirectory()">🖨 Print Directory</button>
                     <button class="btn btn-outline" onclick="exportStudentsCSV()">Export CSV</button>
+                    <button class="btn btn-outline" onclick="showAlignStudentRepair()" title="Admin/Owner: align student user, enrollments, and grades">🔧 Repair Records</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Admission #</th><th>Student</th><th>Study Center</th><th>Program</th><th>Year</th><th>Country</th><th>Status</th><th>Balance</th><th>Actions</th></tr></thead><tbody id="students-body"></tbody></table></div></div>
             </section>
@@ -1324,6 +1328,34 @@
                         </div>
                         <div class="form-group"><label>Scheduled Message (optional)</label><textarea id="settings-maintenance-scheduled-message" rows="2" placeholder="Message shown in the pre-maintenance banner..."></textarea></div>
                         <button class="btn btn-primary" onclick="saveMaintenanceMode()">Save Maintenance Settings</button>
+                        <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+                        <h4 style="margin:0 0 8px 0;color:var(--accent);font-size:14px;">🤖 Maintenance AI</h4>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Runs routine checks during scheduled maintenance (and manual runs), generates reports with recommendations, and learns from baselines/trends. Designed to be non-burdensome (time-budgeted, capped, chunked).</div>
+                        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;flex-wrap:wrap;">
+                            <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                <input type="checkbox" id="settings-maintenance-ai" onchange="saveMaintenanceAIConfig()" style="opacity:0;width:0;height:0;">
+                                <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                            </label>
+                            <span id="maintenance-ai-status" style="font-size:12px;font-weight:600;color:var(--text-muted);">Loading...</span>
+                            <button class="btn btn-outline btn-sm" onclick="runMaintenanceAICheck()" id="maintenance-ai-run-btn">Run Maintenance Check</button>
+                            <button class="btn btn-outline btn-sm" onclick="loadMaintenanceAIReports()">Refresh Reports</button>
+                        </div>
+                        <div id="maintenance-ai-reports" style="margin-top:10px;font-size:12px;color:var(--text-muted);">Reports not loaded.</div>
+                    </div>
+
+                    <div class="card"><h3>📢 Announcement Banner</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.4;">Show a message banner to students. Announcements can target all students, a specific region, or a specific study center. The banner fades in, stays visible for the configured duration, and can reappear after the configured interval.</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <div class="form-group"><label>Display duration (seconds)</label><input type="number" id="ann-display-seconds" min="2" max="120" step="1" value="8"></div>
+                            <div class="form-group"><label>Repeat interval (seconds)</label><input type="number" id="ann-interval-seconds" min="0" max="86400" step="1" value="300"><div style="font-size:10px;color:var(--text-muted);margin-top:2px;">0 = show once per browser session.</div></div>
+                        </div>
+                        <button class="btn btn-primary btn-sm" onclick="saveAnnouncementBannerSettings()">Save Banner Settings</button>
+                        <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                            <b style="font-size:13px;">Announcements</b>
+                            <button class="btn btn-outline btn-sm" onclick="openAnnouncementEditor()">+ New Announcement</button>
+                        </div>
+                        <div id="announcements-list" style="font-size:12px;color:var(--text-muted);">Loading...</div>
                     </div>
                     <div class="card"><h3>Academic Settings</h3>
                         <div class="form-group"><label>Current Academic Year</label><input type="text" id="settings-academic-year"></div>
@@ -1676,8 +1708,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=478"></script>
-    <script data-cfasync="false" src="js/student-hub.js?v=90"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=479"></script>
+    <script data-cfasync="false" src="js/student-hub.js?v=91"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

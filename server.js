@@ -9,6 +9,7 @@ const zlib = require('zlib');
 const QRCode = require('qrcode');
 const WebSocket = require('ws');
 const dripEngine = require('./drip-engine');
+const courseGate = require('./course-gate');
 
 // ---- Password hashing --------------------------------------------------
 // New and changed passwords are stored as PBKDF2-HMAC-SHA256 with a random
@@ -1161,11 +1162,65 @@ const fileCache = new Map();
 const MAX_CACHE_SIZE = 10 * 1024 * 1024; // 10MB
 let cacheSize = 0;
 
+// A static asset is safe to cache forever only when its URL carries a version
+// (either ?v=... or the /name.123.js form). index.html deliberately does NOT
+// use this: it is generated per request and must stay no-store.
+function isVersionedAssetRequest(req, url) {
+    const raw = (req && req.url) || url || '';
+    return /[?&]v=[^&]+/.test(raw) || /\.\d+\.(?:css|js)(?:[?#]|$)/i.test(raw);
+}
+
+function appendVary(res, value) {
+    const cur = String(res.getHeader('Vary') || '');
+    if (!cur) { res.setHeader('Vary', value); return; }
+    if (cur.toLowerCase().split(',').map(v => v.trim()).indexOf(value.toLowerCase()) === -1) {
+        res.setHeader('Vary', cur + ', ' + value);
+    }
+}
+
+// Persist a freshly compressed asset so the next request is served straight
+// from disk. In-flight paths are tracked so a burst of first requests does not
+// queue the same multi-megabyte write repeatedly.
+const gzipWriteInFlight = new Set();
+function persistGzip(gzPath, buf) {
+    if (!gzPath || gzipWriteInFlight.has(gzPath)) return;
+    gzipWriteInFlight.add(gzPath);
+    fs.writeFile(gzPath, buf, err => {
+        gzipWriteInFlight.delete(gzPath);
+        if (err) console.error('persistGzip failed (' + gzPath + '): ' + err.message);
+    });
+}
+
+function setAssetCacheHeaders(res, opts) {
+    const versioned = !!opts.versioned;
+    const isCode = !!opts.isCode;
+    const longLived = !!opts.longLived;
+    if (isCode) {
+        if (versioned) {
+            // The filename/query changes with every deploy, so this is safe.
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            res.setHeader('CDN-Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+            // Unversioned code must be revalidated, never served stale.
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('CDN-Cache-Control', 'no-store');
+        }
+    } else {
+        const secs = longLived ? 604800 : 3600;
+        res.setHeader('Cache-Control', 'public, max-age=' + secs);
+        res.setHeader('CDN-Cache-Control', 'public, max-age=' + secs);
+    }
+    // Compressed and identity responses are different representations.
+    appendVary(res, 'Accept-Encoding');
+}
+
 function serveCachedFile(res, filePath, url, req) {
     const isBundle = url.includes('bundle.js');
     const ext = path.extname(filePath).toLowerCase();
     const mime = MIME[ext] || 'application/octet-stream';
     const skipGzip = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.svg'].includes(ext);
+    const isCode = isBundle || ext === '.css' || ext === '.js';
+    const versioned = isVersionedAssetRequest(req, url);
     const acceptEncoding = (req && req.headers) ? req.headers['accept-encoding'] || '' : '';
     const wantsGzip = acceptEncoding.includes('gzip');
     
@@ -1182,14 +1237,7 @@ function serveCachedFile(res, filePath, url, req) {
     if (gzFresh) {
         res.setHeader('Content-Type', mime);
         res.setHeader('Content-Encoding', 'gzip');
-        if (isBundle || ext === '.css' || ext === '.js') {
-            res.setHeader('CDN-Cache-Control', 'no-store');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        } else {
-            res.setHeader('Cache-Control', 'public, max-age=3600');
-        }
+        setAssetCacheHeaders(res, { versioned, isCode, longLived: skipGzip });
         const stat = fs.statSync(gzPath);
         res.setHeader('Content-Length', stat.size);
         return fs.createReadStream(gzPath).pipe(res);
@@ -1204,24 +1252,19 @@ function serveCachedFile(res, filePath, url, req) {
         
         if (res.headersSent) return;
         res.setHeader('Content-Type', mime);
-        
-        if (isBundle || ext === '.css' || ext === '.js') {
-            res.setHeader('CDN-Cache-Control', 'no-store');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        } else if (skipGzip) {
-            res.setHeader('Cache-Control', 'public, max-age=604800');
-        } else {
-            res.setHeader('Cache-Control', 'public, max-age=3600');
-        }
+        setAssetCacheHeaders(res, { versioned, isCode, longLived: skipGzip });
         
         if (!skipGzip && wantsGzip && data.length > 512) {
-            zlib.gzip(data, { level: 6 }, (err, result) => {
+            zlib.gzip(data, { level: 9 }, (err, result) => {
                 if (err || res.headersSent) {
                     res.setHeader('Content-Length', data.length);
                     res.end(data);
                 } else {
+                    // Keep a pre-compressed copy next to the asset. Production
+                    // images also run scripts/precompress.js at build time, so
+                    // this is mainly a first-request safety net for local/OTA
+                    // deployments.
+                    persistGzip(gzPath, result);
                     res.setHeader('Content-Encoding', 'gzip');
                     res.setHeader('Content-Length', result.length);
                     res.end(result);
@@ -1589,7 +1632,8 @@ const STUDENT_DENY_STORES = new Set([
     'certificates', 'idCards', 'idcards', 'backups', 'smsLog', 'smsSettings',
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
     'invoices', 'installments', 'whatsappTemplates', 'whatsappLog', 'whatsappOutbox', 'whatsappRuns',
-    'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents'
+    'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents',
+    'maintenanceReports', 'maintenanceAIState'
 ]);
 
 // Stores a student is allowed to write to (their own activity records)
@@ -2637,6 +2681,70 @@ function markAlumniAccount(user, storedUser) {
         if (alumniSince !== '') rec.alumniSince = alumniSince;
     }
 }
+
+// ---- Course-sequence enforcement (server-authoritative) -------------------
+// Reads that would expose locked course material, and writes that would create
+// progress/registration inside a locked course, are checked here. The browser
+// still renders the same state for a friendly UI; this is the boundary that
+// cannot be bypassed by calling the API directly.
+const COURSE_GATED_READ_STORES = new Set(['lessons', 'quizzes', 'exams', 'notes', 'questionBank']);
+const COURSE_GATED_WRITE_STORES = new Set(['submissions', 'examRegistrations', 'quizRegistrations', 'retakeRequests']);
+const COURSE_GATE_INVALIDATE_STORES = new Set([
+    'settings', 'students', 'studyCenters', 'courses', 'enrollments',
+    'grades', 'submissions', 'quizzes', 'exams', 'lessons',
+    'lessonCompletions', 'courseCompletions'
+]);
+
+function courseGateLookup() { return courseGate.createLookup(db); }
+
+function filterCourseLockedRows(user, store, rows, lookup) {
+    if (!user || user.role !== 'student' || !COURSE_GATED_READ_STORES.has(store)) return rows;
+    const sid = serverStudentId(user);
+    if (!sid) return rows;
+    const ctx = courseGate.contextFor(db, sid);
+    if (!ctx.gated || !ctx.allowed) return rows;
+    const lk = lookup || courseGateLookup();
+    return (rows || []).filter(rec => {
+        // An "Ungated" assessment is deliberately usable even when its course
+        // is still locked; the flag is set by staff on the assessment record.
+        if ((store === 'exams' || store === 'quizzes') && rec && rec.ungated === true) return true;
+        const cid = courseGate.resolveCourseId(store, rec, lk);
+        return !cid || ctx.allowed.has(String(cid));
+    });
+}
+
+function courseGateReadDenied(user, store, rec, lookup) {
+    if (!user || user.role !== 'student' || !rec || !COURSE_GATED_READ_STORES.has(store)) return null;
+    if ((store === 'exams' || store === 'quizzes') && rec.ungated === true) return null;
+    const sid = serverStudentId(user);
+    if (!sid) return null;
+    const cid = courseGate.resolveCourseId(store, rec, lookup || courseGateLookup());
+    if (!cid) return null;
+    const access = courseGate.courseAccess(db, sid, cid);
+    return access.ok ? null : courseGate.lockedMessage(access);
+}
+
+function courseGateWriteDenied(user, store, rec, lookup) {
+    if (!user || user.role !== 'student' || !rec || !COURSE_GATED_WRITE_STORES.has(store)) return null;
+    if (courseGate.isUngatedAssessment(db, store, rec)) return null;
+    const sid = serverStudentId(user);
+    if (!sid) return null;
+    const cid = courseGate.resolveCourseId(store, rec, lookup || courseGateLookup());
+    if (!cid) return null;
+    const access = courseGate.courseAccess(db, sid, cid);
+    return access.ok ? null : courseGate.lockedMessage(access);
+}
+
+// The authoritative audit entry for a course-sequence override. The browser
+// also writes a log entry, but only this one is trusted: it runs inside the
+// authenticated write handler, after the change has been accepted.
+function auditContentGateChange(oldRec, newRec, user) {
+    try {
+        const diff = courseGate.gateDiff(oldRec, newRec);
+        if (!diff.changed) return;
+        auditLog('content-gate-update', 'settings', diff, user && user.username);
+    } catch (e) { console.error('content-gate audit failed:', e.message); }
+}
 // A stable id for the grade of one attempt, so the server and the browser
 // always write the SAME record (no duplicates when both write it).
 function assessmentGradeId(studentId, quizId) {
@@ -2910,6 +3018,77 @@ function stripPrivateBranding(rec) {
 // injected blob can never re-add a signature.
 function publicSettingsView(rows) {
     return (rows || []).filter(r => r && PUBLIC_SETTING_KEYS.has(r.key)).map(stripPrivateBranding);
+}
+
+// Settings records a learner's screens actually need. Everything else -
+// WhatsApp/SMS/M-Pesa credentials, translation keys, access maps, admission
+// counters, audit config, petty-cash templates - stays staff-only. A new
+// settings record is invisible to students until it is explicitly added here.
+const STUDENT_SETTING_KEYS = new Set([
+    'branding', 'academic', 'contentGate', 'feeGate', 'feeRules', 'mpesa',
+    'maintenance', 'documentGenFlags', 'diplomaPdfConfig',
+    'completionPdfConfig'
+]);
+
+// Return the student-safe projection of settings rows. Branding loses the
+// signature/stamp/KRA fields, contentGate and feeGate lose every other
+// student's exemptions/overrides, and M-Pesa keeps only the pay-button flag.
+function studentSettingsView(user, rows) {
+    const sid = serverStudentId(user);
+    const student = sid ? (db.students || []).find(s => s && String(s.id) === sid) : null;
+    const centerId = student && student.studyCenterId ? String(student.studyCenterId) : '';
+    const center = centerId ? (db.studyCenters || []).find(c => c && String(c.id) === centerId) : null;
+    const regionId = center && center.regionId ? String(center.regionId) : '';
+    const out = [];
+    (rows || []).forEach(r => {
+        if (!r || !STUDENT_SETTING_KEYS.has(r.key)) return;
+        const v = r.value !== undefined ? r.value : r;
+        if (r.key === 'branding') { out.push(stripPrivateBranding(r)); return; }
+        if (r.key === 'mpesa') {
+            out.push({ key: 'mpesa', payButtonEnabled: !!((v && v.payButtonEnabled)) });
+            return;
+        }
+        if (r.key === 'contentGate') {
+            const g = {
+                key: 'contentGate',
+                enabled: !!(v && v.enabled),
+                mode: (v && v.mode) || 'global',
+                locks: { ...((v && v.locks) || {}) }
+            };
+            if (v && Array.isArray(v.unlocked)) g.unlocked = v.unlocked.slice();
+            if (sid && v && v.students && v.students[sid]) g.students = { [sid]: v.students[sid] };
+            if (centerId && v && v.centers && v.centers[centerId]) g.centers = { [centerId]: v.centers[centerId] };
+            if (regionId && v && v.regions && v.regions[regionId]) g.regions = { [regionId]: v.regions[regionId] };
+            out.push(g);
+            return;
+        }
+        if (r.key === 'feeGate') {
+            const g = {
+                key: 'feeGate',
+                enabled: !!(v && v.enabled),
+                amount: v && v.amount,
+                day: v && v.day,
+                time: v && v.time,
+                tabs: (v && v.tabs) || {},
+                scope: (v && v.scope) || 'all',
+                mode: (v && v.mode) || 'global'
+            };
+            if (regionId && v && v.mode === 'per-region' && v.regions && v.regions[regionId]) {
+                const rc = v.regions[regionId] || {};
+                const safeRc = { ...rc };
+                // A regional config carries its own per-student overrides.
+                // Never hand a learner the rest of the region's list.
+                safeRc.overrides = (sid && rc.overrides && rc.overrides[sid]) ? { [sid]: rc.overrides[sid] } : {};
+                g.regions = { [regionId]: safeRc };
+            }
+            const ov = (sid && v && v.overrides && v.overrides[sid]) ? v.overrides[sid] : null;
+            g.overrides = ov ? { [sid]: ov } : {};
+            out.push(g);
+            return;
+        }
+        out.push(r);
+    });
+    return out;
 }
 
 // Check if user can access a store
@@ -3262,7 +3441,7 @@ function filterStoreForUser(user, store, rows) {
     // only, until they are adopted into a country. Stores in
     // GLOBAL_SHARED_STORES are deliberate institution-wide content (shared
     // curriculum, templates, manuals) that has no country identity by design.
-    const countryExemptStores = ['users', 'counters', 'sessions', 'maintenanceBypassTokens'];
+    const countryExemptStores = ['users', 'counters', 'sessions', 'maintenanceBypassTokens', 'announcements'];
     // Coordinators may only ever see the payment receipt counters (payment-YYYYMM)
     // they touch while recording payments — never the global staff / other counters.
     if (user && user.role === 'coordinator' && store === 'counters') {
@@ -3480,6 +3659,52 @@ function verifyRateSuccess(req) {
     verifyAttempts.delete(clientIp(req));
 }
 
+// Expensive / externally-billed endpoints. These do not need a high request
+// ceiling for normal screens, but one runaway loop (or a hostile account) can
+// burn CPU, disk or an AI/SMS/translation bill in seconds. Login and public
+// verification keep their own stricter, failure-based limiters above.
+const EXPENSIVE_API_LIMITS = Object.freeze({
+    'ai': { max: 20, windowMs: 60000 },
+    'translate': { max: 30, windowMs: 60000 },
+    'report': { max: 10, windowMs: 60000 },
+    'security': { max: 10, windowMs: 60000 },
+    'certificate': { max: 30, windowMs: 60000 },
+    'backup': { max: 2, windowMs: 60000 },
+    'backups': { max: 10, windowMs: 60000 },
+    'restore': { max: 2, windowMs: 60000 },
+    'restore-from-backup': { max: 2, windowMs: 60000 },
+    'send-sms': { max: 10, windowMs: 60000 },
+    'whatsapp-cloud': { max: 20, windowMs: 60000 },
+    'wa-auto': { max: 20, windowMs: 60000 },
+    'mpesa': { max: 60, windowMs: 60000 },
+    'media': { max: 30, windowMs: 60000 },
+    'qr': { max: 30, windowMs: 60000 },
+    'public-contact': { max: 5, windowMs: 60000 },
+    'signup': { max: 5, windowMs: 60000 },
+    'change-password': { max: 10, windowMs: 60000 },
+    'reset-password': { max: 10, windowMs: 60000 },
+    'jitsi-token': { max: 30, windowMs: 60000 }
+});
+const expensiveApiHits = new Map();
+
+function expensiveApiBlocked(req, routeKey) {
+    const cfg = EXPENSIVE_API_LIMITS[routeKey];
+    if (!cfg) return false;
+    const reqUser = getRequestUser(req);
+    const id = (reqUser ? 'u:' + reqUser.username : 'ip:' + clientIp(req)) + ':' + routeKey;
+    const now = Date.now();
+    let rec = expensiveApiHits.get(id);
+    if (!rec || now - rec.windowStart > cfg.windowMs) rec = { count: 0, windowStart: now };
+    rec.count++;
+    expensiveApiHits.set(id, rec);
+    if (expensiveApiHits.size > 5000) {
+        for (const [k, v] of expensiveApiHits) {
+            if (now - v.windowStart > 5 * 60 * 1000) expensiveApiHits.delete(k);
+        }
+    }
+    return rec.count > cfg.max;
+}
+
 // Server-side audit trail for security-relevant events
 function auditLog(action, entity, details, user) {
     try {
@@ -3497,6 +3722,83 @@ function auditLog(action, entity, details, user) {
         if (db.audit.length > 20000) db.audit = db.audit.slice(-15000);
         saveDB();
 } catch (e) {}
+}
+
+// Stores where a generic create/update is itself a security or financial
+// event. Deletes/clears already have their own audit entries, so this covers
+// only insert/update. Values are summarised, never dumped: passwords, tokens,
+// API keys, PINs, signatures and stamps must not reach the audit log.
+const MUTATION_AUDIT_STORES = new Set([
+    'users', 'settings', 'counters', 'payments', 'students', 'grades',
+    'certificates', 'idCards', 'idcards', 'transcriptVerifications',
+    'sessions', 'maintenanceBypassTokens', 'feeAgreements'
+]);
+const AUDIT_SECRET_FIELD = /(pass(word)?|secret|token|api.?key|access.?key|consumer.?key|credential|pin\b|otp\b|hash|salt|sig(_|nature|$)|stamp|private.?key)/i;
+
+function auditSafeFieldNames(obj, limit) {
+    if (!obj || typeof obj !== 'object') return [];
+    return Object.keys(obj)
+        .filter(k => k !== 'key' && k !== 'value' && !AUDIT_SECRET_FIELD.test(k))
+        .slice(0, limit || 40);
+}
+
+function auditRecordSummary(store, rec) {
+    if (!rec || typeof rec !== 'object') return {};
+    if (store === 'settings') {
+        const v = rec.value !== undefined ? rec.value : rec;
+        return {
+            key: rec.key || rec.id || '',
+            fields: auditSafeFieldNames(v, 30)
+        };
+    }
+    if (store === 'users') {
+        return {
+            username: rec.username || '',
+            role: rec.role || '',
+            status: rec.status || '',
+            studentId: rec.studentId || '',
+            hasPassword: !!rec.password
+        };
+    }
+    if (store === 'payments') {
+        return {
+            id: rec.id || '',
+            studentId: rec.studentId || '',
+            amount: rec.amount,
+            method: rec.method || rec.paymentMethod || '',
+            reference: rec.reference || rec.receipt || rec.mpesaReceipt || '',
+            date: rec.date || rec.createdAt || ''
+        };
+    }
+    if (store === 'counters') {
+        return { key: rec.key || rec.id || '', value: rec.value };
+    }
+    if (store === 'students') {
+        return {
+            id: rec.id || '',
+            admissionNumber: rec.admissionNumber || '',
+            status: rec.status || '',
+            studyCenterId: rec.studyCenterId || '',
+            country: rec.country || '',
+            regionId: rec.regionId || ''
+        };
+    }
+    if (store === 'grades') {
+        return {
+            id: rec.id || '',
+            studentId: rec.studentId || '',
+            courseId: rec.courseId || '',
+            score: rec.score,
+            grade: rec.grade || ''
+        };
+    }
+    if (store === 'certificates' || store === 'idCards' || store === 'idcards') {
+        return { id: rec.id || '', studentId: rec.studentId || '', type: rec.type || '' };
+    }
+    if (store === 'sessions' || store === 'maintenanceBypassTokens') {
+        return { username: rec.username || rec.user || '', role: rec.role || '' };
+    }
+    return { id: rec.id || rec.docId || '', fields: auditSafeFieldNames(rec, 25) };
 }
 
 // ---- Security & integrity layer ----
@@ -4227,6 +4529,543 @@ function isMaintenanceActive() {
     return false;
 }
 
+// ===== Maintenance AI (deterministic diagnostics + trend/baseline engine) =====
+// Runs only during scheduled maintenance windows and/or manual admin trigger.
+// Performance safeguards: single-run lock, time budget, capped scans, chunk yields,
+// safe garbage cleanup only, no request-path blocking.
+let _maiRunning = false;
+let _maiLastScheduledWindowKey = '';
+const MAI_TIME_BUDGET_MS = parseInt(process.env.MAI_TIME_BUDGET_MS || '45000', 10);
+const MAI_SCAN_CAP = parseInt(process.env.MAI_SCAN_CAP || '5000', 10);
+const MAI_SAMPLE_CAP = parseInt(process.env.MAI_SAMPLE_CAP || '300', 10);
+
+function _maiNow() { return Date.now(); }
+function _maiIso(ts) { return new Date(ts || Date.now()).toISOString(); }
+async function _maiYield() { await new Promise(r => setImmediate ? setImmediate(r) : setTimeout(r, 0)); }
+function _maiBudget(started, extraMs) { return (_maiNow() - started) < (Math.max(5000, (extraMs || MAI_TIME_BUDGET_MS))); }
+function _maiNum(v, d) { const n = Number(v); return isFinite(n) ? n : (d || 0); }
+function _maiSafeIds(rows, max) {
+    const out = []; const seen = new Set();
+    for (const r of (rows||[])) {
+        const id = r && (r.id || r.key || r.username || r.admissionNumber);
+        if (!id) continue; const s = String(id).slice(0, 80);
+        if (seen.has(s)) continue; seen.add(s); out.push(s); if (out.length >= (max||10)) break;
+    }
+    return out;
+}
+function _maiSettings(key) {
+    try { const rec = (db.settings||[]).find(s=>s && s.key===key); return rec && rec.value && typeof rec.value==='object' ? rec.value : (rec?rec.value:null); } catch(e){ return null; }
+}
+function _maiEnabledForAuto() {
+    const v = _maiSettings('maintenanceAI');
+    if (v && typeof v === 'object' && v.enabled === false) return false;
+    return true; // default enabled
+}
+function _maiWindowKey(v) {
+    const s = v && v.startAt ? String(v.startAt) : '';
+    const e = v && v.endAt ? String(v.endAt) : '';
+    if (!s || !e) return '';
+    return s + '|' + e;
+}
+function _maiIsInScheduledWindow(v) {
+    try {
+        const s = v && v.startAt ? Date.parse(String(v.startAt)) : NaN;
+        const e = v && v.endAt ? Date.parse(String(v.endAt)) : NaN;
+        if (!isFinite(s)||!isFinite(e)) return false;
+        const now = Date.now(); return now >= s && now < e;
+    } catch(e){ return false; }
+}
+function _maiEnsureStores() {
+    if (!Array.isArray(db.maintenanceReports)) db.maintenanceReports = [];
+    if (!Array.isArray(db.maintenanceAIState)) db.maintenanceAIState = [];
+}
+function _maiGetState() {
+    _maiEnsureStores();
+    let st = db.maintenanceAIState.find(x=>x && x.key==='main');
+    if (!st) { st = { key:'main', version:1, updatedAt:_maiIso(), cycles:0, baselines:{} }; db.maintenanceAIState.push(st); }
+    if (!st.baselines || typeof st.baselines!=='object') st.baselines = {};
+    return st;
+}
+function _maiPushFinding(findings, severity, area, message, details) {
+    findings.push({ severity, area, message: String(message||'').slice(0,500), details: details || {} });
+}
+function _maiRollBaseline(b, key, value) {
+    const prev = b[key] && typeof b[key]==='object' ? b[key] : { avg: _maiNum(value), min:_maiNum(value), max:_maiNum(value), n:0 };
+    const n = Math.min(9999, (prev.n||0) + 1);
+    const avg = prev.n ? (prev.avg * (Math.min(prev.n, 50)) + _maiNum(value)) / (Math.min(prev.n, 50) + 1) : _maiNum(value);
+    b[key] = { avg, min: Math.min(prev.min==null?avg:prev.min, _maiNum(value)), max: Math.max(prev.max==null?avg:prev.max, _maiNum(value)), n };
+    return b[key];
+}
+function _maiDelta(b, key, value) {
+    const base = b[key]; if (!base || !base.n) return null;
+    const avg = _maiNum(base.avg); if (avg === 0) return null;
+    return (_maiNum(value) - avg) / Math.max(1, Math.abs(avg));
+}
+
+
+function _maiProposalId() { return 'MAIR-' + Date.now() + '-' + Math.random().toString(36).slice(2,7); }
+function _maiLearnRepair(state, type, outcome) {
+    state.repairLearning = state.repairLearning && typeof state.repairLearning === 'object' ? state.repairLearning : {};
+    const k = String(type||'unknown');
+    const cur = state.repairLearning[k] || { applied:0, failed:0, rejected:0, lastAt:null };
+    if (outcome === 'applied') cur.applied = (cur.applied||0)+1;
+    else if (outcome === 'failed') cur.failed = (cur.failed||0)+1;
+    else if (outcome === 'rejected') cur.rejected = (cur.rejected||0)+1;
+    cur.lastAt = _maiIso();
+    state.repairLearning[k] = cur;
+}
+function _maiQueueRepairs(state, proposals, cycleId) {
+    state.pendingRepairs = Array.isArray(state.pendingRepairs) ? state.pendingRepairs : [];
+    // dedupe by type+signature for pending items
+    const sig = (p)=> [p.type,p.area,JSON.stringify(p.action&&p.action.filter||p.action&&p.action.ids||'')].join('|').slice(0,300);
+    const existing = new Set(state.pendingRepairs.filter(p=>p && p.status==='pending').map(sig));
+    (proposals||[]).forEach(p => {
+        if (!p || existing.has(sig(p))) return;
+        state.pendingRepairs.push(Object.assign({ id:_maiProposalId(), createdAt:_maiIso(), cycleId, status:'pending', requiresApproval:true }, p));
+        existing.add(sig(p));
+    });
+    // keep pending manageable + retain recent applied/rejected history
+    const pending = state.pendingRepairs.filter(p=>p && p.status==='pending').slice(-30);
+    const done = state.pendingRepairs.filter(p=>p && p.status!=='pending').slice(-40);
+    state.pendingRepairs = pending.concat(done);
+}
+function _maiFindRecordsByIds(store, ids) {
+    const set = new Set((ids||[]).map(x=>String(x)));
+    const arr = Array.isArray(db[store]) ? db[store] : [];
+    return arr.filter(r => r && (set.has(String(r.id)) || set.has(String(r.key))));
+}
+function _maiApplyRepair(proposal, user) {
+    if (!proposal || proposal.status !== 'pending') return { ok:false, error:'Repair is not pending' };
+    const action = proposal.action || {};
+    const result = { ok:true, changed:0, details:{} };
+    const _arr = (k)=> Array.isArray(db[k]) ? db[k] : [];
+    const sid = (v)=> (v==null||v==='')?'':String(v);
+    const studentKeySet = (()=>{ const set=new Set(); _arr('students').forEach(s=>{[s&&s.id,s&&s.admissionNumber,s&&s.phone,s&&s.email,s&&s.username].filter(Boolean).forEach(v=>set.add(sid(v)));}); return set; })();
+    const studentExists = (ref)=>{ const k=sid(ref); return !!k && studentKeySet.has(k); };
+
+    if (action.type === 'remove_dangling_student_refs') {
+        const stores = Array.isArray(action.stores) ? action.stores : [];
+        stores.forEach(store => {
+            if (!Array.isArray(db[store])) return;
+            const before = db[store].length;
+            db[store] = db[store].filter(r => !r || studentExists(r.studentId));
+            const removed = Math.max(0, before - db[store].length);
+            if (removed) { result.changed += removed; result.details[store]=removed; }
+        });
+    } else if (action.type === 'relink_unlinked_student_users') {
+        const links = Array.isArray(action.links) ? action.links : [];
+        const usersArr = Array.isArray(db.users) ? db.users : [];
+        const studentsArr = Array.isArray(db.students) ? db.students : [];
+        const byUserId = new Map(usersArr.filter(u=>u).map(u=>[String(u.id||u.username), u]));
+        const byUsername = new Map(usersArr.filter(u=>u&&u.username).map(u=>[String(u.username).toLowerCase(), u]));
+        const byStudentId = new Map(studentsArr.filter(s=>s).map(s=>[String(s.id), s]));
+        for (const link of links) {
+            const u = (link.userId && byUserId.get(String(link.userId))) || (link.username && byUsername.get(String(link.username).toLowerCase()));
+            const st = byStudentId.get(String(link.matchedStudentId||''));
+            if (!u || !st) continue;
+            // Re-verify: only link if user is a student and target student still exists
+            if (String(u.role||'').toLowerCase() !== 'student') continue;
+            let changed = false;
+            const canonicalId = String(st.id);
+            if (String(u.studentId || '') !== canonicalId) { u.studentId = canonicalId; changed = true; }
+            if (u.user && typeof u.user === 'object' && String(u.user.studentId || '') !== canonicalId) { u.user.studentId = canonicalId; changed = true; }
+            if (!u.admissionNumber && st.admissionNumber) { u.admissionNumber = String(st.admissionNumber); changed = true; }
+            if (changed) result.changed++;
+        }
+        result.details.linkedUsers = result.changed;
+    } else if (action.type === 'remove_records_by_ids') {
+        const store = action.store;
+        if (!Array.isArray(db[store])) return { ok:false, error:'Unknown store' };
+        const ids = new Set((action.ids||[]).map(String));
+        const before = db[store].length;
+        db[store] = db[store].filter(r => !(r && ids.has(String(r.id||r.key))));
+        result.changed = Math.max(0, before - db[store].length);
+        result.details[store] = result.changed;
+    } else {
+        return { ok:false, error:'Unsupported repair action' };
+    }
+
+    if (result.changed > 0) { try { if (typeof saveDB==='function') saveDB(); } catch(e){} }
+    proposal.status = 'applied';
+    proposal.approvedBy = user && user.username ? user.username : 'admin';
+    proposal.appliedAt = _maiIso();
+    proposal.result = result;
+    try { if (typeof auditLog==='function') auditLog('maintenance-ai-repair-applied', 'maintenance', { id:proposal.id, type:proposal.type, changed:result.changed, details:result.details, by:proposal.approvedBy }, proposal.approvedBy); } catch(e){}
+    return result;
+}
+
+async function runMaintenanceAICycle(opts) {
+    opts = opts || {};
+    if (_maiRunning) return { ok:false, skipped:true, reason:'already_running' };
+    _maiRunning = true;
+    const started = _maiNow();
+    const trigger = opts.trigger || 'manual';
+    const findings = [];
+    const recommendations = [];
+    const metrics = {};
+    const cleaned = {};
+    let riskScore = 0;
+    try {
+        _maiEnsureStores();
+        const state = _maiGetState();
+        const baselines = state.baselines || {};
+
+        // --- Memory/runtime health + safe corrective actions ---
+        try {
+            const mu = process.memoryUsage();
+            metrics.memory = { rss: mu.rss, heapUsed: mu.heapUsed, heapTotal: mu.heapTotal, external: mu.external||0 };
+            metrics.uptimeSec = Math.round(process.uptime());
+            const heapRatio = mu.heapTotal ? (mu.heapUsed / mu.heapTotal) : 0;
+            // Safe in-app memory relief: drop retained expired/transient data references
+            const memActions = [];
+            try { if (typeof maintenanceBypassTokens !== 'undefined' && maintenanceBypassTokens && maintenanceBypassTokens.clear && maintenanceBypassTokens.size > 500) { /* keep only by not bulk-clearing valid ones; handled in garbage pass */ } } catch(e){}
+            // Attempt V8 GC only if Node was started with --expose-gc (safe no-op otherwise)
+            if ((heapRatio > 0.88 || (_maiDelta(baselines,'heapUsed', mu.heapUsed) || 0) > 0.35) && typeof global.gc === 'function') {
+                try { global.gc(); memActions.push('requested V8 garbage collection (global.gc available)'); } catch(e){}
+            }
+            if ((heapRatio > 0.88 || (_maiDelta(baselines,'heapUsed', mu.heapUsed) || 0) > 0.35)) {
+                // Trim AI state history to keep learning compact (already bounded)
+                try { const st0 = _maiGetState(); if (st0 && Array.isArray(st0.history) && st0.history.length > 40) { st0.history = st0.history.slice(-40); memActions.push('compacted AI history'); } } catch(e){}
+            }
+            const mu2 = (heapRatio > 0.88 || memActions.length) ? process.memoryUsage() : mu;
+            metrics.memoryAfter = (mu2 !== mu) ? { rss: mu2.rss, heapUsed: mu2.heapUsed, heapTotal: mu2.heapTotal } : undefined;
+            if (memActions.length) cleaned.memoryActions = memActions;
+            if (heapRatio > 0.92) {
+                riskScore += 15; _maiPushFinding(findings,'warn','memory','Heap usage is high.',{heapUsed:mu.heapUsed,heapTotal:mu.heapTotal,heapRatio,actions:memActions});
+                recommendations.push('Memory: heap usage is high. The AI applied safe in-app relief (expired cleanup, optional GC if enabled, compacting AI state). V8 heap cannot be fully forced down from app code; if the trend persists, schedule a restart/maintenance window sooner, review memory growth/leaks, and consider running Node with --expose-gc only in controlled environments.');
+            } else if ((_maiDelta(baselines,'heapUsed', mu.heapUsed) || 0) > 0.35) {
+                riskScore += 8; _maiPushFinding(findings,'info','memory','Heap usage increased versus baseline.',{delta:_maiDelta(baselines,'heapUsed', mu.heapUsed),actions:memActions});
+                recommendations.push('Memory: heap used is above learned baseline. Safe cleanup/compaction was applied; monitor trend and run maintenance sooner if it keeps rising.');
+            }
+            _maiRollBaseline(baselines,'heapUsed', mu.heapUsed);
+            _maiRollBaseline(baselines,'rss', mu.rss);
+        } catch(e) { _maiPushFinding(findings,'info','memory','Memory check unavailable.',{error:String(e&&e.message||e)}); }
+        await _maiYield(); if (!_maiBudget(started)) { _maiPushFinding(findings,'warn','engine','Time budget reached; partial report generated.',{}); }
+
+        // --- Safe garbage cleanup (expired sessions/tokens) ---
+        try {
+            const now = _maiNow();
+            let sessPruned = 0;
+            try {
+                for (const [token, s] of sessions) { if (!s || !s.expires || s.expires < now) { sessions.delete(token); sessPruned++; if (sessPruned >= 2000) break; } }
+                if (sessPruned) { try { saveSessions(); } catch(e){} }
+            } catch(e){}
+            let bypassPruned = 0;
+            try {
+                if (typeof maintenanceBypassTokens !== 'undefined' && maintenanceBypassTokens && typeof maintenanceBypassTokens.forEach === 'function') {
+                    for (const [token, entry] of maintenanceBypassTokens) { if (!entry || !entry.expires || entry.expires < now) { maintenanceBypassTokens.delete(token); bypassPruned++; if (bypassPruned >= 1000) break; } }
+                }
+            } catch(e){}
+            cleaned.expiredSessions = sessPruned;
+            cleaned.expiredMaintenanceBypassTokens = bypassPruned;
+            metrics.sessionsActive = (typeof sessions !== 'undefined' && sessions && sessions.size) ? sessions.size : 0;
+            if (sessPruned || bypassPruned) recommendations.push(`Garbage cleanup: removed ${sessPruned} expired session(s) and ${bypassPruned} expired maintenance bypass token(s).`);
+        } catch(e) { _maiPushFinding(findings,'info','garbage','Garbage cleanup check failed safely.',{error:String(e&&e.message||e)}); }
+        await _maiYield();
+
+        // --- Intrusion/security signals (best-effort from available data) ---
+        try {
+            const audit = Array.isArray(db.audit) ? db.audit : [];
+            const recent = audit.slice(-Math.min(audit.length, MAI_SCAN_CAP));
+            let secEvents = 0, loginFails = 0, tamper = 0, adminActions = 0;
+            const samples = [];
+            for (let i=recent.length-1; i>=0 && i>=recent.length-1000; i--) {
+                const a = recent[i]; if (!a) continue;
+                const action = String(a.action||a.type||'').toLowerCase();
+                const entity = String(a.entity||a.store||'').toLowerCase();
+                if (entity === 'security' || /tamper|intrus|forbid|blocked|unauthor/.test(action)) { secEvents++; if (samples.length<5) samples.push({action:a.action,entity:a.entity,at:a.at||a.timestamp}); }
+                if (/tamper/.test(action)) tamper++;
+                if (/login.*fail|failed.*login|invalid.*password|auth.*fail/.test(action)) loginFails++;
+                if (entity === 'security' || /cleanup-confirmed|admin|permission/.test(action)) adminActions++;
+            }
+            metrics.security = { auditScanned: recent.length, securityEventsRecent: secEvents, loginFailSignals: loginFails, tamperSignals: tamper };
+            if (tamper > 0) { riskScore += 30; _maiPushFinding(findings,'high','intrusion','File tamper/security events detected in audit history.',{count:tamper,samples}); recommendations.push('Security: investigate tamper/security audit events immediately and verify system integrity/backups.'); }
+            else if (secEvents > 10) { riskScore += 12; _maiPushFinding(findings,'warn','intrusion','Elevated security-related audit activity detected.',{count:secEvents,samples}); recommendations.push('Security: review recent security/audit events for suspicious patterns.'); }
+            const users = Array.isArray(db.users) ? db.users : [];
+            const admins = users.filter(u=>u && u.role==='admin');
+            const defaultish = users.filter(u=>u && u.mustChangePassword===true);
+            metrics.accounts = Object.assign(metrics.accounts||{}, { users: users.length, admins: admins.length, mustChangePassword: defaultish.length });
+            if (admins.length > 5) { _maiPushFinding(findings,'info','security','High number of admin accounts.',{admins:admins.length}); recommendations.push('Security: review admin accounts and keep least privilege.'); }
+            if (defaultish.length > 0) { riskScore += 4; _maiPushFinding(findings,'info','security','Accounts still require password change.',{count:defaultish.length}); recommendations.push('Security: ensure flagged accounts complete password changes.'); }
+            _maiRollBaseline(baselines,'securityEvents', secEvents);
+        } catch(e) { _maiPushFinding(findings,'info','security','Security check failed safely.',{error:String(e&&e.message||e)}); }
+        await _maiYield(); if (!_maiBudget(started)) { _maiPushFinding(findings,'warn','engine','Time budget reached; partial report generated.',{}); }
+
+        // --- Account/linkage integrity (specific + safe auto-correction on scheduled maintenance) ---
+        try {
+            const _arr = (k) => Array.isArray(db[k]) ? db[k] : [];
+            const users = _arr('users');
+            const students = _arr('students');
+            const courses = _arr('courses');
+            const exams = _arr('exams');
+            const sid = (v) => (v == null || v === '') ? '' : String(v);
+            const studentKeySet = new Set();
+            students.forEach(s=>{ [s&&s.id,s&&s.admissionNumber,s&&s.phone,s&&s.email,s&&s.username].filter(Boolean).forEach(v=>studentKeySet.add(sid(v))); });
+            const courseIdSet = new Set(courses.map(c=>sid(c&&c.id)).filter(Boolean));
+            const examIdSet = new Set(exams.map(e=>sid(e&&e.id)).filter(Boolean));
+            const studentExists = (ref) => { const k=sid(ref); return !!k && studentKeySet.has(k); };
+            const courseExists = (ref) => { const k=sid(ref); return !k || courseIdSet.has(k); }; // empty course ref not treated as missing
+            const examExists = (ref) => { const k=sid(ref); return !k || examIdSet.has(k); };
+
+            // Unlinked student users (specific)
+            const unlinkedUsers = [];
+            users.filter(u=>u && String(u.role||'').toLowerCase()==='student').forEach(u=>{
+                const candidates=[u.studentId,u.username,u.admissionNumber,u.phone,u.email].filter(Boolean).map(sid);
+                if (candidates.length && !candidates.some(c=>studentKeySet.has(c))) {
+                    unlinkedUsers.push({ username: sid(u.username).slice(0,80), userId: sid(u.id).slice(0,80), tried: candidates.slice(0,4) });
+                }
+            });
+
+            // Detailed orphan detection (full arrays; safe)
+            const scanStore = (store, predicate, mapper, cap) => {
+                const arr = _arr(store); const samples=[]; let total=0;
+                for (let i=0;i<arr.length;i++) { const r=arr[i]; if (!r) continue; if (predicate(r)) { total++; if (samples.length < (cap||MAI_SAMPLE_CAP)) samples.push(mapper(r)); } }
+                return { total, samples };
+            };
+
+            const enrollMissingStudent = scanStore('enrollments', e => !studentExists(e.studentId), e => ({ id:sid(e.id), studentId:sid(e.studentId), courseId:sid(e.courseId), status:sid(e.status) }), 12);
+            const enrollMissingCourse  = scanStore('enrollments', e => studentExists(e.studentId) && sid(e.courseId) && !courseIdSet.has(sid(e.courseId)), e => ({ id:sid(e.id), studentId:sid(e.studentId), courseId:sid(e.courseId), status:sid(e.status) }), 12);
+            const gradesMissingStudent  = scanStore('grades', g => !studentExists(g.studentId), g => ({ id:sid(g.id), studentId:sid(g.studentId), courseId:sid(g.courseId), examId:sid(g.examId) }), 12);
+            const gradesMissingCourse   = scanStore('grades', g => studentExists(g.studentId) && sid(g.courseId) && !courseIdSet.has(sid(g.courseId)), g => ({ id:sid(g.id), studentId:sid(g.studentId), courseId:sid(g.courseId), examId:sid(g.examId) }), 12);
+            const subsMissingStudent    = scanStore('submissions', s => !studentExists(s.studentId), s => ({ id:sid(s.id), studentId:sid(s.studentId), examId:sid(s.examId), quizId:sid(s.quizId) }), 12);
+            const subsMissingExam       = scanStore('submissions', s => studentExists(s.studentId) && sid(s.examId) && !examIdSet.has(sid(s.examId)), s => ({ id:sid(s.id), studentId:sid(s.studentId), examId:sid(s.examId) }), 12);
+            const regsMissingStudent    = scanStore('examRegistrations', r => !studentExists(r.studentId), r => ({ id:sid(r.id), studentId:sid(r.studentId), examId:sid(r.examId) }), 12);
+            const regsMissingExam       = scanStore('examRegistrations', r => studentExists(r.studentId) && sid(r.examId) && !examIdSet.has(sid(r.examId)), r => ({ id:sid(r.id), studentId:sid(r.studentId), examId:sid(r.examId) }), 12);
+
+            const details = {
+                unlinkedStudentUsers: { total: unlinkedUsers.length, samples: unlinkedUsers.slice(0,12), meaning: 'Student login/account could not be matched to a student record by studentId/username/admission/phone/email.' },
+                enrollmentsMissingStudent: { total: enrollMissingStudent.total, samples: enrollMissingStudent.samples, meaning: 'Enrollment references a student record that does not exist (dangling).' },
+                enrollmentsMissingCourse:  { total: enrollMissingCourse.total, samples: enrollMissingCourse.samples, meaning: 'Enrollment references a course that does not exist (course deleted/unavailable); student still exists.' },
+                gradesMissingStudent:      { total: gradesMissingStudent.total, samples: gradesMissingStudent.samples, meaning: 'Grade references a missing student (dangling).' },
+                gradesMissingCourse:       { total: gradesMissingCourse.total, samples: gradesMissingCourse.samples, meaning: 'Grade references a missing course (historical risk; not auto-deleted).' },
+                submissionsMissingStudent: { total: subsMissingStudent.total, samples: subsMissingStudent.samples, meaning: 'Submission references a missing student (dangling).' },
+                submissionsMissingExam:    { total: subsMissingExam.total, samples: subsMissingExam.samples, meaning: 'Submission references a missing/deleted exam (historical; preserved by design, not auto-deleted).' },
+                examRegistrationsMissingStudent: { total: regsMissingStudent.total, samples: regsMissingStudent.samples, meaning: 'Exam registration references a missing student (dangling).' },
+                examRegistrationsMissingExam:    { total: regsMissingExam.total, samples: regsMissingExam.samples, meaning: 'Exam registration references a missing/deleted exam (historical; preserved by design, not auto-deleted).' },
+            };
+            metrics.linkages = {
+                scanned: { users:users.length, students:students.length, courses:courses.length, exams:exams.length, enrollments:_arr('enrollments').length, grades:_arr('grades').length, submissions:_arr('submissions').length, examRegistrations:_arr('examRegistrations').length },
+                totals: Object.fromEntries(Object.entries(details).map(([k,v])=>[k,v.total])),
+                details
+            };
+
+            const danglingTotal = enrollMissingStudent.total + gradesMissingStudent.total + subsMissingStudent.total + regsMissingStudent.total;
+            const historicalMissingRefs = enrollMissingCourse.total + gradesMissingCourse.total + subsMissingExam.total + regsMissingExam.total;
+            const issueTotal = unlinkedUsers.length + danglingTotal + historicalMissingRefs;
+
+            // Safe auto-correction ONLY during scheduled maintenance (conservative): remove records whose owning student is missing.
+            // Never delete historical records for missing/deleted exams or courses when a student still exists.
+            const canAutoFix = (trigger === 'scheduled');
+            let fixed = 0;
+            const fixSummary = {};
+            if (canAutoFix && danglingTotal > 0 && _maiBudget(started)) {
+                const before = { enrollments:_arr('enrollments').length, grades:_arr('grades').length, submissions:_arr('submissions').length, examRegistrations:_arr('examRegistrations').length };
+                if (enrollMissingStudent.total) db.enrollments = _arr('enrollments').filter(e => !e || studentExists(e.studentId));
+                if (gradesMissingStudent.total)  db.grades      = _arr('grades').filter(g => !g || studentExists(g.studentId));
+                if (subsMissingStudent.total)    db.submissions = _arr('submissions').filter(s => !s || studentExists(s.studentId));
+                if (regsMissingStudent.total)    db.examRegistrations = _arr('examRegistrations').filter(r => !r || studentExists(r.studentId));
+                Object.entries(before).forEach(([k,v])=>{ const diff = Math.max(0, v - _arr(k).length); if (diff) { fixSummary[k]=diff; fixed += diff; } });
+                if (fixed) {
+                    cleaned.orphanLinkageRecordsRemoved = fixed;
+                    cleaned.orphanLinkageFixSummary = fixSummary;
+                    try { if (typeof saveDB === 'function') saveDB(); } catch(e){}
+                    try { if (typeof auditLog === 'function') auditLog('maintenance-ai-linkage-fix', 'maintenance', { fixed, fixSummary, trigger }, opts.user || 'system'); } catch(e){}
+                    recommendations.push(`Auto-corrected ${fixed} dangling linkage record(s) during scheduled maintenance (removed records whose student no longer exists): ${Object.entries(fixSummary).map(([k,v])=>`${k}: ${v}`).join(', ')}. Historical exam/course references were preserved.`);
+                }
+            }
+
+            if (issueTotal) {
+                riskScore += Math.min(25, unlinkedUsers.length*2 + Math.min(enrollMissingStudent.total + gradesMissingStudent.total + subsMissingStudent.total + regsMissingStudent.total, 20) + Math.min(historicalMissingRefs, 8));
+                _maiPushFinding(findings, (danglingTotal>20 || unlinkedUsers.length>10)?'warn':'info', 'linkages', 'Specific account/data linkage issues detected.', details);
+                if (unlinkedUsers.length) recommendations.push(`Linkages: ${unlinkedUsers.length} student account(s) could not be matched to student records. Review account usernames/admission numbers or run Repair Records; do not auto-delete accounts.`);
+                if (enrollMissingCourse.total || gradesMissingCourse.total) recommendations.push(`Linkages: ${enrollMissingCourse.total} enrollment(s) and ${gradesMissingCourse.total} grade(s) reference missing courses while the student still exists. Review course IDs/history before manual correction (not auto-deleted).`);
+                if (subsMissingExam.total || regsMissingExam.total) recommendations.push(`Linkages: ${subsMissingExam.total} submission(s) and ${regsMissingExam.total} exam registration(s) reference missing/deleted exams. These are preserved intentionally for exam history; no deletion performed.`);
+                if (danglingTotal && !(canAutoFix && fixed)) recommendations.push(`Linkages: ${danglingTotal} dangling record(s) reference missing students. ${canAutoFix ? 'Auto-correction was attempted if budget allowed.' : 'These can be auto-corrected during the next scheduled maintenance window (safe cleanup of student-missing records only).'} Manual review: Repair Records / admin data review.`);
+            } else {
+                recommendations.push('Linkages: no orphaned enrollment/grade/submission/registration/student-account linkage issues detected in this scan.');
+            }
+
+            // Repair proposals (admin approval workflow) - AI learns from outcomes over time
+            try {
+                const proposals = [];
+                const affectedStores = [];
+                if (enrollMissingStudent.total) affectedStores.push('enrollments');
+                if (gradesMissingStudent.total) affectedStores.push('grades');
+                if (subsMissingStudent.total) affectedStores.push('submissions');
+                if (regsMissingStudent.total) affectedStores.push('examRegistrations');
+                if (danglingTotal > 0) {
+                    const autoApplied = !!(canAutoFix && fixed);
+                    proposals.push({
+                        type: 'remove_dangling_student_refs',
+                        area: 'linkages',
+                        severity: danglingTotal > 20 ? 'medium' : 'low',
+                        title: `Remove ${danglingTotal} dangling record(s) referencing missing students`,
+                        description: 'Safely removes enrollment/grade/submission/exam-registration records whose studentId no longer matches any student record. Historical records for existing students (including deleted exam/course references) are not affected.',
+                        reason: 'Records reference missing students and cannot be usefully linked; removing them improves data integrity.',
+                        confidence: 'high',
+                        safe: true,
+                        status: autoApplied ? 'applied' : 'pending',
+                        requiresApproval: !autoApplied,
+                        affectedCount: danglingTotal,
+                        affectedSamples: details,
+                        action: { type: 'remove_dangling_student_refs', stores: affectedStores },
+                        appliedAt: autoApplied ? _maiIso() : null,
+                        approvedBy: autoApplied ? 'system:scheduled-maintenance' : null,
+                        result: autoApplied ? { ok:true, changed: fixed, details: fixSummary } : null
+                    });
+                    if (autoApplied) _maiLearnRepair(state, 'remove_dangling_student_refs', 'applied');
+                }
+                if (unlinkedUsers.length > 0) {
+                    // Unambiguous auto-relink with approval: only when exactly one student matches by strong identifiers
+                    const norm = (v)=>String(v==null?'':v).trim().toLowerCase();
+                    const digits = (v)=>String(v==null?'':v).replace(/\D/g,'');
+                    const unlinkedObjs = users.filter(u=>u && String(u.role||'').toLowerCase()==='student').filter(u=>{ const candidates=[u.studentId,u.username,u.admissionNumber,u.phone,u.email].filter(Boolean).map(sid); return candidates.length && !candidates.some(c=>studentKeySet.has(c)); });
+                    const proposedRelinks = [];
+                    const stillManual = [];
+                    for (const u of unlinkedObjs) {
+                        const matches = [];
+                        const addMatch = (st, by) => { if (st && !matches.find(m=>String(m.st.id)===String(st.id))) matches.push({ st, by }); };
+                        const uname = sid(u.username); const uadm = sid(u.admissionNumber); const uemail = norm(u.email); const uphone = digits(u.phone);
+                        if (uname) students.forEach(st => { if (sid(st.admissionNumber)===uname || sid(st.id)===uname) addMatch(st,'username==admission/id'); });
+                        if (uadm) students.forEach(st => { if (sid(st.admissionNumber)===uadm || sid(st.id)===uadm) addMatch(st,'admissionNumber'); });
+                        if (uemail && uemail.includes('@')) { const em = students.filter(st => norm(st.email)===uemail); if (em.length===1) addMatch(em[0],'unique email'); }
+                        if (uphone && uphone.length >= 9) { const ph = students.filter(st => { const d=digits(st.phone); return d && (d===uphone || d.slice(-9)===uphone.slice(-9)); }); if (ph.length===1) addMatch(ph[0],'unique phone'); }
+                        if (matches.length === 1) {
+                            const st = matches[0].st;
+                            proposedRelinks.push({ userId: sid(u.id), username: uname.slice(0,80), matchedStudentId: sid(st.id), matchedAdmission: sid(st.admissionNumber), matchedName: sid(st.name||st.fullName||'').slice(0,80), matchedBy: matches[0].by });
+                        } else {
+                            stillManual.push({ username: uname.slice(0,80), userId: sid(u.id).slice(0,80), reason: matches.length > 1 ? 'ambiguous: multiple possible students' : 'no unambiguous match found', tried: [uname,uadm,uemail?'<email>':'',uphone?'<phone>':''].filter(Boolean).slice(0,4) });
+                        }
+                    }
+                    // replace stale pending unlinked-user review proposals from prior cycles
+                    try { const stq=_maiGetState(); stq.pendingRepairs=(Array.isArray(stq.pendingRepairs)?stq.pendingRepairs:[]).filter(p=>!(p&&p.status==='pending'&&(p.type==='review_unlinked_student_users'||p.type==='relink_unlinked_student_users'))); } catch(e){}
+                    if (proposedRelinks.length > 0) {
+                        proposals.push({
+                            type: 'relink_unlinked_student_users',
+                            area: 'linkages',
+                            severity: 'low',
+                            title: `Relink ${proposedRelinks.length} student account(s) to unambiguous student records`,
+                            description: 'Links student user accounts to uniquely matched student records (by username/admission, or unique email/phone). Preview each mapping before approval. No passwords/roles changed.',
+                            reason: 'Deterministic unique match found; applying linkage restores account access to the correct student record.',
+                            confidence: 'high',
+                            safe: true,
+                            requiresApproval: true,
+                            affectedCount: proposedRelinks.length,
+                            affectedSamples: { proposedRelinks: proposedRelinks.slice(0,20) },
+                            action: { type: 'relink_unlinked_student_users', links: proposedRelinks }
+                        });
+                    }
+                    if (stillManual.length > 0) {
+                        proposals.push({
+                            type: 'review_unlinked_student_users',
+                            area: 'linkages',
+                            severity: 'low',
+                            title: `Review ${stillManual.length} unlinked student account(s) (no unambiguous match)`,
+                            description: 'Student login accounts could not be uniquely matched to student records. Review usernames/admission numbers or use Repair Records. Accounts are not auto-modified.',
+                            reason: 'No unique deterministic match found; manual identity verification is required.',
+                            confidence: 'medium',
+                            safe: false,
+                            requiresApproval: true,
+                            affectedCount: stillManual.length,
+                            affectedSamples: { unlinkedStudentUsers: stillManual.slice(0,12) },
+                            action: { type: 'manual_review', target: 'student_users' }
+                        });
+                    }
+                }
+                if (proposals.length) {
+                    const cycleRef = 'cycle-' + _maiIso();
+                    _maiQueueRepairs(state, proposals, cycleRef);
+                    if (proposals.some(p=>p.status==='pending')) recommendations.push(`Maintenance AI created ${proposals.filter(p=>p.status==='pending').length} repair proposal(s) awaiting admin approval in Settings → Maintenance AI → Repair Proposals.`);
+                }
+            } catch(e) { /* proposal generation must not fail the cycle */ }
+
+            _maiRollBaseline(baselines,'orphanLinkages', issueTotal);
+        } catch(e) { _maiPushFinding(findings,'info','linkages','Linkage check failed safely.',{error:String(e&&e.message||e)}); }
+        await _maiYield();
+
+        // --- Speed/DB size signals (lightweight, no load tests) ---
+        try {
+            const t0 = _maiNow();
+            // lightweight in-memory probes only
+            const counts = {};
+            ['users','students','courses','exams','quizzes','submissions','grades','enrollments','audit','messages'].forEach(k=>{ try { counts[k]=Array.isArray(db[k])?db[k].length:0; } catch(e){} });
+            metrics.dbCounts = counts;
+            metrics.probeMs = _maiNow()-t0;
+            if ((counts.audit||0) > 50000) recommendations.push('Performance/storage: audit log is large; consider archival/rotation policy if growth continues (no business data deleted).');
+            if ((counts.submissions||0) > 50000 || (counts.messages||0) > 50000) { riskScore += 4; recommendations.push('Performance: large data collections detected; monitor query/backup performance and consider indexing/archival strategies.'); }
+            _maiRollBaseline(baselines,'probeMs', metrics.probeMs);
+        } catch(e) { _maiPushFinding(findings,'info','speed','Speed/size check failed safely.',{error:String(e&&e.message||e)}); }
+
+        // --- Final recommendations / run-sooner decision ---
+        const baselineCycles = _maiNum(state.cycles, 0);
+        const prevRisk = _maiNum(state.lastRiskScore, 0);
+        riskScore = Math.max(0, Math.min(100, Math.round(riskScore)));
+        const riskDelta = riskScore - prevRisk;
+        let runSooner = null;
+        if (riskScore >= 60) { runSooner = { recommended:true, urgency:'high', reason:'Risk score is high; run the next maintenance cycle sooner and review findings.' }; recommendations.push('Scheduling: run maintenance sooner than planned (high risk signals).'); }
+        else if (riskScore >= 35 || riskDelta >= 20) { runSooner = { recommended:true, urgency:'medium', reason:'Risk increased or moderate issues detected; consider an earlier maintenance window.' }; recommendations.push('Scheduling: consider running maintenance earlier than planned.'); }
+        else { runSooner = { recommended:false, urgency:'low', reason:'No strong trend indicates earlier maintenance is needed.' }; }
+
+        // Learning state update (baselines/history)
+        state.cycles = baselineCycles + 1;
+        state.updatedAt = _maiIso();
+        state.lastRunAt = state.updatedAt;
+        state.lastTrigger = trigger;
+        state.lastRiskScore = riskScore;
+        state.lastRunSooner = runSooner;
+        state.baselines = baselines;
+        // keep small history
+        state.history = Array.isArray(state.history) ? state.history : [];
+        state.history.push({ at: state.updatedAt, trigger, riskScore, findings: findings.length, cleaned: cleaned.expiredSessions||0 });
+        if (state.history.length > 60) state.history = state.history.slice(-60);
+
+        const prevReportCount = Array.isArray(db.maintenanceReports) ? db.maintenanceReports.length : 0;
+        if (prevReportCount > 0) cleaned.previousReportsCompacted = prevReportCount; // older reports' key signals are already in AI baselines/history
+        const report = {
+            id: 'MAI-' + Date.now() + '-' + Math.random().toString(36).slice(2,7),
+            createdAt: state.updatedAt,
+            trigger,
+            durationMs: _maiNow() - started,
+            status: 'completed',
+            config: { autoEnabled: _maiEnabledForAuto(), timeBudgetMs: MAI_TIME_BUDGET_MS, scanCap: MAI_SCAN_CAP },
+            summary: { riskScore, previousRiskScore: prevRisk, findings: findings.length, recommendations: recommendations.length, runSooner },
+            metrics,
+            cleaned,
+            findings,
+            recommendations,
+            learning: { cycle: state.cycles, baselineKeys: Object.keys(baselines||{}).slice(0,30), retainedHistory: (state.history||[]).length }
+        };
+        // Keep only the latest full report for admin review; older cycle data is retained in AI state (baselines/history).
+        db.maintenanceReports = [report];
+        try { if (typeof saveDB === 'function') saveDB(); } catch(e){ try { if (typeof broadcastEvent === 'function') broadcastEvent('db-change', { store:'maintenanceReports' }); } catch(e2){} }
+        try { if (typeof auditLog === 'function') auditLog('maintenance-ai-cycle', 'maintenanceReports', { id: report.id, trigger, riskScore, findings: findings.length, compacted: prevReportCount }, opts.user || 'system'); } catch(e){}
+        return { ok:true, report };
+    } catch (e) {
+        const err = { ok:false, error: String(e && e.message || e) };
+        try { _maiEnsureStores(); db.maintenanceReports.push({ id:'MAI-ERR-'+Date.now(), createdAt:_maiIso(), trigger, status:'error', error: err.error, findings, recommendations, metrics }); if (typeof saveDB==='function') saveDB(); } catch(e2){}
+        return err;
+    } finally {
+        _maiRunning = false;
+    }
+}
+
+async function _maiMaybeRunScheduled() {
+    try {
+        if (_maiRunning) return;
+        const v = getMaintenanceSetting();
+        if (!_maiIsInScheduledWindow(v)) return;
+        if (!_maiEnabledForAuto()) return;
+        const key = _maiWindowKey(v);
+        if (!key || key === _maiLastScheduledWindowKey) return;
+        // Ensure we run once per scheduled window
+        _maiLastScheduledWindowKey = key;
+        setImmediate(() => { runMaintenanceAICycle({ trigger: 'scheduled' }).catch(()=>{}); });
+    } catch(e){}
+}
+// Cheap scheduler: checks every 60s; no heavy work on tick.
+try { if (!global.__maiScheduler) { global.__maiScheduler = setInterval(_maiMaybeRunScheduled, 60000); } } catch(e){ try { setInterval(_maiMaybeRunScheduled, 60000); } catch(e2){} }
+
+
 function parseCookies(req) {
     const out = {};
     const header = req.headers['cookie'] || '';
@@ -4396,6 +5235,12 @@ function handleAPI(req, res) {
 
     if (parts[0] !== 'api') return false;
 
+    // Cap CPU/disk/external-cost endpoints before any route work is done.
+    // The limiter is keyed by session user, or by IP for public endpoints.
+    if (parts[1] && EXPENSIVE_API_LIMITS[parts[1]] && expensiveApiBlocked(req, parts[1])) {
+        return json(res, 429, { error: 'Too many requests. Please slow down and try again shortly.' });
+    }
+
     // GET /api/health
     if (parts.length === 2 && parts[1] === 'health') {
         const s = db.mpesaSettings || {};
@@ -4474,6 +5319,120 @@ function handleAPI(req, res) {
             if (idx >= 0) sseClients.splice(idx, 1);
         });
         return true;
+    }
+
+    // Maintenance AI (admin only): reports, state, config, manual run, repair proposals
+    if (parts[1] === 'maintenance' && (parts[2] === 'reports' || parts[2] === 'ai-state' || parts[2] === 'run-check' || parts[2] === 'ai-config' || parts[2] === 'repairs')) {
+        try { console.log('[MAI] hit', req.method, path, 'parts2=', parts[2], 'ct=', req.headers['content-type']||''); } catch(e){}
+        if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
+        try {
+            const maiUser = getRequestUser(req);
+            if (!maiUser || (maiUser.role !== 'admin' && maiUser.role !== 'owner')) { try{console.log('[MAI] 403', maiUser&&maiUser.role, maiUser&&maiUser.username);}catch(e){} return json(res, 403, { error: 'Admin access required', _mai:'v2' }); }
+            if (req.method === 'GET' && parts[2] === 'reports') {
+                _maiEnsureStores();
+                const limit = Math.max(1, Math.min(50, parseInt(urlObj.searchParams.get('limit')||'20', 10) || 20));
+                const full = urlObj.searchParams.get('full') === '1' && urlObj.searchParams.get('id');
+                if (full) {
+                    const r = (db.maintenanceReports||[]).find(x=>x && String(x.id)===String(urlObj.searchParams.get('id')));
+                    return json(res, 200, r || null);
+                }
+                const list = (db.maintenanceReports||[]).slice(-limit).reverse().map(r=>({
+                    id:r.id, createdAt:r.createdAt, trigger:r.trigger, status:r.status, durationMs:r.durationMs,
+                    summary:r.summary, findingsCount:(r.findings||[]).length, recommendationsCount:(r.recommendations||[]).length, cleaned:r.cleaned
+                }));
+                return json(res, 200, { reports: list, autoEnabled: _maiEnabledForAuto(), running: !!_maiRunning });
+            }
+            if (req.method === 'GET' && parts[2] === 'ai-state') {
+                const st = _maiGetState();
+                return json(res, 200, { autoEnabled: _maiEnabledForAuto(), running: !!_maiRunning, state: { cycles:st.cycles, updatedAt:st.updatedAt, lastRunAt:st.lastRunAt, lastTrigger:st.lastTrigger, lastRiskScore:st.lastRiskScore, lastRunSooner:st.lastRunSooner, history:(st.history||[]).slice(-20), baselines: st.baselines } });
+            }
+            if (req.method === 'POST' && parts[2] === 'run-check') {
+                // manual run allowed for admin even if auto disabled
+                if (_maiRunning) return json(res, 409, { error: 'Maintenance AI cycle is already running' });
+                const userName = (maiUser && maiUser.username) || 'admin';
+                setImmediate(() => { Promise.resolve(runMaintenanceAICycle({ trigger:'manual', user: userName })).catch(()=>{}); });
+                return json(res, 202, { ok:true, started:true, message:'Maintenance AI cycle started' });
+            }
+            if (req.method === 'POST' && parts[2] === 'ai-config') {
+                const qEnabled = urlObj.searchParams.get('enabled');
+                const applyConfig = (enabledVal) => {
+                    const enabled = !(enabledVal === false || enabledVal === 'false' || enabledVal === 0 || enabledVal === '0');
+                    if (!Array.isArray(db.settings)) db.settings = [];
+                    let rec = db.settings.find(s=>s && s.key==='maintenanceAI');
+                    const value = { enabled };
+                    if (rec) { rec.value = value; rec.updatedAt = _maiIso(); rec.updatedBy = maiUser.username; }
+                    else db.settings.push({ key:'maintenanceAI', value, updatedAt:_maiIso(), updatedBy: maiUser.username });
+                    try { if (typeof saveDB === 'function') saveDB(); } catch(e){}
+                    try { if (typeof auditLog === 'function') auditLog('maintenance-ai-config', 'settings', { enabled }, maiUser.username); } catch(e){}
+                    return json(res, 200, { ok:true, enabled });
+                };
+                // If body stream is already consumed/ended, use query fallback
+                if (req.readableEnded) {
+                    if (qEnabled != null) return applyConfig(qEnabled);
+                    return json(res, 400, { error: 'Missing config body', hint: 'Send JSON {"enabled":true|false} or ?enabled=1|0' });
+                }
+                let body = '';
+                let done = false;
+                const finish = () => {
+                    if (done) return; done = true;
+                    try {
+                        let parsed = {};
+                        const raw = String(body || '').trim();
+                        if (raw) {
+                            try { parsed = JSON.parse(raw); } catch(e) { if (qEnabled != null) return applyConfig(qEnabled); return json(res, 400, { error: 'Invalid JSON body' }); }
+                        } else if (qEnabled != null) {
+                            return applyConfig(qEnabled);
+                        }
+                        if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'enabled')) return applyConfig(parsed.enabled);
+                        if (qEnabled != null) return applyConfig(qEnabled);
+                        return applyConfig(true);
+                    } catch(e) { return json(res, 400, { error: 'Could not save config', detail: String(e && e.message || e) }); }
+                };
+                req.on('data', c => { body += (typeof c === 'string' ? c : c.toString('utf8')); if (body.length > 20000) { try { req.destroy(); } catch(e){} } });
+                req.on('end', finish);
+                req.on('error', () => { if (qEnabled != null) return applyConfig(qEnabled); return json(res, 400, { error: 'Invalid request body' }); });
+                // fallback for edge cases where end doesn't fire
+                setTimeout(() => { if (!done) finish(); }, 1500);
+                return true;
+            }
+            if (parts[2] === 'repairs') {
+                const st = _maiGetState();
+                const repairs = Array.isArray(st.pendingRepairs) ? st.pendingRepairs : [];
+                if (req.method === 'GET') {
+                    const status = urlObj.searchParams.get('status') || 'pending';
+                    const list = (status === 'all' ? repairs : repairs.filter(r=>r && (status==='history' ? r.status!=='pending' : r.status===status))).slice().reverse().slice(0, 60);
+                    return json(res, 200, { repairs: list, learning: st.repairLearning || {}, pendingCount: repairs.filter(r=>r&&r.status==='pending').length });
+                }
+                if (req.method === 'POST') {
+                    const id = parts[3] ? String(parts[3]) : (urlObj.searchParams.get('id')||'');
+                    const act = parts[4] || urlObj.searchParams.get('action') || '';
+                    if (!id) return json(res, 400, { error: 'Repair id required' });
+                    const proposal = repairs.find(r=>r && String(r.id)===String(id));
+                    if (!proposal) return json(res, 404, { error: 'Repair proposal not found' });
+                    if (act === 'reject') {
+                        if (proposal.status !== 'pending') return json(res, 409, { error: 'Repair is not pending' });
+                        proposal.status = 'rejected'; proposal.rejectedBy = maiUser.username; proposal.rejectedAt = _maiIso();
+                        _maiLearnRepair(st, proposal.type, 'rejected');
+                        try { if (typeof saveDB==='function') saveDB(); } catch(e){}
+                        try { if (typeof auditLog==='function') auditLog('maintenance-ai-repair-rejected','maintenance',{id:proposal.id,type:proposal.type,by:maiUser.username},maiUser.username); } catch(e){}
+                        return json(res, 200, { ok:true, proposal });
+                    }
+                    if (act === 'approve' || act === 'apply') {
+                        if (proposal.status !== 'pending') return json(res, 409, { error: 'Repair is not pending' });
+                        if (proposal.action && proposal.action.type === 'manual_review') return json(res, 400, { error: 'This item requires manual review, not automatic application.' });
+                        const applied = _maiApplyRepair(proposal, maiUser);
+                        if (!applied.ok) { proposal.status = 'failed'; proposal.error = applied.error; _maiLearnRepair(st, proposal.type, 'failed'); try{if(typeof saveDB==='function')saveDB();}catch(e){} return json(res, 400, applied); }
+                        _maiLearnRepair(st, proposal.type, 'applied');
+                        try { if (typeof saveDB==='function') saveDB(); } catch(e){}
+                        return json(res, 200, { ok:true, applied, proposal });
+                    }
+                    return json(res, 400, { error: 'Unknown repair action (use approve/apply or reject)' });
+                }
+            }
+            return json(res, 405, { error: 'Method not allowed' });
+        } catch (e) {
+            return json(res, 500, { error: 'Maintenance AI endpoint error', detail: String(e && e.message || e) });
+        }
     }
 
     // GET /api/maintenance-status — public maintenance flag (login screen polling/SSE fallback)
@@ -4856,6 +5815,111 @@ function handleAPI(req, res) {
         return true;
     }
 
+    // POST /api/admin/align-student — repair/link a student's records (admin/owner only)
+    if (parts.length === 3 && parts[1] === 'admin' && parts[2] === 'align-student' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!authUser || authUser.role !== 'admin') return json(res, 403, { error: 'Administrator access required' });
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body || '{}');
+                const admissionNumber = String(parsed.admissionNumber || '').trim();
+                const canonicalStudentId = String(parsed.canonicalStudentId || '').trim();
+                const courseIds = Array.isArray(parsed.courseIds) ? parsed.courseIds.map(String) : [];
+                const linkUsername = String(parsed.linkUsername || '').trim();
+                if (!admissionNumber && !canonicalStudentId) return json(res, 400, { error: 'admissionNumber or canonicalStudentId is required' });
+
+                const students = db.students || [];
+                const users = db.users || [];
+                const enrollments = db.enrollments || [];
+                const norm = (v) => String(v || '').trim().toLowerCase();
+                let student = null;
+                if (canonicalStudentId) student = students.find(s => String(s.id) === canonicalStudentId);
+                if (!student && admissionNumber) student = students.find(s => norm(s.admissionNumber) === norm(admissionNumber) || String(s.admissionNumber || '') === admissionNumber);
+                if (!student) return json(res, 404, { error: 'Student record not found' });
+                const canonicalId = String(student.id);
+                const adm = String(student.admissionNumber || admissionNumber || '');
+
+                // Collect identifiers that belong to this student
+                const idSet = new Set([canonicalId]);
+                if (adm) idSet.add(adm);
+                for (const u of users) {
+                    if (u && (String(u.studentId) === canonicalId || String((u.user && u.user.studentId) || '') === canonicalId || norm(u.username) === norm(adm) || (linkUsername && norm(u.username) === norm(linkUsername)))) {
+                        if (u.studentId) idSet.add(String(u.studentId));
+                        if (u.user && u.user.studentId) idSet.add(String(u.user.studentId));
+                        if (u.username) idSet.add(String(u.username));
+                    }
+                }
+
+                // Link user account(s) to canonical student
+                let usersLinked = 0;
+                for (const u of users) {
+                    if (!u) continue;
+                    const matches = String(u.studentId) === canonicalId
+                        || String((u.user && u.user.studentId) || '') === canonicalId
+                        || (adm && norm(u.username) === norm(adm))
+                        || (student.phone && String(u.username) === String(student.phone))
+                        || (student.email && norm(u.username) === norm(student.email))
+                        || (linkUsername && norm(u.username) === norm(linkUsername));
+                    if (matches) {
+                        let changed = false;
+                        if (String(u.studentId || '') !== canonicalId) { u.studentId = canonicalId; changed = true; }
+                        if (u.user && typeof u.user === 'object' && String(u.user.studentId || '') !== canonicalId) { u.user.studentId = canonicalId; changed = true; }
+                        if (u.role === 'student' && !u.name && student.name) { u.name = student.name; changed = true; }
+                        if (changed) usersLinked++;
+                    }
+                }
+
+                // Normalize enrollments: reassign any enrollment belonging to this student's IDs to canonical ID
+                let enrollmentsUpdated = 0;
+                for (const e of enrollments) {
+                    if (!e) continue;
+                    if (idSet.has(String(e.studentId))) {
+                        if (String(e.studentId) !== canonicalId) { e.studentId = canonicalId; enrollmentsUpdated++; }
+                    }
+                }
+
+                // Ensure enrollments exist for specified courses
+                let enrollmentsCreated = 0;
+                for (const cid of courseIds) {
+                    if (!cid) continue;
+                    const exists = enrollments.some(e => e && String(e.studentId) === canonicalId && String(e.courseId) === String(cid));
+                    if (!exists) {
+                        const rec = { id: `ENR-${canonicalId}-${cid}-${Date.now()}`, studentId: canonicalId, courseId: String(cid), enrolledAt: new Date().toISOString(), status: 'active', alignedByRepair: true };
+                        db.enrollments.push(rec);
+                        enrollmentsCreated++;
+                    }
+                }
+
+                // Also normalize grades/submissions references? (helps transcript/visibility in some paths)
+                let gradesUpdated = 0;
+                for (const g of (db.grades || [])) {
+                    if (g && idSet.has(String(g.studentId)) && String(g.studentId) !== canonicalId) { g.studentId = canonicalId; gradesUpdated++; }
+                }
+                let submissionsUpdated = 0;
+                for (const s of (db.submissions || [])) {
+                    if (s && idSet.has(String(s.studentId)) && String(s.studentId) !== canonicalId) { s.studentId = canonicalId; submissionsUpdated++; }
+                }
+
+                const touchedStores = new Set();
+                if (usersLinked) touchedStores.add('users');
+                if (enrollmentsUpdated || enrollmentsCreated) touchedStores.add('enrollments');
+                if (gradesUpdated) touchedStores.add('grades');
+                if (submissionsUpdated) touchedStores.add('submissions');
+                if (touchedStores.size) {
+                    broadcastEvent('db-change', { stores: Array.from(touchedStores) });
+                    saveDB();
+                }
+                auditLog('aligned', 'student-records', { canonicalStudentId: canonicalId, admissionNumber: adm, usersLinked, enrollmentsUpdated, enrollmentsCreated, gradesUpdated, submissionsUpdated, courseIds }, authUser.username);
+                return json(res, 200, { ok: true, canonicalStudentId: canonicalId, admissionNumber: adm, studentName: student.name, usersLinked, enrollmentsUpdated, enrollmentsCreated, gradesUpdated, submissionsUpdated });
+            } catch (e) {
+                return json(res, 500, { error: e.message || 'Repair failed' });
+            }
+        });
+        return true;
+    }
+
     // GET /api/backup â€” download full database JSON (admin only)
     if (parts.length === 2 && parts[1] === 'backup') {
         if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
@@ -5169,6 +6233,7 @@ ${verified ? `<a class="btn sec" href="/#verify">✓ Verify this document</a>` :
                     return json(res, 429, { error: 'Too many failed attempts. Please try again in 15 minutes.' });
                 }
 let { input, password, country } = JSON.parse(body);
+                if (country === undefined || country === null || country === 'undefined' || country === 'null') country = '';
                 process.stderr.write('LOGIN_TRY input=' + String(input).slice(0, 40) + ' country=' + String(country).slice(0, 20) + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n');
                 if (!input || !password) return json(res, 400, { error: 'Enter username and password' });
                 if (loginRateBlocked(req, input)) {
@@ -7153,11 +8218,29 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                     sid = String(parsed.studentId);
                 }
                 if (!sid) return json(res, 400, { error: 'Student not identified' });
+                // A student cannot use the drip engine to read or advance a
+                // lesson in a course the sequence gate has locked. Staff are
+                // unaffected (they may preview/manage any course).
+                if (user.role === 'student') {
+                    let gateCourseId = parsed.courseId ? String(parsed.courseId) : '';
+                    if (!gateCourseId && parsed.lessonId) {
+                        const gl = (db.lessons || []).find(l => l && String(l.id) === String(parsed.lessonId));
+                        gateCourseId = gl ? String(gl.courseId || '') : '';
+                    }
+                    if (gateCourseId) {
+                        const gateSid = serverStudentId(user) || sid;
+                        const gateAccess = courseGate.courseAccess(db, gateSid, gateCourseId);
+                        if (!gateAccess.ok) {
+                            return json(res, 403, { error: courseGate.lockedMessage(gateAccess), code: 'course_locked' });
+                        }
+                    }
+                }
                 db.lessonUnlocks = db.lessonUnlocks || [];
                 db.lessonCompletions = db.lessonCompletions || [];
                 const E = dripEngine;
                 const persist = (stores) => {
                     (Array.isArray(stores) ? stores : [stores]).forEach(s => { try { broadcastEvent('db-change', { store: s }); } catch (e) {} });
+                    courseGate.invalidate();
                     saveDB();
                 };
                 let result = { ok: true, action };
@@ -7491,10 +8574,15 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
         const user = getRequestUser(req);
         const names = (urlObj.searchParams.get('stores') || '').split(',').filter(Boolean);
         const result = {};
+        let gateLookup = null;
         for (const name of names) {
             if (!db[name]) db[name] = [];
             if (!canAccessStore(user, name, 'GET')) { result[name] = []; continue; }
             let rows = filterStoreForUser(user, name, db[name]);
+            if (user && user.role === 'student' && COURSE_GATED_READ_STORES.has(name)) {
+                if (!gateLookup) gateLookup = courseGateLookup();
+                rows = filterCourseLockedRows(user, name, rows, gateLookup);
+            }
             const previewB = (user && user.role === 'admin') ? (urlObj.searchParams.get('preview') || '') : '';
             if (previewB) {
                 try { console.log('[preview] admin ' + user.username + ' viewing as ' + previewB + ' store=' + name); } catch {}
@@ -7508,6 +8596,9 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
             if (name === 'settings') rows = rows.map(injectSettingsBlobs);
             if (name === 'settings' && (!user || user.role !== 'admin')) {
                 rows = rows.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
+            }
+            if (name === 'settings' && user && user.role === 'student') {
+                rows = studentSettingsView(user, rows);
             }
             // Anonymous callers only ever see the public slice of these stores.
             if (!user) {
@@ -7569,12 +8660,28 @@ return json(res, 200, result);
                         const alumniBatchErr = studentAlumniEnrollmentError(user, r, _exB);
                         if (alumniBatchErr) { result.errors.push({ error: alumniBatchErr }); continue; }
                     }
+                    const _gateB = courseGateWriteDenied(user, store, r);
+                    if (_gateB) { result.errors.push({ key: pk, error: _gateB, code: 'course_locked' }); continue; }
                     const idx = db[store].findIndex(x => x[keyPath] === pk);
                     if (idx >= 0) db[store][idx] = r;
                     else db[store].push(r);
+                    if (store === 'settings' && r && r.key === 'contentGate') {
+                        auditContentGateChange(_exB, r, user);
+                    } else if (MUTATION_AUDIT_STORES.has(store)) {
+                        try {
+                            auditLog(idx >= 0 ? 'update' : 'create', store,
+                                auditRecordSummary(store, r), (user && user.username) || 'anonymous');
+                        } catch (e) {}
+                    }
                     result.ok++;
                 }
-                if (result.ok) { broadcastEvent('db-change', { store }); saveDB(); }
+                if (result.ok) {
+                    if (COURSE_GATE_INVALIDATE_STORES.has(store)) courseGate.invalidate();
+                    if (store === 'students' || store === 'studyCenters' || store === 'regions') invalidateCountryIndex();
+                    if (store === 'settings') invalidateSettingsCache();
+                    broadcastEvent('db-change', { store });
+                    saveDB();
+                }
                 return json(res, 200, result);
             } catch (e) { return json(res, 400, { error: 'Invalid JSON' }); }
         });
@@ -7663,6 +8770,9 @@ const LIVE_PUSH_STORES = new Set([
 
 // Helper to save DB after mutations â€” broadcast FIRST so clients get instant notification
         function mutate(record, action) {
+            // The sequence gate caches per-student status for a few seconds.
+            // Drop it immediately on any write that can change the answer.
+            if (COURSE_GATE_INVALIDATE_STORES.has(store)) courseGate.invalidate();
             // Invalidate derived-country index whenever its inputs change so
             // new students/centers/regions are resolvable immediately.
             if (store === 'students' || store === 'studyCenters' || store === 'regions') {
@@ -7680,6 +8790,18 @@ const LIVE_PUSH_STORES = new Set([
                 }
             }
             if (record && record._cleared) record = null;            // whole-store clear: signal only
+            // Generic create/update audit for high-risk stores. Deletes have
+            // their own entry; contentGate/adminAccess have richer, dedicated
+            // entries and must not be duplicated here.
+            if (record && action !== 'delete' && MUTATION_AUDIT_STORES.has(store)) {
+                const skipDetailed = store === 'settings' && record.key && (record.key === 'contentGate' || record.key === 'adminAccess');
+                if (!skipDetailed) {
+                    try {
+                        auditLog(action === 'insert' ? 'create' : 'update', store,
+                            auditRecordSummary(store, record), (user && user.username) || 'anonymous');
+                    } catch (e) {}
+                }
+            }
             if (record && LIVE_PUSH_STORES.has(store)) {
                 broadcastStoreChange(store, record, action || (record._deleted ? 'delete' : 'upsert'));
             } else {
@@ -7715,6 +8837,11 @@ const LIVE_PUSH_STORES = new Set([
 
             // Students only see their own student/user records
             results = filterStoreForUser(user, store, results);
+            // Locked course material is hidden from students even if they call
+            // the API directly (the browser guard is only a convenience).
+            if (user && user.role === 'student' && COURSE_GATED_READ_STORES.has(store)) {
+                results = filterCourseLockedRows(user, store, results);
+            }
             // Overall-admin deep dive: ?preview=<country> re-scopes this read
             // exactly as that country's coordinator sees it. Admin only, read-only,
             // console-logged; it can only narrow, never widen.
@@ -7749,6 +8876,9 @@ const LIVE_PUSH_STORES = new Set([
             if (store === 'settings' && (!user || user.role !== 'admin')) {
                 results = results.map(r => (r && r.key === 'mpesa') ? { key: 'mpesa', payButtonEnabled: !!((r.value || r).payButtonEnabled) } : r);
             }
+            if (store === 'settings' && user && user.role === 'student') {
+                results = studentSettingsView(user, results);
+            }
             // Anonymous callers only ever see the public slice of these stores.
             if (!user) {
                 if (store === 'settings') results = publicSettingsView(results);
@@ -7780,6 +8910,10 @@ const LIVE_PUSH_STORES = new Set([
                 const filtered = filterStoreForUser(effUser, store, [item]);
                 item = filtered.length ? filtered[0] : null;
             }
+            // A single locked lesson/quiz/exam/note is not readable by a student
+            // even when the id was obtained from another screen.
+            const _gateRead = courseGateReadDenied(user, store, item);
+            if (_gateRead) return json(res, 403, { error: _gateRead, code: 'course_locked' });
             if (item && store === 'settings' && key === 'smsSettings' && (!user || user.role !== 'admin')) {
                 item = null;
             }
@@ -7809,6 +8943,13 @@ const LIVE_PUSH_STORES = new Set([
                     };
                     if (item.value && typeof item.value === 'object') item = Object.assign({}, item, { value: _stripLightBranding(item.value) });
                     else item = _stripLightBranding(item);
+                }
+                // Learners get a narrowed settings view: no credentials, no
+                // other students' overrides, no private branding assets.
+                if (item && store === 'settings' && user && user.role === 'student') {
+                    const visible = studentSettingsView(user, [item]);
+                    if (!visible.length) return json(res, 403, { error: 'Not permitted' });
+                    item = visible[0];
                 }
             }
             return json(res, 200, item);
@@ -7882,6 +9023,10 @@ const parsed = JSON.parse(body);
                     preserveDocIdentity(store, toStore, _exPut);
                     const _scPut = scopeWrite(user, store, toStore, _exPut);
                     if (_scPut) return json(res, 403, { error: _scPut });
+                    // A student cannot create/continue work in a course the
+                    // sequence gate (or an explicit override) has locked.
+                    const _gatePut = courseGateWriteDenied(user, store, toStore, null);
+                    if (_gatePut) return json(res, 403, { error: _gatePut, code: 'course_locked' });
                     // A student may only record a grade that the SERVER scored.
                     // The submitted answers are re-marked here against the answer
                     // key, so a tampered client cannot award itself marks.
@@ -8073,6 +9218,9 @@ const parsed = JSON.parse(body);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);
                     mutate(toStore, idx >= 0 ? 'update' : 'insert');
+                    if (store === 'settings' && toStore.key === 'contentGate') {
+                        auditContentGateChange(_exPut, toStore, user);
+                    }
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }
@@ -8165,6 +9313,8 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     if (exists) return json(res, 409, { error: `Record with ${keyPath}="${pk}" already exists` });
                     const _scAdd = scopeWrite(user, store, toStore, null);
                     if (_scAdd) return json(res, 403, { error: _scAdd });
+                    const _gateAdd = courseGateWriteDenied(user, store, toStore, null);
+                    if (_gateAdd) return json(res, 403, { error: _gateAdd, code: 'course_locked' });
                     preserveDocIdentity(store, toStore, null);
                     if (store === 'studyCenters') {
                         const _dupCode = studyCenterCodeConflict(toStore);
@@ -8208,6 +9358,9 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                         }
                     }
                     mutate(toStore, 'insert');
+                    if (store === 'settings' && toStore.key === 'contentGate') {
+                        auditContentGateChange(null, toStore, user);
+                    }
                     if (store === 'settings' && toStore.key === 'maintenance') {
                         try { broadcastMaintenance(!!((toStore.value || toStore).active)); } catch {}
                     }

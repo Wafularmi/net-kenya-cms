@@ -3,6 +3,9 @@ let _hubActiveTab = 'overview';
 let _hubModalOpen = false;
 let _hubRenderedTabs = {};
 
+// defensive: prevent ReferenceError from stale scopes
+var examRegIds = (typeof examRegIds!=='undefined'&&examRegIds)?examRegIds:new Set();
+
 function safeGetLocal(key, defaultValue) {
     try {
         const val = localStorage.getItem(key);
@@ -206,6 +209,11 @@ async function hubContentGate() {
     return _hubContentGateCache;
 }
 // Returns { gated, allowed:Set(courseIds), locked:Set(enrolled locked ids), statuses }
+// Enforces transcript/program-order course sequence: a course is accessible only after
+// previous courses are completed (combination via studentCourseStatuses/isCourseCovered),
+// or when admin/owner applies a manual per-student course override (unlocked). Drip-per-
+// lesson rules still apply within an unlocked course. Current students are enforced unless
+// an explicit override is already applied.
 async function hubCourseAccess(me, data) {
     const openAll = () => ({ gated: false, allowed: new Set((data.courses || []).map(c => c.id)), locked: new Set(), statuses: {} });
     if (!me || !data) return openAll();
@@ -223,20 +231,17 @@ async function hubCourseAccess(me, data) {
     if (!gate || typeof gate !== 'object') return openAll();
     try {
         if (!_hubCenterRegionCache) {
-            const centers = await dbGetAll('studyCenters');
+            const centers = await dbGetAll('studyCenters').catch(()=>[]);
             _hubCenterRegionCache = {};
             (centers || []).forEach(c => { if (c && c.id) _hubCenterRegionCache[c.id] = c.regionId || ''; });
         }
     } catch {}
-    // Precedence: per-student override > study center > region > global.
-    // Locks map values: 'locked' | 'unlocked' (absent = auto-follow sequence).
-    // Legacy unlocked[] arrays are migrated on the fly.
     const migrateLocks = (o) => {
         const m = { ...((o && o.locks) || {}) };
         ((o && o.unlocked) || []).forEach(id => { if (!m[id]) m[id] = 'unlocked'; });
         return m;
     };
-    const sOv = (gate.students && gate.students[me.id]) || null;
+    const sOv = gate && gate.students ? (gate.students[me.id] || null) : null;
     if (sOv && sOv.exempt) return openAll();
     const studentLocks = migrateLocks(sOv);
     let eff = { enabled: !!gate.enabled, locks: migrateLocks(gate) };
@@ -254,13 +259,22 @@ async function hubCourseAccess(me, data) {
             }
         }
     }
-    if (!eff.enabled && !Object.keys(studentLocks).length) return openAll();
-    eff = { enabled: true, locks: { ...eff.locks } };
+    eff = { enabled: !!eff.enabled, locks: { ...eff.locks } };
     Object.entries(studentLocks).forEach(([cid, st]) => { eff.locks[cid] = st; });
-    if (!data.grades || !data.submissions) {
-        try { await _hubLoadTabData('overview'); } catch {}
+    // Respect the master/scope switch. The previous code forced enabled=true,
+    // which enforced the sequence even when Content Gating was turned OFF in
+    // Admin Settings. The server now honours the switch too.
+    if (!eff.enabled) {
+        const open = openAll();
+        window._hubCourseAccess = open;
+        return open;
     }
-    const statuses = (typeof studentCourseStatuses === 'function') ? studentCourseStatuses(me.id, data.courses || [], data) : {};
+    // Ensure data needed for completion/sequence (combination)
+    if (!data.grades || !data.submissions || !data.lessonCompletions || !data.courseCompletions) {
+        try { await _hubLoadTabData('overview'); await dbGetBatch(['courseCompletions','lessonCompletions','submissions','grades']).then(x=>Object.assign(studentHubCache||{},x,data)); } catch {}
+    }
+    const dataForStatus = Object.assign({}, data, studentHubCache || {});
+    const statuses = (typeof studentCourseStatuses === 'function') ? studentCourseStatuses(me.id, dataForStatus.courses || [], dataForStatus) : {};
     const locks = eff.locks || {};
     const allowed = new Set();
     const locked = new Set();
@@ -268,11 +282,15 @@ async function hubCourseAccess(me, data) {
     const enrolledIds = new Set((data.enrollments || []).filter(e => String(e.studentId) === String(me.id)).map(e => e.courseId));
     (data.courses || []).forEach(c => {
         const st = statuses[c.id] || 'current';
-        const lockState = locks[c.id] || 'auto';
+        const lockState = locks[c.id] || 'auto'; // course override (admin/owner): unlocked/locked/auto
         if (st === 'covered') { allowed.add(c.id); return; }
+        if (lockState === 'unlocked') { allowed.add(c.id); return; } // manual override; drip-per-lesson still applies within
         if (lockState === 'locked') { if (enrolledIds.has(c.id)) { locked.add(c.id); reasons[c.id] = 'manual'; } return; }
-        if (st === 'current' || lockState === 'unlocked') { allowed.add(c.id); return; }
+        // Sequence enforcement (transcript order): only accessible if previous completed => status current.
+        // No access to first/any lesson until course is accessible (current/covered) or overridden.
+        if (st === 'current') { allowed.add(c.id); return; }
         if (enrolledIds.has(c.id)) { locked.add(c.id); reasons[c.id] = 'sequence'; }
+        else { allowed.add(c.id); } // not enrolled: catalog visibility handled elsewhere
     });
     const res = { gated: true, allowed, locked, reasons, statuses };
     window._hubCourseAccess = res;
@@ -594,46 +612,63 @@ function _hubBuildComputed(data, me) {
         return true;
     });
     if (typeof sortCoursesByTranscriptOrder === 'function') availableCourses = sortCoursesByTranscriptOrder(availableCourses);
-    const examRegIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(String(r.studentId))).map(r => r.examId));
+    const myRegExamIds = new Set((data.examRegistrations || []).filter(r => allStudentIds.has(r.studentId)).map(r => String(r.examId))); var examRegIds = myRegExamIds;
+    const mySuppRelevantIds = new Set();
+    (data.retakeRequests || []).forEach(r => {
+        if (!allStudentIds.has(r.studentId) || r.status === 'rejected') return;
+        if (r.supplementaryExamId) mySuppRelevantIds.add(String(r.supplementaryExamId));
+        if (r.examId) mySuppRelevantIds.add(String(r.examId));
+    });
+    myRegExamIds.forEach(id => mySuppRelevantIds.add(id));
+    const approvedSuppIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'approved' && r.supplementaryExamId).map(r => String(r.supplementaryExamId)));
+    const mySubs = (data.submissions || []).filter(s => allStudentIds.has(s.studentId));
+    const hasExamInteraction = (e) => {
+        if (myRegExamIds.has(String(e.id))) return true;
+        const ids = [String(e.id), e.linkedQuizId ? String(e.linkedQuizId) : ''].filter(Boolean);
+        return mySubs.some(s => ids.includes(String(s.quizId)) || ids.includes(String(s.examId)));
+    };
     const allCourseExams = (data.exams || []).filter(e => {
         if (!e) return false;
-        if (e.published === false) return false;
-        const exType = String(e.type || e.assessmentType || '').toLowerCase();
-        if (exType === 'supplementary') {
-            const myRetakeReqs = (data.retakeRequests || []).filter(r => allStudentIds.has(String(r.studentId)));
-            const suppOk = myRetakeReqs.some(r => r.status === 'approved' && (String(r.supplementaryExamId) === String(e.id) || String(r.examId) === String(e.id)));
-            if (!suppOk) return false;
-            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-            if (!(e.openWindow || (e.date && e.time))) {
-                try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
-                return true;
-            }
-            return true;
+        if (!enrolledIds.has(e.courseId) && !myRegExamIds.has(String(e.id))) return false;
+        // Like Quizzes tab: keep cards/information even after exam is unpublished, if student has interaction.
+        if (e.published === false && !hasExamInteraction(e)) return false;
+        // All study centers (no exam center) => all enrolled students. Center-specific + mismatch
+        // requires owner/admin override (centerAccessOverrides) or existing registration.
+        if (e.studyCenterId && me.studyCenterId && e.studyCenterId !== me.studyCenterId) {
+            const ov = e.centerAccessOverrides || {};
+            const allowed = allStudentIds.some(id => ov[String(id)] === true) || myRegExamIds.has(String(e.id));
+            if (!allowed) return false;
         }
-        if (e.openWindow || (e.date && e.time)) {
-            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-            return true;
-        }
-        if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-        try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
+        if (e.type === 'supplementary') return myRegExamIds.has(String(e.id)) || mySuppRelevantIds.has(String(e.id));
         return true;
     });
-    const myRetakeRequestsAll = (data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId));
-    const approvedSuppIds = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.supplementaryExamId).map(r => String(r.supplementaryExamId)));
-    const hasApprovedSuppForExam = new Set(myRetakeRequestsAll.filter(r => r.status === 'approved' && r.examId).map(r => String(r.examId)));
-    const myRegisteredExams = allCourseExams.filter(e => {
-        if (!examRegIds.has(e.id)) return false;
-        const exType = String(e.type || e.assessmentType || '').toLowerCase();
-        if (exType === 'supplementary') {
-            return approvedSuppIds.has(String(e.id));
-        }
-        return true;
-    }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    // Keep cards/information for deleted exams (registrations/submissions remain)
+    const knownExamIds = new Set((data.exams || []).map(e => String(e.id)));
+    const placeholderExams = [];
+    (data.examRegistrations || []).filter(r => allStudentIds.has(r.studentId) && !knownExamIds.has(String(r.examId))).forEach(r => {
+        if (allCourseExams.some(e => String(e.id) === String(r.examId)) || placeholderExams.some(p => String(p.id) === String(r.examId))) return;
+        placeholderExams.push({ id: String(r.examId), courseId: '', title: 'Exam (record unavailable)', date: (r.registeredAt || '').slice(0,10), time: '', venue: '--', type: 'midterm', published: false, _deletedPlaceholder: true, openWindow: false, questionIds: [], passMark: 50 });
+    });
+    mySubs.forEach(s => {
+        const qid = String(s.quizId || s.examId || '');
+        if (!qid || knownExamIds.has(qid) || allCourseExams.some(e => String(e.id) === qid) || placeholderExams.some(p => String(p.id) === qid)) return;
+        if (/^EXM[-_]/i.test(qid) || myRegExamIds.has(qid)) placeholderExams.push({ id: qid, courseId: '', title: 'Exam (record unavailable)', date: (s.submittedAt || s.createdAt || '').slice(0,10) || '', time: '', venue: '--', type: 'midterm', published: false, _deletedPlaceholder: true, openWindow: false, questionIds: [], passMark: 50 });
+    });
+    const myRegisteredExams = allCourseExams.filter(e => myRegExamIds.has(String(e.id))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const today = new Date().toISOString().split('T')[0];
-    const _examOpen = e => { if (e && e.openWindow === true) return true; try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); return !w || !w.closed; } catch { return true; } };
-    const upcomingRegisteredExams = myRegisteredExams.filter(e => !e.date || e.date >= today || _examOpen(e));
-    const pastRegisteredExams = myRegisteredExams.filter(e => !!e.date && e.date < today && !_examOpen(e));
-    let availableExams = allCourseExams.filter(e => !examRegIds.has(e.id)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const _winOf = a => (typeof assessmentWindow === 'function' ? assessmentWindow(a) : { closesAt: '', closed: false, notYetOpen: false, opensAt: '' });
+    const _stillVisible = e => !_winOf(e).closed;
+    const _isCurrentOrUpcoming = e => {
+        if (!e) return false;
+        if (_stillVisible(e)) return true; // open window / not yet closed
+        if (!e.date) return true;
+        return String(e.date) >= today;
+    };
+    // Deleted/missing exam records: do not list under Exams, but keep grade/submission history.
+    const upcomingRegisteredExams = myRegisteredExams.filter(_isCurrentOrUpcoming);
+    const pastRegisteredExams = myRegisteredExams.filter(e => !_isCurrentOrUpcoming(e));
+    const _deletedTakenExamIds = new Set(placeholderExams.filter(function(p){ return mySubs.some(function(s){ var q=String(s.quizId||s.examId||''); return q===String(p.id); }) || myRegExamIds.has(String(p.id)); }).map(function(p){ return String(p.id); }));
+    const availableExams = allCourseExams.filter(e => !myRegExamIds.has(String(e.id))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const missedDroppedIds = new Set((data.retakeRequests || []).filter(r => allStudentIds.has(r.studentId) && r.status === 'dropped').map(r => r.examId));
     // Drip: courses with incomplete drip lessons hide upcoming exam registration until lessons complete.
     const dripIncompleteCourseIds = new Set();
@@ -705,28 +740,39 @@ function _hubBuildComputed(data, me) {
     const pendingQuizzes = activeQuizzes.filter(q => !submittedQuizIds.has(q.id));
     const completedQuizzes = activeQuizzes.filter(q => submittedQuizIds.has(q.id));
     const gradeKeys = new Set(allGrades.map(g => (g.quizId || '') + '|' + (g.examId || '')));
+    const _regExamIdsAll = new Set((data.examRegistrations||[]).filter(function(r){ return allStudentIds.has(r.studentId); }).map(function(r){ return String(r.examId); }));
+    const _isExamScore = function(exam, examId, quizId){
+        if (exam) return true;
+        var eid = String(examId||''), qid = String(quizId||'');
+        if (eid) return true;
+        if (qid && _regExamIdsAll.has(qid)) return true;
+        if (/^EXM[-_]/i.test(qid)) return true;
+        return false;
+    };
     const allScores = allGrades.map(g => {
-        const exam = g.examId ? (data.exams || []).find(e => e.id === g.examId) : null;
+        const exam = g.examId ? (data.exams || []).find(e => e.id === g.examId) : (g.quizId ? (data.exams||[]).find(e=>String(e.id)===String(g.quizId)) : null);
         const quiz = !exam ? (data.quizzes || []).find(q => q.id === g.quizId) : null;
         const obj = exam || quiz;
         const course = (data.courses || []).find(c => c.id === g.courseId);
         const sub = allSubs.find(s => s.quizId === g.quizId || (g.examId && s.examId === g.examId));
-        return { submission: sub || { score: g.score, grade: g.grade, submittedAt: g.gradedAt, pointsEarned: g.pointsEarned != null ? g.pointsEarned : sub?.pointsEarned, totalPoints: g.totalPoints != null ? g.totalPoints : sub?.totalPoints }, assessment: obj || { title: g.courseId, courseId: g.courseId, passMark: 50 }, course, grade: g, isExam: !!exam };
+        var isExam = _isExamScore(exam, g.examId, g.quizId);
+        return { submission: sub || { score: g.score, grade: g.grade, submittedAt: g.gradedAt, pointsEarned: g.pointsEarned != null ? g.pointsEarned : sub?.pointsEarned, totalPoints: g.totalPoints != null ? g.totalPoints : sub?.totalPoints }, assessment: obj || { title: (isExam ? ('Exam: ' + (g.examId||g.quizId||g.courseId)) : (g.courseId||g.quizId)), courseId: g.courseId, passMark: 50 }, course, grade: g, isExam: isExam };
     });
     allSubs.forEach(s => {
         const key = (s.quizId || '') + '|' + (s.examId || '');
         if (gradeKeys.has(key)) return;
-        const exam = s.examId ? (data.exams || []).find(e => e.id === s.examId) : null;
+        const exam = s.examId ? (data.exams || []).find(e => e.id === s.examId) : (s.quizId ? (data.exams||[]).find(e=>String(e.id)===String(s.quizId)) : null);
         const quiz = !exam ? (data.quizzes || []).find(q => q.id === s.quizId) : null;
         const obj = exam || quiz;
-        const course = (data.courses || []).find(c => c.id === (obj?.courseId || quiz?.courseId));
+        const course = (data.courses || []).find(c => c.id === (obj?.courseId || quiz?.courseId || s.courseId));
         const gradeEntry = allGrades.find(g => g.quizId === s.quizId || (s.examId && g.examId === s.examId));
+        var isExam = _isExamScore(exam, s.examId, s.quizId);
         allScores.push({
             submission: s,
-            assessment: obj || { title: s.quizId, courseId: s.quizId, passMark: 50 },
+            assessment: obj || { title: (isExam ? ('Exam: ' + (s.examId||s.quizId||'Record unavailable')) : (s.quizId||'Assessment')), courseId: obj?.courseId || s.courseId || '', passMark: 50 },
             course,
             grade: gradeEntry || { score: s.score, grade: s.grade, gpa: 0, gradedAt: s.submittedAt },
-            isExam: !!exam
+            isExam: isExam
         });
     });
     allScores.sort((a, b) => (b.submission?.submittedAt || b.grade?.gradedAt || '').localeCompare(a.submission?.submittedAt || a.grade?.gradedAt || ''));
@@ -748,8 +794,6 @@ function _hubBuildComputed(data, me) {
         }).map(e => ({ type: 'exam', id: e.id, title: e.title || 'Exam', courseId: e.courseId, courseName: _courseName(e.courseId), date: e.date || '' })),
         ...pendingQuizzes.map(q => ({ type: 'quiz', id: q.id, title: q.title, courseId: q.courseId, courseName: _courseName(q.courseId), date: q.dueDate || '' }))
     ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const _winOf = a => (typeof assessmentWindow === 'function' ? assessmentWindow(a) : { closesAt: '', closed: false, notYetOpen: false, opensAt: '' });
-    const _stillVisible = e => (e && e.openWindow === true) || !_winOf(e).closed;
     const _openExams = upcomingRegisteredExams.filter(_stillVisible).filter(e => {
         const exType = String(e.type || e.assessmentType || '').toLowerCase();
         if (exType === 'supplementary') return approvedSuppIds.has(String(e.id));
@@ -893,6 +937,7 @@ async function renderStudentHub(force) {
 
     if (!hasCache) content.innerHTML = _hubStartupShell(currentUser);
 
+    const _withTimeout = (p, ms, label) => Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error((label||'Loading')+' timed out after '+Math.round(ms/1000)+'s. Slow connection or server busy.')), ms))]);
     try {
         // Reactivated accounts must not reuse a stale cache from before reactivation.
         try {
@@ -1081,10 +1126,9 @@ async function renderStudentHub(force) {
             content.innerHTML = `
                 <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:24px;border-radius:12px;margin-bottom:16px;"><h2 style="margin:0 0 4px 0;">${me ? esc(me.name) : 'Student'}</h2><div style="font-size:13px;opacity:0.9;">${me ? esc(me.admissionNumber || '') : ''}</div></div>
                 <h3 style="color:var(--accent);margin-bottom:12px;">📝 Upcoming Exams</h3>
-                ${upcomingExams.length ? upcomingExams.map(e => { const course = courses.find(c => c.id === e.courseId); const r = examRegIds.has(e.id); return `<div class="card" style="margin-bottom:8px;border-left:4px solid ${r ? 'var(--success)' : 'var(--warning)'};"><div style="font-weight:700;">${esc(e.title || course?.code || 'Exam')}</div><div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${course ? esc(course.name) : ''} — ${formatDate(e.date)} ${esc(e.time || '')}</div><span class="badge badge-${r ? 'success' : 'warning'}" style="margin-top:4px;">${r ? '✓ Registered' : 'Not registered'}</span></div>`; }).join('') : '<div style="color:var(--text-muted);padding:20px;text-align:center;">No upcoming exams.</div>'}
-                <div style="text-align:center;margin-top:20px;"><a href="#" onclick="renderStudentHub();return false;" style="color:var(--accent);">Try full Hub →</a></div>`;
+                ${upcomingExams.length ? upcomingExams.map(e => { const course = courses.find(c => c.id === e.courseId); const r = examRegIds.has(e.id); return `<div class="card" style="margin-bottom:8px;border-left:4px solid ${r ? 'var(--success)' : 'var(--warning)'};"><div style="font-weight:700;">${esc(e.title || course?.code || 'Exam')}</div><div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${course ? esc(course.name) : ''} — ${formatDate(e.date)} ${esc(e.time || '')}</div><span class="badge badge-${r ? 'success' : 'warning'}" style="margin-top:4px;">${r ? '✓ Registered' : 'Not registered'}</span></div>`; }).join('') : '<div style="color:var(--text-muted);padding:20px;text-align:center;">No upcoming exams.</div>'}`;
         } catch (fbErr) {
-            content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger);">Error loading Student Hub. Please refresh the page.</div>';
+            content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger);"><h3 style="margin:0 0 8px 0;">Student Hub could not load</h3><div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">' + (typeof esc==='function'?esc(String(err&&err.message||err||'')):String(err&&err.message||err||'')) + '</div><button class="btn btn-primary btn-sm" onclick="invalidateStudentHubCache();renderStudentHub()">Retry</button></div>';
         }
     }
 }
@@ -1122,7 +1166,10 @@ async function switchHubTab(tab, btn) {
     }
     if (!_hubRenderedTabs[tab]) {
         let c = _hubComputed;
-        if (!c) return;
+        if (!c) {
+            try { const me = _hubGetMe(); if (me && studentHubCache) { c = _hubBuildComputed(studentHubCache, me); _hubComputed = c; _hubComputedCache = { computed: c, dataVersion: studentHubCache.loadedAt, meId: me.id }; } } catch(e){}
+        }
+        if (!c) { container.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;">Loading... <button class="btn btn-outline btn-sm" onclick="invalidateStudentHubCache();renderStudentHub()">Retry</button></div>'; _hubRenderedTabs[tab]=true; container.style.display='block'; return; }
         if (tab !== 'overview') await _hubLoadTabData(tab);
         if (tab !== 'overview' && studentHubCache && studentHubCache.loadedAt !== c.data?.loadedAt) {
             try {
@@ -1145,10 +1192,10 @@ async function switchHubTab(tab, btn) {
                     myNotes: (c.myNotes || []).filter(n => ok.has(n.courseId)),
                     pendingQuizzes: (c.pendingQuizzes || []).filter(q => ok.has(q.courseId)),
                     completedQuizzes: (c.completedQuizzes || []).filter(q => ok.has(q.courseId)),
-                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e)),
-                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e)),
-                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e)),
-                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e))
+                    upcomingRegisteredExams: (c.upcomingRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e) || e.ungated === true || e._deletedPlaceholder || e.published === false || !e.courseId),
+                    pastRegisteredExams: (c.pastRegisteredExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e) || e.ungated === true || e._deletedPlaceholder || e.published === false || !e.courseId),
+                    upcomingAvailableExams: (c.upcomingAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e) || e.ungated === true || e._deletedPlaceholder || e.published === false || !e.courseId),
+                    pastAvailableExams: (c.pastAvailableExams || []).filter(e => ok.has(e.courseId) || regIds.has(e.id) || _openNow(e) || e.ungated === true || e._deletedPlaceholder || e.published === false || !e.courseId)
                 };
             }
         } catch {}
@@ -1907,9 +1954,14 @@ function _hubExamStatus(exam) {
 
 function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomingAvailableExams, pastAvailableExams, data) {
     data = data || {};
+    me = me || {};
+    upcomingRegisteredExams = Array.isArray(upcomingRegisteredExams) ? upcomingRegisteredExams : [];
+    pastRegisteredExams = Array.isArray(pastRegisteredExams) ? pastRegisteredExams : [];
+    upcomingAvailableExams = Array.isArray(upcomingAvailableExams) ? upcomingAvailableExams : [];
+    pastAvailableExams = Array.isArray(pastAvailableExams) ? pastAvailableExams : [];
     let myCourses = (data.courses || []);
     if (typeof sortCoursesByTranscriptOrder === 'function') myCourses = sortCoursesByTranscriptOrder(myCourses);
-    const myIds = new Set([me && me.id, me && me.admissionNumber, me && me.phone, me && me.email].filter(Boolean).map(String));
+    const myIds = new Set([me.id, me.admissionNumber, me.phone, me.email].filter(Boolean).map(String));
     const _allIds = typeof _hubLearnerIds === 'function' ? _hubLearnerIds(me) : myIds;
     const examRegIds = new Set((data.examRegistrations || []).filter(r => _allIds.has(String(r.studentId))).map(r => r.examId));
     const mySubmissions = (data.submissions || []).filter(s => myIds.has(String(s.studentId)));
@@ -1918,14 +1970,22 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
     const droppedExamIds = new Set(myRetakeRequests.filter(r => r.status === 'dropped').map(r => String(r.examId)));
     const droppedExams = (data.exams || []).filter(e => droppedExamIds.has(String(e.id))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     const myCourseIds = new Set(myCourses.map(c => String(c.id)));
+    const myRegExamIdSet = new Set((data.examRegistrations||[]).filter(function(r){ return myIds.has(String(r.studentId)); }).map(function(r){ return String(r.examId); }));
+    const knownExamIdSet = new Set((data.exams||[]).map(function(e){ return String(e.id); }));
     const myExamIds = new Set((data.exams || []).filter(e => myCourseIds.has(String(e.courseId)) && e.published !== false).map(e => String(e.id)));
     const quizToExam = {};
     (data.exams || []).forEach(e => { if (e.linkedQuizId) quizToExam[String(e.linkedQuizId)] = String(e.id); });
+    const _looksLikeExamId = function(id){ return /^EXM[-_]/i.test(String(id||'')); };
     const resolveExam = (x) => {
         if (!x) return null;
-        if (x.examId && myExamIds.has(String(x.examId))) return String(x.examId);
-        if (x.quizId && myExamIds.has(String(x.quizId))) return String(x.quizId);
-        if (x.quizId && quizToExam[String(x.quizId)] && myExamIds.has(quizToExam[String(x.quizId)])) return quizToExam[String(x.quizId)];
+        var xid = x.examId ? String(x.examId) : '';
+        var qid = x.quizId ? String(x.quizId) : '';
+        if (xid && (myExamIds.has(xid) || myRegExamIdSet.has(xid) || (!knownExamIdSet.has(xid) && _looksLikeExamId(xid)))) return xid;
+        if (qid && (myExamIds.has(qid) || myRegExamIdSet.has(qid))) return qid;
+        if (qid && quizToExam[qid] && myExamIds.has(quizToExam[qid])) return quizToExam[qid];
+        // Deleted/missing exam record: keep grade/history if it was taken (EXM id or exam registration evidence)
+        if (qid && !knownExamIdSet.has(qid) && (_looksLikeExamId(qid) || myRegExamIdSet.has(qid))) return qid;
+        if (xid && !knownExamIdSet.has(xid) && myRegExamIdSet.has(xid)) return xid;
         return null;
     };
     const examLinkedSubs = mySubmissions.filter(s => resolveExam(s));
@@ -2016,20 +2076,24 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
             const passedIcon = passed ? '✅' : '❌';
             actionBtn = `<span class="badge badge-${passed ? 'success' : 'danger'}" style="font-size:11px;padding:5px 10px;">${passedIcon} ${passed ? 'Passed' : 'Failed'} — ${mySub.score || 0}%</span>`;
             scorePill = `<div style="margin-top:5px;"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;"><span style="display:inline-block;width:50px;height:5px;background:var(--bg-input);border-radius:3px;overflow:hidden;"><span style="display:block;height:100%;width:${Math.min(mySub.score || 0, 100)}%;background:${passed ? 'var(--success)' : 'var(--danger)'};border-radius:3px;"></span></span><span style="font-weight:600;color:${passed ? 'var(--success)' : 'var(--danger)'};">${mySub.score || 0}%</span></span></div>`;
+        } else if (isRegistered && (e._deletedPlaceholder || e.published === false)) {
+            actionBtn = `<span style="font-size:11px;color:var(--text-muted);">${e._deletedPlaceholder ? 'Exam record unavailable' : 'Exam unavailable'}</span>`;
         } else if (isRegistered) {
             const _w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : { notYetOpen: false, opensAt: '' });
             actionBtn = _w.notYetOpen
                 ? `<span class="badge badge-info" style="font-size:10px;padding:4px 8px;">🔒 Opens ${esc(_w.opensAt)}${_w.startTime ? ' at ' + esc(_w.startTime) : ''}</span>`
                 : `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')" style="font-size:11px;padding:6px 14px;">${typeIcon} Take Exam</button>`;
-        } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id)) {
+        } else if (!isRegistered && e.date < (extra?.today || new Date().toISOString().split('T')[0]) && !pendingReqExamIds.has(e.id) && !e._deletedPlaceholder && e.published !== false) {
             actionBtn = `<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button><button class="btn btn-outline btn-sm" onclick="hubRequestMissedExam('${e.id}')" style="font-size:11px;border-color:var(--warning);color:var(--warning);padding:5px 10px;">📋 Request Exam</button><button class="btn btn-outline btn-sm" onclick="hubDropMissedExam('${e.id}','${esc(me.name)}')" style="font-size:11px;border-color:var(--danger);color:var(--danger);padding:5px 10px;">🗑️ Drop</button></div>`;
         } else if (!isRegistered) {
-            actionBtn = e._hubDripLocked
-                ? `<div style="text-align:right;"><span class="badge badge-warning" style="font-size:11px;padding:5px 10px;">🔒 Complete lessons to register</span></div>`
-                : `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button>`;
+            actionBtn = (e._deletedPlaceholder || e.published === false)
+                ? `<span style="font-size:11px;color:var(--text-muted);">Exam unavailable</span>`
+                : (e._hubDripLocked
+                    ? `<div style="text-align:right;"><span class="badge badge-warning" style="font-size:11px;padding:5px 10px;">🔒 Complete lessons to register</span></div>`
+                    : `<button class="btn btn-primary btn-sm" onclick="hubRegisterExam('${e.id}','${esc(me.name)}')" style="font-size:11px;padding:6px 14px;">Register</button>`);
         }
 
-        if (isRegistered && !mySub && !hasActiveSupp) {
+        if (isRegistered && !mySub && !hasActiveSupp && !e._deletedPlaceholder && e.published !== false) {
             dropBtn = `<button class="btn btn-outline btn-sm" onclick="hubDropExam('${e.id}','${esc(me.name)}')" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:4px 8px;">Drop</button>`;
         }
 
@@ -2038,6 +2102,7 @@ function renderHubExams(me, upcomingRegisteredExams, pastRegisteredExams, upcomi
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
                     <span style="background:${typeBg};color:#fff;font-size:9px;padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap;">${typeIcon} ${typeLabel}</span>
                     <span style="font-weight:600;font-size:14px;color:var(--text);">${esc(e.title || course?.code || 'Exam')}</span>
+                    ${e._deletedPlaceholder ? '<span class="badge badge-secondary" style="font-size:9px;">Record unavailable</span>' : (e.published === false ? '<span class="badge badge-secondary" style="font-size:9px;">Unpublished</span>' : '')}
                 </div>
                 ${course ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${esc(course.name)}</div>` : ''}
                 <div style="display:flex;gap:8px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;">
@@ -2132,9 +2197,13 @@ async function hubRegisterExam(examId, studentName) {
         const me = _hubGetMe();
         if (!me) { console.warn('hubRegisterExam: _hubGetMe returned null'); return showToast('Could not identify your profile', { type: 'danger' }); }
         if ((data.examRegistrations || []).find(r => r.studentId === me.id && r.examId === examId)) return showToast('Already registered');
+        const exam = (data.exams || []).find(e => String(e.id) === String(examId));
+        // Course-sequence gate (outer): previous course completion or admin/owner override required. Drip-per-lesson still applies within.
+        if (exam && exam.courseId && exam.ungated !== true) {
+            try { const access = await hubCourseAccess(me, data); if (access && access.locked && access.locked.has(String(exam.courseId))) { const reason = access.reasons && access.reasons[String(exam.courseId)]; return showToast(reason==='manual' ? '🔒 This course is locked by an administrator.' : '🔒 Complete the previous course(s) first to register for this exam. Ask an admin/owner for a course override if needed.', { type:'warning', duration:6000 }); } } catch(e){}
+        }
         // Drip: exam opens only when every drip lesson in its course is complete.
         try {
-            const exam = (data.exams || []).find(e => String(e.id) === String(examId));
             if (exam && typeof dripExamOpen === 'function') {
                 await loadDripMaps(me.id);
                 const gate = await dripExamOpen(me.id, exam);
@@ -3320,6 +3389,17 @@ async function viewHubLessonNote(lessonId, courseId) {
         const __viewer2 = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         const __isStu = __viewer2.role === 'student';
         const __sid = __viewer2.studentId || __viewer2.username;
+        // Course-sequence gate (outer): no lesson access until previous course completed or admin/owner override. Drip-per-lesson still applies within.
+        if (__isStu) {
+            try {
+                const __cid = String(courseId || lesson.courseId || '');
+                const access = await hubCourseAccess(_hubGetMe ? _hubGetMe() : (data.students||[]).find(s=>String(s.id)===String(__sid)||String(s.admissionNumber)===String(__sid)), data);
+                if (access && access.locked && access.locked.has(__cid)) {
+                    const reason = access.reasons && access.reasons[__cid];
+                    return showToast(reason==='manual' ? '🔒 This course is locked by an administrator.' : '🔒 Complete the previous course(s) first to unlock this course and its lessons. Ask an admin/owner for a course override if needed.', { type:'warning', duration:6000 });
+                }
+            } catch(e){}
+        }
         const dripMode = __isStu && typeof lessonMode === 'function' && lessonMode(lesson) === 'drip';
         const __visLive = (typeof lessonVisible === 'function' ? lessonVisible(lesson) : lesson.published !== false);
         if (!__visLive) {
@@ -3714,7 +3794,7 @@ function startHubLiveSync() {
 }
 
 (function initHubLiveSync() {
-    function go() { startHubLiveSync(); }
+    function go() { startHubLiveSync(); try { if (typeof startAnnouncementBanner === 'function') startAnnouncementBanner(); } catch(e){} }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', go);
     } else {
@@ -3727,6 +3807,7 @@ renderStudentHub = async function() {
     _hubLastUpdate = Date.now();
     await _origRenderStudentHub.apply(this, arguments);
     _updateHubRefreshButton();
+    try { if (typeof startAnnouncementBanner === 'function') startAnnouncementBanner(); if (typeof checkAnnouncementBanner === 'function') checkAnnouncementBanner(); } catch(e){}
 };
 
 if (typeof showModal === 'function') {

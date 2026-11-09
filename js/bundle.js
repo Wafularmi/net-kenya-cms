@@ -1196,21 +1196,21 @@ function playBell() {
         setTimeout(() => ctx.close(), 1000);
     } catch (_) {}
 }
-function getTranscriptCourseOrder() {
-    return [
-        "GOD'S CALL TO MINISTRY",
-        "GOD'S WAY OF SALVATION",
-        "OLD TESTAMENT SURVEY",
-        "NEW TESTAMENT SURVEY",
-        "PASTORAL CARE",
-        "TEMPERAMENTS",
-        "CHRISTIAN MARRIAGE AND FAMILY",
-        "TEACHING GOD'S WAY",
-        "LIVING FOR CHRIST",
-        "DIACONAL MINISTRY",
-        "PASSION FOR PREACHING",
-        "THE CHURCH THE BODY OF CHRIST"
-    ];
+function transcriptSemesterGroups(courses, size) {
+    const n = Math.max(1, parseInt(size, 10) || 3);
+    const ordered = sortCoursesByTranscriptOrder((courses || []).filter(Boolean));
+    const groups = [];
+    for (let i = 0; i < ordered.length; i += n) groups.push({ semester: Math.floor(i / n) + 1, courses: ordered.slice(i, i + n) });
+    return groups;
+}
+function transcriptCourseSemesterIndex(course, courses, size) {
+    const groups = transcriptSemesterGroups(courses, size);
+    const cid = course && (course.id || course.courseId);
+    const cname = String((course && course.name) || '').toUpperCase();
+    for (const g of groups) {
+        if (g.courses.some(c => (cid && String(c.id) === String(cid)) || (cname && String(c.name || '').toUpperCase() === cname))) return g.semester;
+    }
+    return 0;
 }
 function sortCoursesByTranscriptOrder(courses) {
     const order = getTranscriptCourseOrder();
@@ -1318,6 +1318,59 @@ function studentCourseStatuses(studentId, courses, data) {
     });
     return out;
 }
+
+// Course-sequence gate (transcript/program order). Returns { ok, reason, status }.
+// Locked unless previous courses completed (combination via isCourseCovered) or admin/owner
+// manual course override (contentGate students[].locks[courseId]='unlocked'). Drip-per-
+// lesson still applies within an accessible course.
+async function checkStudentCourseSequenceAccess(studentId, courseId, preloaded) {
+    try {
+        if (!studentId || !courseId) return { ok: true };
+        // load data
+        let courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions, gate;
+        if (preloaded && preloaded.courses && preloaded.enrollments) {
+            ({courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions} = preloaded);
+            gate = preloaded._contentGate;
+        } else {
+            const batch = await dbGetBatch(['courses','enrollments','grades','submissions','quizzes','exams','lessons','lessonCompletions','courseCompletions']).catch(()=>({}));
+            ({courses, enrollments, grades, submissions, quizzes, exams, lessons, lessonCompletions, courseCompletions} = batch);
+        }
+        if (!gate) { try { const r = await dbGet('settings','contentGate'); gate = r && (r.value||r); } catch{} }
+        // Content Gating is OFF unless the administrator enabled it. For
+        // per-center/per-region modes the server resolves the effective
+        // scope, so this client guard must not guess and block a student
+        // whose center/region has gating disabled.
+        if (!gate || gate.enabled !== true) return { ok: true };
+        if (gate.mode === 'per-center' || gate.mode === 'per-region') return { ok: true };
+        courses = courses || []; enrollments = enrollments || [];
+        // only enforce for enrolled students/courses
+        const enrolled = (enrollments||[]).some(e => String(e.studentId)===String(studentId) && String(e.courseId)===String(courseId));
+        if (!enrolled) return { ok: true };
+        // per-student override
+        const migrateLocks = (o)=>{ const m={...((o&&o.locks)||{})}; ((o&&o.unlocked)||[]).forEach(id=>{ if(!m[id]) m[id]='unlocked'; }); return m; };
+        const sOv = gate && gate.students ? (gate.students[String(studentId)] || gate.students[studentId] || null) : null;
+        if (sOv && sOv.exempt) return { ok: true };
+        const studentLocks = migrateLocks(sOv);
+        // merge global/region/center locks baseline like hub
+        let effLocks = gate ? migrateLocks(gate) : {};
+        // (center/region resolution omitted for brevity in guard; per-student override is authoritative enough; global locks apply)
+        Object.entries(studentLocks).forEach(([cid,st])=>{ effLocks[cid]=st; });
+        const lockState = effLocks[String(courseId)] || effLocks[courseId] || 'auto';
+        if (lockState === 'unlocked') return { ok: true, override: true };
+        const data = { courses, grades: grades||[], submissions: submissions||[], quizzes: quizzes||[], exams: exams||[], lessons: lessons||[], lessonCompletions: lessonCompletions||[], courseCompletions: courseCompletions||[] };
+        try { if (typeof buildLessonCoverIndex==='function') data._lessonCoverIdx = buildLessonCoverIndex(data.lessons, data.lessonCompletions); } catch{}
+        const statuses = (typeof studentCourseStatuses==='function') ? studentCourseStatuses(studentId, courses, data) : {};
+        const st = statuses[String(courseId)] || statuses[courseId] || 'current';
+        if (st === 'covered' || st === 'current') return { ok: true, status: st };
+        if (lockState === 'locked') return { ok: false, reason: 'manual', status: st };
+        return { ok: false, reason: 'sequence', status: st };
+    } catch(e) { console.warn('checkStudentCourseSequenceAccess', e); return { ok: true }; } // fail-open on errors to avoid breaking
+}
+function studentCourseLockedToast(res) {
+    if (res && res.reason === 'manual') return showToast('🔒 This course is locked by an administrator.', { type: 'warning', duration: 5000 });
+    return showToast('🔒 Complete the previous course(s) first to unlock this course. If you need access now, ask an admin/owner for a course override.', { type: 'warning', duration: 6000 });
+}
+
 function hexToRgb(hex) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null;
@@ -1564,6 +1617,579 @@ async function saveMaintenanceMode() {
     showToast('Maintenance settings saved.');
 }
 
+window.loadMaintenanceMode = loadMaintenanceMode;
+window.saveMaintenanceMode = saveMaintenanceMode;
+window.setMaintenanceMode = setMaintenanceMode;
+
+// ===== Maintenance AI UI =====
+async function loadMaintenanceAI() {
+    try {
+        const res = await fetch(`/api/maintenance/ai-state`, { headers: getAuthHeaders() });
+        const raw = await res.text();
+        let data = null; try { data = JSON.parse(raw); } catch(e) { throw new Error('HTTP '+res.status+' (non-JSON response)'); }
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        const cb = document.getElementById('settings-maintenance-ai');
+        if (cb) cb.checked = data.autoEnabled !== false;
+        const st = document.getElementById('maintenance-ai-status');
+        if (st) {
+            const parts = [];
+            parts.push(data.autoEnabled === false ? 'Auto: OFF' : 'Auto: ON');
+            if (data.running) parts.push('running');
+            if (data.state && data.state.lastRunAt) parts.push('last: ' + new Date(data.state.lastRunAt).toLocaleString());
+            if (data.state && typeof data.state.lastRiskScore === 'number') parts.push('risk: ' + data.state.lastRiskScore + '/100');
+            st.textContent = parts.join(' • ');
+            st.style.color = data.autoEnabled === false ? 'var(--warning)' : 'var(--text-muted)';
+        }
+        loadMaintenanceAIReports();
+        if (typeof loadMaintenanceAIRepairs === 'function') loadMaintenanceAIRepairs();
+    } catch (e) {
+        const st = document.getElementById('maintenance-ai-status');
+        if (st) st.textContent = 'Maintenance AI status unavailable';
+    }
+}
+async function saveMaintenanceAIConfig() {
+    const cb = document.getElementById('settings-maintenance-ai');
+    const enabled = !!(cb && cb.checked);
+    try {
+        let res = await fetch(`/api/maintenance/ai-config?enabled=${enabled ? '1' : '0'}`, { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, getAuthHeaders()), body: JSON.stringify({ enabled }) });
+        let data = null;
+        try { data = await res.clone().json(); } catch(e) { data = null; }
+        if (!res.ok) {
+            // fallback: query-only (some proxies/body parsers can interfere)
+            res = await fetch(`/api/maintenance/ai-config?enabled=${enabled ? '1' : '0'}`, { method:'POST', headers: getAuthHeaders() });
+            try { data = await res.clone().json(); } catch(e) { data = null; }
+        }
+        if (!res.ok) throw new Error((data && (data.error || data.detail)) || await res.text().catch(()=>res.status));
+        showToast(enabled ? 'Maintenance AI auto-run enabled' : 'Maintenance AI auto-run disabled', { type:'success' });
+        loadMaintenanceAI();
+    } catch (e) {
+        showToast('Could not save Maintenance AI setting: ' + (e && e.message ? e.message : e), { type:'danger' });
+        loadMaintenanceAI();
+    }
+}
+async function runMaintenanceAICheck() {
+    const btn = document.getElementById('maintenance-ai-run-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Running...'; }
+    try {
+        const res = await fetch(`/api/maintenance/run-check`, { method:'POST', headers: getAuthHeaders() });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data.error || res.status);
+        showToast((data && data.message) ? data.message : 'Maintenance AI check started. Refresh reports in a moment.', { type:'success' });
+        setTimeout(loadMaintenanceAIReports, 4000);
+        setTimeout(loadMaintenanceAI, 5000);
+    } catch (e) {
+        showToast('Could not start Maintenance AI check: ' + (e && e.message ? e.message : e), { type:'danger' });
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Run Maintenance Check'; }
+    }
+}
+function _maiEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+async function loadMaintenanceAIReports() {
+    const el = document.getElementById('maintenance-ai-reports');
+    if (!el) return;
+    el.innerHTML = '<span style="color:var(--text-muted);">Loading reports...</span>';
+    try {
+        const res = await fetch(`/api/maintenance/reports?limit=10`, { headers: getAuthHeaders() });
+        const raw = await res.text();
+        let data = null; try { data = JSON.parse(raw); } catch(e) { throw new Error('HTTP '+res.status+' (non-JSON response)'); }
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        const reports = data.reports || [];
+        if (!reports.length) { el.innerHTML = '<div style="color:var(--text-muted);">No maintenance AI reports yet. Run a check or wait for the next scheduled maintenance window.</div>'; return; }
+        el.innerHTML = reports.map(r => {
+            const risk = r.summary && typeof r.summary.riskScore === 'number' ? r.summary.riskScore : null;
+            const sooner = r.summary && r.summary.runSooner && r.summary.runSooner.recommended;
+            const sev = risk == null ? 'info' : risk >= 60 ? 'danger' : risk >= 35 ? 'warning' : 'success';
+            return `<div style="border:1px solid var(--border,#d1d5db);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg-elevated,#fff);color:var(--text,#111827);">
+                <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <div><b>${_maiEsc(r.id||'Report')}</b> <span class="badge badge-${sev}" style="font-size:10px;">${risk==null?'':'risk '+risk+'/100'}</span> ${sooner?'<span class="badge badge-warning" style="font-size:10px;">Run sooner</span>':''}</div>
+                    <div style="font-size:11px;color:var(--text-muted);">${_maiEsc(r.createdAt?new Date(r.createdAt).toLocaleString():'')} • ${_maiEsc(r.trigger||'')} • ${(r.findingsCount||0)} finding(s)</div>
+                </div>
+                <div style="margin-top:6px;"><button class="btn btn-outline btn-sm" onclick="viewMaintenanceAIReport('${_maiEsc(r.id)}')">View details</button></div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        el.innerHTML = '<div style="color:var(--danger);">Failed to load Maintenance AI reports: ' + _maiEsc(e && e.message ? e.message : e) + '</div>';
+    }
+}
+async function viewMaintenanceAIReport(id) {
+    try {
+        const res = await fetch(`/api/maintenance/reports?full=1&id=${encodeURIComponent(id)}`, { headers: getAuthHeaders() });
+        const raw = await res.text();
+        let r = null; try { r = JSON.parse(raw); } catch(e) { throw new Error('HTTP '+res.status+' (non-JSON response)'); }
+        if (!res.ok) throw new Error(r.error || r.detail || res.status);
+        if (!r) return showToast('Report not found', { type:'danger' });
+        const box = 'background:#0f172a;color:#e5eefc;padding:10px;border-radius:8px;border:1px solid #334155;';
+        const sevColor = (s)=>({high:'#fecaca',warn:'#fde68a',info:'#bfdbfe'}[(s||'').toLowerCase()]||'#e5eefc');
+        const findings = (r.findings||[]).map(f=>`<li style="margin:4px 0;color:#f8fafc;"><b style="color:${sevColor(f.severity)};">[${_maiEsc(f.severity)} ${_maiEsc(f.area)}]</b> <span style="color:#e5eefc;">${_maiEsc(f.message)}</span></li>`).join('') || '<li style="color:#cbd5e1;">No findings.</li>';
+        const recs = (r.recommendations||[]).map(x=>`<li style="margin:4px 0;color:#e5eefc;">${_maiEsc(x)}</li>`).join('') || '<li style="color:#cbd5e1;">No recommendations.</li>';
+        const cleaned = r.cleaned ? `<pre style="white-space:pre-wrap;font-size:11px;${box}max-height:220px;overflow:auto;">${_maiEsc(JSON.stringify(r.cleaned,null,2))}</pre>` : '';
+        const metrics = r.metrics ? `<details><summary style="cursor:pointer;font-weight:600;color:#e5eefc;">Metrics</summary><pre style="white-space:pre-wrap;font-size:11px;${box}max-height:260px;overflow:auto;margin-top:6px;">${_maiEsc(JSON.stringify(r.metrics,null,2))}</pre></details>` : '';
+        const runSooner = r.summary && r.summary.runSooner ? `<div style="margin:8px 0;padding:10px;border-radius:8px;background:${r.summary.runSooner.recommended?'#7c2d12':'#14532d'};color:#ffffff;border:1px solid ${r.summary.runSooner.recommended?'#fb923c':'#22c55e'};"><b style="color:#fff;">Run sooner:</b> <span style="color:#fff;">${r.summary.runSooner.recommended?'Yes':'No'} (${_maiEsc(r.summary.runSooner.urgency||'')}) — ${_maiEsc(r.summary.runSooner.reason||'')}</span></div>` : '';
+        const body = `<div style="font-size:13px;color:#e5eefc;background:#111827;padding:12px;border-radius:10px;border:1px solid #334155;">
+            <div style="color:#f8fafc;"><b>Status:</b> ${_maiEsc(r.status)} • <b>Trigger:</b> ${_maiEsc(r.trigger)} • <b>Duration:</b> ${_maiEsc(r.durationMs)} ms • <b>Risk:</b> ${_maiEsc(r.summary&&r.summary.riskScore)}</div>
+            ${runSooner}
+            <h4 style="margin:12px 0 6px;color:#f8fafc;">Findings</h4><ul style="margin:0 0 8px 18px;">${findings}</ul>
+            <h4 style="margin:12px 0 6px;color:#f8fafc;">Recommendations</h4><ul style="margin:0 0 8px 18px;">${recs}</ul>
+            ${cleaned?'<h4 style="margin:12px 0 6px;color:#f8fafc;">Safe cleanup / auto-corrections</h4>'+cleaned:''}
+            ${metrics}
+            <div style="font-size:11px;color:#94a3b8;margin-top:8px;">Learning: cycle ${_maiEsc(r.learning&&r.learning.cycle)}. No sensitive personal data, passwords, or tokens are included in reports.</div>
+        </div>`;
+        if (typeof showModal === 'function') showModal('Maintenance AI Report', body, '');
+    } catch (e) { showToast('Failed to load report: ' + (e&&e.message?e.message:e), { type:'danger' }); }
+}
+
+async function loadMaintenanceAIRepairs() {
+    let el = document.getElementById('maintenance-ai-repairs');
+    if (!el) {
+        // inject container after reports if missing
+        const reports = document.getElementById('maintenance-ai-reports');
+        if (reports && reports.parentNode) {
+            const wrap = document.createElement('div');
+            wrap.innerHTML = '<h4 style="margin:14px 0 6px;color:var(--text,#111827);">Repair Proposals (approval required)</h4><div id="maintenance-ai-repairs" style="margin-bottom:8px;"></div>';
+            reports.parentNode.insertBefore(wrap, reports.nextSibling);
+            el = document.getElementById('maintenance-ai-repairs');
+        }
+    }
+    if (!el) return;
+    el.innerHTML = '<span style="color:var(--text-muted);">Loading repair proposals...</span>';
+    try {
+        const res = await fetch('/api/maintenance/repairs?status=pending', { headers: getAuthHeaders() });
+        const raw = await res.text();
+        let data = null; try { data = JSON.parse(raw); } catch(e) { throw new Error('HTTP '+res.status); }
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        const repairs = data.repairs || [];
+        const learning = data.learning || {};
+        if (!repairs.length) {
+            el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No pending repair proposals. The AI will propose safe repairs after analysis; you approve before any real change is applied (except explicitly safe scheduled auto-fixes already logged).</div>';
+            return;
+        }
+        el.innerHTML = repairs.map(p => {
+            const canApply = p.safe && p.action && p.action.type !== 'manual_review';
+            const sev = p.severity==='high'?'danger':p.severity==='medium'?'warning':'info';
+            return `<div style="border:1px solid var(--border,#d1d5db);border-left:4px solid ${canApply?'#2563eb':'#f59e0b'};border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg-elevated,#fff);color:var(--text,#111827);">
+                <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;"><b>${_maiEsc(p.title||p.type)}</b><span class="badge badge-${sev}" style="font-size:10px;">${_maiEsc(p.severity||'info')} • ${_maiEsc(p.confidence||'')} confidence</span></div>
+                <div style="font-size:12px;margin-top:4px;">${_maiEsc(p.description||'')}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Affected: ${_maiEsc(p.affectedCount||0)} • Type: ${_maiEsc(p.type)} • Created: ${_maiEsc(p.createdAt?new Date(p.createdAt).toLocaleString():'')}</div>
+                <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+                    ${canApply ? `<button class="btn btn-primary btn-sm" onclick="approveMaintenanceAIRepair('${_maiEsc(p.id)}')">Approve & Apply</button>` : `<button class="btn btn-outline btn-sm" disabled title="Manual review required">Manual review required</button>`}
+                    <button class="btn btn-outline btn-sm" onclick="rejectMaintenanceAIRepair('${_maiEsc(p.id)}')">Decline</button>
+                    <button class="btn btn-outline btn-sm" onclick="viewMaintenanceAIRepairProposal('${_maiEsc(p.id)}')">Preview details</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        el.innerHTML = '<div style="color:var(--danger);font-size:12px;">Failed to load repair proposals: ' + _maiEsc(e && e.message ? e.message : e) + '</div>';
+    }
+}
+async function viewMaintenanceAIRepairProposal(id) {
+    try {
+        const res = await fetch('/api/maintenance/repairs?status=all', { headers: getAuthHeaders() });
+        const data = await res.json();
+        const p = (data.repairs||[]).find(r=>String(r.id)===String(id));
+        if (!p) return showToast('Proposal not found', {type:'danger'});
+        const body = `<div style="font-size:13px;color:#e5eefc;background:#111827;padding:12px;border-radius:10px;border:1px solid #334155;">
+            <div><b>${_maiEsc(p.title)}</b></div>
+            <div style="margin-top:6px;">${_maiEsc(p.description||'')}</div>
+            <div style="margin-top:6px;"><b>Reason:</b> ${_maiEsc(p.reason||'')}</div>
+            <div style="margin-top:6px;"><b>Safe:</b> ${p.safe?'Yes':'No'} • <b>Confidence:</b> ${_maiEsc(p.confidence)} • <b>Affected:</b> ${_maiEsc(p.affectedCount)}</div>
+            <details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:600;">Action / samples</summary><pre style="white-space:pre-wrap;font-size:11px;background:#0f172a;color:#e5eefc;padding:10px;border-radius:8px;border:1px solid #334155;max-height:260px;overflow:auto;">${_maiEsc(JSON.stringify({action:p.action,affectedSamples:p.affectedSamples,result:p.result},null,2))}</pre></details>
+            <div style="font-size:11px;color:#94a3b8;margin-top:8px;">Only predefined safe repair actions are executed. Every approved repair is audited.</div>
+        </div>`;
+        if (typeof showModal==='function') showModal('Repair Proposal', body, '');
+    } catch(e) { showToast('Failed to load proposal: '+(e&&e.message?e.message:e), {type:'danger'}); }
+}
+async function approveMaintenanceAIRepair(id) {
+    if (!confirm('Approve and apply this repair? The AI will execute only the specific predefined safe action shown in the proposal. This will be audited.')) return;
+    try {
+        const res = await fetch(`/api/maintenance/repairs/${encodeURIComponent(id)}/approve`, { method:'POST', headers: getAuthHeaders() });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        showToast(`Repair applied. Changed: ${(data.applied&&data.applied.changed)||0} record(s).`, { type:'success' });
+        loadMaintenanceAIRepairs(); loadMaintenanceAI();
+    } catch(e) { showToast('Could not apply repair: '+(e&&e.message?e.message:e), {type:'danger'}); }
+}
+async function rejectMaintenanceAIRepair(id) {
+    try {
+        const res = await fetch(`/api/maintenance/repairs/${encodeURIComponent(id)}/reject`, { method:'POST', headers: getAuthHeaders() });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        showToast('Repair proposal declined. The AI will learn from this feedback.', { type:'info' });
+        loadMaintenanceAIRepairs(); loadMaintenanceAI();
+    } catch(e) { showToast('Could not decline repair: '+(e&&e.message?e.message:e), {type:'danger'}); }
+}
+window.loadMaintenanceAI = loadMaintenanceAI;
+window.saveMaintenanceAIConfig = saveMaintenanceAIConfig;
+window.runMaintenanceAICheck = runMaintenanceAICheck;
+window.loadMaintenanceAIReports = loadMaintenanceAIReports;
+window.viewMaintenanceAIReport = viewMaintenanceAIReport;
+window.loadMaintenanceAIRepairs = loadMaintenanceAIRepairs;
+window.approveMaintenanceAIRepair = approveMaintenanceAIRepair;
+window.rejectMaintenanceAIRepair = rejectMaintenanceAIRepair;
+window.viewMaintenanceAIRepairProposal = viewMaintenanceAIRepairProposal;
+
+
+// ===== Announcement Banner =====
+const _ANN_SETTINGS_KEY = 'announcementBanner';
+let _annTimer = null;
+let _annHideTimer = null;
+let _annQueue = [];
+let _annIndex = 0;
+
+function _annEsc(v){ return String(v==null?'':v).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+async function loadAnnouncementBannerSettings() {
+    try {
+        const rec = await dbGet('settings', _ANN_SETTINGS_KEY);
+        const v = rec && rec.value ? rec.value : (rec || {});
+        const ds = document.getElementById('ann-display-seconds');
+        const is = document.getElementById('ann-interval-seconds');
+        if (ds) ds.value = Math.max(2, Number(v.displaySeconds) || 8);
+        if (is) is.value = Math.max(0, Number(v.intervalSeconds) != null ? Number(v.intervalSeconds) : 300);
+    } catch (e) {}
+}
+
+async function saveAnnouncementBannerSettings() {
+    const ds = Math.max(2, Math.min(120, parseInt((document.getElementById('ann-display-seconds')||{}).value, 10) || 8));
+    const is = Math.max(0, Math.min(86400, parseInt((document.getElementById('ann-interval-seconds')||{}).value, 10) || 0));
+    await dbPut('settings', { key: _ANN_SETTINGS_KEY, value: { displaySeconds: ds, intervalSeconds: is }, updatedAt: new Date().toISOString() });
+    showToast('Announcement banner settings saved', { type: 'success' });
+    try { if (typeof _restartAnnouncementBanner === 'function') _restartAnnouncementBanner(); } catch(e){}
+}
+
+async function renderAnnouncementsList() {
+    const el = document.getElementById('announcements-list');
+    if (!el) return;
+    try {
+        const [anns, regions, centers] = await Promise.all([dbGetAll('announcements').catch(()=>[]), dbGetAll('regions').catch(()=>[]), dbGetAll('studyCenters').catch(()=>[])]);
+        const list = (anns || []).sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+        if (!list.length) { el.innerHTML = '<div style="color:var(--text-muted);">No announcements yet.</div>'; return; }
+        const rMap = {}; (regions||[]).forEach(r=>rMap[String(r.id)]=r.name||r.id);
+        const cMap = {}; (centers||[]).forEach(c=>cMap[String(c.id)]=c.name||c.id);
+        let exams=[]; try { exams = await dbGetAll('exams').catch(()=>[]); } catch(e){}
+        const eMap = {}; (exams||[]).forEach(e=>eMap[String(e.id)]= (e.title||e.code||e.id));
+        el.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;">' + list.map(a => {
+            const scope = a.scope === 'region' ? `Region: ${_annEsc(rMap[String(a.scopeId)]||a.scopeId||'')}` : a.scope === 'studyCenter' ? `Study center: ${_annEsc(cMap[String(a.scopeId)]||a.scopeId||'')}` : 'All students';
+            const er = a.examRule || 'none';
+            const exName = a.examId ? (eMap[String(a.examId)] || a.examId) : '';
+            const examRuleLabel = er === 'did_exam' ? `Did exam: ${_annEsc(exName)}` : er === 'registered_not_submitted' ? `Registered, not submitted: ${_annEsc(exName)}` : er === 'did_not_do_exam' ? `Did not do exam: ${_annEsc(exName)}` : er === 'registered_not_submitted_any_past' ? 'Registered, not submitted (any past exam)' : er === 'did_not_do_any_past' ? 'Did not submit any past exam (enrolled)' : '';
+            const active = a.active !== false;
+            return `<div style="border:1px solid var(--border,#d1d5db);border-radius:10px;padding:10px;background:var(--bg-elevated, var(--bg, #ffffff));color:var(--text,#111827);">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:13px;color:var(--text,#111827);background:transparent;white-space:pre-wrap;">${_annEsc(a.message||'')}</div>
+                        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                            <span class="badge badge-${active?'success':'secondary'}" style="font-size:10px;">${active?'Active':'Inactive'}</span>
+                            <span class="badge badge-info" style="font-size:10px;">${scope}</span>
+                            ${examRuleLabel ? `<span class="badge badge-warning" style="font-size:10px;">${examRuleLabel}</span>` : ''}
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">
+                        <button class="btn btn-outline btn-sm" onclick="toggleAnnouncementActive('${_annEsc(String(a.id))}')" style="font-size:10px;">${active?'Disable':'Enable'}</button>
+                        <button class="btn btn-outline btn-sm" onclick="openAnnouncementEditor('${_annEsc(String(a.id))}')" style="font-size:10px;">Edit</button>
+                        <button class="btn btn-outline btn-sm" onclick="deleteAnnouncement('${_annEsc(String(a.id))}')" style="font-size:10px;color:var(--danger);border-color:var(--danger);">Delete</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('') + '</div>';
+    } catch (e) { el.innerHTML = '<div style="color:var(--danger);">Failed to load announcements.</div>'; }
+}
+
+async function openAnnouncementEditor(id) {
+    const [anns, regions, centers, exams, courses] = await Promise.all([dbGetAll('announcements').catch(()=>[]), dbGetAll('regions').catch(()=>[]), dbGetAll('studyCenters').catch(()=>[]), dbGetAll('exams').catch(()=>[]), dbGetAll('courses').catch(()=>[])]);
+    const a = id ? (anns||[]).find(x => String(x.id) === String(id)) : null;
+    const scope = a ? (a.scope || 'all') : 'all';
+    const scopeId = a ? String(a.scopeId || '') : '';
+    const examRule = a ? (a.examRule || 'none') : 'none';
+    const examId = a ? String(a.examId || '') : '';
+    const courseMap = {}; (courses||[]).forEach(c=>courseMap[String(c.id)]=c);
+    const examOpts = (exams||[]).slice().sort((x,y)=>String(y.date||'').localeCompare(String(x.date||''))).map(e=>{
+        const c = courseMap[String(e.courseId)]||{};
+        const label = `${e.title||'Exam'}${c.code?` (${c.code})`:''}${e.date?` — ${e.date}`:''}`;
+        return `<option value="${_annEsc(String(e.id))}"${examId===String(e.id)?' selected':''}>${_annEsc(label)}</option>`;
+    }).join('');
+    const title = a ? 'Edit Announcement' : 'New Announcement';
+    const body = `
+        <div class="form-group"><label>Message</label><textarea id="ann-edit-message" rows="4" style="width:100%;background:var(--bg-input,#ffffff);color:var(--text,#111827);border:1px solid var(--border,#d1d5db);" placeholder="Message shown to students...">${_annEsc(a && a.message || '')}</textarea></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="form-group"><label>Target</label>
+                <select id="ann-edit-scope" style="background:var(--bg-input,#fff);color:var(--text,#111827);" onchange="(function(){var v=this.value;document.getElementById('ann-edit-region-wrap').style.display=v==='region'?'':'none';document.getElementById('ann-edit-center-wrap').style.display=v==='studyCenter'?'':'none';}).call(this)">
+                    <option value="all"${scope==='all'?' selected':''}>All students</option>
+                    <option value="region"${scope==='region'?' selected':''}>Specific region</option>
+                    <option value="studyCenter"${scope==='studyCenter'?' selected':''}>Specific study center</option>
+                </select>
+            </div>
+            <div class="form-group"><label>Status</label>
+                <select id="ann-edit-active" style="background:var(--bg-input,#fff);color:var(--text,#111827);"><option value="true"${(a?a.active!==false:true)?' selected':''}>Active</option><option value="false"${(a&&a.active===false)?' selected':''}>Inactive</option></select>
+            </div>
+        </div>
+        <div id="ann-edit-region-wrap" class="form-group" style="display:${scope==='region'?'':'none'};"><label>Region</label><select id="ann-edit-region" style="background:var(--bg-input,#fff);color:var(--text,#111827);">${(regions||[]).map(r=>`<option value="${_annEsc(String(r.id))}"${scopeId===String(r.id)?' selected':''}>${_annEsc(r.name||r.id)}</option>`).join('') || '<option value="">No regions</option>'}</select></div>
+        <div id="ann-edit-center-wrap" class="form-group" style="display:${scope==='studyCenter'?'':'none'};"><label>Study center</label><select id="ann-edit-center" style="background:var(--bg-input,#fff);color:var(--text,#111827);">${(centers||[]).map(c=>`<option value="${_annEsc(String(c.id))}"${scopeId===String(c.id)?' selected':''}>${_annEsc(c.name||c.id)}</option>`).join('') || '<option value="">No study centers</option>'}</select></div>
+        <div class="form-group"><label>Exam rule (combined with audience scope)</label>
+            <select id="ann-edit-exam-rule" style="background:var(--bg-input,#fff);color:var(--text,#111827);" onchange="(function(){var v=this.value;document.getElementById('ann-edit-exam-wrap').style.display=(v==='did_exam'||v==='did_not_do_exam'||v==='registered_not_submitted')?'':'none';}).call(this)">
+                <option value="none"${examRule==='none'?' selected':''}>None</option>
+                <option value="did_exam"${examRule==='did_exam'?' selected':''}>Student did selected exam (has submission)</option>
+                <option value="registered_not_submitted"${examRule==='registered_not_submitted'?' selected':''}>Registered but did NOT submit selected exam</option>
+                <option value="did_not_do_exam"${examRule==='did_not_do_exam'?' selected':''}>Student did NOT do selected exam (no submission)</option>
+                <option value="registered_not_submitted_any_past"${examRule==='registered_not_submitted_any_past'?' selected':''}>Registered but did NOT submit any past exam (enrolled)</option>
+                <option value="did_not_do_any_past"${examRule==='did_not_do_any_past'?' selected':''}>Student did NOT submit any past exam (enrolled courses)</option>
+            </select>
+        </div>
+        <div id="ann-edit-exam-wrap" class="form-group" style="display:${(examRule==='did_exam'||examRule==='did_not_do_exam'||examRule==='registered_not_submitted')?'':'none'};"><label>Exam</label><select id="ann-edit-exam" style="background:var(--bg-input,#fff);color:var(--text,#111827);"><option value="">Select exam</option>${examOpts}</select></div>
+    `;
+    if (typeof showModal === 'function') {
+        showModal(title, body, `<button class="btn btn-primary" onclick="saveAnnouncement('${_annEsc(String(id||''))}')">Save</button>`);
+    } else if (typeof openModal === 'function') {
+        openModal(title, body, `<button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveAnnouncement('${_annEsc(String(id||''))}')">Save</button>`);
+    } else {
+        alert('Modal unavailable'); // fallback
+    }
+}
+
+async function saveAnnouncement(id) {
+    const msg = ((document.getElementById('ann-edit-message')||{}).value||'').trim();
+    if (!msg) return showToast('Announcement message is required', { type: 'danger' });
+    const scope = (document.getElementById('ann-edit-scope')||{}).value || 'all';
+    const active = (document.getElementById('ann-edit-active')||{}).value !== 'false';
+    const scopeId = scope === 'region' ? ((document.getElementById('ann-edit-region')||{}).value||'') : scope === 'studyCenter' ? ((document.getElementById('ann-edit-center')||{}).value||'') : '';
+    const examRule = (document.getElementById('ann-edit-exam-rule')||{}).value || 'none';
+    const examId = (examRule === 'did_exam' || examRule === 'did_not_do_exam' || examRule === 'registered_not_submitted') ? ((document.getElementById('ann-edit-exam')||{}).value||'') : '';
+    if ((examRule === 'did_exam' || examRule === 'did_not_do_exam' || examRule === 'registered_not_submitted') && !examId) return showToast('Please select an exam for this rule', { type: 'danger' });
+    let rec = null;
+    if (id) { try { const all = await dbGetAll('announcements'); rec = (all||[]).find(x=>String(x.id)===String(id)); } catch(e){} }
+    const now = new Date().toISOString();
+    const out = Object.assign({}, rec || {}, {
+        id: rec && rec.id ? rec.id : ('ANN-' + Date.now() + '-' + Math.random().toString(36).slice(2,7)),
+        message: msg, scope, scopeId: scopeId || '', examRule, examId: examId || '', active,
+        createdAt: rec && rec.createdAt ? rec.createdAt : now,
+        updatedAt: now
+    });
+    await dbPut('announcements', out);
+    try { closeModal(); } catch(e){}
+    showToast('Announcement saved', { type: 'success' });
+    renderAnnouncementsList();
+    try { if (typeof _restartAnnouncementBanner === 'function') _restartAnnouncementBanner(); } catch(e){}
+}
+
+async function toggleAnnouncementActive(id) {
+    try {
+        const all = await dbGetAll('announcements');
+        const a = (all||[]).find(x=>String(x.id)===String(id));
+        if (!a) return;
+        a.active = a.active === false ? true : false;
+        a.updatedAt = new Date().toISOString();
+        await dbPut('announcements', a);
+        renderAnnouncementsList();
+        try { if (typeof _restartAnnouncementBanner === 'function') _restartAnnouncementBanner(); } catch(e){}
+    } catch(e){ showToast('Failed to update announcement', { type:'danger' }); }
+}
+
+async function deleteAnnouncement(id) {
+    if (!await showConfirm('Delete Announcement', 'Delete this announcement?')) return;
+    try {
+        await dbDelete('announcements', id);
+        renderAnnouncementsList();
+        try { if (typeof _restartAnnouncementBanner === 'function') _restartAnnouncementBanner(); } catch(e){}
+        showToast('Announcement deleted', { type: 'success' });
+    } catch(e){ showToast('Failed to delete announcement', { type:'danger' }); }
+}
+
+// --- student banner display ---
+function _ensureAnnouncementBannerDom() {
+    if (document.getElementById('announcement-banner')) return;
+    const style = document.createElement('style');
+    style.id = 'announcement-banner-style';
+    style.textContent = `#announcement-banner{position:fixed;top:10px;left:50%;transform:translateX(-50%) translateY(-12px);z-index:9999;max-width:min(920px,calc(100vw - 24px));width:max-content;min-width:min(320px,calc(100vw - 24px));background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:12px 14px;display:none;opacity:0;transition:opacity .35s ease, transform .35s ease;font-size:14px;line-height:1.45}#announcement-banner.ann-show{display:block;opacity:1;transform:translateX(-50%) translateY(0)}#announcement-banner .ann-close{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;padding:4px 8px;cursor:pointer;font-size:12px;margin-left:10px}#announcement-banner .ann-row{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}`;
+    document.head.appendChild(style);
+    const div = document.createElement('div');
+    div.id = 'announcement-banner';
+    div.innerHTML = '<div class="ann-row"><div id="announcement-banner-msg" style="white-space:pre-wrap;"></div><button class="ann-close" onclick="hideAnnouncementBanner(true)" aria-label="Close">✕</button></div>';
+    document.body.appendChild(div);
+}
+
+function hideAnnouncementBanner(manual) {
+    const b = document.getElementById('announcement-banner');
+    if (b) b.classList.remove('ann-show');
+    if (_annHideTimer) { clearTimeout(_annHideTimer); _annHideTimer = null; }
+    if (manual) { try { sessionStorage.setItem('annBannerDismissed', '1'); } catch(e){} }
+}
+
+function _showAnnouncementBanner(msg, displaySeconds) {
+    _ensureAnnouncementBannerDom();
+    const b = document.getElementById('announcement-banner');
+    const m = document.getElementById('announcement-banner-msg');
+    if (!b || !m) return;
+    m.textContent = msg || '';
+    b.classList.add('ann-show');
+    if (_annHideTimer) clearTimeout(_annHideTimer);
+    _annHideTimer = setTimeout(() => hideAnnouncementBanner(false), Math.max(2000, (Number(displaySeconds)||8) * 1000));
+}
+
+async function _getStudentAnnouncementContext() {
+    try {
+        const cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        const role = String(cu.role || '').toLowerCase();
+        const isStudent = role === 'student' || !!cu.studentId || !!cu.admissionNumber;
+        if (!cu || !cu.username || !isStudent) return null; // show to students
+        let me = cu;
+        try { if (typeof _hubGetMe === 'function') me = _hubGetMe() || cu; } catch(e){}
+        try { if ((!me || (!me.studyCenterId && !me.id)) && typeof dbGetAll === 'function') {
+            const students = await dbGetAll('students').catch(()=>[]);
+            const found = (students||[]).find(s => [s.id,s.admissionNumber,s.phone,s.email].filter(Boolean).map(String).some(v => [cu.username,cu.studentId,cu.admissionNumber].filter(Boolean).map(String).includes(v)));
+            if (found) me = Object.assign({}, found, cu);
+        }} catch(e){}
+        let studyCenterId = String((me && me.studyCenterId) || cu.studyCenterId || '');
+        let regionId = String((me && me.regionId) || cu.regionId || '');
+        if (!regionId && studyCenterId) {
+            try {
+                const centers = await dbGetAll('studyCenters').catch(()=>[]);
+                const c = (centers||[]).find(x => String(x.id) === studyCenterId);
+                if (c) regionId = String(c.regionId || '');
+            } catch(e){}
+        }
+        const studentId = (me && me.id) || cu.studentId || cu.username;
+        const allStudentIds = new Set([studentId, cu.username, cu.studentId, cu.admissionNumber, me && me.id, me && me.admissionNumber, me && me.phone, me && me.email].filter(Boolean).map(String));
+        return { studyCenterId, regionId, studentId, allStudentIds, me, cu };
+    } catch(e){ console.debug('announcement ctx', e); return null; }
+}
+
+function _announcementScopeMatches(a, ctx) {
+    if (!a || a.active === false) return false;
+    if (!a.message) return false;
+    const scope = a.scope || 'all';
+    if (scope === 'all') return true;
+    if (scope === 'region') return !!(ctx && ctx.regionId && String(a.scopeId) === String(ctx.regionId));
+    if (scope === 'studyCenter') return !!(ctx && ctx.studyCenterId && String(a.scopeId) === String(ctx.studyCenterId));
+    return true;
+}
+
+function _annExamSubmitted(exam, subs, allStudentIds) {
+    if (!exam) return false;
+    const ids = new Set([String(exam.id), exam.linkedQuizId ? String(exam.linkedQuizId) : ''].filter(Boolean));
+    return (subs || []).some(s => allStudentIds.has(String(s.studentId)) && (ids.has(String(s.quizId)) || ids.has(String(s.examId))));
+}
+function _annExamRegistered(exam, regs, allStudentIds) {
+    if (!exam) return false;
+    return (regs || []).some(r => allStudentIds.has(String(r.studentId)) && String(r.examId) === String(exam.id));
+}
+
+function _isPastExam(e) {
+    if (!e) return false;
+    try {
+        if (typeof assessmentWindow === 'function') {
+            const w = assessmentWindow(e);
+            if (w && w.closed) return true;
+        }
+    } catch(e2){}
+    const today = new Date().toISOString().split('T')[0];
+    if (e.openWindow) return false;
+    return !!(e.date && String(e.date) < today);
+}
+
+async function _announcementExamMatches(a, ctx, data) {
+    const rule = a && a.examRule ? a.examRule : 'none';
+    if (rule === 'none') return true;
+    const subs = (data && data.submissions) || [];
+    const exams = (data && data.exams) || [];
+    const enrollments = (data && data.enrollments) || [];
+    const regs = (data && data.examRegistrations) || [];
+    const ids = ctx && ctx.allStudentIds ? ctx.allStudentIds : new Set();
+    if (rule === 'did_exam' || rule === 'did_not_do_exam' || rule === 'registered_not_submitted') {
+        const ex = exams.find(e => String(e.id) === String(a.examId));
+        if (!ex) return false; // exam missing -> don't show
+        const did = _annExamSubmitted(ex, subs, ids);
+        const registered = _annExamRegistered(ex, regs, ids);
+        if (rule === 'did_exam') return did;
+        if (rule === 'registered_not_submitted') return registered && !did;
+        return !did; // did_not_do_exam
+    }
+    if (rule === 'did_not_do_any_past' || rule === 'registered_not_submitted_any_past') {
+        const enrolled = new Set((enrollments||[]).filter(e => ids.has(String(e.studentId))).map(e => String(e.courseId)));
+        const past = (exams||[]).filter(e => enrolled.has(String(e.courseId)) && _isPastExam(e) && e.published !== false);
+        if (!past.length) return false; // no applicable past exams
+        if (rule === 'registered_not_submitted_any_past') {
+            // registration + submission: registered for a past exam but no submission
+            return past.some(ex => _annExamRegistered(ex, regs, ids) && !_annExamSubmitted(ex, subs, ids));
+        }
+        return !past.some(ex => _annExamSubmitted(ex, subs, ids)); // no submission for any past exam
+    }
+    return true;
+}
+
+async function _announcementMatches(a, ctx, data) {
+    if (!_announcementScopeMatches(a, ctx)) return false;
+    if ((a.examRule || 'none') === 'none') return true;
+    return await _announcementExamMatches(a, ctx, data || {});
+}
+
+async function _tickAnnouncementBanner() {
+    try {
+        if (sessionStorage.getItem('annBannerDismissed') === '1') return;
+        const ctx = await _getStudentAnnouncementContext();
+        if (!ctx) return;
+        const [settingsRec, anns] = await Promise.all([dbGet('settings', _ANN_SETTINGS_KEY).catch(()=>null), dbGetAll('announcements').catch(()=>[])]);
+        const v = settingsRec && settingsRec.value ? settingsRec.value : (settingsRec || {});
+        const displaySeconds = Math.max(2, Number(v.displaySeconds) || 8);
+        const intervalSeconds = Math.max(0, Number(v.intervalSeconds) != null ? Number(v.intervalSeconds) : 300);
+        const now = Date.now();
+        if (intervalSeconds > 0) {
+            const last = Number(sessionStorage.getItem('annBannerLastShown') || 0);
+            if (last && (now - last) < intervalSeconds * 1000) return;
+        } else {
+            if (sessionStorage.getItem('annBannerShownOnce') === '1') return;
+        }
+        const scopeMatches = (anns || []).filter(a => _announcementScopeMatches(a, ctx));
+        if (!scopeMatches.length) return;
+        let data = {};
+        if (scopeMatches.some(a => (a.examRule || 'none') !== 'none')) {
+            const [submissions, exams, enrollments, examRegistrations] = await Promise.all([dbGetAll('submissions').catch(()=>[]), dbGetAll('exams').catch(()=>[]), dbGetAll('enrollments').catch(()=>[]), dbGetAll('examRegistrations').catch(()=>[])]);
+            data = { submissions, exams, enrollments, examRegistrations };
+        }
+        const queue = [];
+        for (const a of scopeMatches) { if (await _announcementMatches(a, ctx, data)) queue.push(a); }
+        if (!queue.length) return;
+        const a = queue[_annIndex % queue.length];
+        _annIndex = (_annIndex + 1) % queue.length;
+        sessionStorage.setItem('annBannerLastShown', String(now));
+        if (intervalSeconds <= 0) sessionStorage.setItem('annBannerShownOnce', '1');
+        _showAnnouncementBanner(a.message, displaySeconds);
+    } catch(e){}
+}
+
+function startAnnouncementBanner() {
+    try {
+        // initial delay to avoid fighting with login/render
+        setTimeout(() => { _tickAnnouncementBanner(); }, 1500);
+        setTimeout(() => { _tickAnnouncementBanner(); }, 5000);
+        if (!_annTimer) _annTimer = setInterval(() => { _tickAnnouncementBanner(); }, 15000); // check; actual interval enforced by lastShown
+    } catch(e){}
+}
+function _restartAnnouncementBanner() {
+    try { sessionStorage.removeItem('annBannerShownOnce'); sessionStorage.removeItem('annBannerLastShown'); sessionStorage.removeItem('annBannerDismissed'); } catch(e){}
+    _tickAnnouncementBanner();
+}
+window.startAnnouncementBanner = startAnnouncementBanner;
+window.checkAnnouncementBanner = _tickAnnouncementBanner;
+window._restartAnnouncementBanner = _restartAnnouncementBanner;
+window.loadAnnouncementBannerSettings = loadAnnouncementBannerSettings;
+window.saveAnnouncementBannerSettings = saveAnnouncementBannerSettings;
+window.renderAnnouncementsList = renderAnnouncementsList;
+window.openAnnouncementEditor = openAnnouncementEditor;
+window.saveAnnouncement = saveAnnouncement;
+window.toggleAnnouncementActive = toggleAnnouncementActive;
+window.deleteAnnouncement = deleteAnnouncement;
+window.hideAnnouncementBanner = hideAnnouncementBanner;
+
+
+
+function _throttledBg(key, ms, fn) {
+    try {
+        const last = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+        if (Date.now() - last < ms) return;
+        localStorage.setItem(key, String(Date.now()));
+        setTimeout(() => { Promise.resolve(fn()).catch(e => console.error(key, e)); }, 1500);
+    } catch(e) {}
+}
+
 async function initAuth() {
     try { if (typeof loadCountries === 'function') loadCountries(); } catch {}
     // NOTE: there used to be a block here that re-created the `admin` account
@@ -1576,8 +2202,6 @@ async function initAuth() {
     // init() has already loaded branding before calling initAuth(). Do not
     // download the 1.16 MB record a second time just to show the login screen.
     try { await initAcademicCache(); } catch (e) { console.error('initAuth initAcademicCache failed:', e); }
-    try { await checkAllAccountActivity(); } catch (e) { console.error('initAuth checkAllAccountActivity failed:', e); }
-    try { await syncUserAccounts(); } catch (e) { console.error('initAuth syncUserAccounts failed:', e); }
     try {
         const session = sessionStorage.getItem('currentUser');
         if (session) {
@@ -1586,45 +2210,38 @@ async function initAuth() {
             try { dbUser = await dbGet('users', user.username); } catch {}
             const effUser = (dbUser && dbUser.status !== 'locked') ? dbUser : user;
             if (dbUser && effUser.status !== 'locked') {
-                // The users-store record has no session token (and carries the
-                // password hash). Merging keeps the live session alive — without
-                // this every later API call went out unauthenticated and the whole
-                // admin UI came back empty.
                 sessionStorage.setItem('currentUser', JSON.stringify({ ...dbUser, session_token: user.session_token || dbUser.session_token || '', password: undefined }));
             }
             if (effUser) {
-                // Terms & Conditions check — version-aware
                 const key = 'terms_accepted_' + (effUser.username || effUser.id);
                 const brandingCheck = (typeof window !== 'undefined' && window._brandingSettings)
                     ? window._brandingSettings
-                    : await dbGet('settings', 'branding');
-                const currentVersion = brandingCheck && brandingCheck.termsContent ? (brandingCheck.termsVersion || 1) : 0;
+                    : await dbGet('settings', 'branding').catch(() => null);
+                const bval = brandingCheck && (brandingCheck.value || brandingCheck);
+                const currentVersion = bval && bval.termsContent ? (bval.termsVersion || 1) : 0;
                 if (currentVersion > 0 && effUser.termsVersion !== currentVersion) {
                     localStorage.removeItem(key);
                     showTermsModalApp(effUser);
                     return;
                 }
                 if (currentVersion > 0 && localStorage.getItem(key) !== 'true') {
-                    if (effUser.termsAccepted && effUser.termsVersion === currentVersion) {
-                        localStorage.setItem(key, 'true');
-                    } else {
-                        showTermsModalApp(effUser);
-                        return;
-                    }
+                    if (effUser.termsAccepted && effUser.termsVersion === currentVersion) localStorage.setItem(key, 'true');
+                    else { showTermsModalApp(effUser); return; }
                 }
-                // A forced password change stops the app until it is done.
-                if (effUser.mustChangePassword) {
-                    showForcedPasswordChange(effUser);
-                    return;
-                }
+                if (effUser.mustChangePassword) { showForcedPasswordChange(effUser); return; }
                 try { if (typeof startAutoRefresh === 'function') startAutoRefresh(); } catch {}
                 try { if (typeof loadPayrollStaffSelect === 'function' && effUser.role !== 'student') loadPayrollStaffSelect(); } catch {}
-                return showApp(effUser);
+                showApp(effUser);
+                // Non-blocking, throttled background maintenance (not on every load)
+                _throttledBg('checkAllAccountActivity:last', 12*3600*1000, checkAllAccountActivity);
+                _throttledBg('syncUserAccounts:last', 24*3600*1000, syncUserAccounts);
+                return;
             }
         }
         document.getElementById('login-screen').style.display = 'flex';
         document.getElementById('app').style.display = 'none';
-    } catch (e) { console.error('initAuth session check failed:', e); }
+        // Light background checks for login screen are not needed; skip.
+    } catch (e) { console.error('initAuth session check failed:', e); try { document.getElementById('login-screen').style.display = 'flex'; } catch(e2){} }
 }
 function staffRoleToSystemRole(staffRole) {
     const map = { admin: 'admin', lecturer: 'lecturer', professor: 'lecturer', dean: 'registrar', 'finance officer': 'finance', support: 'lecturer', assistant: 'assistant', 'assistant admin': 'assistant' };
@@ -2232,57 +2849,58 @@ async function updatePendingBadge() {
 
 async function checkAllAccountActivity() {
     const batch = await dbGetBatch(['users','students']);
-    const users = batch.users, students = batch.students;
+    const users = batch.users || [], students = batch.students || [];
     const now = new Date();
-    let changed = false;
     for (const user of users) {
-        if (user.role !== 'student' || user.status === 'locked') continue;
+        if (!user || user.role !== 'student' || user.status === 'locked') continue;
         if (!user.lastLogin) continue;
+        let userChanged = false;
         const workDays = countWorkingDays(user.lastLogin, now);
         const student = students.find(s => s.id === user.studentId || s.id === 'STU-' + user.username || s.email === user.username);
         const phone = student ? student.phone : '';
         if (workDays >= 20 && workDays < 27) {
             if (!user.warned1) {
-                user.warned1 = true;
+                user.warned1 = true; userChanged = true;
                 if (phone) {
-                    const tpl = await dbGet('whatsappTemplates', 'tpl-inactivity1');
-                    if (tpl) {
-                        const branding = await dbGet('settings', 'branding');
-                        const schoolName = branding ? branding.schoolName : 'College';
-                        const msg = applyTemplateVars(tpl.message, student || { name: user.name }, schoolName);
-                        sendWhatsApp(phone, msg);
-                    }
+                    try {
+                        const tpl = await dbGet('whatsappTemplates', 'tpl-inactivity1');
+                        if (tpl) {
+                            const branding = await dbGet('settings', 'branding');
+                            const schoolName = branding ? (branding.value?branding.value.schoolName:branding.schoolName) : 'College';
+                            const msg = applyTemplateVars(tpl.message, student || { name: user.name }, schoolName);
+                            sendWhatsApp(phone, msg);
+                        }
+                    } catch(e){}
                 }
-                changed = true;
             }
         } else if (workDays >= 27 && workDays < 30) {
             if (!user.warned2) {
-                user.warned2 = true;
+                user.warned2 = true; userChanged = true;
                 if (phone) {
-                    const tpl = await dbGet('whatsappTemplates', 'tpl-inactivity2');
-                    if (tpl) {
-                        const branding = await dbGet('settings', 'branding');
-                        const schoolName = branding ? branding.schoolName : 'College';
-                        const msg = applyTemplateVars(tpl.message, student || { name: user.name }, schoolName);
-                        sendWhatsApp(phone, msg);
-                    }
+                    try {
+                        const tpl = await dbGet('whatsappTemplates', 'tpl-inactivity2');
+                        if (tpl) {
+                            const branding = await dbGet('settings', 'branding');
+                            const schoolName = branding ? (branding.value?branding.value.schoolName:branding.schoolName) : 'College';
+                            const msg = applyTemplateVars(tpl.message, student || { name: user.name }, schoolName);
+                            sendWhatsApp(phone, msg);
+                        }
+                    } catch(e){}
                 }
-                changed = true;
             }
         } else if (workDays >= 30) {
             if (user.status !== 'locked') {
                 user.status = 'locked';
                 user.lockedAt = now.toISOString();
                 user.lockedReason = 'Inactive for ' + workDays + ' working days';
-                if (student) student.status = 'inactive';
-                if (student) await dbPut('students', student);
-                changed = true;
-                logAudit('locked', 'user', { username: user.username, reason: user.lockedReason });
+                userChanged = true;
+                if (student) { student.status = 'inactive'; try { await dbPut('students', student); } catch(e){} }
+                try { logAudit('locked', 'user', { username: user.username, reason: user.lockedReason }); } catch(e){}
             }
         }
-        if (user.warned1 && workDays < 20) user.warned1 = false;
-        if (user.warned2 && workDays < 27) user.warned2 = false;
-        await dbPut('users', user);
+        if (user.warned1 && workDays < 20) { user.warned1 = false; userChanged = true; }
+        if (user.warned2 && workDays < 27) { user.warned2 = false; userChanged = true; }
+        if (userChanged) { try { await dbPut('users', user); } catch(e){} }
     }
 }
 function signupFilterCenters() {
@@ -2723,7 +3341,7 @@ function showScreen(id) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); loadDocGenFlags(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadMaintenanceAI === 'function') loadMaintenanceAI(); loadDocGenFlags(); if (typeof loadAnnouncementBannerSettings === 'function') loadAnnouncementBannerSettings(); if (typeof renderAnnouncementsList === 'function') renderAnnouncementsList(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -3740,6 +4358,43 @@ async function confirmAdoptStudent() {
         showToast('Student adopted into ' + country + ' — Adm#: ' + data.admissionNumber, { type: 'success' });
         try { logAudit('adopted', 'student', { id: studentId, country, admissionNumber: data.admissionNumber }); } catch {}
     } catch (e) { showToast('Adoption failed: ' + e.message, { type: 'danger' }); }
+}
+function showAlignStudentRepair(presetAdmission) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (currentUser.role !== 'admin') return showToast('Administrator/Owner access required.', { type: 'danger' });
+    const content = `
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Admin/Owner repair: aligns a student’s login link, enrollments, grades and submissions to one canonical student record (fixes cases where exams/transcripts don’t appear due to ID mismatch).</div>
+        <div class="form-group"><label>Admission Number *</label><input type="text" id="align-admission" value="${escapeHtml(presetAdmission || '')}" placeholder="e.g. NF/MNSC/6-26/402"></div>
+        <div class="form-group"><label>Canonical Student ID (optional)</label><input type="text" id="align-canonical-id" placeholder="Leave blank to use the student record found by admission"></div>
+        <div class="form-group"><label>Course IDs to ensure enrolled (optional, comma-separated)</label><input type="text" id="align-course-ids" placeholder="e.g. CRS-...,CRS-..."></div>
+        <div class="form-group"><label>Link Username/Phone (optional)</label><input type="text" id="align-username" placeholder="User account username/phone to link"></div>
+    `;
+    showModal('Repair Student Records', content, `<button class="btn btn-primary" onclick="submitAlignStudentRepair()">Run Repair</button>`);
+}
+async function submitAlignStudentRepair() {
+    const admissionNumber = (document.getElementById('align-admission')?.value || '').trim();
+    const canonicalStudentId = (document.getElementById('align-canonical-id')?.value || '').trim();
+    const courseIdsRaw = (document.getElementById('align-course-ids')?.value || '').trim();
+    const linkUsername = (document.getElementById('align-username')?.value || '').trim();
+    const courseIds = courseIdsRaw ? courseIdsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+    if (!admissionNumber && !canonicalStudentId) return showToast('Enter admission number or canonical student ID.', { type: 'danger' });
+    if (!await showConfirm('Repair Student Records', `Align records for ${escapeHtml(admissionNumber || canonicalStudentId)}? This updates user linkage and reassigns matching enrollments/grades/submissions to the canonical student ID.`)) return;
+    try {
+        const res = await fetch('/api/admin/align-student', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ admissionNumber, canonicalStudentId, courseIds, linkUsername })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Repair failed (${res.status})`);
+        closeModal();
+        showToast(`Repaired ${data.studentName || admissionNumber}: linked users ${data.usersLinked}, enrollments updated ${data.enrollmentsUpdated}, created ${data.enrollmentsCreated}, grades ${data.gradesUpdated}, submissions ${data.submissionsUpdated}.`, { type: 'success', duration: 9000 });
+        try { if (typeof renderStudents === 'function') await renderStudents(); } catch {}
+        try { if (typeof loadGrades === 'function') loadGrades(); } catch {}
+        logAudit('aligned', 'student-records', data);
+    } catch (e) {
+        showToast('Repair failed: ' + e.message, { type: 'danger', duration: 7000 });
+    }
 }
 async function adminEnrollStudentInCourse(studentId) {
     const student = await dbGet('students', studentId);
@@ -6009,19 +6664,19 @@ async function computeAndSaveAllGrades() {
     if (!courseId) return showToast('Select a course!');
     const course = await dbGet('courses', courseId);
     const quizzes = await dbGetAll('quizzes');
-    const exams = await dbGetAll('exams');
+    const exams = await dbGetAll('exams').catch(() => []);
     const submissions = await dbGetAll('submissions');
     const attendance = await dbGetAll('attendance');
     const enrollments = await dbGetAll('enrollments');
     const users = await dbGetAll('users');
     const allGrades = await dbGetAll('grades');
-    const studentIds = [...new Set(enrollments.filter(e => e.courseId === courseId).map(e => e.studentId))];
+    const studentIds = [...new Set(enrollments.filter(e => String(e.courseId) === String(courseId)).map(e => e.studentId))];
     // PLAN FIRST. A manually entered mark is never overwritten by a bulk
     // compute, and the confirmation states exactly what will change.
     const plan = [];
     let keptManual = 0, keptSame = 0, noData = 0;
     for (const studentId of studentIds) {
-        const existing = allGrades.find(g => g && g.studentId === studentId && g.courseId === courseId
+        const existing = allGrades.find(g => g && String(g.studentId) === String(studentId) && String(g.courseId) === String(courseId)
             && String(g.semester) === String(semester) && isCourseLevelGrade(g));
         if (existing && existing.manual === true) { keptManual++; continue; }
         const result = computeWeightedGrade(studentId, courseId, course, quizzes, submissions, attendance, users, exams, semester);
@@ -6060,12 +6715,6 @@ async function computeAndSaveAllGrades() {
         saved++;
     }
     loadGrades();
-    // Also sync to ensure transcript consistency
-    try {
-        for (const sid of studentIds) {
-            await syncCourseGradeFromAssessmentsClient(sid, courseId, semester);
-        }
-    } catch(e) {}
     showToast(`Saved ${saved} weighted grade(s).${keptManual ? ` ${keptManual} manual entr${keptManual === 1 ? 'y' : 'ies'} kept.` : ''}`, { duration: 6000 });
     logAudit('computed', 'weighted-grades', { courseId, semester, count: saved, keptManual });
 }
@@ -6091,7 +6740,6 @@ async function saveGrade(studentId, courseId, semester) {
     // by "Compute Weighted" - the recorded result wins over a recomputation.
     const grade = { id: `GRD-${studentId}-${courseId}-${semester}`, studentId, courseId, semester: parseInt(semester), score, grade: gradeInfo.grade, gpa: gradeInfo.gpa, manual: true, gradedAt: new Date().toISOString() };
     await dbPut('grades', grade); showToast('Grade saved!'); logAudit('saved', 'grade', { studentId, courseId, score });
-    try { await syncCourseGradeFromAssessmentsClient(studentId, courseId, semester); } catch(e) {}
 }
 let _gradeScale = 'standard';
 function setGradeScale(scale) { _gradeScale = scale || 'standard'; _gradeScaleLoaded = true; }
@@ -6314,6 +6962,7 @@ function pickAuthoritativeGrade(a, b) {
     if (pa.manual !== pb.manual) return pa.manual > pb.manual ? a : b;
     if (pa.assessments !== pb.assessments) return pa.assessments > pb.assessments ? a : b;
     if (pa.weighted !== pb.weighted) return pa.weighted > pb.weighted ? a : b;
+    if (pa.manual !== pb.manual) return pa.manual > pb.manual ? b : a; // manual lower priority now
     if (pa.ts !== pb.ts) return pa.ts > pb.ts ? a : b;
     return pa.score >= pb.score ? a : b;
 }
@@ -6386,55 +7035,6 @@ function resolveStudentResults(allGrades, studentId, opts) {
     };
 }
 
-
-// Auto-sync course-level grade from all assessment data (quizzes/CATs/exams)
-async function syncCourseGradeFromAssessmentsClient(studentId, courseId, semester) {
-    try {
-        const course = await dbGet('courses', courseId);
-        if (!course) return null;
-        const quizzes = await dbGetAll('quizzes');
-        const submissions = await dbGetAll('submissions');
-        const attendance = await dbGetAll('attendance');
-        const users = await dbGetAll('users');
-        const allGrades = await dbGetAll('grades');
-        const courseQuizzes = (quizzes || []).filter(q => q && q.courseId === courseId);
-        const ids = studentIdSet(studentId, users);
-        const matchId = (s) => s && ids.has(s.studentId);
-        const examSubs = (submissions || []).filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && q.assessmentType === 'exam'));
-        const quizSubs = (submissions || []).filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && (q.assessmentType === 'quiz' || !q.assessmentType)));
-        const catSubs = (submissions || []).filter(s => matchId(s) && courseQuizzes.some(q => q.id === s.quizId && q.assessmentType === 'cat'));
-        const studentAttendance = (attendance || []).filter(a => matchId(a) && a.courseId === courseId);
-        const bestByQuiz = (subs) => { const best = {}; subs.forEach(s => { if (s && s.score != null) { const sc = Number(s.score); if (best[s.quizId] === undefined || sc > best[s.quizId]) best[s.quizId] = sc; } }); return Object.values(best); };
-        const examScores = bestByQuiz(examSubs);
-        const quizScores = bestByQuiz(quizSubs);
-        const catScores = bestByQuiz(catSubs);
-        const examAvg = examScores.length ? examScores.reduce((a,b)=>a+b,0)/examScores.length : 0;
-        const quizAvg = quizScores.length ? quizScores.reduce((a,b)=>a+b,0)/quizScores.length : 0;
-        const catAvg = catScores.length ? catScores.reduce((a,b)=>a+b,0)/catScores.length : 0;
-        const attPct = studentAttendance.length ? (studentAttendance.filter(a => a.status === 'present' || a.status === 'late').length / studentAttendance.length) * 100 : 0;
-        const attAward = attPct >= 80 ? 100 : 0;
-        const wt = course.weightage || [
-            { label: 'Exam', value: course.examWeight || 30, type: 'exam' },
-            { label: 'Quiz', value: course.quizWeight || 20, type: 'quiz' },
-            { label: 'CAT', value: course.catWeight || 25, type: 'cat' },
-            { label: 'Attendance', value: course.attWeight || 10, type: 'attendance' }
-        ];
-        const getWt = (type) => ((wt.find(w=>w.type===type)||{value:0}).value/100);
-        const weightedScore = Math.round((examAvg*getWt('exam')) + (quizAvg*getWt('quiz')) + (catAvg*getWt('cat')) + (attAward*getWt('attendance')));
-        if (!(weightedScore > 0)) return null;
-        const sem = semester === 'all' ? 1 : (semester || 1);
-        const existing = (allGrades || []).find(g => g && g.studentId === studentId && g.courseId === courseId && String(g.semester) === String(sem) && isCourseLevelGrade(g));
-        if (existing && existing.manual === true) return existing;
-        const gradeInfo = getGrade(weightedScore);
-        const grade = {
-            id: (existing && /^GRD-/.test(existing.id||'')) ? existing.id : `GRD-${studentId}-${courseId}-${sem}`,
-            studentId, courseId, semester: parseInt(sem), score: weightedScore, grade: gradeInfo.grade, gpa: gradeInfo.gpa,
-            weighted: true, autoSynced: true, bestScoreApplied: true, gradedAt: new Date().toISOString(), syncedAt: new Date().toISOString()
-        };
-        await dbPut('grades', grade);
-        return grade;
-    } catch (e) { console.error('syncCourseGradeFromAssessmentsClient error:', e.message); return null; }
-}
 
 
 // Live cache for the Exams screen. renderExams() fills this on its first run
@@ -6510,41 +7110,111 @@ async function renderExams(opts) {
         const studentId = me ? me.id : (currentUser.studentId || currentUser.username);
         const enrolledCourseIds = new Set(enrollments.filter(e => String(e.studentId) === String(studentId)).map(e => e.courseId));
         const inactiveCourseIds = new Set(courses.filter(c => c.status === 'inactive').map(c => c.id));
+        const today = new Date().toISOString().split('T')[0];
         const myRegistrations = registrations.filter(r => String(r.studentId) === String(studentId));
-        const myRetakeExamIds = new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => r.examId));
+        const myRegExamIds = new Set(myRegistrations.map(r => String(r.examId || r.quizId)));
         const submissions = await dbGetAll('submissions');
-        const mySubmittedIds = new Set(submissions.filter(s => s.studentId === studentId).map(s => s.quizId));
+        const mySubmittedIds = new Set(submissions.filter(s => String(s.studentId) === String(studentId)).map(s => s.quizId));
+        const mySubmissions = submissions.filter(s => String(s.studentId) === String(studentId) || String(s.studentId) === String(currentUser.username));
         const assessmentCtx = {
             student: me,
             centers,
             courseIds: enrolledCourseIds,
             examRegIds: new Set(myRegistrations.map(r => r.examId || r.quizId)),
-            retakeExamIds: myRetakeExamIds,
+            retakeExamIds: new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => String(r.examId))),
             submittedIds: mySubmittedIds
         };
+        // Course-sequence lock (transcript order, combination completion; admin/owner override respected).
+        // Client-side only for UX: the server remains authoritative, and per-centre/per-region
+        // gating is resolved by the server.
+        let _seqLockedCourses = new Set();
+        try {
+            const [grades, quizzesAll, lessons, lessonCompletions, courseCompletions, gateR] = await Promise.all([
+                dbGetAll('grades').catch(()=>[]), dbGetAll('quizzes').catch(()=>[]), dbGetAll('lessons').catch(()=>[]), dbGetAll('lessonCompletions').catch(()=>[]), dbGetAll('courseCompletions').catch(()=>[]), dbGet('settings','contentGate').catch(()=>null)
+            ]);
+            const gate = gateR && (gateR.value||gateR);
+            if (gate && gate.enabled === true && gate.mode !== 'per-center' && gate.mode !== 'per-region') {
+                const migrateLocks = (o)=>{ const m={...((o&&o.locks)||{})}; ((o&&o.unlocked)||[]).forEach(id=>{ if(!m[id]) m[id]='unlocked'; }); return m; };
+                const sOv = gate.students ? (gate.students[String(studentId)]||gate.students[studentId]||null) : null;
+                const effLocks = Object.assign({}, migrateLocks(gate), migrateLocks(sOv));
+                if (!(sOv && sOv.exempt)) {
+                    const dataS = { courses, grades:grades||[], submissions:submissions||[], quizzes:quizzesAll||[], exams, lessons:lessons||[], lessonCompletions:lessonCompletions||[], courseCompletions:courseCompletions||[] };
+                    try { if (typeof buildLessonCoverIndex==='function') dataS._lessonCoverIdx = buildLessonCoverIndex(dataS.lessons, dataS.lessonCompletions); } catch{}
+                    const statuses = (typeof studentCourseStatuses==='function') ? studentCourseStatuses(studentId, courses, dataS) : {};
+                    enrolledCourseIds.forEach(cid => {
+                        const st = statuses[cid] || statuses[String(cid)] || 'current';
+                        const ls = effLocks[cid] || effLocks[String(cid)] || 'auto';
+                        if (st==='covered' || st==='current' || ls==='unlocked') return;
+                        _seqLockedCourses.add(String(cid));
+                    });
+                }
+            }
+        } catch(e){}
+        const hasExamInteraction = (e) => {
+            if (myRegExamIds.has(String(e.id))) return true;
+            const ids = [e.id, e.linkedQuizId].filter(Boolean).map(String);
+            return mySubmissions.some(s => ids.includes(String(s.quizId)) || ids.includes(String(s.examId)));
+        };
+        const myCenterId = String((me && me.studyCenterId) || '');
         const sorted = exams.filter(e => {
-            if (e.published === false) return false;
+            if (!semMatches(e)) return false;
+            const interaction = hasExamInteraction(e);
+            if (e.published === false && !interaction) return false;
+            if (_seqLockedCourses.has(String(e.courseId)) && !interaction && e.ungated !== true) return false;
             const exType = String(e.type || e.assessmentType || '').toLowerCase();
+            const isPastExam = !e.openWindow && e.date && e.date < today;
+            if (e.studyCenterId && myCenterId && String(e.studyCenterId) !== myCenterId) {
+                const ov = e.centerAccessOverrides || {};
+                const allowed = ov[String(studentId)] === true || ov[String(me && me.id)] === true || myRegExamIds.has(String(e.id));
+                if (!allowed && !interaction) return false;
+            }
             if (exType !== 'supplementary' && (e.openWindow || (e.date && e.time))) {
-                if (!inactiveCourseIds.has(e.courseId) && semMatches(e)) return true;
+                if (!inactiveCourseIds.has(e.courseId) || interaction) return true;
             }
             if (!e.openWindow) {
                 try {
                     const w = assessmentWindow(e);
-                    if (w.closed) return false;
-                    if (w.notYetOpen) return false;
+                    if (w.closed || w.notYetOpen) return false;
                 } catch(e){}
             }
-            return !inactiveCourseIds.has(e.courseId) && semMatches(e) && canStudentAccessAssessment(e, 'exam', assessmentCtx);
+            if (inactiveCourseIds.has(e.courseId) && !isPastExam && !interaction) return false;
+            return canStudentAccessAssessment(e, 'exam', assessmentCtx) || interaction;
         }).sort((a, b) => {
             const ad = a.date || '9999-12-31', bd = b.date || '9999-12-31';
             return ad.localeCompare(bd);
         });
-        const today = new Date().toISOString().split('T')[0];
+        const myRetakeExamIds = new Set(retakeRequests.filter(r => String(r.studentId) === String(studentId) && r.status !== 'rejected').map(r => String(r.examId)));
+        const mySuppRelevantIds = new Set();
+        retakeRequests.forEach(r => {
+            if (String(r.studentId) !== String(studentId) || r.status === 'rejected') return;
+            if (r.supplementaryExamId) mySuppRelevantIds.add(String(r.supplementaryExamId));
+            if (r.examId) mySuppRelevantIds.add(String(r.examId));
+        });
+        myRegExamIds.forEach(id => mySuppRelevantIds.add(id));
+        const visibleSorted = sorted.filter(e => {
+            if (e.type !== 'supplementary') return true;
+            return myRegExamIds.has(String(e.id)) || mySuppRelevantIds.has(String(e.id));
+        });
+        // Keep cards with information even after exam is deleted: build placeholders from registrations/submissions.
+        const knownExamIds = new Set(exams.map(e => String(e.id)));
+        const placeholderExams = [];
+        registrations.filter(r => String(r.studentId) === String(studentId) && !knownExamIds.has(String(r.examId))).forEach(r => {
+            placeholderExams.push({ id: r.examId, courseId: '', title: 'Exam (record unavailable)', date: (r.registeredAt || '').slice(0,10), time: '', venue: '--', type: 'midterm', published: false, _deletedPlaceholder: true, openWindow: false, questionIds: [], passMark: 50 });
+        });
+        // Submissions that look exam-related (EXM- prefix or matched via exam registration history) but exam deleted
+        mySubmissions.forEach(s => {
+            const qid = String(s.quizId || s.examId || '');
+            if (!qid || knownExamIds.has(qid)) return;
+            if (placeholderExams.some(p => String(p.id) === qid)) return;
+            if (/^EXM[-_]/i.test(qid) || myRegExamIds.has(qid) || registrations.some(r => String(r.examId) === qid && String(r.studentId) === String(studentId))) {
+                placeholderExams.push({ id: qid, courseId: '', title: 'Exam (record unavailable)', date: (s.submittedAt || s.createdAt || '').slice(0,10) || '', time: '', venue: '--', type: 'midterm', published: false, _deletedPlaceholder: true, openWindow: false, questionIds: [], passMark: 50 });
+            }
+        });
         // An open-ended exam has no closing date, so it is always "upcoming" -
         // it must never appear under Past, or students would assume it is closed.
-        const upcoming = sorted.filter(e => e.openWindow || e.date >= today);
-        const past = sorted.filter(e => !e.openWindow && e.date < today);
+        const _visibleAll = visibleSorted.concat(placeholderExams);
+        const upcoming = _visibleAll.filter(e => e.openWindow || !e.date || e.date >= today);
+        const past = _visibleAll.filter(e => !e.openWindow && e.date && e.date < today);
         const tbody = document.getElementById('exams-body');
         const tableContainer = tbody.closest('.table-container');
         if (tableContainer) tableContainer.style.display = 'none';
@@ -6567,13 +7237,14 @@ async function renderExams(opts) {
             const passed = examSub && examSub.status === 'pass';
             const typeIcon = e.type === 'final' ? '📄' : e.type === 'supplementary' ? '🔄' : '📝';
             const typeLabel = e.type === 'final' ? 'Final' : e.type === 'supplementary' ? 'Supplementary' : 'Midterm';
-            const hasPendingRequest = myRetakeExamIds.has(e.id);
+            const hasPendingRequest = myRetakeExamIds.has(String(e.id));
             return `<div style="padding:16px;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                     <div>
                         <b style="font-size:14px;">${typeIcon} ${e.title || course?.code || e.courseId}</b>
                         <span class="badge badge-info" style="font-size:9px;margin-left:6px;">${typeLabel}</span>
                         ${e.openWindow ? '<span class="badge badge-success" style="font-size:9px;margin-left:6px;">OPEN — no time limit</span>' : ''}${e.ungated ? '<span class="badge badge-warning" style="font-size:9px;margin-left:6px;">Ungated</span>' : ''}
+                        ${e._deletedPlaceholder ? '<span class="badge badge-secondary" style="font-size:9px;margin-left:6px;">Record unavailable</span>' : (e.published === false ? '<span class="badge badge-secondary" style="font-size:9px;margin-left:6px;">Unpublished</span>' : '')}
                         ${course ? `<br><span style="font-size:11px;color:var(--text-muted);">${course.name} (${course.code})</span>` : ''}
                     </div>
                     <div style="text-align:right;">
@@ -6589,9 +7260,9 @@ async function renderExams(opts) {
                     ${center ? `<span>🏛 ${center.name}</span>` : ''}
                 </div>
                 <div style="margin-top:8px;">
-                    ${examSub ? `<span>Score: <b style="color:${passed ? 'var(--success)' : 'var(--danger)'};">${examSub.score}%</b></span>` : (isRegistered || e.openWindow) ? `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')">📝 ${e.openWindow ? 'Start Exam (untimed)' : 'Take Exam'}</button>` : `<span style="font-size:11px;color:var(--text-muted);">Not registered</span>`}
+                    ${examSub ? `<span>Score: <b style="color:${passed ? 'var(--success)' : 'var(--danger)'};">${examSub.score}%</b></span>` : (e._deletedPlaceholder || e.published === false) ? `<span style="font-size:11px;color:var(--text-muted);">${e._deletedPlaceholder ? 'Exam record unavailable' : 'Exam unavailable'}</span>` : (isRegistered || e.openWindow) ? `<button class="btn btn-primary btn-sm" onclick="startExam('${e.id}')">📝 ${e.openWindow ? 'Start Exam (untimed)' : 'Take Exam'}</button>` : `<span style="font-size:11px;color:var(--text-muted);">Not registered</span>`}
                     ${!passed && hasPendingRequest ? '<br><span class="badge badge-warning" style="margin-top:6px;">⏳ Request Pending</span>' : ''}
-                    ${!passed && !hasPendingRequest && e.date < today ? `<br><button class="btn btn-outline btn-sm" onclick="requestMissedExam('${e.id}')" style="margin-top:6px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>` : ''}
+                    ${!passed && !hasPendingRequest && e.date < today && !e._deletedPlaceholder ? `<br><button class="btn btn-outline btn-sm" onclick="requestMissedExam('${e.id}')" style="margin-top:6px;border-color:var(--warning);color:var(--warning);">📋 Request Exam</button>` : ''}
                 </div>
             </div>`;
         }
@@ -6929,7 +7600,7 @@ async function saveExam() {
     const exam = { id, courseId, studyCenterId: document.getElementById('exam-center').value, date, time,
         opensAt: (document.getElementById('exam-opens') || {}).value || date || '',
         closesAt: (document.getElementById('exam-closes') || {}).value || '',
-        venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, durationDays: parseInt(document.getElementById('exam-duration-days')?.value) || 0, durationHours: parseInt(document.getElementById('exam-duration-hours')?.value) || 0, durationMinutes: parseInt(document.getElementById('exam-duration-mins')?.value) || 0, duration: (parseInt(document.getElementById('exam-duration-days')?.value)||0)*24*60 + (parseInt(document.getElementById('exam-duration-hours')?.value)||0)*60 + (parseInt(document.getElementById('exam-duration-mins')?.value)||0) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, maxRetakes: Math.max(1, Math.min(10, parseInt((document.getElementById('exam-attempts') || {}).value) || 1)), totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString() };
+        venue, invigilatorId: document.getElementById('exam-invigilator').value, type: document.getElementById('exam-type').value, durationDays: parseInt(document.getElementById('exam-duration-days')?.value) || 0, durationHours: parseInt(document.getElementById('exam-duration-hours')?.value) || 0, durationMinutes: parseInt(document.getElementById('exam-duration-mins')?.value) || 0, duration: (parseInt(document.getElementById('exam-duration-days')?.value)||0)*24*60 + (parseInt(document.getElementById('exam-duration-hours')?.value)||0)*60 + (parseInt(document.getElementById('exam-duration-mins')?.value)||0) || 180, passMark: parseInt(document.getElementById('exam-pass').value) || 50, maxRetakes: Math.max(1, Math.min(10, parseInt((document.getElementById('exam-attempts') || {}).value) || 1)), totalMarks: parseInt(document.getElementById('exam-total-marks').value) || 100, questionIds, title: document.getElementById('exam-title').value.trim(), semester: (function () { const v = document.getElementById('exam-semester').value; return (v === 'all' || !v) ? String(existing ? existing.semester : 4) : v; })(), published: document.getElementById('exam-published').checked, openWindow: !!(document.getElementById('exam-open-window') || {}).checked, ungated: !!(document.getElementById('exam-ungated') || {}).checked, scheduled, createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString(), centerAccessOverrides: existing && existing.centerAccessOverrides ? existing.centerAccessOverrides : undefined };
     await dbPut('exams', exam); closeModal(); renderExams();
     showToast(editId ? 'Exam updated!' : (scheduled ? 'Exam set and scheduled!' : 'Exam set! Schedule it when ready.'));
     logAudit(editId ? 'updated' : 'created', 'exam', exam);
@@ -7168,15 +7839,32 @@ async function showExamRegistration(examId) {
     const exam = await dbGet('exams', examId);
     if (!exam) return;
     const course = await dbGet('courses', exam.courseId);
-    const students = await dbGetAll('students');
-    const centers = await getCenters();
-    const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId);
+    const [students, centers, regs, enrollments] = await Promise.all([dbGetAll('students'), getCenters(), dbGetAll('examRegistrations').then(r=>r.filter(x=>x.examId===examId)), dbGetAll('enrollments')]);
     const regIds = new Set(regs.map(r => r.studentId));
     const activeStudents = students.filter(s => s.status === 'active');
     const centerOpts = centers.map(c => `<option value="${c.id}" ${exam.studyCenterId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
-    let html = `<div style="margin-bottom:12px;"><b>${course ? course.name : exam.courseId}</b> — ${formatDate(exam.date)} ${exam.time}</div>
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    const canOverrideCenter = !!(currentUser && (currentUser.isOwner || currentUser.role === 'admin' || currentUser.role === 'owner'));
+    const overrides = exam.centerAccessOverrides || {};
+    let mismatchHtml = '';
+    if (exam.studyCenterId && canOverrideCenter) {
+        const enrolledMismatched = activeStudents.filter(s => enrollments.some(e => String(e.courseId) === String(exam.courseId) && String(e.studentId) === String(s.id)) && s.studyCenterId && s.studyCenterId !== exam.studyCenterId);
+        if (enrolledMismatched.length) {
+            mismatchHtml = `<div style="margin:12px 0;padding:12px;border:1px solid #f59e0b;background:rgba(245,158,11,0.08);border-radius:8px;">
+                <div style="font-weight:700;color:#92400e;margin-bottom:6px;">⚠️ Study center mismatch (enrolled, different center)</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Exam is restricted to a specific center. These students are enrolled in the relevant course but in a different study center. Owner/admin can allow or disallow each student to register/take this published exam.</div>
+                <div style="max-height:220px;overflow-y:auto;"><table class="data-table"><thead><tr><th>Student</th><th>Center</th><th>Access</th></tr></thead><tbody>
+                ${enrolledMismatched.map(s => {
+                    const allowed = overrides[String(s.id)] === true;
+                    return `<tr><td>${escapeHtml(s.name)}${s.admissionNumber?`<br><span style="font-size:10px;color:var(--text-muted);">${escapeHtml(s.admissionNumber)}</span>`:''}</td><td style="font-size:11px;">${escapeHtml((centers.find(x=>x.id===s.studyCenterId)||{}).name||s.studyCenterId||'--')}</td><td><button class="btn ${allowed?'btn-success':'btn-outline'} btn-sm" onclick="toggleExamCenterOverride('${examId}','${s.id}',${allowed?'false':'true'})">${allowed?'Allowed (click to disallow)':'Allow'}</button></td></tr>`;
+                }).join('')}
+                </tbody></table></div></div>`;
+        }
+    }
+    let html = `<div style="margin-bottom:12px;"><b>${course ? course.name : exam.courseId}</b> — ${formatDate(exam.date)} ${exam.time}${exam.studyCenterId ? ` <span class="badge badge-info" style="font-size:10px;">Center: ${escapeHtml((centers.find(c=>c.id===exam.studyCenterId)||{}).name||exam.studyCenterId)}</span>` : ' <span class="badge badge-success" style="font-size:10px;">All study centers</span>'}</div>
+        ${mismatchHtml}
         <div class="form-group"><label>Filter by Center</label><select id="exam-reg-center" onchange="examRegCenterFilter('${examId}')"><option value="">All Centers</option>${centerOpts}</select></div>
-        <div id="exam-reg-section"><div class="form-group"><label>Add Student</label><select id="exam-reg-student"><option value="">Select student...</option>${activeStudents.filter(s=>{const c=document.getElementById('exam-reg-center');return (!c||!c.value||s.studyCenterId===c.value)&&!regIds.has(s.id);}).map(s=>`<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber||s.id})${s.studyCenterId?` - ${escapeHtml(centers.find(x=>x.id===s.studyCenterId)?.name||'')}`:''}</option>`).join('')}</select> <button class="btn btn-primary btn-sm" onclick="addExamRegistration('${examId}')" style="margin-top:4px;">+ Add</button></div>
+        <div id="exam-reg-section"><div class="form-group"><label>Add Student</label><select id="exam-reg-student"><option value="">Select student...</option>${activeStudents.filter(s=>!regIds.has(s.id)).map(s=>`<option value="${s.id}">${escapeHtml(s.name)} (${s.admissionNumber||s.id})${s.studyCenterId?` - ${escapeHtml(centers.find(x=>x.id===s.studyCenterId)?.name||'')}`:''}</option>`).join('')}</select> <button class="btn btn-primary btn-sm" onclick="addExamRegistration('${examId}')" style="margin-top:4px;">+ Add</button></div>
         <div style="max-height:400px;overflow-y:auto;">
             <table class="data-table"><thead><tr><th>#</th><th>Student</th><th>Phone</th><th>Center</th><th>Action</th></tr></thead><tbody>
                 ${regs.length ? regs.map((r,i)=>{const s=students.find(x=>x.id===r.studentId);return `<tr><td>${i+1}</td><td>${escapeHtml(s?.name||r.studentId)}${s?.admissionNumber?`<br><span style="font-size:10px;color:var(--text-muted);">${escapeHtml(s.admissionNumber)}</span>`:''}</td><td style="font-size:11px;">${s?.phone?`<a href="tel:${escapeHtml(s.phone)}">${escapeHtml(s.phone)}</a>`:'<span style="color:var(--danger);">none</span>'}</td><td style="font-size:11px;">${s?.studyCenterId?escapeHtml(centers.find(x=>x.id===s.studyCenterId)?.name||''):'--'}</td><td><button class="btn btn-success btn-sm" onclick="notifyExamStudent('${examId}','${r.studentId}')" title="Send WhatsApp to this student" ${!s?.phone?'disabled style="opacity:0.4;cursor:not-allowed;"':''}>📱</button> <button class="btn btn-danger btn-sm" onclick="removeExamRegistration('${r.id}','${examId}')">Del</button></td></tr>`;}).join('') : '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">No students registered yet</td></tr>'}
@@ -7185,6 +7873,20 @@ async function showExamRegistration(examId) {
     showModal('Exam Registration', html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
 }
 function examRegCenterFilter(examId) {
+    showExamRegistration(examId);
+}
+async function toggleExamCenterOverride(examId, studentId, allow) {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (!(currentUser && (currentUser.isOwner || currentUser.role === 'admin' || currentUser.role === 'owner'))) return showToast('Only owner/admin can change center access', { type: 'danger' });
+    const exam = await dbGet('exams', examId);
+    if (!exam) return showToast('Exam not found', { type: 'danger' });
+    exam.centerAccessOverrides = Object.assign({}, exam.centerAccessOverrides || {});
+    if (allow) exam.centerAccessOverrides[String(studentId)] = true;
+    else delete exam.centerAccessOverrides[String(studentId)];
+    exam.updatedAt = new Date().toISOString();
+    await dbPut('exams', exam);
+    logAudit(allow ? 'updated' : 'updated', 'exam', { id: examId, centerAccessOverride: { studentId, allow } });
+    showToast(allow ? 'Student allowed to access this exam despite center mismatch' : 'Center mismatch access removed', { type: 'success' });
     showExamRegistration(examId);
 }
 async function notifyExamStudent(examId, studentId) {
@@ -7313,6 +8015,10 @@ async function startExam(examId) {
     const _win = assessmentWindow(exam);
     if (_win.closed) return showToast('⏰ This exam closed on ' + _win.closesAt + (_win.closesAtISO ? ' at ' + _win.closesAtISO.slice(11, 16) : '') + ' and is no longer available.', { type: 'warning', duration: 6000 });
     if (_win.notYetOpen) return showToast('🔒 This exam opens on ' + _win.opensAt + (_win.startTime ? ' at ' + _win.startTime : '') + '.', { type: 'warning', duration: 6000 });
+    // Course-sequence gate (transcript order, combination completion) - outer gate; drip-per-lesson still applies within.
+    if (currentUser.role === 'student' && exam.courseId && exam.ungated !== true && typeof checkStudentCourseSequenceAccess === 'function') {
+        try { const seq = await checkStudentCourseSequenceAccess(studentId, exam.courseId); if (!seq.ok) return studentCourseLockedToast(seq); } catch(e){}
+    }
     const regs = (await dbGetAll('examRegistrations')).filter(r => r.examId === examId && r.studentId === studentId);
     // An OPEN exam needs no explicit registration: publishing it is the invitation.
     const openExam = !!exam.openWindow;
@@ -10328,23 +11034,10 @@ async function generateTranscript() {
     const grouping = document.getElementById('transcript-grouping')?.value || 'group';
     const issue = issueDateInfo(document.getElementById('transcript-issue-date')?.value || '');
     const student = await dbGet('students', studentId);
-    let grades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
-    if (semester !== 'all') grades = grades.filter(g => g.semester == semester);
     const courses = await dbGetAll('courses');
-    // Auto-sync all course grades from assessments before generating transcript
-    try {
-        for (const c of courses) {
-            if (semester !== 'all') {
-                await syncCourseGradeFromAssessmentsClient(studentId, c.id, semester);
-            } else {
-                // sync for all semesters this student has
-                const sems = new Set();
-                (grades||[]).forEach(g=>{if(g.semester) sems.add(g.semester);});
-                if (sems.size === 0) sems.add('1');
-                for (const s of sems) await syncCourseGradeFromAssessmentsClient(studentId, c.id, s);
-            }
-        }
-    } catch(e) {}
+    // Transcript semesters are curriculum groups of 3 courses in settings order.
+    // For a specific group, resolve across all stored grade semesters for those courses.
+    const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
     const payments = await dbGetAll('payments');
     const chapel = await dbGetAll('chapel');
     const attendance = await dbGetAll('attendance');
@@ -10360,11 +11053,9 @@ async function generateTranscript() {
     const logo = branding ? branding.logo : null;
     const accentColor = branding ? branding.accentColor : '#f59e0b';
     const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;
-    const allGrades = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
-    // RESULTS OF RECORD - the rows this document prints. Resolved once here and
-    // reused by the document, the summary and the verification record so they
-    // can never disagree with each other.
-    const results = resolveStudentResults(allGrades, studentId, { semester: semester, courses: courses });
+    const allGradesFresh = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
+    // Resolve all course results; builder groups by 3-per-semester in settings order.
+    const results = resolveStudentResults(allGradesFresh, studentId, { semester: 'all', courses: courses });
     const totalPaid = tuitionPaid(payments, studentId);
     const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
     const studentAttendance = attendance.filter(a => a.studentId === studentId);
@@ -10409,7 +11100,7 @@ function buildProfessionalTranscript(data) {
     // RESULTS OF RECORD - course-level results only (a per-assessment mark is a
     // component of a course grade, never the grade). The caller resolves them
     // so every screen and every document print exactly the same numbers.
-    const resultRows = Array.isArray(data.resultRows)
+    let resultRows = Array.isArray(data.resultRows)
         ? data.resultRows
         : resolveStudentResults(allGrades || grades || [], student && student.id, { semester: semester, courses: courses }).rows;
     // Order courses the same way as the Courses tab and Student Hub: by the
@@ -10588,7 +11279,7 @@ function buildProfessionalTranscript(data) {
         <div class="summary-panel">
             <div class="summary-title">Academic Summary</div>
             <div class="summary-grid">
-                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${resultRows.length}</span></div>
+                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${displayRows.length}</span></div>
                 <div class="summary-item"><span class="summary-label">Total Credits</span><span class="summary-value">${totalCredits}</span></div>
                 <div class="summary-item"><span class="summary-label">Cumulative GPA</span><span class="summary-value cgpa-value">${cgpa.toFixed(2)}</span></div>
                 <div class="summary-item"><span class="summary-label">Classification</span><span class="summary-value class-badge ${classification.cssClass}">${classification.label}</span></div>
@@ -10657,7 +11348,7 @@ function buildProfessionalTranscript(data) {
             </div>
             <div class="page-main">
                 <div class="wavy-bg">${wavyBgHTML(schoolName, accentColor)}</div>
-                <div class="semester-block"><div class="semester-header"><span class="semester-title">${semester && String(semester) !== 'all' ? 'Semester ' + semester + ' Results' : 'Complete Academic Record — All Courses'}</span></div>${coursesTableHTML}</div>
+                ${coursesTableHTML}
                 ${summaryBlock}
                 <div class="signatures-section">
                     <div class="signature-blocks">
@@ -11552,70 +12243,6 @@ async function generateFinalTranscript() {
 function buildFinalTranscriptDocument(data) {
     const { student, courseResults, schoolName, tagline, initials, logo, accentColor, sig_registrar, sig_dean, sig_director, center, academic, cgpa, classification, totalCredits, totalGPAPoints, docId, vCode, generatedDate, generatedTime, issueDate, feeBalance, postalAddress, city, phone, email, website, college_stamp } = data;
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
-    const groups = [];
-    (courseResults || []).forEach((cr, idx) => {
-        const sem = cr.semester != null && cr.semester !== '' ? String(cr.semester) : String(Math.floor(idx / 3) + 1);
-        if (!groups.length || groups[groups.length - 1].sem !== sem) {
-            groups.push({ sem, rows: [] });
-        }
-        groups[groups.length - 1].rows.push(Object.assign({}, cr, { _idx: idx }));
-    });
-    if (groups.length === 0) {
-        for (let i = 0; i < (courseResults || []).length; i += 3) {
-            const semNum = String(Math.floor(i / 3) + 1);
-            groups.push({ sem: semNum, rows: (courseResults || []).slice(i, i + 3).map((cr, j) => Object.assign({}, cr, { _idx: i + j })) });
-        }
-    }
-    let rowsHtml = '';
-    groups.forEach(group => {
-        rowsHtml += `<tr><td colspan="8" style="background:#f8fafc;font-weight:700;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Semester ${group.sem} Results</td></tr>`;
-        group.rows.forEach((cr, gidx) => {
-            const c = cr.course || {};
-            const r = cr.result;
-            const score = cr.weightedScore;
-            const gInfo = cr.gradeInfo;
-            const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
-            const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
-            const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
-            const hasScore = cr.source === 'recorded' || (score != null && score > 0);
-            const scoreDisplay = hasScore ? score : '--';
-            const isAuto = cr.source === 'auto';
-            const rowIdx = cr._idx != null ? cr._idx : gidx;
-            rowsHtml += `<tr class="${rowIdx % 2 === 1 ? 'alt-row' : ''}">
-                <td class="col-no">${rowIdx + 1}</td>
-                <td class="col-code">${(c.code || c.id) || '--'}</td>
-                <td class="col-title">${c.name || c.id || '--'}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
-                <td class="col-sem" style="text-align:center;">Sem ${group.sem}</td>
-                <td class="col-credits" style="text-align:center;">${cr.credits}</td>
-                <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
-                <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
-                <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
-            </tr>`;
-        });
-    });
-    if (!rowsHtml) {
-        (courseResults || []).forEach((cr, idx) => {
-            const c = cr.course || {};
-            const score = cr.weightedScore;
-            const gInfo = cr.gradeInfo;
-            const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
-            const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
-            const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
-            const hasScore = cr.source === 'recorded' || (score != null && score > 0);
-            const scoreDisplay = hasScore ? score : '--';
-            const isAuto = cr.source === 'auto';
-            rowsHtml += `<tr class="${idx % 2 === 1 ? 'alt-row' : ''}">
-                <td class="col-no">${idx + 1}</td>
-                <td class="col-code">${(c.code || c.id) || '--'}</td>
-                <td class="col-title">${c.name || c.id || '--'}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
-                <td class="col-sem" style="text-align:center;">${cr.semester ? 'Sem ' + cr.semester : '--'}</td>
-                <td class="col-credits" style="text-align:center;">${cr.credits}</td>
-                <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
-                <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
-                <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
-            </tr>`;
-        });
-    }
     const classificationLabel = classification.label;
     const classificationClass = classification.cssClass;
     const feeStatus = feeBalance <= 0 ? 'CLEARED' : 'OUTSTANDING';
@@ -11625,6 +12252,66 @@ function buildFinalTranscriptDocument(data) {
     if (email) addrParts.push('Email: ' + email);
     if (website) addrParts.push('Web: ' + website);
     const addressHTML = addrParts.length ? `<p class="school-address">${addrParts.join(' &nbsp;|&nbsp; ')}</p>` : '';
+    // Group by 3 courses per semester following settings/transcript order.
+    const order = getTranscriptCourseOrder();
+    const fOrderIdx = (cr) => {
+        const name = String((cr && cr.course && cr.course.name) || '').toUpperCase();
+        const i = order.indexOf(name);
+        return i !== -1 ? i : 9999;
+    };
+    const sortedResults = (courseResults || []).slice().sort((a, b) => fOrderIdx(a) - fOrderIdx(b));
+    const fGroups = {};
+    sortedResults.forEach(cr => {
+        const pos = fOrderIdx(cr);
+        const semNum = pos < 9000 ? Math.floor(pos / 3) + 1 : (cr.semester || 1);
+        if (!fGroups[semNum]) fGroups[semNum] = [];
+        fGroups[semNum].push(cr);
+    });
+    const fKeys = Object.keys(fGroups).map(Number).sort((a,b)=>a-b);
+    let globalIdx = 0;
+    const semesterBlocksHTML = fKeys.length ? fKeys.map(semNum => {
+        const rows = fGroups[semNum];
+        const rowsHtml = rows.map(cr => {
+            globalIdx++;
+            const c = cr.course;
+            const score = cr.weightedScore;
+            const gInfo = cr.gradeInfo;
+            const gradeClass = gInfo ? getGradeClass(gInfo.grade) : '';
+            const gradeLabel = gInfo ? `${gInfo.grade}` : '--';
+            const gpaVal = gInfo ? gInfo.gpa.toFixed(2) : '--';
+            const hasScore = cr.source === 'recorded' || score > 0;
+            const scoreDisplay = hasScore ? score : '--';
+            const isAuto = cr.source === 'auto';
+            return `<tr class="${globalIdx % 2 === 0 ? 'alt-row' : ''}">
+            <td class="col-no">${globalIdx}</td>
+            <td class="col-code">${c.code || '--'}</td>
+            <td class="col-title">${c.name || c.id}${isAuto ? ' <span style="font-size:8px;color:#94a3b8;">(auto)</span>' : ''}</td>
+            <td class="col-sem" style="text-align:center;">Sem ${semNum}</td>
+            <td class="col-credits" style="text-align:center;">${cr.credits}</td>
+            <td class="col-score" style="text-align:center;"><b>${scoreDisplay}</b></td>
+            <td class="col-grade ${gradeClass}" style="text-align:center;"><b>${gradeLabel}</b></td>
+            <td class="col-gpa" style="text-align:center;">${gpaVal}</td>
+        </tr>`;
+        }).join('');
+        return `<div class="semester-block" style="margin-bottom:12px;">
+                <div class="semester-header"><span class="semester-title">Semester ${semNum} Results</span></div>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th class="col-no">#</th>
+                            <th class="col-code">Code</th>
+                            <th class="col-title">Course Title</th>
+                            <th class="col-sem" style="text-align:center;width:45px;">Sem</th>
+                            <th class="col-credits" style="text-align:center;width:55px;">Credits</th>
+                            <th class="col-score" style="text-align:center;width:65px;">Score</th>
+                            <th class="col-grade" style="text-align:center;width:55px;">Grade</th>
+                            <th class="col-gpa" style="text-align:center;width:55px;">Grade Pt</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>`;
+    }).join('') : `<div class="semester-block"><div class="semester-header"><span class="semester-title">Complete Academic Record</span></div><table class="results-table"><thead><tr><th class="col-no">#</th><th class="col-code">Code</th><th class="col-title">Course Title</th><th class="col-sem" style="text-align:center;width:45px;">Sem</th><th class="col-credits" style="text-align:center;width:55px;">Credits</th><th class="col-score" style="text-align:center;width:65px;">Score</th><th class="col-grade" style="text-align:center;width:55px;">Grade</th><th class="col-gpa" style="text-align:center;width:55px;">Grade Pt</th></tr></thead><tbody><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course records found</td></tr></tbody></table></div>`;
     return `
     <div class="transcript-document" style="--accent: ${accentColor};">
         <div class="doc-watermark">${schoolName}</div>
@@ -11662,26 +12349,9 @@ function buildFinalTranscriptDocument(data) {
         </div>
         <div style="position:relative;">
             <div class="wavy-bg">${wavyBgHTML(schoolName, accentColor)}</div>
-            <div class="semester-block">
-                <div class="semester-header"><span class="semester-title">Complete Academic Record — All Courses</span></div>
-                <table class="results-table">
-                    <thead>
-                        <tr>
-                            <th class="col-no">#</th>
-                            <th class="col-code">Code</th>
-                            <th class="col-title">Course Title</th>
-                            <th class="col-sem" style="text-align:center;width:45px;">Sem</th>
-                            <th class="col-credits" style="text-align:center;width:55px;">Credits</th>
-                            <th class="col-score" style="text-align:center;width:65px;">Score</th>
-                            <th class="col-grade" style="text-align:center;width:55px;">Grade</th>
-                            <th class="col-gpa" style="text-align:center;width:55px;">Grade Pt</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rowsHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">No course records found</td></tr>'}</tbody>
-                </table>
-                <div style="padding:6px 10px;font-size:9px;color:#64748b;border-top:1px solid #e2e8f0;">
-                    Scores above are the recorded course results, identical to those printed on the Official Transcript. A course marked <em>(auto)</em> has no recorded result: its mark was recomputed from the available assessment data and is excluded from the Cumulative GPA and Recorded Credits.
-                </div>
+            ${semesterBlocksHTML}
+            <div style="padding:6px 10px;font-size:9px;color:#64748b;border-top:1px solid #e2e8f0;margin:0 0 8px;">
+                Scores above are the recorded course results, identical to those printed on the Official Transcript. A course marked <em>(auto)</em> has no recorded result: its mark was recomputed from the available assessment data and is excluded from the Cumulative GPA and Recorded Credits.
             </div>
             <div class="summary-panel" style="margin:8px 25px;">
                 <div class="summary-title">Academic Summary</div>
@@ -20211,6 +20881,10 @@ async function startQuiz(quizId, opts) {
     let submissions = [];
     try { submissions = (await dbGetAll('submissions')).filter(s => s.quizId === quizId && s.studentId === studentId); } catch (e) { console.error('submissions load failed:', e); return showToast('Could not reach server — check connection and retry.', { type: 'danger' }); }
     if (submissions.length >= (quiz.maxRetakes || 1)) return showToast('Maximum attempts reached!');
+    // Course-sequence gate (transcript order) - outer gate; lesson/drip gates still apply within.
+    if (currentUser.role === 'student' && quiz.courseId && quiz.ungated !== true && typeof checkStudentCourseSequenceAccess === 'function') {
+        try { const seq = await checkStudentCourseSequenceAccess(studentId, quiz.courseId); if (!seq.ok) return studentCourseLockedToast(seq); } catch(e){}
+    }
     // Drip: lesson-linked quiz requires its lesson unlocked (students only).
     if (currentUser.role === 'student' && quiz.lessonId) {
         try {
@@ -21442,6 +22116,11 @@ async function viewNote(id) {
     const lessons = await dbGetAll('lessons');
     const course = courses.find(c => c.id === note.courseId);
     const lesson = lessons.find(l => l.id === note.lessonId);
+    const __vu = JSON.parse(sessionStorage.getItem('currentUser')||'{}');
+    const __nCourseId = note.courseId || (lesson && lesson.courseId) || (course && course.id);
+    if (__vu.role === 'student' && __nCourseId && typeof checkStudentCourseSequenceAccess === 'function') {
+        try { const __sid = await resolveStudentId(__vu).catch(()=>__vu.studentId||__vu.username); const seq = await checkStudentCourseSequenceAccess(__sid, __nCourseId); if (!seq.ok) return studentCourseLockedToast(seq); } catch(e){}
+    }
     const html = `<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Course: ${course ? course.name : '—'} | Lesson: ${lesson ? lesson.title : 'General'}</div><h3 style="color:var(--accent);margin-bottom:12px;">${note.title}</h3><div style="white-space:pre-line;font-size:13px;line-height:1.7;max-height:400px;overflow-y:auto;padding:12px;background:var(--bg-input);border-radius:8px;">${note.content}</div>`;
     showModal(note.title, html, `<button class="btn btn-success" onclick="sendNoteWhatsApp('${id}')">📱 Send via WhatsApp</button> <button class="btn btn-outline" onclick="copyNote('${id}')">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'doc')">📄 Download (.doc)</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'pdf')">⬇ Download PDF</button>`);
 }
@@ -29543,6 +30222,12 @@ function getDefaultTranscriptCourseOrder() {
 }
 
 function getTranscriptCourseOrder() {
+    try {
+        const serverOrder = (typeof _academicCache !== 'undefined' && _academicCache && Array.isArray(_academicCache.transcriptCourseOrder) && _academicCache.transcriptCourseOrder.length)
+            ? _academicCache.transcriptCourseOrder
+            : (typeof window !== 'undefined' && window.academicSettings && Array.isArray(window.academicSettings.transcriptCourseOrder) && window.academicSettings.transcriptCourseOrder.length ? window.academicSettings.transcriptCourseOrder : null);
+        if (serverOrder) return serverOrder.map(x => String(x || '').toUpperCase()).filter(Boolean);
+    } catch (e) {}
     try {
         const s = localStorage.getItem('nkcms_transcript_course_order');
         if (s) {

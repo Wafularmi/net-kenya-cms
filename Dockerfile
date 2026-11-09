@@ -27,5 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 RUN npm install --omit=dev
 COPY . .
+RUN node scripts/precompress.js
 # Force rebuild: 2026-08-07
 CMD ["node", "server.js"]
