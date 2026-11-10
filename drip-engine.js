@@ -218,6 +218,63 @@ function dripSameLessonUnit(a, b) {
     return dripGroupOfLesson(a) === dripGroupOfLesson(b);
 }
 
+// Does this lesson actually have something to work through? A lesson with no
+// notes, no description and no video cannot gate anything, so its quiz is
+// never held back.
+function dripLessonHasMedia(db, lesson) {
+    if (!lesson) return false;
+    if (dripLessonVideos(lesson).length) return true;
+    const text = String(dripLessonContent(db, lesson) || '').trim();
+    return text.length > 0;
+}
+
+// A lesson's notes have been read and its videos watched -> its quiz is the
+// next step and may be taken. This is the in-course drip rule:
+// notes -> video -> quiz -> next lesson.
+function dripLessonMediaDone(db, sid, lesson) {
+    if (!lesson) return true;
+    if (dripModeOfLesson(lesson) !== 'drip') return true;
+    if (!dripLessonHasMedia(db, lesson)) return true;
+    const comp = (db.lessonCompletions || []).find(r => String(r.studentId) === String(sid) && String(r.lessonId) === String(lesson.id));
+    if (!comp) return false;
+    const requiredSecs = Number(comp.requiredSecs) > 0
+        ? Number(comp.requiredSecs)
+        : dripReadEstimateSecs(dripLessonContent(db, lesson));
+    const readDone = !!comp.readDoneAt || (Number(comp.readSecs) || 0) >= requiredSecs;
+    if (!readDone) return false;
+    if (!dripRequiredVideos(lesson).length) return true;
+    return dripVideosDone(lesson, comp);
+}
+
+// The learner's position in a course's drip sequence. Lessons run in order
+// (notes -> video -> quiz -> next lesson) and a learner may never skip ahead:
+// only the first unfinished lesson is the current step.
+function dripCourseStep(db, sid, courseId) {
+    const drips = (db.lessons || [])
+        .filter(l => l && l.published !== false && String(l.courseId) === String(courseId) && dripModeOfLesson(l) === 'drip')
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const out = { list: drips, currentId: null, currentIndex: -1, states: {} };
+    if (!drips.length) return out;
+    const myC = (db.lessonCompletions || []).filter(r => String(r.studentId) === String(sid));
+    const myU = (db.lessonUnlocks || []).filter(r => String(r.studentId) === String(sid));
+    let current = null;
+    drips.forEach((l, i) => {
+        const comp = myC.find(r => String(r.lessonId) === String(l.id));
+        const done = !!(comp && comp.completedAt);
+        const unlocked = myU.some(r => String(r.lessonId) === String(l.id));
+        // 'done'    - finished (read + video + quiz), may be revisited
+        // 'current' - the one unfinished step the learner may work on now
+        // 'waiting' - unlocked, but an earlier step is still unfinished
+        // 'locked'  - not opened yet
+        let state = 'locked';
+        if (done) state = 'done';
+        else if (current) state = unlocked ? 'waiting' : 'locked';
+        else if (unlocked) { state = 'current'; current = l; out.currentId = String(l.id); out.currentIndex = i; }
+        out.states[String(l.id)] = state;
+    });
+    return out;
+}
+
 function dripStartOfWeek(d) {
     const dt = d ? new Date(d) : new Date();
     if (isNaN(dt.getTime())) { const n = new Date(); n.setHours(0, 0, 0, 0); n.setDate(n.getDate() - ((n.getDay() + 6) % 7)); return n; }
@@ -548,6 +605,18 @@ function dripSweep(db, sid, courseIdOnly) {
                 changed = true;
                 continue;
             }
+            // In-course drip rule: a learner works one step at a time and may
+            // never skip ahead. Every earlier lesson in this course must be
+            // FINISHED, not just the one right before it - otherwise a stale
+            // unlock (e.g. a lesson that was deleted and re-created) lets the
+            // chain jump to a later lesson and the learner ends up with, say,
+            // "Lesson 5" sitting in the place of "Lesson 2".
+            let allPrevDone = true;
+            for (let k = 0; k < i; k++) {
+                const pc = myC.find(r => String(r.lessonId) === String(drips[k].id));
+                if (!pc || !pc.completedAt) { allPrevDone = false; break; }
+            }
+            if (!allPrevDone) break;
             const prev = drips[i - 1];
             const pc = myC.find(r => String(r.lessonId) === String(prev.id));
             if (!pc || !pc.completedAt) break;
@@ -587,6 +656,12 @@ function dripNextInfo(db, sid, courseId, afterLessonId) {
     const fee = dripFeeOk(db, sid);
     if (!fee.ok) return { lessonId: nx.id, title: nx.title, reason: 'fees', fee: { target: fee.target, paid: fee.paid, cumulativeTarget: fee.cumulativeTarget, deadlineMs: fee.deadlineMs } };
     const prev = drips[idx];
+    // Same in-course rule as the sweep: every earlier lesson must be finished
+    // before the next one opens.
+    for (let k = 0; k <= idx; k++) {
+        const pcx = myC.find(r => String(r.lessonId) === String(drips[k].id));
+        if (!pcx || !pcx.completedAt) return { lessonId: nx.id, title: nx.title, reason: 'prev' };
+    }
     const pc = myC.find(r => String(r.lessonId) === String(prev.id));
     if (!pc || !pc.completedAt) return { lessonId: nx.id, title: nx.title, reason: 'prev' };
     const pace = dripEffectivePace(db, sid, courseId);
@@ -615,6 +690,7 @@ module.exports = {
     dripGroupOfLesson, dripSameLessonUnit,
     dripLessonVideo, dripVideoTrackable, dripVideoRequired, dripVideoDone,
     dripLessonVideos, dripRequiredVideos, dripVideoStates, dripVideosDone, dripRecordVideoProgress,
+    dripLessonHasMedia, dripLessonMediaDone, dripCourseStep,
     dripStartOfWeek, dripFeeOk, dripQuizBestForLesson, dripEvalCompletion, dripSweep,
     dripMapsFor, dripNextInfo, dripCourseLessonRollup, dripLessonCoverIndex
 };

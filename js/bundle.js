@@ -19329,7 +19329,7 @@ function embedVideo(url, opts) {
     return `<a href="${esc(src)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">🎬 Open Lesson Video</a>`;
 }
 async function deleteLesson(id) {
-    if (!await showConfirm('Confirm', 'Delete this lesson? Questions, notes, and files linked to it will be preserved but lose lesson association.')) return;
+    if (!await showConfirm('Confirm', 'Delete this lesson? Questions, notes, and files linked to it will be preserved but lose lesson association. Learner progress and unlock records for this lesson are also cleared.')) return;
     await dbDelete('lessons', id); renderLessons(); showToast('Lesson deleted'); logAudit('deleted', 'lesson', { id });
 }
 async function manageLesson(lessonId) {
@@ -21389,6 +21389,13 @@ async function startQuiz(quizId, opts) {
             await loadDripMaps(studentId);
             const lz = await dbGet('lessons', quiz.lessonId);
             if (lz && !lessonVisible(lz)) return showToast('🔗 This quiz is still locked — complete the previous lesson first.', { type: 'warning', duration: 5000 });
+            // In-course drip: a lesson quiz is the LAST step of its lesson, so
+            // the notes must be read and the video watched before the paper can
+            // be opened. The server enforces the same rule on submission.
+            if (lz && typeof hubLessonMediaDone === 'function') {
+                const mediaDone = hubLessonMediaDone(lz);
+                if (!mediaDone) return showToast('🔒 Read the lesson notes and watch the video first — then take this quiz.', { type: 'warning', duration: 6000 });
+            }
         } catch {}
     }
     const questions = await dbGetAll('questionBank');

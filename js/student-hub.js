@@ -911,6 +911,47 @@ function hubLessonDripState(l, dripIndex) {
     if (dripIndex === 0) return { state: 'locked', reason: _hubFeeSnapshotOk() === false ? 'fees' : 'pending' };
     return { state: 'locked', reason: 'prev' };
 }
+// The learner's position in a course's lesson sequence.
+// RULE OF THUMB (in-course drip): a learner works ONE step at a time and may
+// never skip ahead. Lessons run in order - notes -> video -> quiz -> the next
+// lesson - so only the first unfinished drip lesson is the current step.
+// Everything after it stays locked until it is finished. Lessons that are not
+// drip-sequenced (immediate / date release) are always open.
+function hubDripCourseState(course, allLessons) {
+    const list = (allLessons || [])
+        .filter(l => l && String(l.courseId) === String(course.id) && l.published !== false)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const states = {};
+    let currentId = null;
+    list.forEach(l => {
+        const isDrip = typeof lessonMode === 'function' ? lessonMode(l) === 'drip' : false;
+        const cc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[String(l.id)] : null;
+        const unlocked = !!(typeof _dripU !== 'undefined' && _dripU && _dripU[String(l.id)]);
+        if (!isDrip) { states[String(l.id)] = 'free'; return; }
+        const done = !!(cc && cc.completedAt);
+        let st;
+        if (done) st = 'done';
+        else if (currentId) st = 'waiting';
+        else if (unlocked) { st = 'current'; currentId = String(l.id); }
+        else st = 'locked';
+        states[String(l.id)] = st;
+    });
+    return { list, states, currentId };
+}
+// Has the learner read the notes and watched the videos of this lesson? Only
+// then does the lesson's quiz become the next step they may take.
+function hubLessonMediaDone(lesson) {
+    if (!lesson) return false;
+    if (typeof lessonMode === 'function' && lessonMode(lesson) !== 'drip') return true;
+    const cc = (typeof _dripC !== 'undefined' && _dripC) ? _dripC[String(lesson.id)] : null;
+    if (!cc) return false;
+    const readDone = !!cc.readDoneAt;
+    if (!readDone) return false;
+    const states = hubVideoStates(lesson, cc);
+    const req = states.filter(v => v.required !== false);
+    if (!req.length) return true;
+    return req.every(v => v.done);
+}
 function hubDripRoadmap(course, allLessons) {
     if (typeof lessonMode !== 'function') return '';
     const list = (allLessons || []).filter(l => String(l.courseId) === String(course.id) && lessonMode(l) === 'drip' && l.published !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -2343,6 +2384,11 @@ async function hubRegisterQuiz(quizId) {
         try {
             const quiz = (data.quizzes || []).find(q => String(q.id) === String(quizId));
             if (quiz && quiz.lessonId && !hubLessonVisibleById(quiz.lessonId, data)) return showToast('🔗 This quiz opens with its lesson — complete the previous lesson first.', { type: 'warning', duration: 5000 });
+            // In-course drip: the quiz is the LAST step of the lesson.
+            if (quiz && quiz.lessonId) {
+                const lz = (data.lessons || []).find(l => String(l.id) === String(quiz.lessonId));
+                if (lz && !hubLessonMediaDone(lz)) return showToast('🔒 Read the lesson notes and watch the video first — then take this quiz.', { type: 'warning', duration: 6000 });
+            }
         } catch {}
         const regRecord = { id: 'QREG-' + Date.now(), quizId, studentId: me.id, seat: '', createdAt: new Date().toISOString() };
         await dbPut('quizRegistrations', regRecord);
@@ -2535,6 +2581,11 @@ function renderHubQuizzes(me, pendingQuizzes, completedQuizzes, data, allScores)
         const typeColor = typeColors[q.assessmentType] || '#64748b';
         const isComplete = submittedQuizIds.has(q.id);
         const mySub = isComplete ? mySubmissions.find(s => s.quizId === q.id) : null;
+        // In-course drip: a lesson quiz is the LAST step of its lesson, so it
+        // stays locked until the notes are read and the video is watched.
+        const qLesson = q.lessonId ? (data.lessons || []).find(l => String(l.id) === String(q.lessonId)) : null;
+        const mediaDone = !q.lessonId || hubLessonMediaDone(qLesson);
+        const qLockTxt = qLesson ? (mediaDone ? '' : '🔒 Read the notes and watch the video first') : '';
         if (isComplete) {
             const passed = mySub && mySub.status === 'pass';
             return `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
@@ -2560,9 +2611,12 @@ function renderHubQuizzes(me, pendingQuizzes, completedQuizzes, data, allScores)
                 </div>
                 ${course ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${esc(course.name)}</div>` : ''}
                 ${q.dueDate ? `<div style="font-size:11px;color:var(--warning);margin-top:4px;">⏰ Due: ${formatDate(q.dueDate)}</div>` : ''}
+                ${qLockTxt ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${esc(qLockTxt)}</div>` : ''}
             </div>
             <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-                ${isRegistered ? `<button class="btn btn-primary btn-sm" data-quiz-id="${esc(q.id)}" data-action="take" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" data-quiz-id="${esc(q.id)}" data-action="register" style="font-size:11px;padding:5px 12px;">Register</button>`}
+                ${!mediaDone
+                    ? `<button class="btn btn-outline btn-sm" disabled style="font-size:11px;padding:5px 12px;opacity:.65;cursor:not-allowed;">🔒 Locked</button>`
+                    : (isRegistered ? `<button class="btn btn-primary btn-sm" data-quiz-id="${esc(q.id)}" data-action="take" style="font-size:11px;padding:5px 12px;">Take Quiz →</button>` : `<button class="btn btn-outline btn-sm" data-quiz-id="${esc(q.id)}" data-action="register" style="font-size:11px;padding:5px 12px;">Register</button>`)}
                 ${canDrop ? `<button class="btn btn-outline btn-sm" data-quiz-id="${esc(q.id)}" data-action="drop" style="color:var(--danger);border-color:var(--danger);font-size:10px;padding:3px 8px;">Drop</button>` : ''}
             </div>
         </div>`;
@@ -3156,6 +3210,47 @@ function hubLessonFlowOrder(lesson, data) {
         return items;
     } catch(e){ return []; }
 }
+// The lesson flow strip: Notes -> Video 1 -> ... -> Quiz. Only the next
+// unfinished step is open, so a learner can never skip the notes or jump to a
+// video/quiz that comes later in the lesson.
+function hubLessonFlowHtml(lesson, comp, data) {
+    const items = hubLessonFlowOrder(lesson, data);
+    if (!items.length) return '';
+    const readDone = !!(comp && (comp.readDoneAt || comp.completedAt));
+    const vStates = hubVideoStates(lesson, comp);
+    const quizDone = !!(comp && (comp.quizPassedAt || comp.quizSkippedAt || (comp.quizBest != null && comp.quizBest >= 50)));
+    const mediaDone = hubLessonMediaDone(lesson);
+    let current = true;   // the first unfinished step is the only open one
+    const rows = items.map(it => {
+        let done = false, locked = false, label = it.title;
+        if (it.type === 'notes') done = readDone;
+        else if (it.type === 'video') {
+            const vs = vStates.find(v => v.id === it.id) || vStates[0];
+            done = !!(vs && vs.done);
+            if (vs && vs.state === 'locked') locked = true;
+        } else if (it.type === 'quiz') {
+            done = quizDone;
+            if (!mediaDone) locked = true;
+        }
+        const isCurrent = !done && !locked && current;
+        if (isCurrent) current = false;
+        const icon = done ? '✅' : (locked || !current ? '🔒' : '▶');
+        const stateTxt = done ? 'Done' : (isCurrent ? 'Open now' : (locked ? 'Locked — finish the step above first' : 'Locked'));
+        const color = done ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--text-muted)');
+        const action = (it.type === 'quiz' && isCurrent)
+            ? ` <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();hubGoToQuiz('${esc(it.quizId)}')" style="padding:3px 10px;font-size:11px;">Take Quiz</button>`
+            : '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid ${isCurrent ? 'var(--accent)' : 'var(--border)'};border-radius:8px;background:${isCurrent ? 'var(--bg-input)' : 'transparent'};">
+            <span style="font-size:14px;">${icon}</span>
+            <span style="font-weight:600;font-size:12px;flex:1;">${esc(label)}</span>
+            <span style="font-size:10px;color:${color};font-weight:700;">${stateTxt}</span>${action}
+        </div>`;
+    }).join('');
+    return `<div style="margin-bottom:14px;">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Lesson flow — work through the steps in order</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">${rows}</div>
+    </div>`;
+}
 function clearMediaPreview() {
     try { document.getElementById('media-file').value = ''; } catch {}
     const p = document.getElementById('media-preview'); if (p) { p.style.display = 'none'; p.innerHTML = ''; }
@@ -3334,7 +3429,14 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
         <div id="hub-notes-list">
     `;
     myCourses.forEach(course => {
-        const courseLessons = myLessons.filter(l => l.courseId === course.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+        // The full lesson sequence of the course, so the learner always sees
+        // the whole flow in order. Only the current step is open; the rest are
+        // locked until the step before them is finished.
+        const seq = hubDripCourseState(course, data.lessons || []);
+        const seqIds = new Set(seq.list.map(l => String(l.id)));
+        const extra = myLessons.filter(l => l.courseId === course.id && !seqIds.has(String(l.id)))
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+        const courseLessons = seq.list.concat(extra);
         const courseNotes = myNotes.filter(n => n.courseId === course.id);
         const lessonIds = courseLessons.map(l => l.id);
         const totalRead = courseLessons.filter(l => readLessons[l.id]).length;
@@ -3374,11 +3476,34 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
             || (Number(_cc.videoDurationSecs) > 0 && Number(_cc.videoSecs) >= Number(_cc.videoDurationSecs) * 0.9)
         ));
         const videoLocked = hasVideo && !isRead && !serverRead && !serverWatched;
-                        return `
-                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="viewHubLessonNote('${l.id}','${esc(course.id)}')" style="border:1px solid ${isRead ? 'var(--success)' : 'var(--border)'};border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isRead ? 'var(--success)' : 'var(--border)'}';this.style.transform='';this.style.boxShadow='';">
+        // In-course drip: only the current step (and lessons already finished)
+        // can be opened. Everything after it stays locked, so a learner can
+        // never jump ahead and pick a later lesson to read or watch.
+        const st = seq.states[String(l.id)] || 'free';
+        const isCurrent = st === 'current';
+        const isDone = st === 'done';
+        const isOpen = st === 'free' || isCurrent || isDone;
+        const lockTxt = st === 'waiting'
+            ? '🔒 Finish the previous step first'
+            : (st === 'locked' ? '🔒 Opens after the previous lesson' : '');
+        const badge = isDone
+            ? '<span style="background:rgba(22,163,74,.15);color:var(--success);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">DONE</span>'
+            : (isCurrent ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">CONTINUE HERE</span>' : '');
+                        if (!isOpen) {
+                            return `
+                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" style="border:1px dashed var(--border);border-radius:10px;padding:14px;background:var(--bg-input);opacity:.75;cursor:not-allowed;">
                                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px;">
-                                    <div style="font-weight:600;font-size:14px;line-height:1.3;">${isRead ? '✅' : hasVideo ? '🎬' : '📖'} ${esc(l.title)}</div>
-                                    ${hasVideo ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">VIDEO</span>' : ''}
+                                    <div style="font-weight:600;font-size:14px;line-height:1.3;color:var(--text-muted);">🔒 ${esc(l.title)}</div>
+                                </div>
+                                <div style="font-size:11px;color:var(--text-muted);">${lockTxt}</div>
+                            </div>
+                        `;
+                        }
+                        return `
+                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="viewHubLessonNote('${l.id}','${esc(course.id)}')" style="border:1px solid ${isDone ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--border)')};${isCurrent ? 'border-left:4px solid var(--accent);' : ''}border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isDone ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--border)')}';this.style.transform='';this.style.boxShadow='';">
+                                <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px;">
+                                    <div style="font-weight:600;font-size:14px;line-height:1.3;">${isDone ? '✅' : isCurrent ? '▶' : hasVideo ? '🎬' : '📖'} ${esc(l.title)}</div>
+                                    <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">${badge}${hasVideo ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">VIDEO</span>' : ''}</div>
                                 </div>
                                 ${l.description ? `<div style="color:var(--text-muted);font-size:12px;line-height:1.4;margin-bottom:8px;">${esc(l.description.substring(0, 90))}${l.description.length > 90 ? '...' : ''}</div>` : ''}
                                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-muted);">
@@ -3551,9 +3676,13 @@ async function viewHubLessonNote(lessonId, courseId) {
         if (!hubLessonVideos(lesson).length && _videoSrcHub) videoHtml = `<div style="max-width:720px;margin:0 auto 20px;" id="drip-video-slot">${embedVideo(_videoSrcHub, { track: _isStudentHub })}</div>`;
         if (_videoSrcHub && hubLessonVideos(lesson).length && dripMode && !dripReadDone && dripStateKnown) videoHtml = `<div id="drip-video-slot" style="max-width:720px;margin:0 auto 20px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video — keep these notes open for the required reading time.</div></div>`;
         const quizAlertHtml = _isStudentHub && dripMode ? hubLessonQuizAlertHtml(lesson, _comp, data) : '';
+        // In-course drip: show the lesson's own steps (notes -> videos -> quiz)
+        // so the learner works them in order instead of picking freely.
+        const flowHtml = (_isStudentHub && dripMode) ? hubLessonFlowHtml(lesson, _comp, data) : '';
         const html = `
             <div style="max-width:760px;margin:0 auto;">
                 ${quizAlertHtml}
+                ${flowHtml}
                 ${videoHtml}
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">${esc(course?.code || '')} · ${esc(course?.name || '')}</div>
                 <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(lesson.title)}</h2>

@@ -9749,6 +9749,19 @@ const parsed = JSON.parse(body);
                                     return json(res, 409, { error: 'You have already used all ' + allowed + ' attempt' + (allowed === 1 ? '' : 's') + ' for this assessment.' });
                                 }
                             }
+                            // In-course drip rule (server is the authority): a lesson
+                            // quiz is the LAST step of its lesson, so the learner
+                            // must have read the notes and watched the video
+                            // before the paper is accepted.
+                            if (assessment && assessment.lessonId) {
+                                try {
+                                    const dLesson = (db.lessons || []).find(l => l && String(l.id) === String(assessment.lessonId));
+                                    if (dLesson && dripEngine.dripModeOfLesson(dLesson) === 'drip' && !dripEngine.dripLessonMediaDone(db, sid, dLesson)) {
+                                        console.warn('[drip-quiz] lesson media not finished', assessment.id, dLesson.id, sid);
+                                        return json(res, 403, { error: 'Finish this lesson first: read the notes and watch the video, then take the quiz.' });
+                                    }
+                                } catch (e) { console.error('drip quiz gate error:', e && e.message); }
+                            }
                             const marked = scoreSubmissionOnServer(toStore);
                             if (marked) {
                                 const band = gradeBandForScore(marked.score);
@@ -10109,6 +10122,25 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                         try { if (typeof f === 'string' && f && fs.existsSync(f)) { fs.unlinkSync(f); } } catch {}
                     }
                 } catch (e) { console.error('DEL-CLEAN err:', e && e.message); }
+            }
+            // Deleting a lesson must take its drip records with it. Left
+            // behind, the orphan unlock/completion rows make the drip chain
+            // believe a learner progressed past a lesson that no longer exists,
+            // which unlocks a later lesson out of sequence (a learner then sees
+            // e.g. "Lesson 5 - VIDEO 1" sitting in the place of "Lesson 2").
+            if (doomed && store === 'lessons') {
+                try {
+                    const lid = String(doomed.id || key || '');
+                    const beforeU = (db.lessonUnlocks || []).length;
+                    const beforeC = (db.lessonCompletions || []).length;
+                    db.lessonUnlocks = (db.lessonUnlocks || []).filter(r => !r || String(r.lessonId) !== lid);
+                    db.lessonCompletions = (db.lessonCompletions || []).filter(r => !r || String(r.lessonId) !== lid);
+                    const removedU = beforeU - db.lessonUnlocks.length;
+                    const removedC = beforeC - db.lessonCompletions.length;
+                    if (removedU || removedC) {
+                        auditLog('delete', 'lessons', { key: lid, dripUnlocksRemoved: removedU, dripCompletionsRemoved: removedC }, user && user.username);
+                    }
+                } catch (e) { console.error('lesson drip cleanup failed:', e && e.message); }
             }
             mutate({ [keyPath]: key, _deleted: true }, 'delete');
             auditLog('delete', store, { key }, user && user.username);
