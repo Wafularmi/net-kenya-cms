@@ -5636,6 +5636,7 @@ async function _maiMaybeRunScheduled() {
     try {
         if (_maiRunning) return;
         const v = getMaintenanceSetting();
+        if (!v || v.scheduledEnabled !== true) return;
         if (!_maiIsInScheduledWindow(v)) return;
         if (!_maiEnabledForAuto()) return;
         const key = _maiWindowKey(v);
