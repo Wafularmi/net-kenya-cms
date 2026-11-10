@@ -1794,7 +1794,7 @@ function renderMaintenanceSpeed(speed) {
     const rollback = r.rollback ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Reversible actions: ${_maiEsc((r.rollback.reversibleActions || []).join(', ') || 'none')}. ${((r.rollback.irreversibleActions || []).length) ? 'Expired/transient cleanup cannot be restored: ' + _maiEsc((r.rollback.irreversibleActions || []).join(', ')) : ''}</div>` : '';
     const reverted = speed.lastRevertResult ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Last revert: ${_maiEsc((speed.lastRevertResult.restored || []).length)} restored, ${_maiEsc((speed.lastRevertResult.skipped || []).length)} expired/transient action(s) skipped.</div>` : '';
     const sev = Number(r.speedScore) >= 80 ? 'success' : Number(r.speedScore) >= 55 ? 'warning' : 'danger';
-    el.innerHTML = `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg-elevated,#fff);color:var(--text,#111827);">
+    el.innerHTML = `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg-elevated, var(--bg-card, #1e293b));color:var(--text,#111827);">
         <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
             <div><b>${_maiEsc(_maiSpeedLabel(r))}</b> <span class="badge badge-${sev}" style="font-size:10px;">score ${_maiEsc(r.speedScore)}/100</span></div>
             <div style="font-size:11px;color:var(--text-muted);">${_maiEsc(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')} • ${_maiEsc(r.durationMs || 0)}ms</div>
@@ -1874,7 +1874,7 @@ async function loadMaintenanceAIReports() {
             const risk = r.summary && typeof r.summary.riskScore === 'number' ? r.summary.riskScore : null;
             const sooner = r.summary && r.summary.runSooner && r.summary.runSooner.recommended;
             const sev = risk == null ? 'info' : risk >= 60 ? 'danger' : risk >= 35 ? 'warning' : 'success';
-            return `<div style="border:1px solid var(--border,#d1d5db);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg-elevated,#fff);color:var(--text,#111827);">
+            return `<div style="border:1px solid var(--border,#d1d5db);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg-elevated, var(--bg-card, #1e293b));color:var(--text,#111827);">
                 <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
                     <div><b>${_maiEsc(r.id||'Report')}</b> <span class="badge badge-${sev}" style="font-size:10px;">${risk==null?'':'risk '+risk+'/100'}</span> ${sooner?'<span class="badge badge-warning" style="font-size:10px;">Run sooner</span>':''}</div>
                     <div style="font-size:11px;color:var(--text-muted);">${_maiEsc(r.createdAt?new Date(r.createdAt).toLocaleString():'')} • ${_maiEsc(r.trigger||'')} • ${(r.findingsCount||0)} finding(s)</div>
@@ -1941,7 +1941,7 @@ async function loadMaintenanceAIRepairs() {
         el.innerHTML = repairs.map(p => {
             const canApply = p.safe && p.action && p.action.type !== 'manual_review';
             const sev = p.severity==='high'?'danger':p.severity==='medium'?'warning':'info';
-            return `<div style="border:1px solid var(--border,#d1d5db);border-left:4px solid ${canApply?'#2563eb':'#f59e0b'};border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg-elevated,#fff);color:var(--text,#111827);">
+            return `<div style="border:1px solid var(--border,#d1d5db);border-left:4px solid ${canApply?'#2563eb':'#f59e0b'};border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg-elevated, var(--bg-card, #1e293b));color:var(--text,#111827);">
                 <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;"><b>${_maiEsc(p.title||p.type)}</b><span class="badge badge-${sev}" style="font-size:10px;">${_maiEsc(p.severity||'info')} • ${_maiEsc(p.confidence||'')} confidence</span></div>
                 <div style="font-size:12px;margin-top:4px;">${_maiEsc(p.description||'')}</div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Affected: ${_maiEsc(p.affectedCount||0)} • Type: ${_maiEsc(p.type)} • Created: ${_maiEsc(p.createdAt?new Date(p.createdAt).toLocaleString():'')}</div>
