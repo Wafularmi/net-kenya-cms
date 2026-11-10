@@ -532,8 +532,9 @@ const maintClients = [];
 function broadcastMaintenance(active) {
     try {
         const m = getMaintenanceSetting();
-        const scheduledActive = isScheduledMaintenanceActive();
-        const msg = `event: maintenance\ndata: ${JSON.stringify({ active: !!active, scheduledEnabled: !!m.scheduledEnabled, scheduledStart: m.scheduledStart || null, scheduledEnd: m.scheduledEnd || null, scheduledActive: scheduledActive })}\n\n`;
+        const info = getMaintenanceScheduleInfo(m, Date.now());
+        const scheduledActive = !!info.active;
+        const msg = `event: maintenance\ndata: ${JSON.stringify({ active: !!active, scheduledEnabled: !!m.scheduledEnabled, scheduledStart: info.start ? new Date(info.start).toISOString() : null, scheduledEnd: info.end ? new Date(info.end).toISOString() : null, scheduledActive: scheduledActive, recurrence: info.recurrence || 'one-time' })}\n\n`;
         for (const list of [sseClients, maintClients]) {
             for (let i = list.length - 1; i >= 0; i--) {
                 const client = list[i];
@@ -4632,6 +4633,187 @@ function getMaintenanceSetting() {
     return v;
 }
 
+// ---- Recurring scheduled maintenance ----
+// Recurring schedules are stored as local wall-clock times in an IANA time
+// zone. The active/next window is calculated on demand and cached for 30s so
+// the per-request maintenance check stays cheap even when recurrence is on.
+const MAINT_DEFAULT_TIMEZONE = 'Africa/Nairobi';
+const _maintFormatterCache = new Map();
+let _maintScheduleCache = { key: '', info: null };
+
+function _maintDtf(tz) {
+    let f = _maintFormatterCache.get(tz);
+    if (f) return f;
+    f = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        weekday: 'short', hourCycle: 'h23'
+    });
+    _maintFormatterCache.set(tz, f);
+    return f;
+}
+
+function _maintTimezone(v) {
+    const raw = v && v.recurTimezone ? String(v.recurTimezone).trim() : '';
+    const candidates = [raw, MAINT_DEFAULT_TIMEZONE, 'UTC'];
+    for (const tz of candidates) {
+        if (!tz) continue;
+        try { _maintDtf(tz); return tz; } catch (e) {}
+    }
+    return 'UTC';
+}
+
+function _maintTimeParts(date, tz) {
+    const parts = {};
+    for (const p of _maintDtf(tz).formatToParts(date)) parts[p.type] = p.value;
+    const weekdays = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return {
+        year: Number(parts.year),
+        month: Number(parts.month),
+        day: Number(parts.day),
+        hour: Number(parts.hour),
+        minute: Number(parts.minute),
+        second: Number(parts.second),
+        weekday: weekdays[parts.weekday]
+    };
+}
+
+function _maintTimezoneOffsetMs(date, tz) {
+    const p = _maintTimeParts(date, tz);
+    const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    return asUTC - Math.floor(date.getTime() / 1000) * 1000;
+}
+
+function _maintZonedTimeToUtc(year, month, day, hour, minute, tz) {
+    const guess = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+    let ts = guess;
+    for (let i = 0; i < 4; i++) {
+        const offset = _maintTimezoneOffsetMs(new Date(ts), tz);
+        const next = guess - offset;
+        if (next === ts) break;
+        ts = next;
+    }
+    return ts;
+}
+
+function _maintParseHm(value) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+    if (!m) return null;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+    return { h, m: min };
+}
+
+function _maintWindowList(v, key) {
+    const value = v && v[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') {
+        return Object.keys(value).map(k => {
+            const item = value[k];
+            return Object.assign({ day: Number(k) }, item && typeof item === 'object' ? item : {});
+        });
+    }
+    return [];
+}
+
+function _maintWindowsStartingOn(v, parts) {
+    const out = [];
+    const rec = String(v && v.recurrence || '');
+    const add = (w) => {
+        const start = _maintParseHm(w && w.start);
+        const end = _maintParseHm(w && w.end);
+        if (start && end) out.push({ sh: start.h, sm: start.m, eh: end.h, em: end.m });
+    };
+    if (rec === 'daily') {
+        add(v.recurDaily);
+    } else if (rec === 'weekly') {
+        for (const w of _maintWindowList(v, 'recurWeekly')) {
+            if (!w || w.enabled === false || w.enabled === 'false') continue;
+            if (Number(w.day) !== parts.weekday) continue;
+            add(w);
+        }
+    } else if (rec === 'monthly') {
+        for (const w of _maintWindowList(v, 'recurMonthly')) {
+            if (!w || Number(w.day) !== parts.day) continue;
+            add(w);
+        }
+    }
+    return out;
+}
+
+function _maintRecurringStatus(v, now) {
+    const tz = _maintTimezone(v);
+    const nowMs = Number(now);
+    const nowParts = _maintTimeParts(new Date(nowMs), tz);
+    const noon = _maintZonedTimeToUtc(nowParts.year, nowParts.month, nowParts.day, 12, 0, tz);
+    const rec = String(v && v.recurrence || '');
+    let lastOffset = 2;
+    if (rec === 'weekly') lastOffset = 7;
+    else if (rec === 'monthly') lastOffset = 62; // covers months that skip day 29/30/31
+    let active = null;
+    let next = null;
+    for (let off = -1; off <= lastOffset; off++) {
+        const p = _maintTimeParts(new Date(noon + off * 86400000), tz);
+        for (const w of _maintWindowsStartingOn(v, p)) {
+            const start = _maintZonedTimeToUtc(p.year, p.month, p.day, w.sh, w.sm, tz);
+            let end;
+            if (w.eh < w.sh || (w.eh === w.sh && w.em <= w.sm)) {
+                const np = _maintTimeParts(new Date(noon + (off + 1) * 86400000), tz);
+                end = _maintZonedTimeToUtc(np.year, np.month, np.day, w.eh, w.em, tz);
+            } else {
+                end = _maintZonedTimeToUtc(p.year, p.month, p.day, w.eh, w.em, tz);
+            }
+            if (nowMs >= start && nowMs < end) {
+                if (!active || start > active.start) active = { start, end };
+            } else if (start > nowMs) {
+                if (!next || start < next.start) next = { start, end };
+            }
+        }
+    }
+    if (active) return { active: true, start: active.start, end: active.end, nextStart: null, nextEnd: null };
+    return {
+        active: false,
+        start: next ? next.start : null,
+        end: next ? next.end : null,
+        nextStart: next ? next.start : null,
+        nextEnd: next ? next.end : null
+    };
+}
+
+function getMaintenanceScheduleInfo(v, now) {
+    const t = now instanceof Date ? now.getTime() : (now != null && Number.isFinite(Number(now)) ? Number(now) : Date.now());
+    const rec = String(v && v.recurrence || 'one-time');
+    const base = { recurrence: rec, active: false, start: null, end: null, nextStart: null, nextEnd: null };
+    if (!v || !v.scheduledEnabled) return base;
+    const key = JSON.stringify([
+        !!v.scheduledEnabled, v.scheduledStart || '', v.scheduledEnd || '',
+        rec, v.recurTimezone || '', v.recurDaily || null, v.recurWeekly || null,
+        v.recurMonthly || null, Math.floor(t / 30000)
+    ]);
+    if (_maintScheduleCache.key === key) return _maintScheduleCache.info;
+    let info;
+    if (rec === 'daily' || rec === 'weekly' || rec === 'monthly') {
+        const r = _maintRecurringStatus(v, t);
+        info = { recurrence: rec, active: !!r.active, start: r.start, end: r.end, nextStart: r.nextStart, nextEnd: r.nextEnd };
+    } else {
+        info = { recurrence: 'one-time', active: false, start: null, end: null, nextStart: null, nextEnd: null };
+        const start = v.scheduledStart ? Date.parse(v.scheduledStart) : NaN;
+        const savedEnd = v.scheduledEnd ? Date.parse(v.scheduledEnd) : NaN;
+        if (isFinite(start)) {
+            // Keep the legacy one-time rule: a missing end never activates the
+            // window, but the banner still uses a two-hour fallback end.
+            info.start = start;
+            info.end = isFinite(savedEnd) ? savedEnd : start + 2 * 60 * 60 * 1000;
+            info.active = isFinite(savedEnd) && t >= start && t < savedEnd;
+            if (start > t) { info.nextStart = start; info.nextEnd = info.end; }
+        }
+    }
+    _maintScheduleCache = { key, info };
+    return info;
+}
+
 function getSmsApiKey() {
     try {
         const rec = (db.settings || []).find(s => s.key === 'smsApiKey' || s.key === 'sms_api_key');
@@ -4699,14 +4881,7 @@ function checkSmsApiKey(req) {
 
 function isScheduledMaintenanceActive() {
     try {
-        const v = getMaintenanceSetting();
-        if (!v.scheduledEnabled) return false;
-        const now = Date.now();
-        const start = v.scheduledStart ? new Date(v.scheduledStart).getTime() : NaN;
-        const end = v.scheduledEnd ? new Date(v.scheduledEnd).getTime() : NaN;
-        if (isNaN(start)) return false;
-        if (isNaN(end)) return now >= start && now <= end;
-        return now >= start && now < end;
+        return !!getMaintenanceScheduleInfo(getMaintenanceSetting(), Date.now()).active;
     } catch (e) { return false; }
 }
 
@@ -4778,17 +4953,13 @@ function _maiEnabledForAuto() {
     return true; // default enabled
 }
 function _maiWindowKey(v) {
-    const s = v && (v.startAt || v.scheduledStart) ? String(v.startAt || v.scheduledStart) : '';
-    const e = v && (v.endAt || v.scheduledEnd) ? String(v.endAt || v.scheduledEnd) : '';
-    if (!s || !e) return '';
-    return s + '|' + e;
+    const info = getMaintenanceScheduleInfo(v, Date.now());
+    if (!info.active || info.start == null || info.end == null) return '';
+    return String(info.start) + '|' + String(info.end);
 }
 function _maiIsInScheduledWindow(v) {
     try {
-        const s = v && (v.startAt || v.scheduledStart) ? Date.parse(String(v.startAt || v.scheduledStart)) : NaN;
-        const e = v && (v.endAt || v.scheduledEnd) ? Date.parse(String(v.endAt || v.scheduledEnd)) : NaN;
-        if (!isFinite(s)||!isFinite(e)) return false;
-        const now = Date.now(); return now >= s && now < e;
+        return !!getMaintenanceScheduleInfo(v, Date.now()).active;
     } catch(e){ return false; }
 }
 function _maiEnsureStores() {
@@ -6095,9 +6266,20 @@ function handleAPI(req, res) {
     // GET /api/maintenance-status — public maintenance flag (login screen polling/SSE fallback)
     if (parts.length === 2 && parts[1] === 'maintenance-status' && req.method === 'GET') {
         const m = getMaintenanceSetting();
-        const scheduledActive = isScheduledMaintenanceActive();
+        const info = getMaintenanceScheduleInfo(m, Date.now());
+        const scheduledActive = !!info.active;
         const active = isMaintenanceActive();
-        return json(res, 200, { active: active, scheduledEnabled: !!m.scheduledEnabled, scheduledStart: m.scheduledStart || null, scheduledEnd: m.scheduledEnd || null, scheduledActive: scheduledActive, message: m.message || '', scheduledMessage: m.scheduledMessage || '' });
+        return json(res, 200, {
+            active: active,
+            scheduledEnabled: !!m.scheduledEnabled,
+            scheduledStart: info.start ? new Date(info.start).toISOString() : null,
+            scheduledEnd: info.end ? new Date(info.end).toISOString() : null,
+            scheduledActive: scheduledActive,
+            recurrence: info.recurrence || 'one-time',
+            timezone: m.recurTimezone || null,
+            message: m.message || '',
+            scheduledMessage: m.scheduledMessage || ''
+        });
     }
     // GET /api/version — public build version (clients poll this to auto-reload on deploy)
     if (parts.length === 2 && parts[1] === 'version' && req.method === 'GET') {

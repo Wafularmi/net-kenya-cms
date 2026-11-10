@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=492" as="script">
+    <link rel="preload" href="js/bundle.js?v=493" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -1321,12 +1321,46 @@
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">This message is shown on the maintenance page. Leave it empty to use the default text.</div>
                         <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px;">Scheduled Maintenance</div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Schedule maintenance in advance. A banner will be shown to users before it starts, and they can wait until it's over to login.</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Schedule maintenance once, daily, weekly, or monthly. A banner is shown to users in the hour before each recurring window starts, and they can wait until it's over to login.</div>
                         <div class="form-group"><label><input type="checkbox" id="settings-maintenance-scheduled" style="margin-right:6px;"> Enable Scheduled Maintenance</label></div>
                         <div class="form-row">
-                            <div class="form-group"><label>Start Date & Time</label><input type="datetime-local" id="settings-maintenance-start"></div>
-                            <div class="form-group"><label>End Date & Time</label><input type="datetime-local" id="settings-maintenance-end"></div>
+                            <div class="form-group"><label>Schedule Type</label>
+                                <select id="settings-maintenance-recurrence" onchange="updateMaintenanceScheduleFields()">
+                                    <option value="one-time">One-time window</option>
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly (choose days)</option>
+                                    <option value="monthly">Monthly (choose days)</option>
+                                </select>
+                            </div>
+                            <div class="form-group"><label>Time Zone</label>
+                                <input type="text" id="settings-maintenance-timezone" placeholder="Africa/Nairobi">
+                                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">IANA time zone. Defaults to this browser's time zone.</div>
+                            </div>
                         </div>
+                        <div id="settings-maintenance-once-fields">
+                            <div class="form-row">
+                                <div class="form-group"><label>Start Date &amp; Time</label><input type="datetime-local" id="settings-maintenance-start"></div>
+                                <div class="form-group"><label>End Date &amp; Time</label><input type="datetime-local" id="settings-maintenance-end"></div>
+                            </div>
+                        </div>
+                        <div id="settings-maintenance-daily-fields" style="display:none;">
+                            <div class="form-row">
+                                <div class="form-group"><label>Daily Start Time</label><input type="time" id="settings-maintenance-daily-start" value="02:00" step="60"></div>
+                                <div class="form-group"><label>Daily End Time</label><input type="time" id="settings-maintenance-daily-end" value="04:00" step="60"></div>
+                            </div>
+                        </div>
+                        <div id="settings-maintenance-weekly-fields" style="display:none;">
+                            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Tick the days to run maintenance and set a start/end time for each day. Different days can have different times.</div>
+                            <div style="display:grid;grid-template-columns:100px 1fr 1fr;gap:8px;font-size:10px;color:var(--text-muted);margin-bottom:4px;"><div>Day</div><div>Start</div><div>End</div></div>
+                            <div id="settings-maintenance-weekly-rows"></div>
+                        </div>
+                        <div id="settings-maintenance-monthly-fields" style="display:none;">
+                            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Choose one or more days of the month. Each day can have a different start/end time. Days that do not exist in a month are skipped.</div>
+                            <div style="display:grid;grid-template-columns:70px 1fr 1fr 36px;gap:8px;font-size:10px;color:var(--text-muted);margin-bottom:4px;"><div>Day</div><div>Start</div><div>End</div><div></div></div>
+                            <div id="settings-maintenance-monthly-rows"></div>
+                            <button type="button" class="btn btn-outline btn-sm" style="margin-top:6px;" onclick="addMaintenanceMonthlyRow()">+ Add Monthly Day</button>
+                        </div>
+                        <div id="settings-maintenance-tz-note" style="font-size:10px;color:var(--text-muted);margin:8px 0;"></div>
                         <div class="form-group"><label>Scheduled Message (optional)</label><textarea id="settings-maintenance-scheduled-message" rows="2" placeholder="Message shown in the pre-maintenance banner..."></textarea></div>
                         <button class="btn btn-primary" onclick="saveMaintenanceMode()">Save Maintenance Settings</button>
                         <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
@@ -1730,7 +1764,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=492"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=493"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=97"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

@@ -1600,6 +1600,216 @@ function fromLocalDateTimeInputValue(v) {
     } catch (e) { return ''; }
 }
 
+var _maintenanceDayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function maintenanceBrowserTimezone() {
+    try {
+        return (Intl && Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'Africa/Nairobi';
+    } catch (e) { return 'Africa/Nairobi'; }
+}
+
+function maintenanceTimezoneValid(tz) {
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date());
+        return true;
+    } catch (e) { return false; }
+}
+
+function maintenanceNormalizeTime(value, fallback) {
+    var v = value ? String(value).trim() : '';
+    var m = /^(\d{1,2}):(\d{2})$/.exec(v);
+    if (!m) return fallback || '';
+    var h = Number(m[1]);
+    var mi = Number(m[2]);
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return fallback || '';
+    return (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi;
+}
+
+function maintenanceInputTime(id, fallback) {
+    var el = document.getElementById(id);
+    return maintenanceNormalizeTime(el && el.value, fallback);
+}
+
+function maintenanceSetTimeValue(el, value, fallback) {
+    if (!el) return;
+    el.value = maintenanceNormalizeTime(value, fallback);
+}
+
+function renderMaintenanceWeeklyRows(rows) {
+    var host = document.getElementById('settings-maintenance-weekly-rows');
+    if (!host) return;
+    host.innerHTML = '';
+    var byDay = {};
+    if (Array.isArray(rows)) {
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            if (r && r.day != null) byDay[String(Number(r.day))] = r;
+        }
+    } else if (rows && typeof rows === 'object') {
+        Object.keys(rows).forEach(function (k) {
+            var r = rows[k];
+            if (r && typeof r === 'object') byDay[String(Number(k))] = Object.assign({ day: Number(k) }, r);
+        });
+    }
+    for (var d = 0; d < 7; d++) {
+        var w = byDay[String(d)] || {};
+        var row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:100px 1fr 1fr;gap:8px;align-items:center;margin-bottom:6px;';
+        var label = document.createElement('label');
+        label.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = 'settings-maintenance-weekly-' + d + '-enabled';
+        cb.checked = w.enabled === true || w.enabled === 'true';
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(_maintenanceDayNames[d]));
+        var start = document.createElement('input');
+        start.type = 'time';
+        start.step = '60';
+        start.id = 'settings-maintenance-weekly-' + d + '-start';
+        maintenanceSetTimeValue(start, w.start, '02:00');
+        var end = document.createElement('input');
+        end.type = 'time';
+        end.step = '60';
+        end.id = 'settings-maintenance-weekly-' + d + '-end';
+        maintenanceSetTimeValue(end, w.end, '04:00');
+        row.appendChild(label);
+        row.appendChild(start);
+        row.appendChild(end);
+        host.appendChild(row);
+    }
+}
+
+function addMaintenanceMonthlyRow(value) {
+    var host = document.getElementById('settings-maintenance-monthly-rows');
+    if (!host) return;
+    var v = value && typeof value === 'object' ? value : {};
+    var row = document.createElement('div');
+    row.className = 'maintenance-monthly-row';
+    row.style.cssText = 'display:grid;grid-template-columns:70px 1fr 1fr 36px;gap:8px;align-items:center;margin-bottom:6px;';
+    var day = document.createElement('input');
+    day.type = 'number';
+    day.min = '1';
+    day.max = '31';
+    day.step = '1';
+    day.className = 'maint-monthly-day';
+    day.value = (Number(v.day) >= 1 && Number(v.day) <= 31) ? String(Number(v.day)) : '1';
+    var start = document.createElement('input');
+    start.type = 'time';
+    start.step = '60';
+    start.className = 'maint-monthly-start';
+    maintenanceSetTimeValue(start, v.start, '02:00');
+    var end = document.createElement('input');
+    end.type = 'time';
+    end.step = '60';
+    end.className = 'maint-monthly-end';
+    maintenanceSetTimeValue(end, v.end, '04:00');
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn btn-outline btn-sm';
+    remove.textContent = '×';
+    remove.title = 'Remove this day';
+    remove.onclick = function () { removeMaintenanceMonthlyRow(remove); };
+    row.appendChild(day);
+    row.appendChild(start);
+    row.appendChild(end);
+    row.appendChild(remove);
+    host.appendChild(row);
+}
+
+function removeMaintenanceMonthlyRow(btn) {
+    var row = btn && btn.closest ? btn.closest('.maintenance-monthly-row') : null;
+    if (!row || !row.parentNode) return;
+    var host = row.parentNode;
+    host.removeChild(row);
+    if (!host.querySelector('.maintenance-monthly-row')) {
+        addMaintenanceMonthlyRow({ day: 1, start: '02:00', end: '04:00' });
+    }
+}
+
+function updateMaintenanceScheduleFields() {
+    var modeEl = document.getElementById('settings-maintenance-recurrence');
+    var mode = modeEl ? modeEl.value : 'one-time';
+    if (mode !== 'daily' && mode !== 'weekly' && mode !== 'monthly') mode = 'one-time';
+    var once = document.getElementById('settings-maintenance-once-fields');
+    var daily = document.getElementById('settings-maintenance-daily-fields');
+    var weekly = document.getElementById('settings-maintenance-weekly-fields');
+    var monthly = document.getElementById('settings-maintenance-monthly-fields');
+    if (once) once.style.display = mode === 'one-time' ? '' : 'none';
+    if (daily) daily.style.display = mode === 'daily' ? '' : 'none';
+    if (weekly) weekly.style.display = mode === 'weekly' ? '' : 'none';
+    if (monthly) monthly.style.display = mode === 'monthly' ? '' : 'none';
+    var tzEl = document.getElementById('settings-maintenance-timezone');
+    var tz = tzEl && tzEl.value ? tzEl.value.trim() : maintenanceBrowserTimezone();
+    if (tzEl && !tzEl.value) tzEl.value = tz;
+    var note = document.getElementById('settings-maintenance-tz-note');
+    if (note) {
+        if (mode === 'one-time') note.textContent = 'One-time windows use the exact start and end date/time you enter.';
+        else if (!maintenanceTimezoneValid(tz)) note.textContent = 'Time zone "' + tz + '" is not recognised. Use an IANA name such as Africa/Nairobi.';
+        else note.textContent = 'Recurring windows use ' + tz + '. If an end time is earlier than its start time, the window continues into the next day.';
+    }
+}
+
+function maintenanceScheduleFormValue(schedEnabled, strict) {
+    strict = strict === true;
+    var modeEl = document.getElementById('settings-maintenance-recurrence');
+    var mode = modeEl ? modeEl.value : 'one-time';
+    if (mode !== 'daily' && mode !== 'weekly' && mode !== 'monthly') mode = 'one-time';
+    var tzEl = document.getElementById('settings-maintenance-timezone');
+    var tz = tzEl && tzEl.value ? tzEl.value.trim() : maintenanceBrowserTimezone();
+    if (!maintenanceTimezoneValid(tz)) {
+        if (strict) throw new Error('Invalid time zone "' + tz + '". Use an IANA name such as Africa/Nairobi.');
+        tz = maintenanceBrowserTimezone();
+    }
+    var dailyStart = maintenanceInputTime('settings-maintenance-daily-start', '');
+    var dailyEnd = maintenanceInputTime('settings-maintenance-daily-end', '');
+    var weekly = [];
+    for (var d = 0; d < 7; d++) {
+        var enabledEl = document.getElementById('settings-maintenance-weekly-' + d + '-enabled');
+        var enabled = !!(enabledEl && enabledEl.checked);
+        var rawStart = maintenanceInputTime('settings-maintenance-weekly-' + d + '-start', '');
+        var rawEnd = maintenanceInputTime('settings-maintenance-weekly-' + d + '-end', '');
+        if (strict && schedEnabled && mode === 'weekly' && enabled && (!rawStart || !rawEnd)) {
+            throw new Error('Set a start and end time for every selected weekly day.');
+        }
+        weekly.push({ day: d, enabled: enabled, start: rawStart || '02:00', end: rawEnd || '04:00' });
+    }
+    var monthly = [];
+    var rows = document.querySelectorAll('#settings-maintenance-monthly-rows .maintenance-monthly-row');
+    for (var i = 0; i < rows.length; i++) {
+        var dayEl = rows[i].querySelector('.maint-monthly-day');
+        var startEl = rows[i].querySelector('.maint-monthly-start');
+        var endEl = rows[i].querySelector('.maint-monthly-end');
+        var dayNum = dayEl ? parseInt(dayEl.value, 10) : NaN;
+        var start = startEl ? maintenanceNormalizeTime(startEl.value, '') : '';
+        var end = endEl ? maintenanceNormalizeTime(endEl.value, '') : '';
+        if (dayNum >= 1 && dayNum <= 31 && start && end) monthly.push({ day: dayNum, start: start, end: end });
+    }
+    if (strict && schedEnabled && mode === 'daily' && (!dailyStart || !dailyEnd)) {
+        throw new Error('Set a daily start time and end time.');
+    }
+    if (strict && schedEnabled && mode === 'weekly') {
+        var activeDays = weekly.filter(function (w) { return w.enabled; });
+        if (!activeDays.length) throw new Error('Choose at least one day for the weekly schedule.');
+    }
+    if (strict && schedEnabled && mode === 'monthly') {
+        if (!monthly.length) throw new Error('Add at least one monthly day with a start and end time.');
+        if (monthly.length !== rows.length) throw new Error('Set a valid day (1-31), start time, and end time for every monthly row.');
+    }
+    if (mode === 'monthly' && !monthly.length) {
+        monthly.push({ day: 1, start: '02:00', end: '04:00' });
+    }
+    return {
+        recurrence: mode,
+        recurTimezone: tz,
+        recurDaily: { start: dailyStart || '02:00', end: dailyEnd || '04:00' },
+        recurWeekly: weekly,
+        recurMonthly: monthly,
+        scheduledStart: fromLocalDateTimeInputValue(document.getElementById('settings-maintenance-start') && document.getElementById('settings-maintenance-start').value),
+        scheduledEnd: fromLocalDateTimeInputValue(document.getElementById('settings-maintenance-end') && document.getElementById('settings-maintenance-end').value)
+    };
+}
+
 async function loadMaintenanceMode() {
     try {
         var rec = await dbGet('settings', 'maintenance');
@@ -1615,16 +1825,34 @@ async function loadMaintenanceMode() {
         if (msg) msg.value = v.message || '';
         var schedCb = document.getElementById('settings-maintenance-scheduled');
         if (schedCb) schedCb.checked = !!v.scheduledEnabled;
+        var recSel = document.getElementById('settings-maintenance-recurrence');
+        if (recSel) {
+            recSel.value = (v.recurrence === 'daily' || v.recurrence === 'weekly' || v.recurrence === 'monthly') ? v.recurrence : 'one-time';
+        }
+        var tzEl = document.getElementById('settings-maintenance-timezone');
+        if (tzEl) tzEl.value = v.recurTimezone || maintenanceBrowserTimezone();
         var schedStart = document.getElementById('settings-maintenance-start');
         if (schedStart) schedStart.value = toLocalDateTimeInputValue(v.scheduledStart);
         var schedEnd = document.getElementById('settings-maintenance-end');
         if (schedEnd) schedEnd.value = toLocalDateTimeInputValue(v.scheduledEnd);
+        var dailyStart = document.getElementById('settings-maintenance-daily-start');
+        maintenanceSetTimeValue(dailyStart, v.recurDaily && v.recurDaily.start, '02:00');
+        var dailyEnd = document.getElementById('settings-maintenance-daily-end');
+        maintenanceSetTimeValue(dailyEnd, v.recurDaily && v.recurDaily.end, '04:00');
+        renderMaintenanceWeeklyRows(v.recurWeekly);
+        var monthlyHost = document.getElementById('settings-maintenance-monthly-rows');
+        if (monthlyHost) {
+            monthlyHost.innerHTML = '';
+            var monthlyRows = Array.isArray(v.recurMonthly) && v.recurMonthly.length ? v.recurMonthly : [{ day: 1, start: '02:00', end: '04:00' }];
+            for (var i = 0; i < monthlyRows.length; i++) addMaintenanceMonthlyRow(monthlyRows[i]);
+        }
         var schedMsg = document.getElementById('settings-maintenance-scheduled-message');
         if (schedMsg) schedMsg.value = v.scheduledMessage || '';
+        updateMaintenanceScheduleFields();
     } catch (e) {}
 }
 
-async function setMaintenanceMode(checked) {
+async function setMaintenanceMode(checked, strictSchedule) {
     var msg = document.getElementById('settings-maintenance-message');
     var cbEl = document.getElementById('settings-maintenance');
     var statusEl = document.getElementById('maintenance-status');
@@ -1632,42 +1860,54 @@ async function setMaintenanceMode(checked) {
         if (cbEl) cbEl.checked = !!on;
         if (statusEl) { statusEl.textContent = on ? 'ON' : 'OFF'; statusEl.style.color = on ? 'var(--danger)' : 'var(--success)'; }
     }
+    var rec = null;
+    try { rec = await dbGet('settings', 'maintenance'); } catch (e) {}
+    var cur = (rec && rec.value) || {};
+    var schedCb = document.getElementById('settings-maintenance-scheduled');
+    var schedEnabled = !!(schedCb && schedCb.checked);
+    var schedule;
+    try {
+        schedule = maintenanceScheduleFormValue(schedEnabled, strictSchedule === true);
+    } catch (e) {
+        paintMaint(!!cur.active);
+        showToast('Could not save maintenance settings: ' + (e && e.message ? e.message : e), { type: 'danger' });
+        loadMaintenanceMode();
+        return false;
+    }
     paintMaint(checked);
     try {
-        var rec = null;
-        try { rec = await dbGet('settings', 'maintenance'); } catch (e) {}
-        var cur = (rec && rec.value) || {};
-        var schedCb = document.getElementById('settings-maintenance-scheduled');
-        var schedStart = document.getElementById('settings-maintenance-start');
-        var schedEnd = document.getElementById('settings-maintenance-end');
         var schedMsg = document.getElementById('settings-maintenance-scheduled-message');
-        var value = {
+        var value = Object.assign({}, cur, schedule, {
             active: !!checked,
             message: (msg && msg.value ? msg.value.trim() : '') || cur.message || '',
-            scheduledEnabled: !!(schedCb && schedCb.checked),
-            scheduledStart: fromLocalDateTimeInputValue(schedStart && schedStart.value),
-            scheduledEnd: fromLocalDateTimeInputValue(schedEnd && schedEnd.value),
+            scheduledEnabled: schedEnabled,
             scheduledMessage: (schedMsg && schedMsg.value ? schedMsg.value.trim() : '') || cur.scheduledMessage || '',
             updatedAt: new Date().toISOString(),
             updatedBy: (JSON.parse(sessionStorage.getItem('currentUser') || '{}').username || '')
-        };
+        });
         await dbPut('settings', { key: 'maintenance', value: value, updatedAt: new Date().toISOString(), updatedBy: value.updatedBy });
+        loadMaintenanceMode();
+        return true;
     } catch (e) {
         showToast('Could not save maintenance mode: ' + (e && e.message ? e.message : e), { type: 'danger' });
+        loadMaintenanceMode();
+        return false;
     }
-    loadMaintenanceMode();
 }
 
 async function saveMaintenanceMode() {
     var cb = document.getElementById('settings-maintenance');
     var enabled = !!(cb && cb.checked);
-    await setMaintenanceMode(enabled);
-    showToast('Maintenance settings saved.');
+    var ok = await setMaintenanceMode(enabled, true);
+    if (ok) showToast('Maintenance settings saved.');
 }
 
 window.loadMaintenanceMode = loadMaintenanceMode;
 window.saveMaintenanceMode = saveMaintenanceMode;
 window.setMaintenanceMode = setMaintenanceMode;
+window.updateMaintenanceScheduleFields = updateMaintenanceScheduleFields;
+window.addMaintenanceMonthlyRow = addMaintenanceMonthlyRow;
+window.removeMaintenanceMonthlyRow = removeMaintenanceMonthlyRow;
 
 // ===== Maintenance AI UI =====
 async function loadMaintenanceAI() {
@@ -31027,6 +31267,7 @@ function updateMaintenanceBanner() {
             .then(data => {
                 if (!data) { banners.forEach(b => { b.style.display = 'none'; }); return; }
                 const now = Date.now();
+                const recurringSchedule = !!(data.recurrence && data.recurrence !== 'one-time');
                 if (data.scheduledEnabled && data.scheduledStart) {
                     const start = new Date(data.scheduledStart).getTime();
                     const end = data.scheduledEnd ? new Date(data.scheduledEnd).getTime() : (start + 7200000);
@@ -31042,6 +31283,10 @@ function updateMaintenanceBanner() {
                             return;
                         }
                         if (now < start) {
+                            if (recurringSchedule && start - now > 60 * 60 * 1000) {
+                                banners.forEach(b => { b.style.display = 'none'; });
+                                return;
+                            }
                             const diff = start - now;
                             const hours = Math.floor(diff / 3600000);
                             const mins = Math.floor((diff % 3600000) / 60000);
