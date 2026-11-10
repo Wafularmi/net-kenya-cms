@@ -3617,6 +3617,21 @@ async function viewHubLessonNote(lessonId, courseId) {
             }
         }
 
+        // In-course drip: a lesson that is unlocked but sits BEHIND an
+        // unfinished step must not be opened either. The learner works one
+        // step at a time - notes -> video -> quiz -> next lesson.
+        if (__isStu && dripMode && typeof hubDripCourseState === 'function') {
+            try {
+                const __course = (data.courses || []).find(c => String(c.id) === String(lesson.courseId));
+                if (__course) {
+                    const __st = hubDripCourseState(__course, data.lessons || []).states[String(lesson.id)];
+                    if (__st === 'waiting') {
+                        return showToast('🔒 Finish the earlier steps of this course first — the lessons are worked in order.', { type: 'warning', duration: 5000 });
+                    }
+                }
+            } catch (e) {}
+        }
+
         const content = note?.content || lesson.description || lesson.reference || 'No content available for this lesson yet.';
         const readTime = estimateReadTime(content);
         const courseLessons = (data.lessons || []).filter(l => l.courseId === courseId && (typeof lessonVisible === 'function' ? lessonVisible(l) : l.published !== false)).sort((a, b) => (a.order || 0) - (b.order || 0));
