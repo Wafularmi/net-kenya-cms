@@ -2722,7 +2722,7 @@ function filterCourseLockedRows(user, store, rows, lookup) {
 
 function courseGateReadDenied(user, store, rec, lookup) {
     if (!user || user.role !== 'student' || !rec || !COURSE_GATED_READ_STORES.has(store)) return null;
-    if ((store === 'exams' || store === 'quizzes') && (rec.ungated === true || rec.openWindow === true)) return null;
+    if ((store === 'exams' || store === 'quizzes') && (rec.ungated === true || isOpenWindowValue(rec.openWindow))) return null;
     // An exam whose window is currently open is readable by every student.
     if (store === 'exams' && courseGate.isUngatedAssessment(db, store, rec)) return null;
     const sid = serverStudentId(user);
@@ -2897,7 +2897,7 @@ function assessmentEpoch(day, clock, timeZone) {
 function assessmentWindowServer(a, user) {
     const now = Date.now();
     if (!a) return { opensAtISO: '', closesAtISO: '', closesAt: '', closed: false, notYetOpen: false, timeZone: ASSESSMENT_DEFAULT_TIME_ZONE, openWindow: false };
-    const openWindow = a.openWindow === true || a.openWindow === 'true' || a.openWindow === 1 || a.openWindow === '1';
+    const openWindow = isOpenWindowValue(a.openWindow);
     const timeZone = assessmentTimeZone(a, user);
     const t = assessmentTimePartsServer(a.time);
     const baseDay = String(a.opensAt || a.date || '').slice(0, 10);
@@ -3303,6 +3303,15 @@ function learnerAssessmentContext(user) {
     const retakeExamIds = new Set((db.retakeRequests || [])
         .filter(r => r && aliases.has(String(r.studentId)) && r.status !== 'rejected')
         .map(r => String(r.examId)));
+    // Supplementary papers are student-specific: only an approved retake grant
+    // unlocks one. Include both ids because a retake of a supplementary paper
+    // records the supp paper in examId and the next paper in supplementaryExamId.
+    const approvedSuppExamIds = new Set();
+    (db.retakeRequests || []).forEach(r => {
+        if (!r || !aliases.has(String(r.studentId)) || r.status !== 'approved') return;
+        if (r.supplementaryExamId) approvedSuppExamIds.add(String(r.supplementaryExamId));
+        if (r.examId) approvedSuppExamIds.add(String(r.examId));
+    });
     const submittedIds = new Set((db.submissions || [])
         .filter(r => r && aliases.has(String(r.studentId)))
         .map(r => String(r.quizId)));
@@ -3316,6 +3325,7 @@ function learnerAssessmentContext(user) {
         examRegIds,
         quizRegIds,
         retakeExamIds,
+        approvedSuppExamIds,
         submittedIds
     };
 }
@@ -3331,13 +3341,20 @@ function isScheduledLearnerAssessment(rec) {
     // quiz; it does not turn that quiz into a registered sitting. A real
     // scheduled assessment carries a date/time (CATs and exams are handled by
     // their assessment type regardless).
-    return !!(rec && (rec.date || rec.time || rec.openWindow));
+    return !!(rec && (rec.date || rec.time || isOpenWindowValue(rec.openWindow)));
 }
 function isCourseworkQuizServer(rec) {
     if (!rec) return false;
     const type = String(rec.assessmentType || '').toLowerCase();
     return (type === 'quiz' || !type) && !isScheduledLearnerAssessment(rec);
 }
+function isOpenWindowValue(value) {
+    // Older imported rows sometimes store openWindow as a string or number.
+    // Treat every true-like form exactly like true so an open paper is never
+    // mistaken for a closed or not-yet-open one.
+    return value === true || value === 'true' || value === 1 || value === '1';
+}
+
 function filterLearnerAssessments(user, store, rows) {
     const ctx = learnerAssessmentContext(user);
     if (!ctx) return [];
@@ -3346,48 +3363,57 @@ function filterLearnerAssessments(user, store, rows) {
         .map(c => String(c.id)));
     return (rows || []).filter(rec => {
         if (!rec || rec.published === false) return false;
-        // Exams that are open-ended or whose window is currently open are
-        // accessible to every student, even without an active enrolment.
-        if (store === 'exams' && rec.openWindow === true) return true;
+        const id = String(rec.id);
+        const types = [rec.type, rec.assessmentType].map(v => String(v || '').toLowerCase());
+        const isSupplementary = types.includes('supplementary');
+        const isExam = store === 'exams' || types.includes('exam') || isSupplementary;
+
+        // A supplementary paper is learner-specific. An open-window flag must
+        // never bypass the approved retake grant that makes it available.
+        if (store === 'exams' && isSupplementary && !ctx.approvedSuppExamIds.has(id)) return false;
+
+        // Open-ended or currently-open exams are published to every student,
+        // even without an active enrolment. This keeps an open paper usable
+        // when an imported student has no course-enrolment row.
+        if (store === 'exams' && isOpenWindowValue(rec.openWindow)) return true;
         if (store === 'exams') {
             try {
                 const now = Date.now();
-                const base = String(rec.date || '').slice(0,10);
+                const base = String(rec.date || '').slice(0, 10);
                 if (base) {
                     const t = rec.time ? String(rec.time).split('-')[0].trim() : '00:00';
                     const start = new Date(base + 'T' + t + ':00');
                     if (!isNaN(start.getTime()) && rec.date && rec.time) {
-                        const durMins = (rec.durationDays||0)*1440 + (rec.durationHours||0)*60 + (rec.durationMinutes||0) + (rec.timeLimitDays||0)*1440 + (rec.timeLimitHours||0)*60 + (rec.timeLimitMinutes||0) || parseInt(rec.duration||rec.timeLimit||0)||0;
-                        const close = durMins > 0 ? start.getTime() + durMins*60000 : start.getTime() + 4*86400000;
+                        const durMins = (rec.durationDays || 0) * 1440 + (rec.durationHours || 0) * 60 + (rec.durationMinutes || 0) + (rec.timeLimitDays || 0) * 1440 + (rec.timeLimitHours || 0) * 60 + (rec.timeLimitMinutes || 0) || parseInt(rec.duration || rec.timeLimit || 0) || 0;
+                        const close = durMins > 0 ? start.getTime() + durMins * 60000 : start.getTime() + 4 * 86400000;
                         if (now >= start.getTime() && now <= close) return true;
                     }
                 }
             } catch (e) {}
         }
-        if (!ctx.enrolledCourseIds.has(String(rec.courseId))) return false;
+
         if (!activeCourses.has(String(rec.courseId))) return false;
         if (!assessmentInLearnerScope(ctx, rec)) return false;
-        const id = String(rec.id);
+
         if (store === 'exams') {
-            // Open-ended exams are published to every student and can be sat
-            // any time until switched back to Draft — no enrolment required.
-            if (rec.openWindow === true) return true;
-            if (!(rec.openWindow || (rec.date && rec.time))) return false;
-            // An exam whose window is currently open is accessible to everyone.
-            try {
-                const now = Date.now();
-                const start = new Date(String(rec.date).slice(0,10) + 'T' + String(rec.time).split('-')[0].trim() + ':00');
-                if (!isNaN(start.getTime())) {
-                    const durMins = (rec.durationDays||0)*1440 + (rec.durationHours||0)*60 + (rec.durationMinutes||0) + (rec.timeLimitDays||0)*1440 + (rec.timeLimitHours||0)*60 + (rec.timeLimitMinutes||0) || parseInt(rec.duration||rec.timeLimit||0)||0;
-                    const close = durMins > 0 ? start.getTime() + durMins*60000 : start.getTime() + 4*86400000;
-                    if (rec.closesAt) { const cd = new Date(String(rec.closesAt).slice(0,10)+'T23:59:59'); if (!isNaN(cd.getTime())) { /* use closesAt if set */ } }
-                    if (now >= start.getTime() && now <= close) return true;
-                }
-            } catch (e) {}
-            return !!(rec.openWindow || ctx.examRegIds.has(id) || ctx.retakeExamIds.has(id) || ctx.submittedIds.has(id));
+            // The exam catalogue is shared with learners so they can see every
+            // published sitting - future, current, past and missed. A paper is
+            // never hidden just because the student has no enrolment row (many
+            // imported accounts never got one) or has not registered yet.
+            // Supplementary papers remain student-specific and require an
+            // approved retake grant.
+            if (isSupplementary) return ctx.approvedSuppExamIds.has(id);
+            return true;
         }
         if (store === 'quizzes') {
-            if (rec.openWindow) return true;
+            // Ordinary lesson quizzes stay inside the learner's courses. A quiz
+            // explicitly filed as an exam follows the same visibility as an exam.
+            if (isExam) {
+                if (isSupplementary) return ctx.approvedSuppExamIds.has(id);
+                return true;
+            }
+            if (!ctx.enrolledCourseIds.has(String(rec.courseId))) return false;
+            if (isOpenWindowValue(rec.openWindow)) return true;
             if (ctx.quizRegIds.has(id) || ctx.examRegIds.has(id) || ctx.submittedIds.has(id)) return true;
             return isCourseworkQuizServer(rec);
         }
@@ -3514,10 +3540,13 @@ function filterStoreForUser(user, store, rows) {
     return rows;
 }
 
-// Server-verified session tokens (issued at login, 12h lifetime).
+// Server-verified session tokens. A tab that stays open remains active: each
+// authenticated request slides the 12h expiry forward, and the refreshed expiry
+// is persisted at most once a minute so a server restart does not lose it.
 const sessions = new Map(); // token -> { username, expires, createdAt }
 const SESSION_TTL = 12 * 3600 * 1000;
 const SESSION_FILE = path.join(DATA_ROOT, 'sessions.json');
+let _lastSessionSaveAt = 0;
 function loadSessions() {
     try {
         if (!fs.existsSync(SESSION_FILE)) return;
@@ -3533,6 +3562,7 @@ function loadSessions() {
 }
 function saveSessions() {
     try {
+        _lastSessionSaveAt = Date.now();
         const arr = [];
         for (const [token, s] of sessions) arr.push({ token, username: s.username, expires: s.expires, createdAt: s.createdAt });
         fs.writeFileSync(SESSION_FILE, JSON.stringify(arr), 'utf8');
@@ -3580,13 +3610,20 @@ function requestToken(req) {
 
 function sessionUserForToken(token) {
     if (!token) return null;
+    const now = Date.now();
     const s = sessions.get(token);
-    if (!s || s.expires < Date.now()) {
-        sessions.delete(token);
+    if (!s || s.expires < now) {
+        if (s) sessions.delete(token);
         return null;
     }
     const user = (db.users || []).find(u => u.username === s.username);
     if (!user || (user.status && user.status !== 'active')) return null;
+    // Activity keeps a background/open tab signed in. Throttle the disk write,
+    // not the in-memory extension, so normal requests stay fast.
+    if (s.expires - now < SESSION_TTL - 60000) {
+        s.expires = now + SESSION_TTL;
+        if (now - _lastSessionSaveAt > 60000) saveSessions();
+    }
     return user;
 }
 

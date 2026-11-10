@@ -2,6 +2,22 @@ let studentHubCache = null;
 let _hubActiveTab = 'overview';
 let _hubModalOpen = false;
 let _hubRenderedTabs = {};
+const _hubValidTabs = ['overview', 'courses', 'exams', 'quizzes', 'notes', 'live', 'discussions', 'media', 'music'];
+function _hubRememberActiveTab(tab) {
+    try {
+        if (_hubValidTabs.includes(tab)) sessionStorage.setItem('lastTab:student-hub', tab);
+    } catch {}
+}
+function _examOpen(exam) {
+    try {
+        if (!exam) return false;
+        const value = exam.openWindow;
+        if (value === true || value === 'true' || value === 1 || value === '1') return true;
+        if (typeof assessmentWindow !== 'function') return false;
+        const win = assessmentWindow(exam);
+        return !!win && !win.closed && !win.notYetOpen;
+    } catch { return false; }
+}
 
 // defensive: prevent ReferenceError from stale scopes
 var examRegIds = (typeof examRegIds!=='undefined'&&examRegIds)?examRegIds:new Set();
@@ -671,7 +687,10 @@ function _hubBuildComputed(data, me) {
     };
     const allCourseExams = (data.exams || []).filter(e => {
         if (!e) return false;
-        if (!enrolledIds.has(e.courseId) && !myRegExamIds.has(String(e.id))) return false;
+        // The server has already scoped published exams to the learner's active
+        // courses, country, region and study centre. Do not repeat an enrolment
+        // requirement here: many imported students have no enrolment row, and
+        // every learner must still see the full published exam catalogue.
         // Like Quizzes tab: keep cards/information even after exam is unpublished, if student has interaction.
         if (e.published === false && !hasExamInteraction(e)) return false;
         // All study centers (no exam center) => all enrolled students. Center-specific + mismatch
@@ -727,31 +746,8 @@ function _hubBuildComputed(data, me) {
     // Exams filed in the quizzes store still belong on the Exams tab.
     const examTypedQuizzes = (data.quizzes || []).filter(q => _isExamTyped(q) && q.published !== false);
     if (examTypedQuizzes.length && Array.isArray(availableExams)) {
-        examTypedQuizzes.forEach(q => { if (!availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || q.assessmentType || 'final' })); });
+        examTypedQuizzes.forEach(q => { if (!examRegIds.has(q.id) && !availableExams.some(e => String(e.id) === String(q.id))) availableExams.push(Object.assign({}, q, { date: q.date || '', type: q.type || q.assessmentType || 'final' })); });
     }
-    // Also include any exams from data.exams that might be missing from filtering
-    (data.exams || []).forEach(ex => {
-        if (ex.published === false) return;
-        if (me.studyCenterId && ex.studyCenterId && ex.studyCenterId !== me.studyCenterId) return;
-        const exType = String(ex.type || ex.assessmentType || '').toLowerCase();
-        if (exType === 'supplementary') {
-            // Only show supplementary to students who have approved retake request for it
-            if (!approvedSuppIds.has(String(ex.id))) return;
-        }
-        if (examRegIds.has(ex.id)) {
-            if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
-            return;
-        }
-        if (enrolledIds.has(ex.courseId)) {
-            if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
-            return;
-        }
-        // If no enrollments loaded, still show published exams (non-supplementary)
-        if (enrolledIds.size === 0) {
-            if (exType === 'supplementary') return;
-            if (!availableExams.some(e => String(e.id) === String(ex.id))) availableExams.push(ex);
-        }
-    });
     availableExams = availableExams.filter(e => {
         if (!e) return false;
         if (e.published === false) return false;
@@ -761,12 +757,7 @@ function _hubBuildComputed(data, me) {
             if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
             return true;
         }
-        if (e.openWindow || (e.date && e.time)) {
-            if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-            return true;
-        }
         if (me.studyCenterId && e.studyCenterId && e.studyCenterId !== me.studyCenterId) return false;
-        try { const w = (typeof assessmentWindow === 'function' ? assessmentWindow(e) : null); if (w && w.closed) return false; } catch {}
         return true;
     });
     availableExams = availableExams.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -972,7 +963,11 @@ async function renderStudentHub(force) {
         return;
     }
     const _renderSeq = ++_hubRenderSeq;
-    _hubActiveTab = 'overview';
+    try {
+        const savedTab = sessionStorage.getItem('lastTab:student-hub');
+        if (savedTab && _hubValidTabs.includes(savedTab)) _hubActiveTab = savedTab;
+    } catch {}
+    if (!_hubValidTabs.includes(_hubActiveTab)) _hubActiveTab = 'overview';
     _hubRenderedTabs = {};
 
     const hasCache = !force && studentHubCache && Date.now() - studentHubCache.loadedAt < 60000;
@@ -1119,6 +1114,16 @@ async function renderStudentHub(force) {
             <div id="hub-tab-music" style="display:none;"></div>
         `;
         _hubRenderedTabs.overview = true;
+        if (_hubActiveTab !== 'overview') {
+            const _restoreTab = _hubActiveTab;
+            setTimeout(() => {
+                try {
+                    if (_hubActiveTab !== _restoreTab) return;
+                    const btn = document.querySelector(`.hub-tab[data-tab="${_restoreTab}"]`);
+                    switchHubTab(_restoreTab, btn || null);
+                } catch (e) { console.warn('Hub tab restore failed', e); }
+            }, 0);
+        }
         } catch (renderErr) {
             console.error('Student Hub render error:', renderErr);
             if (c && c.me) {
@@ -1177,6 +1182,7 @@ async function renderStudentHub(force) {
 
 async function switchHubTab(tab, btn) {
     _hubActiveTab = tab;
+    _hubRememberActiveTab(tab);
     document.querySelectorAll('.hub-tab').forEach(t => {
         t.classList.remove('active');
         t.style.borderBottomColor = 'transparent';

@@ -18,29 +18,30 @@ async function verifySession() {
     } catch { return null; }
 }
 function handleDeadSession() {
-    if (window._deadSessionRedirect) return;
-    window._deadSessionRedirect = true;
-    try { sessionStorage.removeItem('currentUser'); } catch {}
-    try { sessionStorage.removeItem('lastScreen'); } catch {}
-    try { sessionStorage.setItem('loginNotice', 'Session expired — please sign in again.'); } catch {}
-    // Auto refresh on focus after logging out - refresh when page becomes visible
+    // Never destroy the user's page, open tab, or unsaved work because one
+    // request was rejected. A session can look dead after a server restart or
+    // a long sleep; the correct response is a clear notice plus an explicit
+    // choice to sign in again, not an automatic wipe-and-reload.
+    const now = Date.now();
+    if (window._deadSessionPromptUntil && now < window._deadSessionPromptUntil) return;
+    window._deadSessionPromptUntil = now + 60000;
     try {
-        const doRefresh = () => {
-            try { document.removeEventListener('visibilitychange', doRefresh); } catch {}
-            try { window.removeEventListener('focus', doRefresh); } catch {}
-            try { location.reload(); } catch {}
-        };
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                setTimeout(doRefresh, 100);
-            }
-        }, { once: true });
-        window.addEventListener('focus', doRefresh, { once: true });
-        // Also refresh immediately if already visible
-        if (document.visibilityState === 'visible') {
-            setTimeout(doRefresh, 200);
-        }
-    } catch {}
+        showToast('Your sign-in needs to be renewed. Your current page and work are still here.', {
+            type: 'warning',
+            duration: 30000,
+            details: 'Sign in again to keep saving changes.',
+            action: 'Sign in again',
+            actionFn: () => beginSessionReauth()
+        });
+    } catch (e) { console.warn('Could not show session notice:', e); }
+}
+function beginSessionReauth() {
+    // Runs only when the user chooses to sign in again. lastScreen and the
+    // active inner tab are deliberately kept so sign-in returns them to the
+    // same place instead of losing their position.
+    try { sessionStorage.setItem('loginNotice', 'Session expired — please sign in again. Your last screen will be restored.'); } catch {}
+    try { sessionStorage.removeItem('currentUser'); } catch {}
+    try { location.reload(); } catch {}
 }
 function noteAuthFailure(res) {
     try {
@@ -331,14 +332,15 @@ function showModal(title, content, actions = null, options = null) {
         }
     } catch(e) {}
 }
-function showConfirm(title, message) {
+function showConfirm(title, message, actionLabel, duration) {
     return new Promise(resolve => {
         const key = '_toast_cfm_' + Date.now();
+        const wait = Math.max(1000, Number(duration) || 8000);
         window[key] = resolve;
-        showToast(message, { type: 'warning', duration: 8000, details: title,
-            action: 'Yes, proceed', actionFn: () => { window[key](true); delete window[key]; }
+        showToast(message, { type: 'warning', duration: wait, details: title,
+            action: actionLabel || 'Yes, proceed', actionFn: () => { window[key](true); delete window[key]; }
         });
-        setTimeout(() => { if (window[key]) { window[key](false); delete window[key]; } }, 8000);
+        setTimeout(() => { if (window[key]) { window[key](false); delete window[key]; } }, wait);
     });
 }
 function showPrompt(title, message, defaultValue = '') {
@@ -2759,7 +2761,7 @@ async function showApp(user) {
     initSmartSearch();
     renderAlertBell();
     initBackgroundRefresh();
-    try { if (typeof initIdleSessionTimer === 'function') initIdleSessionTimer(); } catch (e) {}
+    try { if (typeof initSessionPresence === 'function') initSessionPresence(); } catch (e) {}
     const _loginUserEl = document.getElementById('login-user');
     if (_loginUserEl) _loginUserEl.value = '';
     window.removeEventListener('resize', adjustHeaderPadding);
@@ -2774,13 +2776,140 @@ async function showApp(user) {
         setTimeout(() => showScreen(lastScreen), 50);
     }
 }
-function initIdleSessionTimer() {
+const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+const ACTIVITY_KEY = 'nkcms:lastUserActivity';
+let _sessionPresenceBound = false;
+let _lastActivityWrite = 0;
+let _idlePromptOpen = false;
+let _lastFocusRefresh = 0;
+let _lastHiddenAt = 0;
+
+function markUserActivity(force) {
+    const now = Date.now();
+    if (!force && now - _lastActivityWrite < 15000) return;
+    _lastActivityWrite = now;
+    try { localStorage.setItem(ACTIVITY_KEY, String(now)); } catch {}
+}
+function lastUserActivityAt() {
+    try { return Number(localStorage.getItem(ACTIVITY_KEY)) || 0; } catch { return 0; }
+}
+function hasSignedInUser() {
     try {
-        // Disabled: do not auto-logout on inactivity or screen focus loss.
-        // Sessions remain active until the user explicitly clicks the red Exit/Logout button.
-        window.__idleSessionTimer = true;
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        return !!(u && u.username && u.session_token);
+    } catch { return false; }
+}
+function activeScreenId() {
+    try {
+        const el = document.querySelector('.screen.active');
+        if (el && el.id && el.id.indexOf('screen-') === 0) return el.id.slice(7);
+        return sessionStorage.getItem('lastScreen') || '';
+    } catch { return ''; }
+}
+function appHasOpenModal() {
+    try {
+        const overlay = document.getElementById('modal-overlay');
+        if (overlay && (overlay.classList.contains('active') || overlay.style.display === 'flex')) return true;
+        const terms = document.getElementById('terms-modal');
+        if (terms && terms.style.display && terms.style.display !== 'none') return true;
+        return !!document.querySelector('.modal-overlay.active, .modal.show');
+    } catch { return false; }
+}
+function canSoftRefresh() {
+    if (appHasOpenModal()) return false;
+    try {
+        const ae = document.activeElement;
+        if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName || '')) return false;
+        if (ae && ae.isContentEditable) return false;
+        // Never tear down audio/video that is currently playing.
+        const media = document.querySelectorAll('video, audio');
+        for (const m of media) {
+            if (!m.paused && !m.ended) return false;
+        }
+    } catch {}
+    return true;
+}
+async function softRefreshActiveScreen() {
+    if (!hasSignedInUser() || document.visibilityState === 'hidden') return;
+    if (Date.now() - _lastFocusRefresh < 2500) return;
+    _lastFocusRefresh = Date.now();
+    let res;
+    try {
+        res = await fetch('/api/session', { headers: getAuthHeaders(), cache: 'no-store' });
+    } catch (e) {
+        // Offline or a slow connection is not a reason to disturb the page.
         return;
-    } catch (e) { console.error('initIdleSessionTimer failed:', e); }
+    }
+    if (!res.ok) { handleDeadSession(); return; }
+    window._deadSessionPromptUntil = 0;
+    // A new code build may have arrived while this tab was in the background.
+    // Never reload underneath an open modal or a field the user is editing.
+    if (window._pendingAppUpdate) {
+        if (!canSoftRefresh()) return;
+        window._pendingAppUpdate = false;
+        try { location.reload(); } catch {}
+        return;
+    }
+    if (!canSoftRefresh()) {
+        // Still make the next render fresh without replacing their open form.
+        try { if (typeof invalidateStudentHubCache === 'function') invalidateStudentHubCache(); } catch {}
+        return;
+    }
+    const screen = activeScreenId();
+    if (!screen) return;
+    if (screen === 'student-hub') {
+        try {
+            if (typeof invalidateStudentHubCache === 'function') invalidateStudentHubCache();
+            if (typeof _hubDebouncedRender === 'function') _hubDebouncedRender();
+            else if (typeof renderStudentHub === 'function') renderStudentHub(true);
+        } catch {}
+        return;
+    }
+    try { showScreen(screen, { soft: true }); } catch {}
+}
+function checkIdleLogout() {
+    if (!hasSignedInUser() || document.visibilityState === 'hidden') return;
+    if (_idlePromptOpen || appHasOpenModal()) return;
+    const last = lastUserActivityAt();
+    if (!last || Date.now() - last < IDLE_LOGOUT_MS) return;
+    _idlePromptOpen = true;
+    showConfirm(
+        'Still there?',
+        'You have been idle for 30 minutes. For your security, would you like to sign out? Your current page stays open if you choose to stay signed in.',
+        'Sign out',
+        30000
+    ).then(ok => {
+        _idlePromptOpen = false;
+        if (ok) logout({ confirmed: true, reason: 'idle' });
+        else markUserActivity(true);
+    }).catch(() => { _idlePromptOpen = false; });
+}
+function initSessionPresence() {
+    if (_sessionPresenceBound) return;
+    _sessionPresenceBound = true;
+    _lastFocusRefresh = Date.now();
+    markUserActivity(true);
+    const onActivity = () => markUserActivity(false);
+    ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(ev => {
+        try { window.addEventListener(ev, onActivity, { passive: true, capture: true }); }
+        catch { try { window.addEventListener(ev, onActivity, true); } catch {} }
+    });
+    try { window.addEventListener('pointermove', onActivity, { passive: true }); } catch {}
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            _lastHiddenAt = Date.now();
+            return;
+        }
+        markUserActivity(true);
+        // Ignore the tiny hide/show flicker some mobile browsers emit.
+        if (_lastHiddenAt && Date.now() - _lastHiddenAt < 1200) return;
+        setTimeout(softRefreshActiveScreen, 250);
+    });
+    window.addEventListener('focus', () => {
+        markUserActivity(true);
+        setTimeout(softRefreshActiveScreen, 250);
+    });
+    setInterval(checkIdleLogout, 30000);
 }
 
 function logoutWithNotice(message) {
@@ -2788,30 +2917,37 @@ function logoutWithNotice(message) {
     try { logout(); } catch {}
 }
 
-function logout() {
+async function logout(options) {
+    const opts = options || {};
+    if (!opts.confirmed) {
+        let ok = false;
+        try {
+            ok = await showConfirm(
+                'Sign out?',
+                'You will be signed out of this browser. Make sure any unsaved changes are saved first.',
+                'Sign out',
+                20000
+            );
+        } catch {}
+        if (!ok) return false;
+    }
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     try { logAudit('logout', 'user', { username: user.username }); } catch (e) {}
-    sessionStorage.removeItem('currentUser');
-    sessionStorage.removeItem('lastScreen');
-    try { document.cookie = 'mt_bypass=; path=/; max-age=0; SameSite=Lax'; } catch (e) {}
-    if (window._logoutRefreshBound) {
-        try { location.reload(); } catch {}
-        return;
-    }
-    window._logoutRefreshBound = true;
+    try { sessionStorage.removeItem('currentUser'); } catch {}
+    try { sessionStorage.removeItem('lastScreen'); } catch {}
     try {
-        const doRefresh = () => {
-            try { document.removeEventListener('visibilitychange', doRefresh); } catch {}
-            try { window.removeEventListener('focus', doRefresh); } catch {}
-            try { location.reload(); } catch {}
-        };
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                setTimeout(doRefresh, 50);
+        Object.keys(sessionStorage).forEach(k => {
+            if (k.indexOf('lastTab:') === 0 || k === 'preMaintenanceScreen' || k === 'sessionNeedsReauth') {
+                sessionStorage.removeItem(k);
             }
-        }, { once: true });
-        window.addEventListener('focus', doRefresh, { once: true });
+        });
     } catch {}
+    try { localStorage.removeItem(ACTIVITY_KEY); } catch {}
+    try { document.cookie = 'mt_bypass=; path=/; max-age=0; SameSite=Lax'; } catch (e) {}
+    // Reload now. The old code waited for a later focus event, which could
+    // leave the signed-out app visible and invite accidental data entry.
+    try { location.reload(); } catch {}
+    return true;
 }
 function buildNavigation(user) {
     let perms = getRolePermissions(user.role, user);
@@ -3301,7 +3437,37 @@ function trackAnalyticsEvent(event, path) {
         fetch('/api/analytics/event', { method: 'POST', headers, body: JSON.stringify({ event: event || 'page', path: path || window.location.pathname || '/', referrer: document.referrer || '', source }) }).catch(() => {});
     } catch (e) {}
 }
-function showScreen(id) {
+function rememberScreenTab(screenId, tabId) {
+    try {
+        if (!screenId || !tabId) return;
+        sessionStorage.setItem('lastTab:' + screenId, String(tabId));
+    } catch {}
+}
+function rememberScreenTabForButton(btn) {
+    try {
+        if (!btn || !btn.dataset || !btn.dataset.tab) return;
+        const screen = btn.closest('.screen');
+        const screenId = (screen && screen.id && screen.id.indexOf('screen-') === 0)
+            ? screen.id.slice(7)
+            : (sessionStorage.getItem('lastScreen') || '');
+        rememberScreenTab(screenId, btn.dataset.tab);
+    } catch {}
+}
+function restoreScreenTab(screenId) {
+    try {
+        if (!screenId || screenId === 'student-hub') return false;
+        const saved = sessionStorage.getItem('lastTab:' + screenId);
+        if (!saved) return false;
+        const screen = document.getElementById('screen-' + screenId);
+        if (!screen || !screen.classList.contains('active')) return false;
+        const btn = Array.from(screen.querySelectorAll('.tab-btn')).find(b => b.dataset && b.dataset.tab === saved);
+        if (!btn) return false;
+        if (!btn.classList.contains('active')) btn.click();
+        return true;
+    } catch { return false; }
+}
+function showScreen(id, options) {
+    const opts = options || {};
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const perms = getRolePermissions(user.role, user);
     if (!perms.includes(id)) return showToast('Access denied: You do not have permission to view this section.');
@@ -3312,7 +3478,7 @@ function showScreen(id) {
         return;
     }
     sessionStorage.setItem('lastScreen', id);
-    try { trackAnalyticsEvent('page', id); } catch {}
+    if (!opts.soft) { try { trackAnalyticsEvent('page', id); } catch {} }
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     const scr = document.getElementById('screen-' + id);
@@ -3399,6 +3565,13 @@ function showScreen(id) {
         case 'compare': renderCompare(); break;
         case 'my-country': renderMyCountry(); break;
     }
+    // Put the user back on the inner tab they were using, including after a
+    // soft refresh triggered by returning to this browser tab. The Student Hub
+    // restores its own tabs once its data has rendered.
+    if (id !== 'student-hub') {
+        setTimeout(() => restoreScreenTab(id), 0);
+        setTimeout(() => restoreScreenTab(id), 300);
+    }
 }
 function initTabs() {
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -3410,6 +3583,7 @@ function initTabs() {
             const parent = tabGroup.parentElement;
             parent.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
             document.getElementById('tab-' + tabId).classList.add('active');
+            rememberScreenTabForButton(btn);
         });
     });
 }
@@ -29846,6 +30020,11 @@ window.renderLessons = async function () {
                     });
                 } catch (e) {}
                 try { sessionStorage.removeItem('studentHubCache'); } catch (e) {}
+                // Do not reload a background tab or interrupt an open form.
+                // The update is applied on the next safe focus instead.
+                window._pendingAppUpdate = true;
+                if (document.visibilityState === 'hidden' || !canSoftRefresh()) return;
+                window._pendingAppUpdate = false;
                 location.reload();
             }
         } catch (e) {}
@@ -29863,15 +30042,18 @@ function handleMaintenancePush(active) {
         const role = (JSON.parse(sessionStorage.getItem('currentUser') || '{}').role) || '';
         if (active && !onMaintPage && role !== 'admin') {
             try {
-                let current = sessionStorage.getItem('lastScreen') || 'dashboard';
+                const currentScreen = sessionStorage.getItem('lastScreen') || 'dashboard';
                 try {
-                    const activeTab = document.querySelector('.tab-content.active');
+                    const activeTab = document.querySelector('#screen-' + currentScreen + ' .tab-content.active');
                     if (activeTab && activeTab.id && activeTab.id.startsWith('tab-')) {
-                        current = activeTab.id.replace('tab-', '');
+                        sessionStorage.setItem('lastTab:' + currentScreen, activeTab.id.replace('tab-', ''));
+                    }
+                    if (currentScreen === 'student-hub' && typeof _hubActiveTab !== 'undefined') {
+                        sessionStorage.setItem('lastTab:student-hub', _hubActiveTab);
                     }
                 } catch (e) {}
-                sessionStorage.setItem('preMaintenanceScreen', current);
-                sessionStorage.setItem('lastScreen', current);
+                sessionStorage.setItem('preMaintenanceScreen', currentScreen);
+                sessionStorage.setItem('lastScreen', currentScreen);
             } catch (e) {}
             location.reload();
             return;

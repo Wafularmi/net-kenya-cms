@@ -392,12 +392,16 @@ function assessmentForRecord(db, store, rec) {
     return null;
 }
 
+function isOpenWindowValue(value) {
+    return value === true || value === 'true' || value === 1 || value === '1';
+}
+
 function isUngatedAssessment(db, store, rec) {
     const target = assessmentForRecord(db, store, rec);
     if (!target) return false;
     if (target.ungated === true) return true;
     // Open-ended exams are published to every student and can be sat any time.
-    if (target.openWindow === true) return true;
+    if (isOpenWindowValue(target.openWindow)) return true;
     // An exam whose window is currently open is accessible to everyone.
     if (target.date && target.time) {
         try {
@@ -411,7 +415,7 @@ function isUngatedAssessment(db, store, rec) {
             }
         } catch (e) {}
     }
-    if (target.openWindow === true) return true;
+    if (isOpenWindowValue(target.openWindow)) return true;
     return false;
 }
 
