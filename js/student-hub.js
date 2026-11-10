@@ -3234,7 +3234,7 @@ function hubLessonFlowHtml(lesson, comp, data) {
         }
         const isCurrent = !done && !locked && current;
         if (isCurrent) current = false;
-        const icon = done ? '✅' : (locked || !current ? '🔒' : '▶');
+        const icon = done ? '✅' : (isCurrent ? '▶' : '🔒');
         const stateTxt = done ? 'Done' : (isCurrent ? 'Open now' : (locked ? 'Locked — finish the step above first' : 'Locked'));
         const color = done ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--text-muted)');
         const action = (it.type === 'quiz' && isCurrent)
@@ -3636,6 +3636,17 @@ async function viewHubLessonNote(lessonId, courseId) {
         const readTime = estimateReadTime(content);
         const courseLessons = (data.lessons || []).filter(l => l.courseId === courseId && (typeof lessonVisible === 'function' ? lessonVisible(l) : l.published !== false)).sort((a, b) => (a.order || 0) - (b.order || 0));
         const currentIdx = courseLessons.findIndex(l => l.id === lessonId);
+        // Number the lesson against the FULL course sequence (the same order
+        // the learner sees in the Notes tab), not just the unlocked ones.
+        let seqLabel = '';
+        try {
+            const _fc = (data.courses || []).find(c => String(c.id) === String(courseId));
+            if (_fc && typeof hubDripCourseState === 'function') {
+                const seq = hubDripCourseState(_fc, data.lessons || []);
+                const si = seq.list.findIndex(l => String(l.id) === String(lessonId));
+                if (si >= 0) seqLabel = `📖 Lesson ${si + 1} of ${seq.list.length}`;
+            }
+        } catch (e) {}
         const prevLesson = currentIdx > 0 ? courseLessons[currentIdx - 1] : null;
         const nextLesson = currentIdx >= 0 && currentIdx < courseLessons.length - 1 ? courseLessons[currentIdx + 1] : null;
 
@@ -3704,7 +3715,7 @@ async function viewHubLessonNote(lessonId, courseId) {
                 <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:20px;flex-wrap:wrap;align-items:center;">
                     ${_videoSrcHub ? '<span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;font-size:10px;">🎬 VIDEO</span>' : ''}
                     <span>⏱ ${readTime} min read</span>
-                    ${currentIdx >= 0 ? `<span>📖 Lesson ${currentIdx + 1} of ${courseLessons.length}</span>` : ''}
+                    ${seqLabel || (currentIdx >= 0 ? `<span>📖 Lesson ${currentIdx + 1} of ${courseLessons.length}</span>` : '')}
                     ${note ? '<span style="color:var(--success);">📄 Study notes attached</span>' : ''}
                     ${_isStudentHub ? `<span id="drip-read-label" style="font-weight:700;color:var(--accent);">${dripReadDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(dripReqSecs / 60) + ' min required'}</span>` : ''}
                 </div>
