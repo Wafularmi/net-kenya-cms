@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=489" as="script">
+    <link rel="preload" href="js/bundle.js?v=490" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -1341,6 +1341,21 @@
                             <button class="btn btn-outline btn-sm" onclick="runMaintenanceAICheck()" id="maintenance-ai-run-btn">Run Maintenance Check</button>
                             <button class="btn btn-outline btn-sm" onclick="loadMaintenanceAIReports()">Refresh Reports</button>
                         </div>
+                        <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px;">
+                            <h4 style="margin:0 0 6px 0;color:var(--accent);font-size:14px;">⚡ Speed &amp; Loading</h4>
+                            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Read-only diagnostics for slow pages/APIs, plus allowlisted housekeeping. Auto speed-up runs only during the scheduled maintenance window and never edits code or business records. The last run can be reverted from here.</div>
+                            <div style="display:flex;align-items:center;gap:12px;padding:6px 0;flex-wrap:wrap;">
+                                <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                    <input type="checkbox" id="settings-maintenance-speed-auto" onchange="saveMaintenanceAIConfig(event)" style="opacity:0;width:0;height:0;">
+                                    <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                                </label>
+                                <span id="maintenance-speed-ai-status" style="font-size:12px;font-weight:600;color:var(--text-muted);">Loading...</span>
+                                <button class="btn btn-outline btn-sm" onclick="runMaintenanceSpeedCheck()" id="maintenance-speed-check-btn">Run Speed Check</button>
+                                <button class="btn btn-outline btn-sm" onclick="runMaintenanceSpeedUp()" id="maintenance-speed-up-btn">Speed Up Now</button>
+                                <button class="btn btn-outline btn-sm" onclick="revertMaintenanceSpeedUp()" id="maintenance-speed-revert-btn" disabled>Revert Last Speed-Up</button>
+                            </div>
+                            <div id="maintenance-ai-speed" style="margin-top:10px;font-size:12px;color:var(--text-muted);">Speed report not loaded.</div>
+                        </div>
                         <div id="maintenance-ai-reports" style="margin-top:10px;font-size:12px;color:var(--text-muted);">Reports not loaded.</div>
                     </div>
 
@@ -1715,7 +1730,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=489"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=490"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=94"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

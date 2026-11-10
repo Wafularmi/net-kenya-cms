@@ -1688,6 +1688,7 @@ async function loadMaintenanceAI() {
             st.textContent = parts.join(' • ');
             st.style.color = data.autoEnabled === false ? 'var(--warning)' : 'var(--text-muted)';
         }
+        renderMaintenanceSpeed(data.speed || null);
         loadMaintenanceAIReports();
         if (typeof loadMaintenanceAIRepairs === 'function') loadMaintenanceAIRepairs();
     } catch (e) {
@@ -1695,20 +1696,33 @@ async function loadMaintenanceAI() {
         if (st) st.textContent = 'Maintenance AI status unavailable';
     }
 }
-async function saveMaintenanceAIConfig() {
+async function saveMaintenanceAIConfig(evt) {
     const cb = document.getElementById('settings-maintenance-ai');
+    const speedCb = document.getElementById('settings-maintenance-speed-auto');
     const enabled = !!(cb && cb.checked);
+    const speedAutoEnabled = speedCb ? !!speedCb.checked : undefined;
+    const query = [`enabled=${enabled ? '1' : '0'}`];
+    const body = { enabled };
+    if (speedAutoEnabled !== undefined) {
+        query.push(`speedAuto=${speedAutoEnabled ? '1' : '0'}`);
+        body.speedAutoEnabled = speedAutoEnabled;
+    }
     try {
-        let res = await fetch(`/api/maintenance/ai-config?enabled=${enabled ? '1' : '0'}`, { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, getAuthHeaders()), body: JSON.stringify({ enabled }) });
+        let res = await fetch(`/api/maintenance/ai-config?${query.join('&')}`, { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, getAuthHeaders()), body: JSON.stringify(body) });
         let data = null;
         try { data = await res.clone().json(); } catch(e) { data = null; }
         if (!res.ok) {
             // fallback: query-only (some proxies/body parsers can interfere)
-            res = await fetch(`/api/maintenance/ai-config?enabled=${enabled ? '1' : '0'}`, { method:'POST', headers: getAuthHeaders() });
+            res = await fetch(`/api/maintenance/ai-config?${query.join('&')}`, { method:'POST', headers: getAuthHeaders() });
             try { data = await res.clone().json(); } catch(e) { data = null; }
         }
         if (!res.ok) throw new Error((data && (data.error || data.detail)) || await res.text().catch(()=>res.status));
-        showToast(enabled ? 'Maintenance AI auto-run enabled' : 'Maintenance AI auto-run disabled', { type:'success' });
+        const source = evt && evt.target ? evt.target.id : '';
+        if (source === 'settings-maintenance-speed-auto') {
+            showToast(speedAutoEnabled ? 'Automatic speed-up enabled (runs only in the scheduled maintenance window)' : 'Automatic speed-up disabled', { type: speedAutoEnabled ? 'success' : 'info' });
+        } else {
+            showToast(enabled ? 'Maintenance AI auto-run enabled' : 'Maintenance AI auto-run disabled', { type:'success' });
+        }
         loadMaintenanceAI();
     } catch (e) {
         showToast('Could not save Maintenance AI setting: ' + (e && e.message ? e.message : e), { type:'danger' });
@@ -1729,6 +1743,119 @@ async function runMaintenanceAICheck() {
         showToast('Could not start Maintenance AI check: ' + (e && e.message ? e.message : e), { type:'danger' });
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Run Maintenance Check'; }
+    }
+}
+function _maiFmtMs(ms) {
+    const n = Number(ms);
+    if (!isFinite(n)) return '—';
+    return n >= 1000 ? (Math.round(n / 100) / 10) + 's' : Math.round(n) + 'ms';
+}
+function _maiSpeedLabel(r) {
+    if (!r) return 'No speed report yet';
+    return (r.mode === 'auto' ? 'Auto' : 'Manual') + (r.applied ? ' speed-up' : ' speed check');
+}
+function renderMaintenanceSpeed(speed) {
+    const speedCb = document.getElementById('settings-maintenance-speed-auto');
+    if (speedCb && speed) speedCb.checked = speed.configAutoEnabled !== false;
+    const st = document.getElementById('maintenance-speed-ai-status');
+    const rev = document.getElementById('maintenance-speed-revert-btn');
+    const el = document.getElementById('maintenance-ai-speed');
+    if (!speed) {
+        if (st) st.textContent = 'Speed telemetry unavailable';
+        if (rev) rev.disabled = true;
+        if (el) el.innerHTML = '<div style="color:var(--text-muted);">Speed diagnostics are unavailable. Reload after the next deployment.</div>';
+        return;
+    }
+    if (st) {
+        const parts = [];
+        parts.push(speed.autoEnabled === false ? 'Auto speed: OFF' : 'Auto speed: ON');
+        parts.push(speed.inScheduledWindow ? 'in maintenance window' : 'waits for maintenance window');
+        if (speed.running) parts.push('running');
+        if (speed.lastRunAt) parts.push('last: ' + new Date(speed.lastRunAt).toLocaleString());
+        if (speed.lastScore != null) parts.push('score: ' + speed.lastScore + '/100');
+        st.textContent = parts.join(' • ');
+        st.style.color = speed.autoEnabled === false ? 'var(--warning)' : 'var(--text-muted)';
+    }
+    if (rev) rev.disabled = !speed.canRevert;
+    if (!el) return;
+    const r = speed.lastReport;
+    if (!r) {
+        el.innerHTML = '<div style="color:var(--text-muted);">No speed check yet. Run a read-only check to see the slowest routes, event-loop delay, and database flush time.</div>';
+        return;
+    }
+    const before = r.before || {};
+    const elag = (before.eventLoop || {});
+    const db = (before.db || {});
+    const routes = (before.routes || []).filter(x => Number(x.maxMs) >= 250).slice(0, 6);
+    const routeHtml = routes.length ? routes.map(x => `<div style="display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--border);padding:3px 0;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_maiEsc(x.route)}</span><span style="white-space:nowrap;">max ${_maiEsc(_maiFmtMs(x.maxMs))} • avg ${_maiEsc(_maiFmtMs(x.avgMs))}</span></div>`).join('') : '<div style="color:var(--text-muted);">No route above 250ms in the current sample.</div>';
+    const applied = (r.appliedActions || []).map(a => `<li>${_maiEsc(a.label || a.id)} — changed ${_maiEsc(a.changed || 0)}${a.reversible ? ' (reversible)' : ' (expired/transient)'}</li>`).join('') || '<li>No safe action was applied.</li>';
+    const findings = (r.findings || []).slice(0, 5).map(f => `<li><b>[${_maiEsc(f.severity)}]</b> ${_maiEsc(f.message)}</li>`).join('') || '<li>No findings.</li>';
+    const recs = (r.recommendations || []).slice(0, 5).map(x => `<li>${_maiEsc(x)}</li>`).join('') || '<li>No recommendations.</li>';
+    const rollback = r.rollback ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Reversible actions: ${_maiEsc((r.rollback.reversibleActions || []).join(', ') || 'none')}. ${((r.rollback.irreversibleActions || []).length) ? 'Expired/transient cleanup cannot be restored: ' + _maiEsc((r.rollback.irreversibleActions || []).join(', ')) : ''}</div>` : '';
+    const reverted = speed.lastRevertResult ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Last revert: ${_maiEsc((speed.lastRevertResult.restored || []).length)} restored, ${_maiEsc((speed.lastRevertResult.skipped || []).length)} expired/transient action(s) skipped.</div>` : '';
+    const sev = Number(r.speedScore) >= 80 ? 'success' : Number(r.speedScore) >= 55 ? 'warning' : 'danger';
+    el.innerHTML = `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg-elevated,#fff);color:var(--text,#111827);">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
+            <div><b>${_maiEsc(_maiSpeedLabel(r))}</b> <span class="badge badge-${sev}" style="font-size:10px;">score ${_maiEsc(r.speedScore)}/100</span></div>
+            <div style="font-size:11px;color:var(--text-muted);">${_maiEsc(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')} • ${_maiEsc(r.durationMs || 0)}ms</div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Event loop max ${_maiEsc(_maiFmtMs(elag.maxMs))} • slow requests ${_maiEsc(before.slowRequests || 0)}/${_maiEsc(before.requests || 0)} • DB flush max ${_maiEsc(_maiFmtMs(db.maxFlushMs))}</div>
+        <div style="margin-top:8px;"><b style="font-size:12px;">Slowest routes</b>${routeHtml}</div>
+        <div style="margin-top:8px;font-size:12px;"><b>Actions</b><ul style="margin:4px 0 0 18px;padding:0;">${applied}</ul></div>
+        ${rollback}${reverted}
+        <details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:600;">Findings, recommendations &amp; raw metrics</summary>
+            <div style="font-size:12px;margin-top:6px;"><b>Findings</b><ul style="margin:4px 0 0 18px;padding:0;">${findings}</ul><b>Recommendations</b><ul style="margin:4px 0 0 18px;padding:0;">${recs}</ul>
+            <pre style="white-space:pre-wrap;font-size:10px;max-height:220px;overflow:auto;background:#0f172a;color:#e5eefc;padding:8px;border-radius:8px;border:1px solid #334155;">${_maiEsc(JSON.stringify({ before, after: r.after, plan: r.plan, skipped: r.skippedActions }, null, 2))}</pre></div>
+        </details>
+    </div>`;
+}
+async function runMaintenanceSpeedCheck() {
+    const btn = document.getElementById('maintenance-speed-check-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+    try {
+        const res = await fetch('/api/maintenance/speed-check', { method:'POST', headers: getAuthHeaders() });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        showToast(data.message || 'Speed check started. Refreshing in a moment.', { type:'success' });
+        setTimeout(loadMaintenanceAI, 2500);
+    } catch (e) {
+        showToast('Could not start speed check: ' + (e && e.message ? e.message : e), { type:'danger' });
+    } finally {
+        setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = 'Run Speed Check'; } }, 2600);
+    }
+}
+async function runMaintenanceSpeedUp() {
+    if (!confirm('Apply a safe speed-up now?\n\nThis only removes expired sessions/tokens, trims expired rate-limit entries, and compacts bounded Maintenance AI history. It does not delete business records, change code, or change security settings. Reversible parts can be restored from this screen.')) return;
+    const btn = document.getElementById('maintenance-speed-up-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
+    try {
+        const res = await fetch('/api/maintenance/speed-up', { method:'POST', headers: getAuthHeaders() });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        showToast(data.message || 'Safe speed-up started. Refreshing in a moment.', { type:'success' });
+        setTimeout(loadMaintenanceAI, 2500);
+    } catch (e) {
+        showToast('Could not start speed-up: ' + (e && e.message ? e.message : e), { type:'danger' });
+    } finally {
+        setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = 'Speed Up Now'; } }, 2600);
+    }
+}
+async function revertMaintenanceSpeedUp() {
+    if (!confirm('Revert the last speed-up?\n\nReversible AI history compactions will be restored. Expired sessions/tokens and expired rate-limit entries are invalid anyway, so they are reported as skipped rather than restored. No code or business data is changed by this action.')) return;
+    const btn = document.getElementById('maintenance-speed-revert-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Reverting...'; }
+    try {
+        const res = await fetch('/api/maintenance/speed-revert', { method:'POST', headers: getAuthHeaders() });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data.error || data.detail || res.status);
+        const restored = (data.restored || []).length;
+        const skipped = (data.skipped || []).length;
+        showToast('Speed-up reverted. Restored ' + restored + ' item(s)' + (skipped ? '; ' + skipped + ' expired/transient cleanup(s) skipped.' : '.'), { type: skipped ? 'warning' : 'success' });
+        loadMaintenanceAI();
+    } catch (e) {
+        showToast('Could not revert speed-up: ' + (e && e.message ? e.message : e), { type:'danger' });
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Revert Last Speed-Up'; }
     }
 }
 function _maiEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -1868,6 +1995,9 @@ async function rejectMaintenanceAIRepair(id) {
 window.loadMaintenanceAI = loadMaintenanceAI;
 window.saveMaintenanceAIConfig = saveMaintenanceAIConfig;
 window.runMaintenanceAICheck = runMaintenanceAICheck;
+window.runMaintenanceSpeedCheck = runMaintenanceSpeedCheck;
+window.runMaintenanceSpeedUp = runMaintenanceSpeedUp;
+window.revertMaintenanceSpeedUp = revertMaintenanceSpeedUp;
 window.loadMaintenanceAIReports = loadMaintenanceAIReports;
 window.viewMaintenanceAIReport = viewMaintenanceAIReport;
 window.loadMaintenanceAIRepairs = loadMaintenanceAIRepairs;

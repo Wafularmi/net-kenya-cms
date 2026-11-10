@@ -6,10 +6,137 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const { monitorEventLoopDelay } = require('perf_hooks');
 const QRCode = require('qrcode');
 const WebSocket = require('ws');
 const dripEngine = require('./drip-engine');
 const courseGate = require('./course-gate');
+
+// ---- Lightweight performance telemetry -----------------------------------
+// Maintenance AI uses this to find slow routes and narrow bottlenecks. It is
+// intentionally an in-memory ring/aggregate: no request is written to the DB,
+// and the cost per request is a timestamp plus a few integer updates.
+const MAI_PERF = {
+    enabled: String(process.env.MAI_PERF_TRACKING || '1') !== '0',
+    startedAt: Date.now(),
+    requests: 0,
+    apiRequests: 0,
+    slowRequests: 0,
+    byRoute: Object.create(null),
+    recent: [],
+    dbFlushes: 0,
+    dbFlushMs: 0,
+    dbFlushMaxMs: 0,
+    dbFlushStores: 0,
+    lastDbFlushAt: 0
+};
+const MAI_PERF_RECENT_CAP = 300;
+const MAI_PERF_ROUTE_CAP = 160;
+const MAI_PERF_SLOW_MS = 1000;
+let _maiEventLoop = null;
+try {
+    if (MAI_PERF.enabled) {
+        _maiEventLoop = monitorEventLoopDelay({ resolution: 20 });
+        _maiEventLoop.enable();
+    }
+} catch (e) { _maiEventLoop = null; }
+
+function _perfRouteName(method, rawUrl) {
+    let path = String(rawUrl || '/').split('?')[0].split('#')[0];
+    if (!path) path = '/';
+    path = path.replace(/^\/api\/db\/[^/]+/, '/api/db/:store');
+    path = path.replace(/^\/api\/db\/:store\/[^/]+/, '/api/db/:store/:key');
+    path = path.replace(/^\/api\/maintenance\/repairs\/[^/]+(?:\/[^/]+)?$/, '/api/maintenance/repairs/:id');
+    path = path.replace(/^\/api\/[^/]+\/[^/]+\/[^/]+$/, (m) => m.split('/').slice(0, 4).join('/') + '/:id');
+    if (path.length > 120) path = path.slice(0, 120);
+    return String(method || 'GET').toUpperCase() + ' ' + path;
+}
+function _perfRecordRequest(req, startedNs, statusCode, route, bytes) {
+    if (!MAI_PERF.enabled) return;
+    try {
+        const ms = Number(process.hrtime.bigint() - startedNs) / 1e6;
+        if (!Number.isFinite(ms)) return;
+        const status = Number(statusCode) || 0;
+        const size = Math.max(0, Number(bytes) || 0);
+        MAI_PERF.requests++;
+        if (route.indexOf('GET /api/') === 0 || route.indexOf('POST /api/') === 0 || route.indexOf('PUT /api/') === 0 || route.indexOf('DELETE /api/') === 0) MAI_PERF.apiRequests++;
+        if (ms >= MAI_PERF_SLOW_MS) MAI_PERF.slowRequests++;
+        let a = MAI_PERF.byRoute[route];
+        if (!a) {
+            if (Object.keys(MAI_PERF.byRoute).length >= MAI_PERF_ROUTE_CAP) return;
+            a = MAI_PERF.byRoute[route] = { route, count: 0, totalMs: 0, maxMs: 0, lastMs: 0, slow: 0, errors: 0, lastAt: 0, bytes: 0 };
+        }
+        a.count++;
+        a.totalMs += ms;
+        a.maxMs = Math.max(a.maxMs, ms);
+        a.lastMs = ms;
+        a.lastAt = Date.now();
+        a.bytes += size;
+        if (ms >= MAI_PERF_SLOW_MS) a.slow++;
+        if (status >= 400) a.errors++;
+        MAI_PERF.recent.push({ at: Date.now(), route, ms: Math.round(ms * 10) / 10, status, bytes: size });
+        if (MAI_PERF.recent.length > MAI_PERF_RECENT_CAP) MAI_PERF.recent.splice(0, MAI_PERF.recent.length - MAI_PERF_RECENT_CAP);
+    } catch (e) { /* measurement must never affect a request */ }
+}
+function _perfRecordDbFlush(ms, stores) {
+    try {
+        const n = Math.max(0, Number(ms) || 0);
+        MAI_PERF.dbFlushes++;
+        MAI_PERF.dbFlushMs += n;
+        MAI_PERF.dbFlushMaxMs = Math.max(MAI_PERF.dbFlushMaxMs, n);
+        MAI_PERF.dbFlushStores += Math.max(0, Number(stores) || 0);
+        MAI_PERF.lastDbFlushAt = Date.now();
+    } catch (e) {}
+}
+function _maiEventLoopSnapshot() {
+    if (!_maiEventLoop) return null;
+    try {
+        const ns = 1e6;
+        return {
+            meanMs: Math.round((_maiEventLoop.mean / ns) * 10) / 10,
+            maxMs: Math.round((_maiEventLoop.max / ns) * 10) / 10,
+            p50Ms: Math.round((_maiEventLoop.percentile(50) / ns) * 10) / 10,
+            p95Ms: Math.round((_maiEventLoop.percentile(95) / ns) * 10) / 10,
+            p99Ms: Math.round((_maiEventLoop.percentile(99) / ns) * 10) / 10
+        };
+    } catch (e) { return null; }
+}
+function _perfSnapshot() {
+    try {
+        const routes = Object.values(MAI_PERF.byRoute || {});
+        const byMax = routes.slice().sort((a, b) => b.maxMs - a.maxMs).slice(0, 15).map(r => ({
+            route: r.route,
+            count: r.count,
+            maxMs: Math.round(r.maxMs * 10) / 10,
+            avgMs: r.count ? Math.round((r.totalMs / r.count) * 10) / 10 : 0,
+            slow: r.slow,
+            errors: r.errors,
+            lastMs: Math.round(r.lastMs * 10) / 10,
+            lastAt: r.lastAt
+        }));
+        const recent = (MAI_PERF.recent || []).slice(-60).map(r => Object.assign({}, r));
+        return {
+            enabled: MAI_PERF.enabled,
+            startedAt: MAI_PERF.startedAt,
+            uptimeSec: Math.round(process.uptime()),
+            requests: MAI_PERF.requests,
+            apiRequests: MAI_PERF.apiRequests,
+            slowRequests: MAI_PERF.slowRequests,
+            slowRate: MAI_PERF.requests ? Math.round((MAI_PERF.slowRequests / MAI_PERF.requests) * 10000) / 100 : 0,
+            eventLoop: _maiEventLoopSnapshot(),
+            db: {
+                flushes: MAI_PERF.dbFlushes,
+                avgFlushMs: MAI_PERF.dbFlushes ? Math.round((MAI_PERF.dbFlushMs / MAI_PERF.dbFlushes) * 10) / 10 : 0,
+                maxFlushMs: Math.round(MAI_PERF.dbFlushMaxMs * 10) / 10,
+                storesWritten: MAI_PERF.dbFlushStores,
+                lastFlushAt: MAI_PERF.lastDbFlushAt
+            },
+            memory: (() => { try { const m = process.memoryUsage(); return { rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal, external: m.external || 0 }; } catch (e) { return null; } })(),
+            routes: byMax,
+            recent
+        };
+    } catch (e) { return { enabled: false, error: String(e && e.message || e) }; }
+}
 
 // ---- Password hashing --------------------------------------------------
 // New and changed passwords are stored as PBKDF2-HMAC-SHA256 with a random
@@ -1449,7 +1576,12 @@ function flushDB() {
 }
 // Write the stores that changed - and only those.
 function flushStores() {
-    if (DB_STORAGE_MODE === 'single') { safeWriteJSON(db); return; }
+    const _flushStarted = process.hrtime.bigint();
+    if (DB_STORAGE_MODE === 'single') {
+        safeWriteJSON(db);
+        _perfRecordDbFlush(Number(process.hrtime.bigint() - _flushStarted) / 1e6, 1);
+        return;
+    }
     const stores = Array.from(_dirtyStores);
     for (const store of stores) {
         if (RUNTIME_DB_KEYS.indexOf(store) >= 0) continue;
@@ -1459,6 +1591,7 @@ function flushStores() {
     // Cleared AFTER the writes so a change made during the flush is not lost.
     _dirtyStores.clear();
     scheduleFullBackup();
+    _perfRecordDbFlush(Number(process.hrtime.bigint() - _flushStarted) / 1e6, stores.length);
 }
 process.on('exit', flushDB);
 // Railway (and every sane supervisor) stops a container with SIGTERM. Without
@@ -4645,15 +4778,15 @@ function _maiEnabledForAuto() {
     return true; // default enabled
 }
 function _maiWindowKey(v) {
-    const s = v && v.startAt ? String(v.startAt) : '';
-    const e = v && v.endAt ? String(v.endAt) : '';
+    const s = v && (v.startAt || v.scheduledStart) ? String(v.startAt || v.scheduledStart) : '';
+    const e = v && (v.endAt || v.scheduledEnd) ? String(v.endAt || v.scheduledEnd) : '';
     if (!s || !e) return '';
     return s + '|' + e;
 }
 function _maiIsInScheduledWindow(v) {
     try {
-        const s = v && v.startAt ? Date.parse(String(v.startAt)) : NaN;
-        const e = v && v.endAt ? Date.parse(String(v.endAt)) : NaN;
+        const s = v && (v.startAt || v.scheduledStart) ? Date.parse(String(v.startAt || v.scheduledStart)) : NaN;
+        const e = v && (v.endAt || v.scheduledEnd) ? Date.parse(String(v.endAt || v.scheduledEnd)) : NaN;
         if (!isFinite(s)||!isFinite(e)) return false;
         const now = Date.now(); return now >= s && now < e;
     } catch(e){ return false; }
@@ -4683,6 +4816,373 @@ function _maiDelta(b, key, value) {
     const base = b[key]; if (!base || !base.n) return null;
     const avg = _maiNum(base.avg); if (avg === 0) return null;
     return (_maiNum(value) - avg) / Math.max(1, Math.abs(avg));
+}
+
+// ===== Maintenance AI: speed / loading performance =========================
+// The speed engine is deliberately split into:
+//   1. a read-only diagnostic (manual "Run Speed Check"), and
+//   2. allowlisted, bounded housekeeping (manual "Speed Up Now" / auto).
+// It never edits code, never deletes business records, and never scans the
+// whole database. Auto mode runs only inside the existing scheduled
+// maintenance window, so it cannot compete with students or exams.
+const MAI_SPEED_ACTION_DEFS = Object.freeze({
+    prune_expired_sessions: { label: 'Remove expired sessions', auto: true, reversible: false },
+    prune_expired_bypass_tokens: { label: 'Remove expired maintenance bypass tokens', auto: true, reversible: false },
+    prune_expired_rate_limits: { label: 'Trim expired rate-limit entries', auto: true, reversible: false },
+    compact_ai_history: { label: 'Compact Maintenance AI history', auto: true, reversible: true },
+    compact_ai_repairs: { label: 'Compact completed repair history', auto: true, reversible: true },
+    compact_speed_history: { label: 'Compact speed-run history', auto: true, reversible: true }
+});
+const MAI_SPEED_AI_HISTORY_CAP = 30;
+const MAI_SPEED_REPAIR_DONE_CAP = 20;
+const MAI_SPEED_HISTORY_CAP = 12;
+let _maiSpeedRunning = false;
+let _maiLastAutoSpeedWindowKey = '';
+
+function _maiSpeedConfig() {
+    const v = _maiSettings('maintenanceAI');
+    return v && typeof v === 'object' ? v : {};
+}
+function _maiSpeedAutoEnabled() {
+    if (String(process.env.MAI_SPEED_AUTO || '1') === '0') return false;
+    if (!_maiEnabledForAuto()) return false;
+    return _maiSpeedConfig().speedAutoEnabled !== false;
+}
+function _maiGetSpeedState(state) {
+    const st = state || _maiGetState();
+    if (!st.speed || typeof st.speed !== 'object') st.speed = { version: 1, cycles: 0, history: [] };
+    if (!Array.isArray(st.speed.history)) st.speed.history = [];
+    if (!Object.prototype.hasOwnProperty.call(st.speed, 'lastRollback')) st.speed.lastRollback = null;
+    return st.speed;
+}
+function _maiCountExpiredRateEntries() {
+    const now = Date.now();
+    let removed = 0;
+    const scan = (map, windowMs) => {
+        try {
+            for (const [, rec] of map) {
+                if (!rec || (now - _maiNum(rec.windowStart) > windowMs && (!rec.blockedUntil || rec.blockedUntil < now))) removed++;
+            }
+        } catch (e) {}
+    };
+    scan(loginAttempts, LOGIN_WINDOW_MS);
+    scan(loginIdAttempts, LOGIN_WINDOW_MS);
+    scan(loginCountryHits, 60 * 1000);
+    scan(verifyAttempts, LOGIN_WINDOW_MS);
+    scan(expensiveApiHits, 5 * 60 * 1000);
+    return removed;
+}
+function _maiPruneExpiredRateEntries() {
+    const now = Date.now();
+    let removed = 0;
+    const prune = (map, windowMs) => {
+        try {
+            for (const [k, rec] of map) {
+                if (!rec || (now - _maiNum(rec.windowStart) > windowMs && (!rec.blockedUntil || rec.blockedUntil < now))) {
+                    map.delete(k);
+                    removed++;
+                }
+            }
+        } catch (e) {}
+    };
+    prune(loginAttempts, LOGIN_WINDOW_MS);
+    prune(loginIdAttempts, LOGIN_WINDOW_MS);
+    prune(loginCountryHits, 60 * 1000);
+    prune(verifyAttempts, LOGIN_WINDOW_MS);
+    prune(expensiveApiHits, 5 * 60 * 1000);
+    return removed;
+}
+function _maiPruneExpiredSessions() {
+    let removed = 0;
+    try {
+        const now = Date.now();
+        for (const [token, s] of sessions) {
+            if (!s || !s.expires || s.expires < now) {
+                sessions.delete(token);
+                removed++;
+                if (removed >= 5000) break;
+            }
+        }
+        if (removed) saveSessions();
+    } catch (e) {}
+    return removed;
+}
+function _maiPruneExpiredBypassTokens() {
+    let removed = 0;
+    try {
+        const now = Date.now();
+        for (const [token, entry] of maintenanceBypassTokens) {
+            if (!entry || !entry.expires || entry.expires < now) {
+                maintenanceBypassTokens.delete(token);
+                removed++;
+                if (removed >= 1000) break;
+            }
+        }
+    } catch (e) {}
+    return removed;
+}
+function _maiSpeedPlan(state) {
+    const speed = _maiGetSpeedState(state);
+    const now = Date.now();
+    const plan = { at: now, actions: [], counts: {} };
+    let expiredSessions = 0;
+    try { for (const [, s] of sessions) if (!s || !s.expires || s.expires < now) expiredSessions++; } catch (e) {}
+    plan.counts.expiredSessions = expiredSessions;
+    if (expiredSessions) plan.actions.push({ id: 'prune_expired_sessions', count: expiredSessions });
+    let expiredBypass = 0;
+    try { for (const [, e] of maintenanceBypassTokens) if (!e || !e.expires || e.expires < now) expiredBypass++; } catch (e) {}
+    plan.counts.expiredBypassTokens = expiredBypass;
+    if (expiredBypass) plan.actions.push({ id: 'prune_expired_bypass_tokens', count: expiredBypass });
+    const expiredRateLimits = _maiCountExpiredRateEntries();
+    plan.counts.expiredRateLimitEntries = expiredRateLimits;
+    if (expiredRateLimits) plan.actions.push({ id: 'prune_expired_rate_limits', count: expiredRateLimits });
+    const historyLen = Array.isArray(state.history) ? state.history.length : 0;
+    plan.counts.aiHistory = historyLen;
+    if (historyLen > MAI_SPEED_AI_HISTORY_CAP) plan.actions.push({ id: 'compact_ai_history', count: historyLen - MAI_SPEED_AI_HISTORY_CAP });
+    const repairs = Array.isArray(state.pendingRepairs) ? state.pendingRepairs : [];
+    const doneRepairs = repairs.filter(p => p && p.status !== 'pending').length;
+    plan.counts.completedRepairs = doneRepairs;
+    if (doneRepairs > MAI_SPEED_REPAIR_DONE_CAP) plan.actions.push({ id: 'compact_ai_repairs', count: doneRepairs - MAI_SPEED_REPAIR_DONE_CAP });
+    const speedHistory = Array.isArray(speed.history) ? speed.history.length : 0;
+    plan.counts.speedHistory = speedHistory;
+    if (speedHistory > MAI_SPEED_HISTORY_CAP) plan.actions.push({ id: 'compact_speed_history', count: speedHistory - MAI_SPEED_HISTORY_CAP });
+    return plan;
+}
+function _maiApplySpeedPlan(plan, state, opts) {
+    const speed = _maiGetSpeedState(state);
+    const snapshot = { aiHistory: null, pendingRepairs: null, speedHistory: null };
+    if ((plan.actions || []).some(a => a.id === 'compact_ai_history')) {
+        try { snapshot.aiHistory = JSON.parse(JSON.stringify(state.history || [])); } catch (e) {}
+    }
+    if ((plan.actions || []).some(a => a.id === 'compact_ai_repairs')) {
+        try { snapshot.pendingRepairs = JSON.parse(JSON.stringify(state.pendingRepairs || [])); } catch (e) {}
+    }
+    if ((plan.actions || []).some(a => a.id === 'compact_speed_history')) {
+        try { snapshot.speedHistory = JSON.parse(JSON.stringify(speed.history || [])); } catch (e) {}
+    }
+    const applied = [];
+    const skipped = [];
+    for (const action of (plan.actions || [])) {
+        const def = MAI_SPEED_ACTION_DEFS[action.id];
+        if (!def) { skipped.push({ id: action.id, reason: 'unknown action' }); continue; }
+        if (opts.auto && !def.auto) { skipped.push({ id: action.id, reason: 'manual only' }); continue; }
+        try {
+            let changed = 0;
+            const details = {};
+            if (action.id === 'prune_expired_sessions') changed = _maiPruneExpiredSessions();
+            else if (action.id === 'prune_expired_bypass_tokens') changed = _maiPruneExpiredBypassTokens();
+            else if (action.id === 'prune_expired_rate_limits') changed = _maiPruneExpiredRateEntries();
+            else if (action.id === 'compact_ai_history') {
+                const before = Array.isArray(state.history) ? state.history.length : 0;
+                state.history = (state.history || []).slice(-MAI_SPEED_AI_HISTORY_CAP);
+                changed = Math.max(0, before - state.history.length);
+            } else if (action.id === 'compact_ai_repairs') {
+                const list = Array.isArray(state.pendingRepairs) ? state.pendingRepairs : [];
+                const pending = list.filter(p => p && p.status === 'pending');
+                const done = list.filter(p => !p || p.status !== 'pending').slice(-MAI_SPEED_REPAIR_DONE_CAP);
+                const before = list.length;
+                state.pendingRepairs = pending.concat(done);
+                changed = Math.max(0, before - state.pendingRepairs.length);
+            } else if (action.id === 'compact_speed_history') {
+                const before = speed.history.length;
+                speed.history = speed.history.slice(-MAI_SPEED_HISTORY_CAP);
+                changed = Math.max(0, before - speed.history.length);
+            }
+            applied.push({ id: action.id, label: def.label, changed, reversible: !!def.reversible, details });
+        } catch (e) {
+            skipped.push({ id: action.id, reason: String(e && e.message || e) });
+        }
+    }
+    const rollback = {
+        id: 'MASR-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+        createdAt: _maiIso(),
+        trigger: opts.trigger || 'manual',
+        mode: opts.auto ? 'auto' : 'manual',
+        actions: applied.map(a => ({ id: a.id, label: a.label, changed: a.changed, reversible: a.reversible })),
+        reversibleActions: applied.filter(a => a.reversible).map(a => a.id),
+        irreversibleActions: applied.filter(a => !a.reversible).map(a => a.id),
+        snapshot
+    };
+    return { applied, skipped, rollback };
+}
+function _maiMergeByKey(current, saved, keyFn, cap) {
+    const map = new Map();
+    (saved || []).forEach(x => { try { map.set(keyFn(x), x); } catch (e) {} });
+    (current || []).forEach(x => { try { map.set(keyFn(x), x); } catch (e) {} });
+    const out = Array.from(map.values());
+    out.sort((a, b) => {
+        const ta = Date.parse(a && (a.at || a.createdAt || a.updatedAt) || '') || 0;
+        const tb = Date.parse(b && (b.at || b.createdAt || b.updatedAt) || '') || 0;
+        return ta - tb;
+    });
+    return cap ? out.slice(-cap) : out;
+}
+function _maiSpeedScore(perf) {
+    const el = (perf && perf.eventLoop) || {};
+    const db = (perf && perf.db) || {};
+    let score = 100;
+    score -= Math.min(30, Math.max(0, Math.round((_maiNum(el.maxMs) - 100) / 10)));
+    score -= Math.min(25, Math.max(0, Math.round(_maiNum(perf && perf.slowRate))));
+    score -= Math.min(20, Math.max(0, Math.round((_maiNum(db.maxFlushMs) - 500) / 50)));
+    if (_maiNum(perf && perf.requests) < 5) score = Math.min(score, 85);
+    return Math.max(0, Math.min(100, Math.round(score)));
+}
+function _maiCompactPerf(perf) {
+    if (!perf) return null;
+    return Object.assign({}, perf, { recent: (perf.recent || []).slice(-20) });
+}
+async function runMaintenanceSpeedCycle(opts) {
+    opts = opts || {};
+    if (_maiSpeedRunning) return { ok: false, skipped: true, reason: 'already_running' };
+    if (_maiRunning) return { ok: false, skipped: true, reason: 'maintenance_cycle_running' };
+    const trigger = opts.trigger || 'manual';
+    const auto = !!opts.auto;
+    const maint = getMaintenanceSetting();
+    if (auto) {
+        if (!_maiSpeedAutoEnabled()) return { ok: false, skipped: true, reason: 'auto_disabled' };
+        if (!_maiIsInScheduledWindow(maint)) return { ok: false, skipped: true, reason: 'outside_maintenance_window' };
+        const key = _maiWindowKey(maint);
+        if (!key) return { ok: false, skipped: true, reason: 'no_scheduled_window' };
+        if (key === _maiLastAutoSpeedWindowKey) return { ok: false, skipped: true, reason: 'already_ran_this_window' };
+        _maiLastAutoSpeedWindowKey = key;
+    }
+    _maiSpeedRunning = true;
+    const started = _maiNow();
+    try {
+        const state = _maiGetState();
+        const speed = _maiGetSpeedState(state);
+        const before = _perfSnapshot();
+        const plan = _maiSpeedPlan(state);
+        const apply = opts.apply === true;
+        const result = apply ? _maiApplySpeedPlan(plan, state, { auto, trigger }) : { applied: [], skipped: [], rollback: null };
+        const after = _perfSnapshot();
+        const findings = [];
+        const recommendations = [];
+        const el = before.eventLoop || {};
+        const db = before.db || {};
+        const slowRoutes = (before.routes || []).filter(r => _maiNum(r.maxMs) >= 1000).slice(0, 8);
+        if (_maiNum(el.maxMs) >= 1000) {
+            _maiPushFinding(findings, 'high', 'speed', 'Event loop delay exceeded 1 second.', { eventLoop: el });
+            recommendations.push('Speed: event-loop delay is severe. Review synchronous database/file work and background jobs before the next peak period.');
+        } else if (_maiNum(el.maxMs) >= 250) {
+            _maiPushFinding(findings, 'warn', 'speed', 'Event loop delay is elevated.', { eventLoop: el });
+            recommendations.push('Speed: event-loop delay is elevated. Monitor slow routes and database flush times.');
+        }
+        if (_maiNum(before.slowRate) >= 5) {
+            _maiPushFinding(findings, 'warn', 'speed', 'A high percentage of sampled requests are slow.', { slowRate: before.slowRate, requests: before.requests });
+            recommendations.push('Speed: several requests exceeded 1 second. Review the slowest routes below; this is a server-side/API issue, not asset download speed.');
+        }
+        if (slowRoutes.length) {
+            _maiPushFinding(findings, 'warn', 'speed', 'Slow API routes detected.', { routes: slowRoutes });
+            recommendations.push('Speed: inspect the slowest routes in this report. Optimise the highest-impact route first; do not run a load test during peak hours.');
+        }
+        if (_maiNum(db.maxFlushMs) >= 1000) {
+            _maiPushFinding(findings, 'warn', 'speed', 'Database flush took more than 1 second.', { db });
+            recommendations.push('Speed: database flush time is high. Check which stores changed and whether a large store is being rewritten too often.');
+        }
+        if (plan.actions.length && !apply) {
+            recommendations.push('Speed: safe housekeeping is available (' + plan.actions.map(a => a.id).join(', ') + '). Use Speed Up Now to apply it.');
+        }
+        if (apply) {
+            const changed = result.applied.reduce((n, a) => n + _maiNum(a.changed), 0);
+            recommendations.push('Speed-up applied ' + result.applied.length + ' safe action(s), changing ' + changed + ' transient item(s). No business records or code were modified.');
+        }
+        if (!plan.actions.length && !apply) recommendations.push('Speed: no safe housekeeping action is currently needed. Use the route timings above to target code-level improvements.');
+        const report = {
+            id: 'MAS-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+            createdAt: _maiIso(),
+            trigger,
+            mode: auto ? 'auto' : 'manual',
+            applied: apply,
+            durationMs: _maiNow() - started,
+            status: 'completed',
+            speedScore: _maiSpeedScore(before),
+            before: _maiCompactPerf(before),
+            after: _maiCompactPerf(after),
+            plan: plan.actions,
+            appliedActions: result.applied,
+            skippedActions: result.skipped,
+            findings,
+            recommendations,
+            rollback: result.rollback ? {
+                id: result.rollback.id,
+                reversibleActions: result.rollback.reversibleActions,
+                irreversibleActions: result.rollback.irreversibleActions
+            } : null
+        };
+        state.updatedAt = report.createdAt;
+        speed.cycles = _maiNum(speed.cycles) + 1;
+        speed.lastRunAt = report.createdAt;
+        speed.lastTrigger = trigger;
+        speed.lastStatus = 'completed';
+        speed.lastScore = report.speedScore;
+        speed.lastReport = report;
+        if (result.rollback) speed.lastRollback = result.rollback;
+        speed.history.push({
+            at: report.createdAt,
+            trigger,
+            mode: report.mode,
+            score: report.speedScore,
+            applied: result.applied.length,
+            changed: result.applied.reduce((n, a) => n + _maiNum(a.changed), 0)
+        });
+        if (speed.history.length > MAI_SPEED_HISTORY_CAP) speed.history = speed.history.slice(-MAI_SPEED_HISTORY_CAP);
+        try { if (typeof saveDB === 'function') saveDB(); } catch (e) {}
+        try { if (typeof auditLog === 'function') auditLog('maintenance-ai-speed-run', 'maintenance', { id: report.id, trigger, mode: report.mode, score: report.speedScore, applied: result.applied.length }, opts.user || 'system'); } catch (e) {}
+        return { ok: true, report };
+    } catch (e) {
+        const err = { ok: false, error: String(e && e.message || e) };
+        try {
+            const state = _maiGetState();
+            const speed = _maiGetSpeedState(state);
+            speed.lastRunAt = _maiIso();
+            speed.lastTrigger = trigger;
+            speed.lastStatus = 'error';
+            speed.lastError = err.error;
+            try { if (typeof saveDB === 'function') saveDB(); } catch (e2) {}
+        } catch (e2) {}
+        return err;
+    } finally {
+        _maiSpeedRunning = false;
+    }
+}
+function revertMaintenanceSpeedUp(user) {
+    try {
+        const state = _maiGetState();
+        const speed = _maiGetSpeedState(state);
+        const rb = speed.lastRollback;
+        if (!rb || typeof rb !== 'object') return { ok: false, error: 'No speed-up run is available to revert' };
+        const snap = rb.snapshot || {};
+        const restored = [];
+        const skipped = [];
+        if (snap.aiHistory) {
+            state.history = _maiMergeByKey(state.history, snap.aiHistory, x => String((x && (x.at || x.trigger || '')) + '|' + JSON.stringify(x || {})), 60);
+            restored.push('compact_ai_history');
+        }
+        if (snap.pendingRepairs) {
+            state.pendingRepairs = _maiMergeByKey(state.pendingRepairs, snap.pendingRepairs, x => String(x && x.id || (x && x.type) || ''), 80);
+            restored.push('compact_ai_repairs');
+        }
+        if (snap.speedHistory) {
+            speed.history = _maiMergeByKey(speed.history, snap.speedHistory, x => String(x && (x.at || '') + '|' + (x && x.action || x && x.trigger || '')), MAI_SPEED_HISTORY_CAP);
+            restored.push('compact_speed_history');
+        }
+        for (const a of (rb.actions || [])) {
+            if (!a.reversible) skipped.push({ id: a.id, label: a.label, reason: 'expired/transient data cannot be restored' });
+        }
+        speed.lastStatus = 'reverted';
+        speed.lastRevertedAt = _maiIso();
+        speed.lastRevertResult = { restored, skipped };
+        speed.lastRollback = null;
+        state.updatedAt = speed.lastRevertedAt;
+        speed.history.push({ at: speed.lastRevertedAt, action: 'revert', restored: restored.length, skipped: skipped.length });
+        if (speed.history.length > MAI_SPEED_HISTORY_CAP) speed.history = speed.history.slice(-MAI_SPEED_HISTORY_CAP);
+        try { if (typeof saveDB === 'function') saveDB(); } catch (e) {}
+        try { if (typeof auditLog === 'function') auditLog('maintenance-ai-speed-revert', 'maintenance', { runId: rb.id, restored, skipped: skipped.map(x => x.id), by: user || 'system' }, user || 'system'); } catch (e) {}
+        return { ok: true, restored, skipped, runId: rb.id };
+    } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+    }
 }
 
 
@@ -5142,7 +5642,15 @@ async function _maiMaybeRunScheduled() {
         if (!key || key === _maiLastScheduledWindowKey) return;
         // Ensure we run once per scheduled window
         _maiLastScheduledWindowKey = key;
-        setImmediate(() => { runMaintenanceAICycle({ trigger: 'scheduled' }).catch(()=>{}); });
+        setImmediate(() => {
+            Promise.resolve(runMaintenanceAICycle({ trigger: 'scheduled' }))
+                .catch(()=>{})
+                .then(() => {
+                    // Auto speed-up runs after the full cycle, still only inside
+                    // the scheduled window and after the cycle lock has cleared.
+                    Promise.resolve(runMaintenanceSpeedCycle({ trigger: 'scheduled', apply: true, auto: true })).catch(()=>{});
+                });
+        });
     } catch(e){}
 }
 // Cheap scheduler: checks every 60s; no heavy work on tick.
@@ -5405,7 +5913,7 @@ function handleAPI(req, res) {
     }
 
     // Maintenance AI (admin only): reports, state, config, manual run, repair proposals
-    if (parts[1] === 'maintenance' && (parts[2] === 'reports' || parts[2] === 'ai-state' || parts[2] === 'run-check' || parts[2] === 'ai-config' || parts[2] === 'repairs')) {
+    if (parts[1] === 'maintenance' && (parts[2] === 'reports' || parts[2] === 'ai-state' || parts[2] === 'run-check' || parts[2] === 'ai-config' || parts[2] === 'repairs' || parts[2] === 'speed-check' || parts[2] === 'speed-up' || parts[2] === 'speed-revert')) {
         try { console.log('[MAI] hit', req.method, path, 'parts2=', parts[2], 'ct=', req.headers['content-type']||''); } catch(e){}
         if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
         try {
@@ -5427,7 +5935,41 @@ function handleAPI(req, res) {
             }
             if (req.method === 'GET' && parts[2] === 'ai-state') {
                 const st = _maiGetState();
-                return json(res, 200, { autoEnabled: _maiEnabledForAuto(), running: !!_maiRunning, state: { cycles:st.cycles, updatedAt:st.updatedAt, lastRunAt:st.lastRunAt, lastTrigger:st.lastTrigger, lastRiskScore:st.lastRiskScore, lastRunSooner:st.lastRunSooner, history:(st.history||[]).slice(-20), baselines: st.baselines } });
+                const sp = _maiGetSpeedState(st);
+                const maint = getMaintenanceSetting();
+                return json(res, 200, {
+                    autoEnabled: _maiEnabledForAuto(),
+                    running: !!_maiRunning,
+                    state: { cycles:st.cycles, updatedAt:st.updatedAt, lastRunAt:st.lastRunAt, lastTrigger:st.lastTrigger, lastRiskScore:st.lastRiskScore, lastRunSooner:st.lastRunSooner, history:(st.history||[]).slice(-20), baselines: st.baselines },
+                    speed: {
+                        autoEnabled: _maiSpeedAutoEnabled(),
+                        configAutoEnabled: _maiSpeedConfig().speedAutoEnabled !== false,
+                        autoWindowOnly: true,
+                        inScheduledWindow: _maiIsInScheduledWindow(maint),
+                        scheduledWindowKey: _maiWindowKey(maint) || null,
+                        running: !!_maiSpeedRunning,
+                        cycles: _maiNum(sp.cycles),
+                        lastRunAt: sp.lastRunAt || null,
+                        lastTrigger: sp.lastTrigger || null,
+                        lastStatus: sp.lastStatus || null,
+                        lastScore: sp.lastScore == null ? null : _maiNum(sp.lastScore),
+                        lastError: sp.lastError || null,
+                        lastReport: sp.lastReport || null,
+                        canRevert: !!sp.lastRollback,
+                        lastRollback: sp.lastRollback ? {
+                            id: sp.lastRollback.id,
+                            createdAt: sp.lastRollback.createdAt,
+                            trigger: sp.lastRollback.trigger,
+                            mode: sp.lastRollback.mode,
+                            actions: sp.lastRollback.actions || [],
+                            reversibleActions: sp.lastRollback.reversibleActions || [],
+                            irreversibleActions: sp.lastRollback.irreversibleActions || []
+                        } : null,
+                        lastRevertedAt: sp.lastRevertedAt || null,
+                        lastRevertResult: sp.lastRevertResult || null,
+                        history: (sp.history || []).slice(-MAI_SPEED_HISTORY_CAP)
+                    }
+                });
             }
             if (req.method === 'POST' && parts[2] === 'run-check') {
                 // manual run allowed for admin even if auto disabled
@@ -5436,23 +5978,49 @@ function handleAPI(req, res) {
                 setImmediate(() => { Promise.resolve(runMaintenanceAICycle({ trigger:'manual', user: userName })).catch(()=>{}); });
                 return json(res, 202, { ok:true, started:true, message:'Maintenance AI cycle started' });
             }
+            if (req.method === 'POST' && (parts[2] === 'speed-check' || parts[2] === 'speed-up')) {
+                if (_maiRunning) return json(res, 409, { error: 'Maintenance AI cycle is already running' });
+                if (_maiSpeedRunning) return json(res, 409, { error: 'A speed check or speed-up is already running' });
+                const apply = parts[2] === 'speed-up';
+                const userName = (maiUser && maiUser.username) || 'admin';
+                setImmediate(() => {
+                    Promise.resolve(runMaintenanceSpeedCycle({ trigger:'manual', apply, user:userName })).catch(()=>{});
+                });
+                return json(res, 202, {
+                    ok: true,
+                    started: true,
+                    apply,
+                    message: apply ? 'Safe speed-up started' : 'Speed check started'
+                });
+            }
+            if (req.method === 'POST' && parts[2] === 'speed-revert') {
+                const result = revertMaintenanceSpeedUp((maiUser && maiUser.username) || 'admin');
+                if (!result.ok) return json(res, 409, result);
+                return json(res, 200, result);
+            }
             if (req.method === 'POST' && parts[2] === 'ai-config') {
                 const qEnabled = urlObj.searchParams.get('enabled');
-                const applyConfig = (enabledVal) => {
-                    const enabled = !(enabledVal === false || enabledVal === 'false' || enabledVal === 0 || enabledVal === '0');
+                const qSpeedAuto = urlObj.searchParams.get('speedAuto');
+                const boolVal = (v) => !(v === false || v === 'false' || v === 0 || v === '0');
+                const applyConfig = (enabledVal, speedVal) => {
                     if (!Array.isArray(db.settings)) db.settings = [];
                     let rec = db.settings.find(s=>s && s.key==='maintenanceAI');
-                    const value = { enabled };
+                    const current = rec && rec.value && typeof rec.value === 'object' ? rec.value : {};
+                    const value = Object.assign({}, current);
+                    if (enabledVal !== undefined && enabledVal !== null) value.enabled = boolVal(enabledVal);
+                    else if (typeof value.enabled !== 'boolean') value.enabled = true;
+                    if (speedVal !== undefined && speedVal !== null) value.speedAutoEnabled = boolVal(speedVal);
+                    else if (typeof value.speedAutoEnabled !== 'boolean') value.speedAutoEnabled = true;
                     if (rec) { rec.value = value; rec.updatedAt = _maiIso(); rec.updatedBy = maiUser.username; }
                     else db.settings.push({ key:'maintenanceAI', value, updatedAt:_maiIso(), updatedBy: maiUser.username });
                     try { if (typeof saveDB === 'function') saveDB(); } catch(e){}
-                    try { if (typeof auditLog === 'function') auditLog('maintenance-ai-config', 'settings', { enabled }, maiUser.username); } catch(e){}
-                    return json(res, 200, { ok:true, enabled });
+                    try { if (typeof auditLog === 'function') auditLog('maintenance-ai-config', 'settings', { enabled: value.enabled !== false, speedAutoEnabled: value.speedAutoEnabled !== false }, maiUser.username); } catch(e){}
+                    return json(res, 200, { ok:true, enabled: value.enabled !== false, speedAutoEnabled: value.speedAutoEnabled !== false });
                 };
                 // If body stream is already consumed/ended, use query fallback
                 if (req.readableEnded) {
-                    if (qEnabled != null) return applyConfig(qEnabled);
-                    return json(res, 400, { error: 'Missing config body', hint: 'Send JSON {"enabled":true|false} or ?enabled=1|0' });
+                    if (qEnabled != null || qSpeedAuto != null) return applyConfig(qEnabled, qSpeedAuto);
+                    return json(res, 400, { error: 'Missing config body', hint: 'Send JSON {"enabled":true|false,"speedAutoEnabled":true|false} or ?enabled=1|0&speedAuto=1|0' });
                 }
                 let body = '';
                 let done = false;
@@ -5462,18 +6030,23 @@ function handleAPI(req, res) {
                         let parsed = {};
                         const raw = String(body || '').trim();
                         if (raw) {
-                            try { parsed = JSON.parse(raw); } catch(e) { if (qEnabled != null) return applyConfig(qEnabled); return json(res, 400, { error: 'Invalid JSON body' }); }
-                        } else if (qEnabled != null) {
-                            return applyConfig(qEnabled);
+                            try { parsed = JSON.parse(raw); } catch(e) { if (qEnabled != null || qSpeedAuto != null) return applyConfig(qEnabled, qSpeedAuto); return json(res, 400, { error: 'Invalid JSON body' }); }
+                        } else if (qEnabled != null || qSpeedAuto != null) {
+                            return applyConfig(qEnabled, qSpeedAuto);
                         }
-                        if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'enabled')) return applyConfig(parsed.enabled);
-                        if (qEnabled != null) return applyConfig(qEnabled);
-                        return applyConfig(true);
+                        const hasEnabled = parsed && Object.prototype.hasOwnProperty.call(parsed, 'enabled');
+                        const hasSpeed = parsed && (Object.prototype.hasOwnProperty.call(parsed, 'speedAutoEnabled') || Object.prototype.hasOwnProperty.call(parsed, 'speedAuto'));
+                        if (hasEnabled || hasSpeed) {
+                            const speed = hasSpeed ? (Object.prototype.hasOwnProperty.call(parsed, 'speedAutoEnabled') ? parsed.speedAutoEnabled : parsed.speedAuto) : undefined;
+                            return applyConfig(hasEnabled ? parsed.enabled : undefined, speed);
+                        }
+                        if (qEnabled != null || qSpeedAuto != null) return applyConfig(qEnabled, qSpeedAuto);
+                        return applyConfig(true, undefined);
                     } catch(e) { return json(res, 400, { error: 'Could not save config', detail: String(e && e.message || e) }); }
                 };
                 req.on('data', c => { body += (typeof c === 'string' ? c : c.toString('utf8')); if (body.length > 20000) { try { req.destroy(); } catch(e){} } });
                 req.on('end', finish);
-                req.on('error', () => { if (qEnabled != null) return applyConfig(qEnabled); return json(res, 400, { error: 'Invalid request body' }); });
+                req.on('error', () => { if (qEnabled != null || qSpeedAuto != null) return applyConfig(qEnabled, qSpeedAuto); return json(res, 400, { error: 'Invalid request body' }); });
                 // fallback for edge cases where end doesn't fire
                 setTimeout(() => { if (!done) finish(); }, 1500);
                 return true;
@@ -9657,6 +10230,15 @@ if (parts[1] === 'discussions') {
 }
 
 const server = http.createServer((req, res) => {
+    // In-memory timing only. This listener runs after the response is finished,
+    // so it cannot delay the request and never writes to the database.
+    const _perfStarted = process.hrtime.bigint();
+    const _perfRoute = _perfRouteName(req.method, req.url);
+    res.on('finish', () => {
+        let _perfBytes = 0;
+        try { _perfBytes = Number(res.getHeader('Content-Length')) || 0; } catch (e) {}
+        _perfRecordRequest(req, _perfStarted, res.statusCode, _perfRoute, _perfBytes);
+    });
     // Security headers applied to every response (harmless over plain HTTP,
     // honored over HTTPS). CSP keeps the app functional (inline styles/handlers,
     // same-origin + https) while blocking cross-origin script injection.
