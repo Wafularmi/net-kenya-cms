@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.js?v=487" as="script">
+    <link rel="preload" href="js/bundle.js?v=489" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -1562,6 +1562,11 @@
                         <button class="btn btn-primary" onclick="changePassword()">Update Password</button>
                         <div id="settings-pw-status" style="font-size:11px;margin-top:6px;"></div>
                     </div>
+                    <div class="card" id="session-security-card"><h3>Session &amp; Security</h3>
+                        <div class="form-group"><label for="settings-idle-minutes">Automatic sign-out prompt after inactivity (minutes)</label><input type="number" id="settings-idle-minutes" min="1" max="1440" step="1" value="30"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">After this many minutes without keyboard, mouse, touch or scroll activity, the user is asked to sign out. They can choose to stay signed in. Default: 30 minutes.</div></div>
+                        <button class="btn btn-primary" onclick="saveSessionSecuritySettings()">Save Session Settings</button>
+                        <div id="session-security-status" style="font-size:11px;margin-top:6px;"></div>
+                    </div>
                     <div class="card"><h3>User Accounts</h3>
                         <input type="text" id="users-search" placeholder="Search by name, username, or role..." class="search-input" style="width:100%;margin-bottom:8px;" oninput="renderUsers()">
                         <div id="users-list"></div>
@@ -1710,7 +1715,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.js?v=487"></script>
+    <script data-cfasync="false" src="js/bundle.js?v=489"></script>
     <script data-cfasync="false" src="js/student-hub.js?v=94"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

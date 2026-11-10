@@ -3036,7 +3036,7 @@ function publicSettingsView(rows) {
 const STUDENT_SETTING_KEYS = new Set([
     'branding', 'academic', 'contentGate', 'feeGate', 'feeRules', 'mpesa',
     'maintenance', 'documentGenFlags', 'diplomaPdfConfig',
-    'completionPdfConfig'
+    'completionPdfConfig', 'sessionSecurity'
 ]);
 
 // Return the student-safe projection of settings rows. Branding loses the
@@ -3055,6 +3055,11 @@ function studentSettingsView(user, rows) {
         if (r.key === 'branding') { out.push(stripPrivateBranding(r)); return; }
         if (r.key === 'mpesa') {
             out.push({ key: 'mpesa', payButtonEnabled: !!((v && v.payButtonEnabled)) });
+            return;
+        }
+        if (r.key === 'sessionSecurity') {
+            const mins = Math.max(1, Math.min(1440, Math.round(Number(v && v.idleMinutes) || 30)));
+            out.push({ key: 'sessionSecurity', value: { idleMinutes: mins } });
             return;
         }
         if (r.key === 'contentGate') {
@@ -9081,6 +9086,9 @@ const parsed = JSON.parse(body);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
+                    if (store === 'settings' && value.key === 'sessionSecurity' && !isOwnerOrAdminUser(user)) {
+                        return json(res, 403, { error: 'Only administrators can change session security' });
+                    }
                     if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });
                     }
@@ -9379,6 +9387,9 @@ const isDocStore = store === 'certificates' || store === 'idCards' || store === 
                     const preserveFields = isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(value) : null);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
+                    }
+if (store === 'settings' && value.key === 'sessionSecurity' && !isOwnerOrAdminUser(user)) {
+                        return json(res, 403, { error: 'Only administrators can change session security' });
                     }
 if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change assistant access' });

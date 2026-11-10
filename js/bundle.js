@@ -2776,13 +2776,95 @@ async function showApp(user) {
         setTimeout(() => showScreen(lastScreen), 50);
     }
 }
-const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+const IDLE_LOGOUT_DEFAULT_MINUTES = 30;
+const IDLE_SETTINGS_KEY = 'sessionSecurity';
+const IDLE_SETTINGS_BROADCAST_KEY = 'nkcms:idleSettings';
+let _idleLogoutMs = IDLE_LOGOUT_DEFAULT_MINUTES * 60 * 1000;
 const ACTIVITY_KEY = 'nkcms:lastUserActivity';
 let _sessionPresenceBound = false;
 let _lastActivityWrite = 0;
 let _idlePromptOpen = false;
 let _lastFocusRefresh = 0;
 let _lastHiddenAt = 0;
+
+function normalizeIdleMinutes(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return IDLE_LOGOUT_DEFAULT_MINUTES;
+    return Math.max(1, Math.min(1440, Math.round(n)));
+}
+function idleLogoutMinutes() {
+    return Math.max(1, Math.round(_idleLogoutMs / 60000));
+}
+function idlePeriodLabel(minutes) {
+    const mins = normalizeIdleMinutes(minutes);
+    if (mins % 60 === 0) return (mins / 60) + (mins === 60 ? ' hour' : ' hours');
+    return mins + (mins === 1 ? ' minute' : ' minutes');
+}
+function applyIdleMinutes(value, broadcast) {
+    const mins = normalizeIdleMinutes(value);
+    _idleLogoutMs = mins * 60 * 1000;
+    const input = document.getElementById('settings-idle-minutes');
+    if (input && document.activeElement !== input) input.value = String(mins);
+    if (broadcast) {
+        try { localStorage.setItem(IDLE_SETTINGS_BROADCAST_KEY, JSON.stringify({ idleMinutes: mins, at: Date.now() })); } catch {}
+    }
+    return mins;
+}
+async function loadSessionSecuritySettings(silent) {
+    try {
+        const rec = await dbGet('settings', IDLE_SETTINGS_KEY);
+        const v = rec && (rec.value !== undefined ? rec.value : rec);
+        const mins = applyIdleMinutes(v && v.idleMinutes);
+        if (!silent) {
+            const status = document.getElementById('session-security-status');
+            if (status) {
+                status.textContent = 'Current idle sign-out prompt: ' + idlePeriodLabel(mins) + '.';
+                status.style.color = 'var(--text-muted)';
+            }
+        }
+        return mins;
+    } catch (e) {
+        if (!silent) {
+            const status = document.getElementById('session-security-status');
+            if (status) {
+                status.textContent = 'Could not load the session setting.';
+                status.style.color = 'var(--danger)';
+            }
+        }
+        return idleLogoutMinutes();
+    }
+}
+async function saveSessionSecuritySettings() {
+    const input = document.getElementById('settings-idle-minutes');
+    const status = document.getElementById('session-security-status');
+    const raw = input ? String(input.value || '').trim() : '';
+    const parsed = Number(raw);
+    if (!raw || !Number.isFinite(parsed) || parsed < 1 || parsed > 1440) {
+        if (status) {
+            status.textContent = 'Enter a whole number from 1 to 1440 minutes.';
+            status.style.color = 'var(--danger)';
+        }
+        return showToast('Idle time must be between 1 and 1440 minutes', { type: 'danger' });
+    }
+    const mins = normalizeIdleMinutes(parsed);
+    try {
+        await dbPut('settings', { key: IDLE_SETTINGS_KEY, value: { idleMinutes: mins }, updatedAt: new Date().toISOString() });
+        applyIdleMinutes(mins, true);
+        if (input) input.value = String(mins);
+        if (status) {
+            status.textContent = 'Saved. Users will be asked to sign out after ' + idlePeriodLabel(mins) + ' of inactivity.';
+            status.style.color = 'var(--success)';
+        }
+        showToast('Idle sign-out set to ' + idlePeriodLabel(mins), { type: 'success' });
+        try { logAudit('updated', 'settings', { key: IDLE_SETTINGS_KEY, idleMinutes: mins }); } catch {}
+    } catch (e) {
+        if (status) {
+            status.textContent = 'Could not save the session setting.';
+            status.style.color = 'var(--danger)';
+        }
+        showToast('Failed to save session setting', { type: 'danger' });
+    }
+}
 
 function markUserActivity(force) {
     const now = Date.now();
@@ -2871,11 +2953,11 @@ function checkIdleLogout() {
     if (!hasSignedInUser() || document.visibilityState === 'hidden') return;
     if (_idlePromptOpen || appHasOpenModal()) return;
     const last = lastUserActivityAt();
-    if (!last || Date.now() - last < IDLE_LOGOUT_MS) return;
+    if (!last || Date.now() - last < _idleLogoutMs) return;
     _idlePromptOpen = true;
     showConfirm(
         'Still there?',
-        'You have been idle for 30 minutes. For your security, would you like to sign out? Your current page stays open if you choose to stay signed in.',
+        'You have been idle for ' + idlePeriodLabel(idleLogoutMinutes()) + '. For your security, would you like to sign out? Your current page stays open if you choose to stay signed in.',
         'Sign out',
         30000
     ).then(ok => {
@@ -2889,6 +2971,16 @@ function initSessionPresence() {
     _sessionPresenceBound = true;
     _lastFocusRefresh = Date.now();
     markUserActivity(true);
+    loadSessionSecuritySettings(true).catch(() => {});
+    try {
+        window.addEventListener('storage', (e) => {
+            if (e.key !== IDLE_SETTINGS_BROADCAST_KEY || !e.newValue) return;
+            try {
+                const v = JSON.parse(e.newValue);
+                if (v && v.idleMinutes) applyIdleMinutes(v.idleMinutes);
+            } catch {}
+        });
+    } catch {}
     const onActivity = () => markUserActivity(false);
     ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(ev => {
         try { window.addEventListener(ev, onActivity, { passive: true, capture: true }); }
@@ -3553,7 +3645,7 @@ function showScreen(id, options) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadMaintenanceAI === 'function') loadMaintenanceAI(); loadDocGenFlags(); if (typeof loadAnnouncementBannerSettings === 'function') loadAnnouncementBannerSettings(); if (typeof renderAnnouncementsList === 'function') renderAnnouncementsList(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadSessionSecuritySettings === 'function') loadSessionSecuritySettings(); if (typeof loadMaintenanceAI === 'function') loadMaintenanceAI(); loadDocGenFlags(); if (typeof loadAnnouncementBannerSettings === 'function') loadAnnouncementBannerSettings(); if (typeof renderAnnouncementsList === 'function') renderAnnouncementsList(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
