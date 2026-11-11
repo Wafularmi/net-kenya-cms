@@ -621,7 +621,7 @@ function hubLiveBanner(c) {
         }
         if (liveLesson) {
             const course = (c.myCourses || []).find(cc => cc.id === liveLesson.courseId);
-            const lessonTitle = liveLesson.title || liveLesson.topic || 'Live Class';
+            const lessonTitle = locTitle(liveLesson).text || liveLesson.topic || 'Live Class';
             const lessonTarget = liveLesson.virtualScheduled ? new Date(String(liveLesson.virtualScheduled).replace(' ','T')).getTime() : Date.now();
             banners.push(`<div id="hub-live-banner-class" style="background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;padding:14px 18px;border-radius:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 14px rgba(37,99,235,0.35);border:1px solid rgba(255,255,255,0.25);">
                 <div style="display:flex;align-items:center;gap:12px;min-width:0;">

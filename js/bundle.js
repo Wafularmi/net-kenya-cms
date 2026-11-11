@@ -6634,7 +6634,7 @@ async function viewStudentLesson(lessonId) {
         html += `<h4 style="color:var(--accent);margin:12px 0 6px;">📚 Notes</h4>`;
         lessonNotes.forEach(n => {
             html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;">
-                <span style="font-size:12px;">${n.title}</span>
+                <span style="font-size:12px;">${esc(locTitle(n).text)}</span>
                 <div style="display:flex;gap:4px;">
                     <button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">Read</button>
                     <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button>
@@ -19558,7 +19558,7 @@ async function dripCongrats(sid, lesson, best) {
     } else nextTxt = 'That was the last lesson in this course - outstanding!';
     const hasVideo = !!(lesson.videoUrl || lesson.video || lesson.videoLink);
     const beginBtn = (nx && nx.reason === 'open' && typeof viewHubLessonNote === 'function') ? '<button class="btn btn-primary" onclick="closeModal();viewHubLessonNote(\'' + nx.lessonId + '\',\'' + String((lesson.courseId || '')).replace(/'/g, '') + '\');">Begin: ' + escapeHtml(nx.title) + '</button> ' : '';
-    showModal('Congratulations, ' + escapeHtml(name) + '!', '<div style="text-align:center;padding:12px;"><div style="font-size:52px;">🎉</div><h3 style="margin:8px 0;">Well done, ' + escapeHtml(name) + '!</h3><p style="font-size:14px;">You completed <b>' + escapeHtml(lesson.title) + '</b>' + (best !== null && best !== undefined ? ' with <b>' + best + '%</b>' : '') + '.</p>' + (hasVideo ? '<p style="font-size:14px;">Your lesson video is now open - watch it next.</p>' : '') + '<p style="font-size:14px;">' + nextTxt + '</p></div>',
+    showModal('Congratulations, ' + escapeHtml(name) + '!', '<div style="text-align:center;padding:12px;"><div style="font-size:52px;">🎉</div><h3 style="margin:8px 0;">Well done, ' + escapeHtml(name) + '!</h3><p style="font-size:14px;">You completed <b>' + escapeHtml(locTitle(lesson).text) + '</b>' + (best !== null && best !== undefined ? ' with <b>' + best + '%</b>' : '') + '.</p>' + (hasVideo ? '<p style="font-size:14px;">Your lesson video is now open - watch it next.</p>' : '') + '<p style="font-size:14px;">' + nextTxt + '</p></div>',
         beginBtn + (hasVideo ? '<button class="btn btn-primary" onclick="closeModal();viewStudentLesson(\'' + lesson.id + '\')">Watch Video</button> ' : '') + '<button class="btn btn-outline" onclick="closeModal();if(typeof renderStudentHub===\'function\'){try{renderStudentHub();}catch{}}">Continue</button>');
 }
 // Exams are course-level: open only when every drip lesson in the course is complete.
@@ -19662,7 +19662,7 @@ async function toggleLessonPublish(lessonId) {
     lesson.updatedAt = new Date().toISOString();
     await dbPut('lessons', lesson);
     renderLessons();
-    showToast(`Lesson "${lesson.title}" → ${lesson.published ? 'Published ✓' : 'Draft 🔒'}`);
+    showToast(`Lesson "${locTitle(lesson).text}" → ${lesson.published ? 'Published ✓' : 'Draft 🔒'}`);
     logAudit(lesson.published ? 'published' : 'unpublished', 'lesson', { id: lessonId });
 }
 // Shared EN/SW language block for the lesson editor. English stays the master
@@ -20346,7 +20346,7 @@ async function renderQuestionBank() {
         else if (q.type === 'matching') answerPreview = `<span style="color:var(--accent);font-size:11px;">${q.pairs ? q.pairs.length + ' pairs' : 'No pairs'}</span>`;
         else if (q.type === 'fillin') answerPreview = `<span style="color:var(--success);font-size:11px;">${q.blanks ? q.blanks.length + ' blanks' : 'No blanks'}</span>`;
         else answerPreview = `<span style="color:var(--accent);font-size:11px;">Rubric: ${q.rubric ? q.rubric.length + ' criteria' : 'None'}</span>`;
-        return `<tr><td><input type="checkbox" data-qid="${q.id}" ${_qbSelected.has(String(q.id)) ? 'checked' : ''} onclick="this.checked?_qbSelected.add('${q.id}'):_qbSelected.delete('${q.id}');qbSyncSelectionUi()"></td><td style="font-weight:700;color:var(--accent,#2563eb);text-align:center;">${questionSeqNumber(q) || ''}</td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td>${typeLabel}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${q.question}">${q.question}</td><td>${answerPreview}</td><td><span class="badge badge-info">${q.points || 1} pt${(q.points || 1) !== 1 ? 's' : ''}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuestion('${q.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteQuestion('${q.id}')">Del</button></td></tr>`;
+        return `<tr><td><input type="checkbox" data-qid="${q.id}" ${_qbSelected.has(String(q.id)) ? 'checked' : ''} onclick="this.checked?_qbSelected.add('${q.id}'):_qbSelected.delete('${q.id}');qbSyncSelectionUi()"></td><td style="font-weight:700;color:var(--accent,#2563eb);text-align:center;">${questionSeqNumber(q) || ''}</td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? esc(locTitle(lesson).text) : '--'}</td><td>${typeLabel}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${q.question}">${q.question}</td><td>${answerPreview}</td><td><span class="badge badge-info">${q.points || 1} pt${(q.points || 1) !== 1 ? 's' : ''}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuestion('${q.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteQuestion('${q.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">No questions yet. Click "+ Add Question" to create one.</td></tr>';
     courseSelect.onchange = renderQuestionBank;
     typeSelect.onchange = renderQuestionBank;
@@ -21143,7 +21143,7 @@ async function renderQuizzes() {
                 return sum + (qq ? qq.points || 1 : 1);
             }, 0) : 0;
             const typeLabel = q.assessmentType === 'exam' ? '📄 Exam' : q.assessmentType === 'cat' ? '📋 CAT' : '🧠 Quiz';
-        return `<tr><td><b>${q.title}</b>${q.timeLimit ? `<br><span style="font-size:10px;color:var(--text-muted);">⏱ ${q.timeLimit}min</span>` : ''}<br><span class="badge badge-info" style="font-size:9px;">${typeLabel}</span></td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td><span class="badge badge-info">${qCount} Qs</span></td><td><span class="badge badge-info">${totalPts} pts</span></td><td><span class="badge badge-warning">${q.passMark}%</span></td><td><span class="badge badge-success">${subs}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuiz('${q.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showQuizRegistration('${q.id}')">Reg</button> <button class="btn btn-success btn-sm" onclick="viewQuizSubmissions('${q.id}')">Results</button> <button class="btn btn-danger btn-sm" onclick="deleteQuiz('${q.id}')">Del</button></td></tr>`;
+        return `<tr><td><b>${q.title}</b>${q.timeLimit ? `<br><span style="font-size:10px;color:var(--text-muted);">⏱ ${q.timeLimit}min</span>` : ''}<br><span class="badge badge-info" style="font-size:9px;">${typeLabel}</span></td><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? esc(locTitle(lesson).text) : '--'}</td><td><span class="badge badge-info">${qCount} Qs</span></td><td><span class="badge badge-info">${totalPts} pts</span></td><td><span class="badge badge-warning">${q.passMark}%</span></td><td><span class="badge badge-success">${subs}</span></td><td><button class="btn btn-outline btn-sm" onclick="editQuiz('${q.id}')">Edit</button> <button class="btn btn-outline btn-sm" onclick="showQuizRegistration('${q.id}')">Reg</button> <button class="btn btn-success btn-sm" onclick="viewQuizSubmissions('${q.id}')">Results</button> <button class="btn btn-danger btn-sm" onclick="deleteQuiz('${q.id}')">Del</button></td></tr>`;
         }).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">No quizzes yet. Click "+ Create Quiz" to set one up.</td></tr>';
         courseSelect.onchange = renderQuizzes;
     }
@@ -23427,13 +23427,14 @@ async function doSendNoteWhatsApp(id) {
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
     const fullMessage = `${prefix ? prefix + '\n\n' : ''}📚 *${locTitle(note, window._noteViewLang).text}*\n\n${locContent(note, window._noteViewLang).text}\n\n— ${schoolName}`;
+    const noteLabel = 'Note: ' + locTitle(note, window._noteViewLang).text;
     closeModal();
     try {
         const st = await waCloudCall('/api/whatsapp-cloud/status');
-        if (st && st.configured) return runCloudBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName, 'Note sent');
+        if (st && st.configured) return runCloudBroadcast(targets, { name: noteLabel }, fullMessage, schoolName, 'Note sent');
     } catch (e) { /* fall through */ }
-    if (await waAutoEnqueueTargets(targets, 'Note: ' + note.title, fullMessage, schoolName, 'Note sent')) return;
-    sendWhatsAppBroadcast(targets, { name: 'Note: ' + note.title }, fullMessage, schoolName);
+    if (await waAutoEnqueueTargets(targets, noteLabel, fullMessage, schoolName, 'Note sent')) return;
+    sendWhatsAppBroadcast(targets, { name: noteLabel }, fullMessage, schoolName);
 }
 async function deleteNote(id) {
     if (!await showConfirm('Confirm', 'Delete this note?')) return;
@@ -27944,11 +27945,12 @@ async function performSmartSearch(query) {
     const qzMatches = quizzes.filter(z => z.title.toLowerCase().includes(q) || (z.courseId || '').toLowerCase().includes(q));
     if (qzMatches.length) results.push({ category: 'Quizzes', items: qzMatches.slice(0, 5).map(z => { const isStudentRole = JSON.parse(sessionStorage.getItem('currentUser') || '{}').role === 'student'; return { label: 'Quiz', text: z.title, sub: `Pass: ${z.passMark}% — ${z.questions ? z.questions.length : 0} questions`, action: isStudentRole ? () => { closeModal(); startQuiz(z.id); } : () => showScreen('quizzes') }; }) });
     const notes = await dbGetAll('notes');
-    const nMatches = notes.filter(n => n.title.toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q));
-    if (nMatches.length) results.push({ category: 'Notes', items: nMatches.slice(0, 5).map(n => ({ label: 'Note', text: n.title, sub: (n.content || '').substring(0, 60) + '...', action: () => { showScreen('notes'); }, })) });
+    // A note is found in EITHER language.
+    const nMatches = notes.filter(n => [n.title, n.titleSw, n.content, n.contentSw].some(t => String(t || '').toLowerCase().includes(q)));
+    if (nMatches.length) results.push({ category: 'Notes', items: nMatches.slice(0, 5).map(n => ({ label: 'Note', text: locTitle(n).text, sub: (locContent(n).text || '').substring(0, 60) + '...', action: () => { showScreen('notes'); }, })) });
     const lessons = await dbGetAll('lessons');
-    const lMatches = lessons.filter(l => l.title.toLowerCase().includes(q) || (l.description || '').toLowerCase().includes(q));
-    if (lMatches.length) results.push({ category: 'Lessons', items: lMatches.slice(0, 5).map(l => ({ label: 'Lesson', text: l.title, sub: (l.description || '').substring(0, 60) + '...', action: () => { showScreen('lessons'); }, })) });
+    const lMatches = lessons.filter(l => [l.title, l.titleSw, l.description, l.descriptionSw].some(t => String(t || '').toLowerCase().includes(q)));
+    if (lMatches.length) results.push({ category: 'Lessons', items: lMatches.slice(0, 5).map(l => ({ label: 'Lesson', text: locTitle(l).text, sub: (locDesc(l).text || '').substring(0, 60) + '...', action: () => { showScreen('lessons'); }, })) });
     const lessonFiles = await dbGetAll('lessonFiles');
     const fMatches = lessonFiles.filter(f => f.fileName.toLowerCase().includes(q));
     if (fMatches.length) results.push({ category: 'Files', items: fMatches.slice(0, 5).map(f => ({ label: 'File', text: f.fileName, sub: 'Lesson resource', action: () => { showScreen('lessons'); }, })) });
@@ -30752,7 +30754,7 @@ async function renderVirtualClassroomTab(lesson, lessonId, canEdit) {
     if (enabled && jitsiUrl) {
         html += '<div style="margin-top:16px;">';
         var vcTrainer = lesson.virtualTrainer ? (' <span style="color:var(--text-muted);font-weight:normal;font-size:13px;">· Trainer: ' + esc(lesson.virtualTrainer) + '</span>') : '';
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>Live Class: ' + (lesson.title || 'Lesson') + '</b>' + vcTrainer;
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>Live Class: ' + escapeHtml(locTitle(lesson).text || 'Lesson') + '</b>' + vcTrainer;
         if (isTeacher && canEdit) html += '<span style="font-size:11px;color:var(--text-muted);">Moderator access</span>';
         html += '</div>';
         if (jitsiEmbed) {
