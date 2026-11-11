@@ -8153,6 +8153,32 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
         } catch { return json(res, 400, { error: 'Invalid request' }); }
     }
 
+    // POST /api/student/lang — the caller's OWN content-language preference
+    // (en / sw) for notes, lessons and videos. Like /api/terms-accept this
+    // stamps ONE field on the caller's own login record, so no generic
+    // users-store write is ever reachable from the browser. The value comes
+    // back in the login response, so the choice follows the learner to
+    // another device without an extra request.
+    if (parts.length === 2 && parts[1] === 'student' && parts[2] === 'lang' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', () => {
+            try {
+                const authUser = getRequestUser(req);
+                if (!authUser || !authUser.user) return json(res, 401, { error: 'Not authenticated' });
+                let parsed = {};
+                try { parsed = JSON.parse(body || '{}') || {}; } catch (e) { parsed = {}; }
+                const lang = String(parsed.lang || parsed.langPref || '').toLowerCase() === 'sw' ? 'sw' : 'en';
+                const userRec = (db.users || []).find(u => String(u.username) === String(authUser.username));
+                if (!userRec) return json(res, 404, { error: 'Account not found' });
+                userRec.langPref = lang;
+                saveDB();
+                return json(res, 200, { ok: true, langPref: lang });
+            } catch (e) { return json(res, 400, { error: 'Invalid request' }); }
+        });
+        return true;
+    }
+
     // GET /api/public-contact — admin phone for login screen (public, no secrets)
     if (parts.length === 2 && parts[1] === 'public-contact' && req.method === 'GET') {
         try {
@@ -10644,20 +10670,15 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     if (store === 'settings' && value.key === 'owner' && !isOwnerUser(user)) {
                         return json(res, 403, { error: 'Only the owner can change the owner account' });
                     }
-                    // Students updating only their own terms acceptance and their
-                    // own language preference (allowed past the gate above).
+                    // Students updating only their own terms acceptance (allowed past the gate above)
                     if (store === 'users' && user && user.role === 'student') {
                         if (String(toStore[keyPath]) !== String(user.username)) return json(res, 403, { error: 'Students may only update their own account' });
                         const existing = (db[store] || []).find(r => r[keyPath] === toStore[keyPath]);
                         if (!existing) return json(res, 404, { error: 'Account not found' });
-                        const termsKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion', 'langPref'];
+                        const termsKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion'];
                         for (const k of termsKeys) {
                             if (k in toStore) existing[k] = toStore[k];
                         }
-                        // The content language (en / sw) the learner picked for
-                        // notes, lessons and videos. Stored on their own login
-                        // record so it follows them to another device.
-                        if ('langPref' in toStore) existing.langPref = (String(toStore.langPref).toLowerCase() === 'sw') ? 'sw' : 'en';
                         mutate(existing);
                         return json(res, 200, { ok: true, key: existing[keyPath] });
                     }

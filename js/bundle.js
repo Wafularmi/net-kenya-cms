@@ -21706,19 +21706,23 @@ function setAppLang(lang) {
     try { localStorage.setItem(APP_LANG_KEY, lang === 'sw' ? 'sw' : 'en'); } catch (e) {}
     try { const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}'); u.lang = lang === 'sw' ? 'sw' : 'en'; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
     try {
-        // On Exams/Quizzes the switcher also drives the student's assessment language,
-        // so persist it on their record. This keeps the next exam/quiz prompt in sync
-        // without rebuilding the whole app.
+        // The learner may only write their OWN login record, so the language
+        // preference is stored by a dedicated endpoint that stamps exactly one
+        // field on their account (never a generic users-store write). It comes
+        // back in the login response, so the choice follows them to another
+        // device without an extra request.
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (u.role === 'student') {
             const pref = lang === 'sw' ? 'sw' : 'en';
-            // The learner may only write their OWN login record, so the language
-            // preference lives there: it then follows them to another device.
             try { u.langPref = pref; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
             (async () => {
                 try {
-                    await dbPut('users', { username: u.username, langPref: pref });
-                } catch (e) { console.error('persist langPref from switcher failed:', e); }
+                    const res = await fetch('/api/student/lang', {
+                        method: 'POST', headers: getAuthHeaders(),
+                        body: JSON.stringify({ lang: pref })
+                    });
+                    if (!res.ok) console.error('persist langPref failed:', res.status);
+                } catch (e) { console.error('persist langPref failed:', e); }
             })();
         }
     } catch (e) {}
