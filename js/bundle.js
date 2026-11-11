@@ -1959,7 +1959,7 @@ async function saveMaintenanceAIConfig(evt) {
         if (!res.ok) throw new Error((data && (data.error || data.detail)) || await res.text().catch(()=>res.status));
         const source = evt && evt.target ? evt.target.id : '';
         if (source === 'settings-maintenance-speed-auto') {
-            showToast(speedAutoEnabled ? 'Automatic speed-up enabled (runs only in the scheduled maintenance window)' : 'Automatic speed-up disabled', { type: speedAutoEnabled ? 'success' : 'info' });
+            showToast(speedAutoEnabled ? 'Automatic speed-up enabled (runs only during low load)' : 'Automatic speed-up disabled', { type: speedAutoEnabled ? 'success' : 'info' });
         } else {
             showToast(enabled ? 'Maintenance AI auto-run enabled' : 'Maintenance AI auto-run disabled', { type:'success' });
         }
@@ -2009,7 +2009,9 @@ function renderMaintenanceSpeed(speed) {
     if (st) {
         const parts = [];
         parts.push(speed.autoEnabled === false ? 'Auto speed: OFF' : 'Auto speed: ON');
-        parts.push(speed.inScheduledWindow ? 'in maintenance window' : 'waits for maintenance window');
+        if (speed.lowLoad) parts.push(speed.lowLoad.lowLoad ? 'low load now' : 'waiting for low load');
+        else parts.push(speed.inScheduledWindow ? 'in maintenance window' : 'waits for low load');
+        if (speed.lowLoad && !speed.lowLoad.lowLoad && speed.lowLoad.reasons && speed.lowLoad.reasons.length) parts.push(speed.lowLoad.reasons[0].replace(/_/g, ' '));
         if (speed.running) parts.push('running');
         if (speed.lastRunAt) parts.push('last: ' + new Date(speed.lastRunAt).toLocaleString());
         if (speed.lastScore != null) parts.push('score: ' + speed.lastScore + '/100');
@@ -2028,11 +2030,11 @@ function renderMaintenanceSpeed(speed) {
     const db = (before.db || {});
     const routes = (before.routes || []).filter(x => Number(x.maxMs) >= 250).slice(0, 6);
     const routeHtml = routes.length ? routes.map(x => `<div style="display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--border);padding:3px 0;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_maiEsc(x.route)}</span><span style="white-space:nowrap;">max ${_maiEsc(_maiFmtMs(x.maxMs))} • avg ${_maiEsc(_maiFmtMs(x.avgMs))}</span></div>`).join('') : '<div style="color:var(--text-muted);">No route above 250ms in the current sample.</div>';
-    const applied = (r.appliedActions || []).map(a => `<li>${_maiEsc(a.label || a.id)} — changed ${_maiEsc(a.changed || 0)}${a.reversible ? ' (reversible)' : ' (expired/transient)'}</li>`).join('') || '<li>No safe action was applied.</li>';
+    const applied = (r.appliedActions || []).map(a => `<li>${_maiEsc(a.label || a.id)} — changed ${_maiEsc(a.changed || 0)}${a.reversible ? ' (reversible)' : ' (non-reversible)'}</li>`).join('') || '<li>No safe action was applied.</li>';
     const findings = (r.findings || []).slice(0, 5).map(f => `<li><b>[${_maiEsc(f.severity)}]</b> ${_maiEsc(f.message)}</li>`).join('') || '<li>No findings.</li>';
     const recs = (r.recommendations || []).slice(0, 5).map(x => `<li>${_maiEsc(x)}</li>`).join('') || '<li>No recommendations.</li>';
-    const rollback = r.rollback ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Reversible actions: ${_maiEsc((r.rollback.reversibleActions || []).join(', ') || 'none')}. ${((r.rollback.irreversibleActions || []).length) ? 'Expired/transient cleanup cannot be restored: ' + _maiEsc((r.rollback.irreversibleActions || []).join(', ')) : ''}</div>` : '';
-    const reverted = speed.lastRevertResult ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Last revert: ${_maiEsc((speed.lastRevertResult.restored || []).length)} restored, ${_maiEsc((speed.lastRevertResult.skipped || []).length)} expired/transient action(s) skipped.</div>` : '';
+    const rollback = r.rollback ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Reversible actions: ${_maiEsc((r.rollback.reversibleActions || []).join(', ') || 'none')}. ${((r.rollback.irreversibleActions || []).length) ? 'Non-reversible cleanup cannot be restored: ' + _maiEsc((r.rollback.irreversibleActions || []).join(', ')) : ''}</div>` : '';
+    const reverted = speed.lastRevertResult ? `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">Last revert: ${_maiEsc((speed.lastRevertResult.restored || []).length)} restored, ${_maiEsc((speed.lastRevertResult.skipped || []).length)} non-reversible action(s) skipped.</div>` : '';
     const sev = Number(r.speedScore) >= 80 ? 'success' : Number(r.speedScore) >= 55 ? 'warning' : 'danger';
     el.innerHTML = `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg-elevated, var(--bg-card, #1e293b));color:var(--text,#111827);">
         <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -2065,7 +2067,7 @@ async function runMaintenanceSpeedCheck() {
     }
 }
 async function runMaintenanceSpeedUp() {
-    if (!confirm('Apply a safe speed-up now?\n\nThis only removes expired sessions/tokens, trims expired rate-limit entries, and compacts bounded Maintenance AI history. It does not delete business records, change code, or change security settings. Reversible parts can be restored from this screen.')) return;
+    if (!confirm('Apply a safe speed-up now?\n\nThis removes expired sessions/tokens, trims expired rate-limit entries, compacts bounded Maintenance AI history, and warms the compressed static/branding cache. It does not delete business records, change code, or change security settings. Reversible parts can be restored from this screen.')) return;
     const btn = document.getElementById('maintenance-speed-up-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
     try {
@@ -2090,7 +2092,7 @@ async function revertMaintenanceSpeedUp() {
         if (!res.ok) throw new Error(data.error || data.detail || res.status);
         const restored = (data.restored || []).length;
         const skipped = (data.skipped || []).length;
-        showToast('Speed-up reverted. Restored ' + restored + ' item(s)' + (skipped ? '; ' + skipped + ' expired/transient cleanup(s) skipped.' : '.'), { type: skipped ? 'warning' : 'success' });
+        showToast('Speed-up reverted. Restored ' + restored + ' item(s)' + (skipped ? '; ' + skipped + ' non-reversible cleanup(s) skipped.' : '.'), { type: skipped ? 'warning' : 'success' });
         loadMaintenanceAI();
     } catch (e) {
         showToast('Could not revert speed-up: ' + (e && e.message ? e.message : e), { type:'danger' });
@@ -2109,7 +2111,7 @@ async function loadMaintenanceAIReports() {
         let data = null; try { data = JSON.parse(raw); } catch(e) { throw new Error('HTTP '+res.status+' (non-JSON response)'); }
         if (!res.ok) throw new Error(data.error || data.detail || res.status);
         const reports = data.reports || [];
-        if (!reports.length) { el.innerHTML = '<div style="color:var(--text-muted);">No maintenance AI reports yet. Run a check or wait for the next scheduled maintenance window.</div>'; return; }
+        if (!reports.length) { el.innerHTML = '<div style="color:var(--text-muted);">No maintenance AI reports yet. Run a check or wait for the next low-load background run.</div>'; return; }
         el.innerHTML = reports.map(r => {
             const risk = r.summary && typeof r.summary.riskScore === 'number' ? r.summary.riskScore : null;
             const sooner = r.summary && r.summary.runSooner && r.summary.runSooner.recommended;

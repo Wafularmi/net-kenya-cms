@@ -22,6 +22,9 @@ const MAI_PERF = {
     requests: 0,
     apiRequests: 0,
     slowRequests: 0,
+    inFlight: 0,
+    lastRequestAt: 0,
+    lastRequestFinishedAt: 0,
     byRoute: Object.create(null),
     recent: [],
     dbFlushes: 0,
@@ -58,6 +61,7 @@ function _perfRecordRequest(req, startedNs, statusCode, route, bytes) {
         if (!Number.isFinite(ms)) return;
         const status = Number(statusCode) || 0;
         const size = Math.max(0, Number(bytes) || 0);
+        MAI_PERF.lastRequestFinishedAt = Date.now();
         MAI_PERF.requests++;
         if (route.indexOf('GET /api/') === 0 || route.indexOf('POST /api/') === 0 || route.indexOf('PUT /api/') === 0 || route.indexOf('DELETE /api/') === 0) MAI_PERF.apiRequests++;
         if (ms >= MAI_PERF_SLOW_MS) MAI_PERF.slowRequests++;
@@ -1367,8 +1371,21 @@ function serveCachedFile(res, filePath, url, req) {
         res.setHeader('Content-Encoding', 'gzip');
         setAssetCacheHeaders(res, { versioned, isCode, longLived: skipGzip });
         const stat = fs.statSync(gzPath);
-        res.setHeader('Content-Length', stat.size);
-        return fs.createReadStream(gzPath).pipe(res);
+        const cacheKey = gzPath + '|' + stat.mtimeMs + '|' + stat.size;
+        const cached = fileCache.get(cacheKey);
+        if (cached) {
+            res.setHeader('Content-Length', cached.length);
+            return res.end(cached);
+        }
+        return fs.readFile(gzPath, (err, data) => {
+            if (err) {
+                if (!res.headersSent) res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                return res.end(res.headersSent ? '' : '404 Not Found');
+            }
+            cacheFile(cacheKey, data);
+            res.setHeader('Content-Length', data.length);
+            res.end(data);
+        });
     }
     
     fs.readFile(filePath, (err, data) => {
@@ -1407,6 +1424,8 @@ function serveCachedFile(res, filePath, url, req) {
 
 function cacheFile(cacheKey, data) {
     if (data.length > 1024 * 1024) return;
+    const prev = fileCache.get(cacheKey);
+    if (prev) cacheSize = Math.max(0, cacheSize - prev.length);
     if (cacheSize + data.length > MAX_CACHE_SIZE) {
         fileCache.clear();
         cacheSize = 0;
@@ -3154,6 +3173,70 @@ function stripPrivateBranding(rec) {
         out[k] = rec[k];
     }
     return out;
+}
+
+// Public branding images. Logos are stored in the settings record as base64
+// data URLs. Embedding those in index.html and in every light-branding response
+// made the first paint download the same ~400 KB twice. The image endpoint
+// below serves them once with a content-addressed, immutable URL instead.
+const PUBLIC_BRANDING_IMAGE_KEYS = new Set(['logo', 'logoDark', 'receiptLogo']);
+function brandingRecordHolder(rec) {
+    if (!rec || typeof rec !== 'object') return null;
+    return (rec.value && typeof rec.value === 'object') ? rec.value : rec;
+}
+function brandingImageVersion(raw) {
+    try { return crypto.createHash('sha256').update(String(raw)).digest('hex').slice(0, 16); } catch (e) { return ''; }
+}
+function publicBrandingImageUrl(key, rec) {
+    const holder = brandingRecordHolder(rec);
+    const raw = holder && holder[key];
+    if (!raw || typeof raw !== 'string') return '';
+    if (!/^data:image\//i.test(raw)) return raw;
+    // Only base64 data URLs are rewritten; anything else stays as the browser
+    // already understands it.
+    if (!/^data:[^,]*;base64,/i.test(raw)) return raw;
+    const v = brandingImageVersion(raw);
+    return '/api/branding/image/' + encodeURIComponent(key) + '.png' + (v ? '?v=' + v : '');
+}
+function lightBrandingView(rec) {
+    if (!rec || typeof rec !== 'object') return rec;
+    const drop = new Set(['schoolSeal', 'officialSeal', 'sig_registrar', 'sig_dean', 'sig_director', 'college_stamp', 'collegeStamp', 'signaturePrefs', 'partner1Logo', 'partner2Logo', 'kraPin', 'paidSignature', 'receivedSignature', 'stamp', 'sig_stamp']);
+    const apply = (src) => {
+        const dst = Object.assign({}, src);
+        drop.forEach(k => { try { delete dst[k]; } catch (e) {} });
+        PUBLIC_BRANDING_IMAGE_KEYS.forEach(k => {
+            const url = publicBrandingImageUrl(k, src);
+            if (url) dst[k] = url;
+        });
+        return dst;
+    };
+    if (rec.value && typeof rec.value === 'object') {
+        const out = apply(rec);
+        out.value = apply(rec.value);
+        return out;
+    }
+    return apply(rec);
+}
+
+// Decoded public branding images are tiny compared with their base64 form and
+// are read on the login path. Keep them in memory; the URL hash changes when
+// the underlying logo changes, so a stale entry can never be served.
+const brandingImageCache = new Map();
+function brandingImageFromRecord(key, rec) {
+    if (!PUBLIC_BRANDING_IMAGE_KEYS.has(key)) return null;
+    const holder = brandingRecordHolder(rec);
+    const raw = holder && holder[key];
+    if (!raw || typeof raw !== 'string') return null;
+    const m = /^data:(image\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,([\s\S]+)$/.exec(raw);
+    if (!m) return null;
+    try {
+        const buf = Buffer.from(m[2], 'base64');
+        if (!buf.length) return null;
+        const hash = brandingImageVersion(raw);
+        const cached = brandingImageCache.get(key);
+        if (!cached || cached.hash !== hash) brandingImageCache.set(key, { hash, mime: m[1], buf });
+        return { hash, mime: m[1], buf };
+    } catch (e) { return null; }
 }
 
 // The anonymous view of the settings store: only the public keys, and for
@@ -4994,21 +5077,165 @@ function _maiDelta(b, key, value) {
 //   1. a read-only diagnostic (manual "Run Speed Check"), and
 //   2. allowlisted, bounded housekeeping (manual "Speed Up Now" / auto).
 // It never edits code, never deletes business records, and never scans the
-// whole database. Auto mode runs only inside the existing scheduled
-// maintenance window, so it cannot compete with students or exams.
+// whole database. Automatic mode also waits for the live low-load gate (and
+// the existing scheduled window when one is configured), so it cannot compete
+// with students or exams.
 const MAI_SPEED_ACTION_DEFS = Object.freeze({
     prune_expired_sessions: { label: 'Remove expired sessions', auto: true, reversible: false },
     prune_expired_bypass_tokens: { label: 'Remove expired maintenance bypass tokens', auto: true, reversible: false },
     prune_expired_rate_limits: { label: 'Trim expired rate-limit entries', auto: true, reversible: false },
     compact_ai_history: { label: 'Compact Maintenance AI history', auto: true, reversible: true },
     compact_ai_repairs: { label: 'Compact completed repair history', auto: true, reversible: true },
-    compact_speed_history: { label: 'Compact speed-run history', auto: true, reversible: true }
+    compact_speed_history: { label: 'Compact speed-run history', auto: true, reversible: true },
+    warm_critical_assets: { label: 'Warm compressed loading assets', auto: true, reversible: false }
 });
 const MAI_SPEED_AI_HISTORY_CAP = 30;
 const MAI_SPEED_REPAIR_DONE_CAP = 20;
 const MAI_SPEED_HISTORY_CAP = 12;
+const MAI_LOW_LOAD_MAX_REQUESTS_PER_MIN = parseInt(process.env.MAI_LOW_LOAD_MAX_REQUESTS_PER_MIN || '20', 10);
+const MAI_LOW_LOAD_MAX_IN_FLIGHT = parseInt(process.env.MAI_LOW_LOAD_MAX_IN_FLIGHT || '1', 10);
+const MAI_LOW_LOAD_IDLE_MS = parseInt(process.env.MAI_LOW_LOAD_IDLE_MS || '15000', 10);
+const MAI_LOW_LOAD_MAX_P95_MS = parseInt(process.env.MAI_LOW_LOAD_MAX_P95_MS || '75', 10);
+const MAI_LOW_LOAD_MAX_MEAN_MS = parseInt(process.env.MAI_LOW_LOAD_MAX_MEAN_MS || '30', 10);
+const MAI_LOW_LOAD_DB_FLUSH_GAP_MS = parseInt(process.env.MAI_LOW_LOAD_DB_FLUSH_GAP_MS || '5000', 10);
+const MAI_LOW_LOAD_STARTUP_GRACE_MS = parseInt(process.env.MAI_LOW_LOAD_STARTUP_GRACE_MS || '300000', 10);
+const MAI_LOW_LOAD_COOLDOWN_MS = parseInt(process.env.MAI_LOW_LOAD_COOLDOWN_MS || String(6 * 60 * 60 * 1000), 10);
+const MAI_STATIC_WARM_MAX_BYTES = parseInt(process.env.MAI_STATIC_WARM_MAX_BYTES || String(8 * 1024 * 1024), 10);
 let _maiSpeedRunning = false;
 let _maiLastAutoSpeedWindowKey = '';
+let _maiLastLowLoadSpeedAt = 0;
+
+function _maiLowLoadStatus(now) {
+    now = now || Date.now();
+    const recent = Array.isArray(MAI_PERF.recent) ? MAI_PERF.recent : [];
+    let requestsLastMinute = 0;
+    let recentMaxMs = 0;
+    for (let i = recent.length - 1; i >= 0; i--) {
+        const r = recent[i] || {};
+        const at = Number(r.at) || 0;
+        if (now - at > 60000) break;
+        requestsLastMinute++;
+        recentMaxMs = Math.max(recentMaxMs, Number(r.ms) || 0);
+    }
+    const lastFinished = Number(MAI_PERF.lastRequestFinishedAt) || 0;
+    const idleForMs = lastFinished ? Math.max(0, now - lastFinished) : 999999;
+    const lastFlush = Number(MAI_PERF.lastDbFlushAt) || 0;
+    const lastFlushAgoMs = lastFlush ? Math.max(0, now - lastFlush) : 999999;
+    const uptimeMs = Math.round(process.uptime() * 1000);
+    const el = _maiEventLoopSnapshot() || {};
+    const reasons = [];
+    if (!MAI_PERF.enabled) reasons.push('telemetry_disabled');
+    if (uptimeMs < MAI_LOW_LOAD_STARTUP_GRACE_MS) reasons.push('startup_grace');
+    if ((Number(MAI_PERF.inFlight) || 0) > MAI_LOW_LOAD_MAX_IN_FLIGHT) reasons.push('requests_in_flight');
+    if (requestsLastMinute > MAI_LOW_LOAD_MAX_REQUESTS_PER_MIN) reasons.push('request_rate');
+    if (idleForMs < MAI_LOW_LOAD_IDLE_MS) reasons.push('recent_request');
+    if ((Number(el.p95Ms) || 0) > MAI_LOW_LOAD_MAX_P95_MS) reasons.push('event_loop_p95');
+    if ((Number(el.meanMs) || 0) > MAI_LOW_LOAD_MAX_MEAN_MS) reasons.push('event_loop_mean');
+    if (lastFlushAgoMs < MAI_LOW_LOAD_DB_FLUSH_GAP_MS) reasons.push('recent_db_flush');
+    return {
+        lowLoad: reasons.length === 0,
+        reasons,
+        at: new Date(now).toISOString(),
+        inFlight: Number(MAI_PERF.inFlight) || 0,
+        requestsLastMinute,
+        recentMaxMs: Math.round(recentMaxMs * 10) / 10,
+        idleForMs,
+        eventLoopP95Ms: Number(el.p95Ms) || 0,
+        eventLoopMeanMs: Number(el.meanMs) || 0,
+        lastDbFlushAgoMs: lastFlushAgoMs,
+        uptimeMs,
+        thresholds: {
+            maxRequestsPerMinute: MAI_LOW_LOAD_MAX_REQUESTS_PER_MIN,
+            maxInFlight: MAI_LOW_LOAD_MAX_IN_FLIGHT,
+            idleMs: MAI_LOW_LOAD_IDLE_MS,
+            maxP95Ms: MAI_LOW_LOAD_MAX_P95_MS,
+            maxMeanMs: MAI_LOW_LOAD_MAX_MEAN_MS,
+            dbFlushGapMs: MAI_LOW_LOAD_DB_FLUSH_GAP_MS,
+            startupGraceMs: MAI_LOW_LOAD_STARTUP_GRACE_MS,
+            cooldownMs: MAI_LOW_LOAD_COOLDOWN_MS
+        }
+    };
+}
+
+function _maiCriticalStaticFiles() {
+    const out = [];
+    for (const dir of ['js', 'css']) {
+        const full = path.join(ROOT, dir);
+        let entries = [];
+        try { entries = fs.readdirSync(full, { withFileTypes: true }); } catch (e) { continue; }
+        for (const entry of entries) {
+            if (!entry || !entry.isFile()) continue;
+            const ext = path.extname(entry.name).toLowerCase();
+            if (ext !== '.js' && ext !== '.css') continue;
+            const filePath = path.join(full, entry.name);
+            try {
+                const stat = fs.statSync(filePath);
+                if (stat.size > 512) out.push({ filePath, size: stat.size, mtimeMs: stat.mtimeMs });
+            } catch (e) {}
+        }
+    }
+    return out;
+}
+function _maiStaticWarmNeeded() {
+    try {
+        for (const f of _maiCriticalStaticFiles()) {
+            const gzPath = f.filePath + '.gz';
+            let gz = null;
+            try { gz = fs.statSync(gzPath); } catch (e) {}
+            if (!gz || gz.mtimeMs < f.mtimeMs) return true;
+            const key = gzPath + '|' + gz.mtimeMs + '|' + gz.size;
+            if (!fileCache.has(key)) return true;
+        }
+        const rec = (db.settings || []).find(s => s && s.key === 'branding');
+        const holder = brandingRecordHolder(rec);
+        for (const key of PUBLIC_BRANDING_IMAGE_KEYS) {
+            const raw = holder && holder[key];
+            if (!raw || typeof raw !== 'string') continue;
+            const cached = brandingImageCache.get(key);
+            if (!cached || cached.hash !== brandingImageVersion(raw)) return true;
+        }
+    } catch (e) { return true; }
+    return false;
+}
+async function _maiWarmCriticalAssets() {
+    const started = Date.now();
+    let files = 0, compressed = 0, cached = 0, bytes = 0, skipped = 0, brandingImages = 0;
+    for (const f of _maiCriticalStaticFiles()) {
+        files++;
+        try {
+            const gzPath = f.filePath + '.gz';
+            let gzStat = null;
+            try { gzStat = fs.statSync(gzPath); } catch (e) {}
+            if (!gzStat || gzStat.mtimeMs < f.mtimeMs) {
+                if (bytes + f.size > MAI_STATIC_WARM_MAX_BYTES) { skipped++; continue; }
+                const gz = await new Promise((resolve, reject) => {
+                    zlib.gzip(fs.readFileSync(f.filePath), { level: 9 }, (err, out) => err ? reject(err) : resolve(out));
+                });
+                await fs.promises.writeFile(gzPath, gz);
+                gzStat = fs.statSync(gzPath);
+                compressed++;
+            }
+            if (bytes + gzStat.size > MAI_STATIC_WARM_MAX_BYTES) { skipped++; continue; }
+            const key = gzPath + '|' + gzStat.mtimeMs + '|' + gzStat.size;
+            if (!fileCache.has(key)) {
+                const data = await fs.promises.readFile(gzPath);
+                cacheFile(key, data);
+                cached++;
+                bytes += data.length;
+            }
+        } catch (e) {
+            skipped++;
+        }
+        await _maiYield();
+    }
+    try {
+        const rec = (db.settings || []).find(s => s && s.key === 'branding');
+        for (const key of PUBLIC_BRANDING_IMAGE_KEYS) {
+            if (brandingImageFromRecord(key, rec)) brandingImages++;
+        }
+    } catch (e) {}
+    return { files, compressed, cached, brandingImages, bytes, skipped, durationMs: Date.now() - started };
+}
 
 function _maiSpeedConfig() {
     const v = _maiSettings('maintenanceAI');
@@ -5117,9 +5344,12 @@ function _maiSpeedPlan(state) {
     const speedHistory = Array.isArray(speed.history) ? speed.history.length : 0;
     plan.counts.speedHistory = speedHistory;
     if (speedHistory > MAI_SPEED_HISTORY_CAP) plan.actions.push({ id: 'compact_speed_history', count: speedHistory - MAI_SPEED_HISTORY_CAP });
+    const warmNeeded = _maiStaticWarmNeeded();
+    plan.counts.staticAssetsNeedWarm = warmNeeded;
+    if (warmNeeded) plan.actions.push({ id: 'warm_critical_assets', count: 1 });
     return plan;
 }
-function _maiApplySpeedPlan(plan, state, opts) {
+async function _maiApplySpeedPlan(plan, state, opts) {
     const speed = _maiGetSpeedState(state);
     const snapshot = { aiHistory: null, pendingRepairs: null, speedHistory: null };
     if ((plan.actions || []).some(a => a.id === 'compact_ai_history')) {
@@ -5158,6 +5388,10 @@ function _maiApplySpeedPlan(plan, state, opts) {
                 const before = speed.history.length;
                 speed.history = speed.history.slice(-MAI_SPEED_HISTORY_CAP);
                 changed = Math.max(0, before - speed.history.length);
+            } else if (action.id === 'warm_critical_assets') {
+                const warm = await _maiWarmCriticalAssets();
+                Object.assign(details, warm);
+                changed = warm.compressed + warm.cached + warm.brandingImages;
             }
             applied.push({ id: action.id, label: def.label, changed, reversible: !!def.reversible, details });
         } catch (e) {
@@ -5209,12 +5443,19 @@ async function runMaintenanceSpeedCycle(opts) {
     const trigger = opts.trigger || 'manual';
     const auto = !!opts.auto;
     const maint = getMaintenanceSetting();
+    const lowLoad = _maiLowLoadStatus();
     if (auto) {
-        if (!_maiSpeedAutoEnabled()) return { ok: false, skipped: true, reason: 'auto_disabled' };
-        if (!_maiIsInScheduledWindow(maint)) return { ok: false, skipped: true, reason: 'outside_maintenance_window' };
-        const key = _maiWindowKey(maint);
-        if (!key) return { ok: false, skipped: true, reason: 'no_scheduled_window' };
-        if (key === _maiLastAutoSpeedWindowKey) return { ok: false, skipped: true, reason: 'already_ran_this_window' };
+        if (!_maiSpeedAutoEnabled()) return { ok: false, skipped: true, reason: 'auto_disabled', lowLoad };
+        // Every automatic run — whether prompted by the scheduled window or
+        // the idle watcher — must pass the live low-load gate. A busy site or
+        // an active exam never gets background compression/cache work.
+        if (!lowLoad.lowLoad) return { ok: false, skipped: true, reason: 'not_low_load', lowLoad };
+        const inWindow = _maiIsInScheduledWindow(maint);
+        const windowKey = inWindow ? _maiWindowKey(maint) : '';
+        const key = windowKey
+            ? ('window:' + windowKey)
+            : ('low:' + Math.floor(Date.now() / Math.max(60000, MAI_LOW_LOAD_COOLDOWN_MS)));
+        if (key === _maiLastAutoSpeedWindowKey) return { ok: false, skipped: true, reason: 'already_ran_this_window', lowLoad };
         _maiLastAutoSpeedWindowKey = key;
     }
     _maiSpeedRunning = true;
@@ -5225,7 +5466,7 @@ async function runMaintenanceSpeedCycle(opts) {
         const before = _perfSnapshot();
         const plan = _maiSpeedPlan(state);
         const apply = opts.apply === true;
-        const result = apply ? _maiApplySpeedPlan(plan, state, { auto, trigger }) : { applied: [], skipped: [], rollback: null };
+        const result = apply ? await _maiApplySpeedPlan(plan, state, { auto, trigger }) : { applied: [], skipped: [], rollback: null };
         const after = _perfSnapshot();
         const findings = [];
         const recommendations = [];
@@ -5265,6 +5506,7 @@ async function runMaintenanceSpeedCycle(opts) {
             trigger,
             mode: auto ? 'auto' : 'manual',
             applied: apply,
+            lowLoad,
             durationMs: _maiNow() - started,
             status: 'completed',
             speedScore: _maiSpeedScore(before),
@@ -5287,6 +5529,7 @@ async function runMaintenanceSpeedCycle(opts) {
         speed.lastTrigger = trigger;
         speed.lastStatus = 'completed';
         speed.lastScore = report.speedScore;
+        speed.lastLowLoad = lowLoad;
         speed.lastReport = report;
         if (result.rollback) speed.lastRollback = result.rollback;
         speed.history.push({
@@ -5299,7 +5542,7 @@ async function runMaintenanceSpeedCycle(opts) {
         });
         if (speed.history.length > MAI_SPEED_HISTORY_CAP) speed.history = speed.history.slice(-MAI_SPEED_HISTORY_CAP);
         try { if (typeof saveDB === 'function') saveDB(); } catch (e) {}
-        try { if (typeof auditLog === 'function') auditLog('maintenance-ai-speed-run', 'maintenance', { id: report.id, trigger, mode: report.mode, score: report.speedScore, applied: result.applied.length }, opts.user || 'system'); } catch (e) {}
+        try { if (typeof auditLog === 'function') auditLog('maintenance-ai-speed-run', 'maintenance', { id: report.id, trigger, mode: report.mode, score: report.speedScore, applied: result.applied.length, actions: result.applied.map(a => a.id), lowLoad: !!lowLoad.lowLoad }, opts.user || 'system'); } catch (e) {}
         return { ok: true, report };
     } catch (e) {
         const err = { ok: false, error: String(e && e.message || e) };
@@ -5825,8 +6068,27 @@ async function _maiMaybeRunScheduled() {
         });
     } catch(e){}
 }
+// Idle watcher: the same safe speed actions are also allowed outside a formal
+// maintenance window, but only after the site has been quiet for a while. The
+// check itself is a few integer reads; the work runs on setImmediate.
+async function _maiMaybeRunLowLoadSpeed() {
+    try {
+        if (_maiRunning || _maiSpeedRunning) return;
+        if (!_maiSpeedAutoEnabled()) return;
+        const low = _maiLowLoadStatus();
+        if (!low.lowLoad) return;
+        const now = Date.now();
+        if (_maiLastLowLoadSpeedAt && now - _maiLastLowLoadSpeedAt < MAI_LOW_LOAD_COOLDOWN_MS) return;
+        _maiLastLowLoadSpeedAt = now;
+        setImmediate(() => {
+            Promise.resolve(runMaintenanceSpeedCycle({ trigger: 'low-load', apply: true, auto: true })).catch(() => {});
+        });
+    } catch (e) {}
+}
+
 // Cheap scheduler: checks every 60s; no heavy work on tick.
 try { if (!global.__maiScheduler) { global.__maiScheduler = setInterval(_maiMaybeRunScheduled, 60000); } } catch(e){ try { setInterval(_maiMaybeRunScheduled, 60000); } catch(e2){} }
+try { if (!global.__maiLowLoadScheduler) { global.__maiLowLoadScheduler = setInterval(_maiMaybeRunLowLoadSpeed, 60000); } } catch(e){ try { setInterval(_maiMaybeRunLowLoadSpeed, 60000); } catch(e2){} }
 
 
 function parseCookies(req) {
@@ -6041,6 +6303,32 @@ function handleAPI(req, res) {
         } });
     }
 
+    // GET /api/branding/image/:key — public, cacheable login/header logo.
+    // The record still stores the image as a data URL (documents and Settings
+    // need that), but the page only references this content-addressed URL.
+    if (parts.length === 4 && parts[1] === 'branding' && parts[2] === 'image' && req.method === 'GET') {
+        let key = '';
+        try { key = decodeURIComponent(parts[3] || ''); } catch (e) {}
+        // A .png suffix keeps the URL inside Cloudflare's default cacheable
+        // extension set while the content type still comes from the data URL.
+        if (/\.png$/i.test(key)) key = key.slice(0, -4);
+        const rec = (db.settings || []).find(s => s && s.key === 'branding');
+        const image = brandingImageFromRecord(key, rec);
+        if (!image) {
+            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+            return res.end('404 Not Found');
+        }
+        res.writeHead(200, {
+            'Content-Type': image.mime,
+            'Content-Length': image.buf.length,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+            'ETag': '"' + image.hash + '"',
+            'X-Content-Type-Options': 'nosniff'
+        });
+        return res.end(image.buf);
+    }
+
     // GET /api/events â€” SSE stream for real-time updates (authenticated only)
     if (parts.length === 2 && parts[1] === 'events' && req.method === 'GET') {
         const qUser = sessionUserForToken(urlObj.searchParams.get('token'));
@@ -6116,7 +6404,9 @@ function handleAPI(req, res) {
                     speed: {
                         autoEnabled: _maiSpeedAutoEnabled(),
                         configAutoEnabled: _maiSpeedConfig().speedAutoEnabled !== false,
-                        autoWindowOnly: true,
+                        autoWindowOnly: false,
+                        autoLowLoad: true,
+                        lowLoad: _maiLowLoadStatus(),
                         inScheduledWindow: _maiIsInScheduledWindow(maint),
                         scheduledWindowKey: _maiWindowKey(maint) || null,
                         running: !!_maiSpeedRunning,
@@ -9781,17 +10071,12 @@ const LIVE_PUSH_STORES = new Set([
                     item = { key: 'mpesa', payButtonEnabled: !!((item.value || item).payButtonEnabled) };
                 }
                 // Light branding: the login/header only needs identity, theme and
-                // the small logo fields. Seals/signatures/partner logos are for
-                // documents and Settings, which still request the full record.
+                // logo URLs. Seals/signatures/partner logos are for documents and
+                // Settings, which still request the full record. Replacing the
+                // inline base64 logos here keeps the login payload tiny; the
+                // browser fetches each logo once from the immutable image URL.
                 if (item && store === 'settings' && key === 'branding' && urlObj.searchParams.get('light') === '1') {
-                    const _lightDrop = new Set(['schoolSeal', 'officialSeal', 'sig_registrar', 'sig_dean', 'sig_director', 'college_stamp', 'signaturePrefs', 'partner1Logo', 'partner2Logo']);
-                    const _stripLightBranding = (rec) => {
-                        const out = Object.assign({}, rec);
-                        _lightDrop.forEach(k => { try { delete out[k]; } catch (e) {} });
-                        return out;
-                    };
-                    if (item.value && typeof item.value === 'object') item = Object.assign({}, item, { value: _stripLightBranding(item.value) });
-                    else item = _stripLightBranding(item);
+                    item = lightBrandingView(item);
                 }
                 // Learners get a narrowed settings view: no credentials, no
                 // other students' overrides, no private branding assets.
@@ -10449,11 +10734,26 @@ const server = http.createServer((req, res) => {
     // so it cannot delay the request and never writes to the database.
     const _perfStarted = process.hrtime.bigint();
     const _perfRoute = _perfRouteName(req.method, req.url);
+    // Long-lived SSE connections are deliberately excluded: a single idle
+    // student tab must not make Maintenance AI believe the site is busy.
+    const _perfTrackInFlight = MAI_PERF.enabled && !/^\/api\/events(?:[?#]|$)/.test(req.url || '');
+    if (_perfTrackInFlight) {
+        MAI_PERF.inFlight++;
+        MAI_PERF.lastRequestAt = Date.now();
+    }
+    let _perfDone = false;
+    const _perfEnd = () => {
+        if (_perfDone) return;
+        _perfDone = true;
+        if (_perfTrackInFlight) MAI_PERF.inFlight = Math.max(0, MAI_PERF.inFlight - 1);
+    };
     res.on('finish', () => {
+        _perfEnd();
         let _perfBytes = 0;
         try { _perfBytes = Number(res.getHeader('Content-Length')) || 0; } catch (e) {}
         _perfRecordRequest(req, _perfStarted, res.statusCode, _perfRoute, _perfBytes);
     });
+    res.on('close', _perfEnd);
     // Security headers applied to every response (harmless over plain HTTP,
     // honored over HTTPS). CSP keeps the app functional (inline styles/handlers,
     // same-origin + https) while blocking cross-origin script injection.
@@ -10571,8 +10871,8 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
             const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
             const schoolName = branding && branding.schoolName ? branding.schoolName : 'NET Foundation Kenya';
             const initials = branding && branding.initials ? branding.initials : 'NET';
-            const headerLogoData = branding && branding.logo ? branding.logo : '';
-            const loginLogoData = branding && (branding.receiptLogo || branding.logo) ? (branding.receiptLogo || branding.logo) : '';
+            const headerLogoData = publicBrandingImageUrl('logo', branding);
+            const loginLogoData = publicBrandingImageUrl('receiptLogo', branding) || headerLogoData;
             const logoData = headerLogoData;
             let logoCss = '';
             if (headerLogoData || loginLogoData) {
