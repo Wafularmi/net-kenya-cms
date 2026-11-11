@@ -19647,7 +19647,9 @@ async function renderLessons() {
         const modeBadge = lmode === 'drip' ? ' <span class="badge" style="font-size:9px;background:#e0e7ff;color:#3730a3;" title="Sequenced: unlocks per learner after the previous lesson + course pacing + fees">🔗 SEQUENCED</span>' : '';
         const lTitle = locTitle(l).text;
         const lDesc = locDesc(l).text;
-        const swBadge = hasSw(l, ['title', 'description', 'reference']) ? ' <span class="badge badge-success" style="font-size:9px;" title="Has a Kiswahili version">SW</span>' : '';
+        const swBadge = hasSw(l, ['title', 'description', 'reference'])
+            ? ' <span class="badge badge-success" style="font-size:9px;" title="Has a Kiswahili version">SW</span>'
+            : ' <span class="badge" style="font-size:9px;background:rgba(100,116,139,.18);color:var(--text-muted);" title="No Kiswahili version yet — open the lesson and press Translate to Kiswahili">EN</span>';
         const videoLangs = (Array.isArray(l.videos) ? l.videos : []).filter(v => v && v.lang === 'sw').length + (l.videoLang === 'sw' ? 1 : 0);
         const swVideoBadge = videoLangs ? ' <span class="badge badge-info" style="font-size:9px;" title="Kiswahili video version">🎬SW</span>' : '';
         return `<tr><td>${l.order || idx + 1}</td><td><b>${esc(lTitle)}</b>${swBadge}${swVideoBadge}${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl || (Array.isArray(l.videos) && l.videos.length) ? ' <span style="font-size:13px;" title="Has video(s)">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${esc(lDesc.substring(0, 80))}${lDesc.length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${(l.videoUrl || (Array.isArray(l.videos) && l.videos.length)) ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
@@ -19945,7 +19947,9 @@ async function switchLessonTab(tab, lessonId) {
             notes.forEach(n => {
                 const nT = locTitle(n).text;
                 const nC = locContent(n).text;
-                const nSw = hasSw(n, ['title', 'content']) ? ' <span class="badge badge-success" style="font-size:9px;">SW</span>' : '';
+                const nSw = hasSw(n, ['title', 'content'])
+                    ? ' <span class="badge badge-success" style="font-size:9px;">SW</span>'
+                    : ' <span class="badge" style="font-size:9px;background:rgba(100,116,139,.18);color:var(--text-muted);" title="No Kiswahili version yet">EN</span>';
                 html += `<div style="padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <b style="font-size:13px;">${esc(nT)}</b>${nSw}
@@ -23475,7 +23479,9 @@ async function renderNotes() {
         const lesson = lessons.find(l => l.id === n.lessonId);
         const nt = locTitle(n).text;
         const nc = locContent(n).text;
-        const swBadge = hasSw(n, ['title', 'content']) ? ' <span class="badge badge-success" style="font-size:9px;">SW</span>' : '';
+        const swBadge = hasSw(n, ['title', 'content'])
+            ? ' <span class="badge badge-success" style="font-size:9px;" title="Has a Kiswahili version">SW</span>'
+            : ' <span class="badge" style="font-size:9px;background:rgba(100,116,139,.18);color:var(--text-muted);" title="No Kiswahili version yet — open the note and press Translate to Kiswahili">EN</span>';
         return `<tr><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? esc(locTitle(lesson).text) : '--'}</td><td><b>${esc(nt)}</b>${swBadge}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">${esc(nc.substring(0, 60))}...</td><td style="font-size:11px;">${formatDate(n.createdAt)}</td><td><button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button> <button class="btn btn-success btn-sm" onclick="sendNoteWhatsApp('${n.id}')">📱</button> <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">No notes yet. Click "+ Add Note" to create one.</td></tr>';
     courseSelect.onchange = renderNotes;
