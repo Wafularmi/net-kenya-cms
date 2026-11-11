@@ -19718,10 +19718,13 @@ async function translateLessonToSwahili() {
     const res = await translateToSw(sources);
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
     if (!res.ok) {
-        if (statusEl) statusEl.textContent = res.reason === 'no_key'
+        // The server may return error in res.error (new format from chunked translation)
+        // or res.reason (legacy format). Check both so administrators see the real reason.
+        const reason = (res.error || '').trim() || (res.reason || '').trim();
+        if (statusEl) statusEl.textContent = reason === 'no_key'
             ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
             : 'Translation failed — please try again.';
-        return showToast(res.reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
     }
     let i = 0;
     if (enTitle) { const el = document.getElementById('lesson-title-sw'); if (el) el.value = res.translations[i++] || ''; }
@@ -20418,10 +20421,13 @@ async function translateQuestionToSwahili() {
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
 
     if (!res.ok) {
-        if (statusEl) statusEl.textContent = res.reason === 'no_key'
+        // The server may return error in res.error (new format from chunked translation)
+        // or res.reason (legacy format). Check both so administrators see the real reason.
+        const reason = (res.error || '').trim() || (res.reason || '').trim();
+        if (statusEl) statusEl.textContent = reason === 'no_key'
             ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
             : 'Translation failed — please try again.';
-        return showToast(res.reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
     }
     let i = 0;
     if (enText) swEl.value = res.translations[i++] || '';
@@ -23255,10 +23261,13 @@ async function translateNoteToSwahili() {
     const res = await translateToSw(sources);
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
     if (!res.ok) {
-        if (statusEl) statusEl.textContent = res.reason === 'no_key'
+        // The server may return error in res.error (new format from chunked translation)
+        // or res.reason (legacy format). Check both so administrators see the real reason.
+        const reason = (res.error || '').trim() || (res.reason || '').trim();
+        if (statusEl) statusEl.textContent = reason === 'no_key'
             ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
             : 'Translation failed — please try again.';
-        return showToast(res.reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
     }
     let i = 0;
     if (enTitle) { const el = document.getElementById('note-title-sw'); if (el) el.value = res.translations[i++] || ''; }
