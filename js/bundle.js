@@ -13976,8 +13976,12 @@ async function renderPdfOnCanvas(base64Pdf) {
         window._diplomaPdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
         const page = window._diplomaPdfDoc.getPages()[0];
 
-        const pageWidth = page.getWidth();
-        const pageHeight = page.getHeight();
+        // Use the DISPLAYED page size (page /Rotate applied) so the preview is
+        // upright and matches the generated certificate exactly.
+        const disp = tplDisplayedPage(page);
+        const pageWidth = disp.w;
+        const pageHeight = disp.h;
+        window._diplomaPageMm = { wMm: disp.wMm, hMm: disp.hMm, rotation: disp.rotation };
 
         const maxWidth = 595;
         const maxHeight = 842;
@@ -14015,6 +14019,8 @@ if (typeof pdfjsLib !== 'undefined') {
                 ctx.fillStyle = '#f0f0f0';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+                // pdf.js applies the page rotation, so the preview is upright.
+                drawTplAxes(canvas);
             } catch (e) {
                 console.warn('pdf.js render failed, using placeholder:', e);
                 drawPlaceholderCanvas();
@@ -14031,7 +14037,11 @@ if (typeof pdfjsLib !== 'undefined') {
                 const rect = canvas.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const clickY = e.clientY - rect.top;
-                const mmToPx = diplomaMmToPx();
+                // The canvas may be displayed smaller than its pixel size
+                // (max-width:100%), so convert through the displayed scale -
+                // otherwise every click lands in the wrong place.
+                const cssScale = rect.width ? (canvas.width / rect.width) : 1;
+                const mmToPx = diplomaMmToPx() * cssScale;
                 const pdfX = clickX / mmToPx;
                 const pdfY = clickY / mmToPx;
                 setActiveFieldCoords(pdfX, pdfY);
@@ -14105,9 +14115,10 @@ function createFieldOverlayElements() {
     
     const canvas = document.getElementById('diploma-pdf-canvas');
     if (!canvas) return;
-    
+
     const scale = window._diplomaCanvasScale || 1;
-    
+    const _pageMm = getDiplomaPageSize();
+
     const fieldsConfig = [
         { id: 'name', label: 'Student Name', color: '#3b82f6' },
         { id: 'adm', label: 'Adm No', color: '#f59e0b' },
@@ -14116,7 +14127,7 @@ function createFieldOverlayElements() {
         { id: 'vcode', label: 'Verify Code', color: '#ef4444' },
         { id: 'website', label: 'Website', color: '#0ea5e9' }
     ];
-    
+
     fieldsConfig.forEach(field => {
         const data = (['name', 'adm', 'date', 'docid', 'vcode', 'website'].reduce((acc, field) => {
             const xEl = document.getElementById('diploma-fx-' + field);
@@ -14131,14 +14142,14 @@ function createFieldOverlayElements() {
             }
             return acc;
         }, {})[field.id]) || { x: 105, y: 120, size: 12 };
-        
+
         const el = document.createElement('div');
         el.className = 'diploma-field-label';
         el.id = 'diploma-field-overlay-' + field.id;
         el.style.cssText = `
             position: absolute;
             left: ${data.x * diplomaMmToPx()}px;
-            top: ${data.y * diplomaMmToPx()}px;
+            top: ${(_pageMm.hMm - data.y) * diplomaMmToPx()}px;
             font-size: ${(data.size || 12) * 0.8}px;
             font-weight: 600;
             color: ${field.color};
@@ -14179,8 +14190,12 @@ function createFieldOverlayElements() {
 
 function getDiplomaPageSize() {
     try {
+        if (window._diplomaPageMm && window._diplomaPageMm.hMm) return { wMm: window._diplomaPageMm.wMm, hMm: window._diplomaPageMm.hMm };
         const pg = window._diplomaPdfDoc && window._diplomaPdfDoc.getPages()[0];
-        if (pg) return { w: pg.getWidth(), h: pg.getHeight(), wMm: pg.getWidth() / 2.83465, hMm: pg.getHeight() / 2.83465 };
+        if (pg) {
+            const d = tplDisplayedPage(pg);
+            return { w: d.w, h: d.h, wMm: d.wMm, hMm: d.hMm };
+        }
     } catch (e) {}
     return { w: 595, h: 842, wMm: 210, hMm: 297 };
 }
@@ -14212,16 +14227,108 @@ function onDiplomaPaperSizeChange() {
     if (cust) cust.style.display = kind === 'custom' ? 'flex' : 'none';
 }
 
+// ===== PDF template coordinate system =====================================
+// X is measured in millimetres from the LEFT edge of the template and Y from
+// the BOTTOM edge, so the X/Y axes meet at the bottom-left corner - the same
+// convention PDF itself uses. Configs saved before this change measured Y
+// from the top and carry no 'origin' flag; they are converted on load, so
+// nothing on the page moves when the convention changes.
+const TPL_ORIGIN_BOTTOM = 'bottom-left';
+function tplHasBottomOrigin(config) { return !!(config && config.origin === TPL_ORIGIN_BOTTOM); }
+// A stored Y -> millimetres from the bottom edge of the page.
+function tplYBottom(config, y, pageHmm) {
+    const n = Number(y);
+    if (!isFinite(n)) return 0;
+    if (tplHasBottomOrigin(config)) return n;
+    return (Number(pageHmm) || 0) - n;   // legacy: stored from the top
+}
+// The page size as it is DISPLAYED. pdf.js applies the page /Rotate while
+// pdf-lib reports the raw media box; mixing the two is what makes a template
+// come out upside down, so everything here works from the displayed size.
+function tplDisplayedPage(page) {
+    let rot = 0;
+    try { rot = (page.getRotation && page.getRotation().angle) || 0; } catch (e) { rot = 0; }
+    rot = ((rot % 360) + 360) % 360;
+    let w = page.getWidth(), h = page.getHeight();
+    if (rot === 90 || rot === 270) { const t = w; w = h; h = t; }
+    return { w: w, h: h, wMm: w / 2.83465, hMm: h / 2.83465, rotation: rot };
+}
+// The displayed page size of a template, in millimetres.
+async function tplPageMmOf(base64Pdf) {
+    try {
+        if (!base64Pdf || typeof PDFLib === 'undefined') return null;
+        const bytes = Uint8Array.from(atob(base64Pdf), c => c.charCodeAt(0));
+        const doc = await PDFLib.PDFDocument.load(bytes);
+        const d = tplDisplayedPage(doc.getPages()[0]);
+        return { wMm: d.wMm, hMm: d.hMm, rotation: d.rotation };
+    } catch (e) { return null; }
+}
+// Prepare the template page for printing. The page is always upright, and the
+// coordinate map keeps every field where the administrator placed it even when
+// the chosen paper size differs from the template (the template is then scaled
+// and centred on the sheet).
+async function tplPreparePage(pdfDoc, page, templateBytes, paperMm) {
+    const mmToPt = 2.83465;
+    const disp = tplDisplayedPage(page);
+    let tgtW = disp.w, tgtH = disp.h;
+    if (paperMm) { tgtW = paperMm.wMm * mmToPt; tgtH = paperMm.hMm * mmToPt; }
+    const needsRebuild = disp.rotation !== 0
+        || (paperMm && (Math.abs(page.getWidth() - tgtW) > 1 || Math.abs(page.getHeight() - tgtH) > 1));
+    if (!needsRebuild) {
+        return { page: page, wMm: disp.wMm, hMm: disp.hMm, tplHmm: disp.hMm, sx: 1, sy: 1, offXmm: 0, offYmm: 0 };
+    }
+    const newPage = await embedTemplateOnPaperPage(pdfDoc, page, tgtW, tgtH, templateBytes);
+    const ratio = Math.min(tgtW / disp.w, tgtH / disp.h);
+    const imgWmm = disp.wMm * ratio, imgHmm = disp.hMm * ratio;
+    const pageWmm = tgtW / mmToPt, pageHmm = tgtH / mmToPt;
+    return {
+        page: newPage,
+        wMm: pageWmm, hMm: pageHmm, tplHmm: disp.hMm,
+        sx: imgWmm / disp.wMm, sy: imgHmm / disp.hMm,
+        offXmm: (pageWmm - imgWmm) / 2, offYmm: (pageHmm - imgHmm) / 2
+    };
+}
+// Where a stored field position ends up on the finished page (mm).
+function tplMapX(map, xTemplateMm) { return map.offXmm + (Number(xTemplateMm) || 0) * map.sx; }
+function tplMapY(map, yTemplateBottomMm) { return map.offYmm + (Number(yTemplateBottomMm) || 0) * map.sy; }
+
+// Draw the X/Y axes on the preview canvas. They meet at the BOTTOM-LEFT
+// corner, which is the origin of the coordinate system (X right, Y up).
+function drawTplAxes(canvas) {
+    if (!canvas) return;
+    try {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, h = canvas.height;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(37,99,235,.9)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([7, 5]);
+        ctx.beginPath(); ctx.moveTo(0, h - 0.5); ctx.lineTo(w, h - 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0.5, 0); ctx.lineTo(0.5, h); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(37,99,235,.95)';
+        ctx.beginPath(); ctx.arc(0, h, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('0,0', 7, h - 7);
+        ctx.fillText('X', w - 14, h - 7);
+        ctx.fillText('Y', 7, 14);
+        ctx.restore();
+    } catch (e) {}
+}
+
 async function embedTemplateOnPaperPage(pdfDoc, srcPage, tgtW, tgtH, templateB64) {
     if (typeof pdfjsLib === 'undefined') {
         srcPage.setSize(tgtW, tgtH);
         return srcPage;
     }
-    const srcW = srcPage.getWidth();
-    const srcH = srcPage.getHeight();
+    // Displayed (rotation-aware) size of the source page.
+    const disp = tplDisplayedPage(srcPage);
+    const srcW = disp.w, srcH = disp.h;
     const ratio = Math.min(tgtW / srcW, tgtH / srcH);
     const renderScale = ratio * 2;
-    const pdfData = (templateB64 instanceof Uint8Array) ? templateB64 : Uint8Array.from(atob(templateB64), c => c.charCodeAt(0));
+    const src = (templateB64 instanceof Uint8Array) ? templateB64 : Uint8Array.from(atob(templateB64), c => c.charCodeAt(0));
+    // pdf.js may detach the buffer it is given, so hand it a copy.
+    const pdfData = src.slice ? src.slice() : src;
     const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: renderScale });
@@ -14237,21 +14344,25 @@ async function embedTemplateOnPaperPage(pdfDoc, srcPage, tgtW, tgtH, templateB64
     const imgW = srcW * ratio;
     const imgH = srcH * ratio;
     newPage.drawImage(img, { x: (tgtW - imgW) / 2, y: (tgtH - imgH) / 2, width: imgW, height: imgH });
-    pdfDoc.removePage(0);
+    // Keep only the new page: the template is one page.
+    const keep = pdfDoc.getPageCount() - 1;
+    for (let i = pdfDoc.getPageCount() - 1; i >= 0; i--) { if (i !== keep) pdfDoc.removePage(i); }
     return newPage;
 }
 
 function positionOverlayLabels() {
     const mmToPx = diplomaMmToPx();
+    const ps = getDiplomaPageSize();
     ['name', 'adm', 'date', 'docid', 'vcode', 'website'].forEach(field => {
         const el = document.getElementById('diploma-field-overlay-' + field);
         if (!el) return;
         const xEl = document.getElementById('diploma-fx-' + field);
         const yEl = document.getElementById('diploma-fy-' + field);
         const xs = parseFloat(xEl && xEl.value) || 105;
+        // Y is stored from the BOTTOM edge, so it is flipped for the canvas.
         const ys = parseFloat(yEl && yEl.value) || 120;
         el.style.left = (xs * mmToPx) + 'px';
-        el.style.top = (ys * mmToPx) + 'px';
+        el.style.top = ((ps.hMm - ys) * mmToPx) + 'px';
     });
 }
 
@@ -14295,7 +14406,10 @@ function wireDiplomaOverlay() {
         if (!canvas) return;
         const canvasRect = canvas.getBoundingClientRect();
         const elRect = el.getBoundingClientRect();
-        const mmToPx = diplomaMmToPx();
+        // The canvas may be displayed smaller than its pixel size, so convert
+        // through the displayed scale or the drop lands in the wrong place.
+        const cssScale = canvasRect.width ? (canvas.width / canvasRect.width) : 1;
+        const mmToPx = diplomaMmToPx() * cssScale;
         const pdfX = (elRect.left - canvasRect.left) / mmToPx;
         const pdfY = (elRect.top - canvasRect.top) / mmToPx;
         const fieldId = el.dataset.field;
@@ -14305,7 +14419,8 @@ function wireDiplomaOverlay() {
         if (xEl && yEl) {
             const ps = getDiplomaPageSize();
             xEl.value = Math.round(Math.max(0, Math.min(ps.wMm, pdfX)));
-            yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, pdfY)));
+            // Y is stored from the BOTTOM edge of the template.
+            yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, ps.hMm - pdfY)));
             const sld = document.getElementById('diploma-fx-' + fieldId + '-slider');
             const sldY = document.getElementById('diploma-fy-' + fieldId + '-slider');
             if (sld) sld.value = xEl.value;
@@ -14322,13 +14437,14 @@ function setActiveFieldCoords(pdfX, pdfY) {
     if (xEl && yEl) {
         const ps = getDiplomaPageSize();
         xEl.value = Math.round(Math.max(0, Math.min(ps.wMm, pdfX)));
-        yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, pdfY)));
+        // Y is stored from the BOTTOM edge of the template.
+        yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, ps.hMm - pdfY)));
         const sld = document.getElementById('diploma-fx-' + activeField + '-slider');
         const sldY = document.getElementById('diploma-fy-' + activeField + '-slider');
         if (sld) sld.value = xEl.value;
         if (sldY) sldY.value = yEl.value;
         positionOverlayLabels();
-        showToast('Moved ' + activeField + ' to X=' + xEl.value + ', Y=' + yEl.value, { type: 'success' });
+        showToast('Moved ' + activeField + ' to X=' + xEl.value + ', Y=' + yEl.value + ' (from the bottom)', { type: 'success' });
     }
 }
 
@@ -14348,6 +14464,9 @@ function clearDiplomaPdfPreview() {
 }
 
 function applyPresetCoords(preset) {
+    // Presets are written from the TOP of the page (the old convention) and
+    // converted to the bottom-left origin at apply time, so they stay correct
+    // whatever the height of the uploaded template.
     const presets = {
         portrait: {
             name: { x: 105, y: 120, size: 24 },
@@ -14367,17 +14486,18 @@ function applyPresetCoords(preset) {
         }
     };
     const coords = presets[preset];
-    if (coords) {
-        for (const [field, coords] of Object.entries(coords)) {
-            const xEl = document.getElementById('diploma-fx-' + field);
-            const yEl = document.getElementById('diploma-fy-' + field);
-            const sizeEl = document.getElementById('diploma-fs-' + field);
-            if (xEl) xEl.value = coords.x;
-            if (yEl) yEl.value = coords.y;
-            if (sizeEl) sizeEl.value = coords.size;
-        }
-        showToast('Applied ' + preset + ' preset coordinates', { type: 'success' });
+    if (!coords) return;
+    const hMm = getDiplomaPageSize().hMm;
+    for (const [field, c] of Object.entries(coords)) {
+        const xEl = document.getElementById('diploma-fx-' + field);
+        const yEl = document.getElementById('diploma-fy-' + field);
+        const sizeEl = document.getElementById('diploma-fs-' + field);
+        if (xEl) xEl.value = c.x;
+        if (yEl) yEl.value = Math.max(0, Math.round(hMm - c.y));
+        if (sizeEl) sizeEl.value = c.size;
     }
+    positionOverlayLabels();
+    showToast('Applied ' + preset + ' preset coordinates', { type: 'success' });
 }
 
 async function detectDiplomaFieldsWithAI() {
@@ -14419,12 +14539,15 @@ async function detectDiplomaFieldsWithAI() {
 
         if (data.fields && Object.keys(data.fields).length) {
             let applied = 0;
+            // Detection returns Y from the TOP of the page; the editor works
+            // from the BOTTOM edge, so convert it here.
+            const pageMm = getDiplomaPageSize();
             for (const [field, coords] of Object.entries(data.fields)) {
                 const xEl = document.getElementById('diploma-fx-' + field);
                 const yEl = document.getElementById('diploma-fy-' + field);
                 const sizeEl = document.getElementById('diploma-fs-' + field);
                 if (xEl && Number.isFinite(coords.x)) { xEl.value = Math.round(coords.x); applied++; }
-                if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(coords.y);
+                if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(pageMm.hMm - coords.y);
                 if (sizeEl && coords.size) sizeEl.value = coords.size;
             }
             // Show detection method and confidence in toast
@@ -14477,6 +14600,9 @@ async function saveDiplomaPdfConfig() {
 
     const config = {
         template: window._diplomaPdfTemplate || null,
+        // X from the left edge, Y from the bottom edge (the X/Y axes meet at
+        // the bottom-left corner of the template).
+        origin: TPL_ORIGIN_BOTTOM,
         fields: {
             name: { x: +document.getElementById('diploma-fx-name').value, y: +document.getElementById('diploma-fy-name').value, size: +document.getElementById('diploma-fs-name').value },
             adm: { x: +document.getElementById('diploma-fx-adm').value, y: +document.getElementById('diploma-fy-adm').value, size: +document.getElementById('diploma-fs-adm').value },
@@ -14565,8 +14691,12 @@ function completionMmToPx() {
 }
 function getCompletionPageSize() {
     try {
+        if (window._completionPageMm && window._completionPageMm.hMm) return { wMm: window._completionPageMm.wMm, hMm: window._completionPageMm.hMm };
         const pg = window._completionPdfDoc && window._completionPdfDoc.getPages()[0];
-        if (pg) return { w: pg.getWidth(), h: pg.getHeight(), wMm: pg.getWidth() / 2.83465, hMm: pg.getHeight() / 2.83465 };
+        if (pg) {
+            const d = tplDisplayedPage(pg);
+            return { w: d.w, h: d.h, wMm: d.wMm, hMm: d.hMm };
+        }
     } catch (e) {}
     return { w: 595, h: 842, wMm: 210, hMm: 297 };
 }
@@ -14593,8 +14723,11 @@ async function renderCompletionPdfOnCanvas(base64Pdf) {
         const pdfBytes = Uint8Array.from(atob(base64Pdf), c => c.charCodeAt(0));
         window._completionPdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
         const page = window._completionPdfDoc.getPages()[0];
-        const pageWidth = page.getWidth();
-        const pageHeight = page.getHeight();
+        // Displayed (rotation-aware) page size, so the preview is upright.
+        const disp = tplDisplayedPage(page);
+        const pageWidth = disp.w;
+        const pageHeight = disp.h;
+        window._completionPageMm = { wMm: disp.wMm, hMm: disp.hMm, rotation: disp.rotation };
         const maxWidth = 595;
         const maxHeight = 842;
         window._completionCanvasScale = Math.min(maxWidth / pageWidth, maxHeight / pageHeight);
@@ -14619,6 +14752,8 @@ async function renderCompletionPdfOnCanvas(base64Pdf) {
                 ctx.fillStyle = '#f0f0f0';
                 ctx.fillRect(0, 0, cnv.width, cnv.height);
                 await rpage.render({ canvasContext: ctx, viewport: viewport }).promise;
+                // The X/Y axes meet at the bottom-left corner of the template.
+                drawTplAxes(cnv);
             } catch (e) {
                 console.warn('pdf.js render failed, using placeholder:', e);
                 drawCompletionPlaceholderCanvas();
@@ -14640,8 +14775,12 @@ async function renderCompletionPdfOnCanvas(base64Pdf) {
                 const rect = canvas.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const clickY = e.clientY - rect.top;
-                const pdfX = clickX / completionMmToPx();
-                const pdfY = clickY / completionMmToPx();
+                // The canvas may be shown smaller than its pixel size, so the
+                // click has to be converted through the displayed scale.
+                const cssScale = rect.width ? (canvas.width / rect.width) : 1;
+                const mmToPx = completionMmToPx() * cssScale;
+                const pdfX = clickX / mmToPx;
+                const pdfY = clickY / mmToPx;
                 setActiveCompletionFieldCoords(pdfX, pdfY);
             };
         }
@@ -14663,6 +14802,7 @@ function createCompletionFieldOverlayElements() {
     ];
     const canvas = document.getElementById('completion-pdf-canvas');
     if (!canvas) return;
+    const _pageMm = getCompletionPageSize();
     const getField = (field) => {
         const xEl = document.getElementById('completion-fx-' + field);
         const yEl = document.getElementById('completion-fy-' + field);
@@ -14676,7 +14816,7 @@ function createCompletionFieldOverlayElements() {
         el.style.cssText = `
             position: absolute;
             left: ${data.x * completionMmToPx()}px;
-            top: ${data.y * completionMmToPx()}px;
+            top: ${(_pageMm.hMm - data.y) * completionMmToPx()}px;
             font-size: ${(data.size || 12) * 0.8}px;
             font-weight: 600;
             color: ${field.color};
@@ -14710,15 +14850,17 @@ function createCompletionFieldOverlayElements() {
 }
 function positionCompletionOverlayLabels() {
     const mmToPx = completionMmToPx();
+    const ps = getCompletionPageSize();
     ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
         const el = document.getElementById('completion-field-overlay-' + field);
         if (!el) return;
         const xEl = document.getElementById('completion-fx-' + field);
         const yEl = document.getElementById('completion-fy-' + field);
         const xs = parseFloat(xEl && xEl.value) || 105;
+        // Y is stored from the BOTTOM edge, so it is flipped for the canvas.
         const ys = parseFloat(yEl && yEl.value) || 120;
         el.style.left = (xs * mmToPx) + 'px';
-        el.style.top = (ys * mmToPx) + 'px';
+        el.style.top = ((ps.hMm - ys) * mmToPx) + 'px';
     });
 }
 function wireCompletionOverlay() {
@@ -14759,7 +14901,8 @@ function wireCompletionOverlay() {
         if (!canvas) return;
         const canvasRect = canvas.getBoundingClientRect();
         const elRect = el.getBoundingClientRect();
-        const mmToPx = completionMmToPx();
+        const cssScale = canvasRect.width ? (canvas.width / canvasRect.width) : 1;
+        const mmToPx = completionMmToPx() * cssScale;
         const pdfX = (elRect.left - canvasRect.left) / mmToPx;
         const pdfY = (elRect.top - canvasRect.top) / mmToPx;
         const fieldId = el.dataset.field;
@@ -14769,7 +14912,8 @@ function wireCompletionOverlay() {
         if (xEl && yEl) {
             const ps = getCompletionPageSize();
             xEl.value = Math.round(Math.max(0, Math.min(ps.wMm, pdfX)));
-            yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, pdfY)));
+            // Y is stored from the BOTTOM edge of the template.
+            yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, ps.hMm - pdfY)));
             const sld = document.getElementById('completion-fx-' + fieldId + '-slider');
             const sldY = document.getElementById('completion-fy-' + fieldId + '-slider');
             if (sld) sld.value = xEl.value;
@@ -14786,13 +14930,14 @@ function setActiveCompletionFieldCoords(pdfX, pdfY) {
     if (xEl && yEl) {
         const ps = getCompletionPageSize();
         xEl.value = Math.round(Math.max(0, Math.min(ps.wMm, pdfX)));
-        yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, pdfY)));
+        // Y is stored from the BOTTOM edge of the template.
+        yEl.value = Math.round(Math.max(0, Math.min(ps.hMm, ps.hMm - pdfY)));
         const sld = document.getElementById('completion-fx-' + activeField + '-slider');
         const sldY = document.getElementById('completion-fy-' + activeField + '-slider');
         if (sld) sld.value = xEl.value;
         if (sldY) sldY.value = yEl.value;
         positionCompletionOverlayLabels();
-        showToast('Moved ' + activeField + ' to X=' + xEl.value + ', Y=' + yEl.value, { type: 'success' });
+        showToast('Moved ' + activeField + ' to X=' + xEl.value + ', Y=' + yEl.value + ' (from the bottom)', { type: 'success' });
     }
 }
 function onCompletionPaperSizeChange() {
@@ -14825,20 +14970,24 @@ function clearCompletionPdfPreview() {
     if (overlay) overlay.innerHTML = '';
 }
 function applyCompletionPresetCoords(preset) {
+    // Presets are written from the TOP of the page (the old convention) and
+    // converted to the bottom-left origin at apply time.
     const presets = {
         portrait: { name: { x: 105, y: 120, size: 24 }, adm: { x: 105, y: 140, size: 14 }, date: { x: 105, y: 200, size: 14 }, docid: { x: 70, y: 280, size: 10 }, vcode: { x: 140, y: 280, size: 10 } },
         landscape: { name: { x: 148, y: 105, size: 24 }, adm: { x: 148, y: 125, size: 14 }, date: { x: 148, y: 185, size: 14 }, docid: { x: 100, y: 250, size: 10 }, vcode: { x: 196, y: 250, size: 10 } }
     };
     const coords = presets[preset];
     if (!coords) return;
+    const hMm = getCompletionPageSize().hMm;
     for (const [field, fc] of Object.entries(coords)) {
         const xEl = document.getElementById('completion-fx-' + field);
         const yEl = document.getElementById('completion-fy-' + field);
         const sizeEl = document.getElementById('completion-fs-' + field);
         if (xEl) xEl.value = fc.x;
-        if (yEl) yEl.value = fc.y;
+        if (yEl) yEl.value = Math.max(0, Math.round(hMm - fc.y));
         if (sizeEl) sizeEl.value = fc.size;
     }
+    positionCompletionOverlayLabels();
     showToast('Applied ' + preset + ' preset coordinates', { type: 'success' });
 }
 async function saveCompletionPdfConfig() {
@@ -14861,6 +15010,9 @@ async function saveCompletionPdfConfig() {
     if (statusEl) { statusEl.textContent = 'Saving...'; statusEl.style.color = 'var(--accent)'; }
     const config = {
         template: window._completionPdfTemplate || null,
+        // X from the left edge, Y from the bottom edge (the X/Y axes meet at
+        // the bottom-left corner of the template).
+        origin: TPL_ORIGIN_BOTTOM,
         fields: {
             name: { x: +document.getElementById('completion-fx-name').value, y: +document.getElementById('completion-fy-name').value, size: +document.getElementById('completion-fs-name').value },
             adm: { x: +document.getElementById('completion-fx-adm').value, y: +document.getElementById('completion-fy-adm').value, size: +document.getElementById('completion-fs-adm').value },
@@ -14915,6 +15067,11 @@ async function loadCompletionPdfConfig() {
     try { localStorage.setItem('nkcms_completionPdfConfig_backup', JSON.stringify(config)); } catch (e) {}
     window._completionPdfTemplate = config.template;
     window._completionSigs = config.sigs || {};
+    // Configs saved before the bottom-left convention measured Y from the top.
+    // Convert them here so the page does not move, and work from the bottom.
+    const pageMm = (await tplPageMmOf(config.template)) || { wMm: 210, hMm: 297 };
+    window._completionPageMm = { wMm: pageMm.wMm, hMm: pageMm.hMm };
+    const yOf = (fc) => Math.round(tplYBottom(config, fc.y, pageMm.hMm));
     const f = config.fields || {};
     ['name', 'adm', 'date', 'docid', 'vcode'].forEach(field => {
         const fc = f[field];
@@ -14923,7 +15080,7 @@ async function loadCompletionPdfConfig() {
             const yEl = document.getElementById('completion-fy-' + field);
             const sizeEl = document.getElementById('completion-fs-' + field);
             if (xEl) xEl.value = fc.x;
-            if (yEl) yEl.value = fc.y;
+            if (yEl) yEl.value = yOf(fc);
             if (sizeEl) sizeEl.value = fc.size;
         }
     });
@@ -14941,7 +15098,7 @@ async function loadCompletionPdfConfig() {
             const s = config.sigs[role];
             if (!s) return;
             document.getElementById('completion-sig-' + role + '-x').value = s.x;
-            document.getElementById('completion-sig-' + role + '-y').value = s.y;
+            document.getElementById('completion-sig-' + role + '-y').value = Math.round(tplYBottom(config, s.y, pageMm.hMm));
             document.getElementById('completion-sig-' + role + '-w').value = s.w;
             if (s.img) { const p = document.getElementById('completion-sig-' + role + '-preview'); if (p) { p.src = s.img; p.style.display = 'block'; } }
         });
@@ -14986,12 +15143,15 @@ async function detectCompletionFieldsWithAI() {
         if (!res.ok) throw new Error(data.error || 'AI detection failed');
         if (data.fields && Object.keys(data.fields).length) {
             let applied = 0;
+            // Detection returns Y from the TOP of the page; the editor works
+            // from the BOTTOM edge, so convert it here.
+            const pageMm = getCompletionPageSize();
             for (const [field, coords] of Object.entries(data.fields)) {
                 const xEl = document.getElementById('completion-fx-' + field);
                 const yEl = document.getElementById('completion-fy-' + field);
                 const sizeEl = document.getElementById('completion-fs-' + field);
                 if (xEl && Number.isFinite(coords.x)) { xEl.value = Math.round(coords.x); applied++; }
-                if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(coords.y);
+                if (yEl && Number.isFinite(coords.y)) yEl.value = Math.round(pageMm.hMm - coords.y);
                 if (sizeEl && coords.size) sizeEl.value = coords.size;
             }
             showToast(`${applied} fields detected. Positions filled.`, { type: 'success' });
@@ -15172,17 +15332,8 @@ async function generateCompletionPdf() {
         const txtColor = rgb(r, g, b);
         const mmToPt = 2.83465;
         const paperMm = resolveDiplomaPaperMm(config.paper);
-        if (paperMm) {
-            const tgtWpt = paperMm.wMm * mmToPt;
-            const tgtHpt = paperMm.hMm * mmToPt;
-            if (Math.abs(page.getWidth() - tgtWpt) > 1 || Math.abs(page.getHeight() - tgtHpt) > 1) {
-                try {
-                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, pdfBytes);
-                } catch (ee) {
-                    console.warn('Paper resize failed, using template page size:', ee);
-                }
-            }
-        }
+        const map = await tplPreparePage(pdfDoc, page, pdfBytes, paperMm);
+        page = map.page;
         const student = await studentP;
         if (!student) throw new Error('Student not found — please refresh and retry.');
         const displayName = nameOverride || student.name;
@@ -15198,11 +15349,17 @@ async function generateCompletionPdf() {
             if (!field) return;
             const size = field.size || 12;
             const topToBaseline = font.heightAtSize(size) * 0.78;
-            let x = field.x * mmToPt;
+            // Y is measured from the BOTTOM edge of the template.
+            const yTpl = tplYBottom(config, field.y, map.tplHmm);
+            let x = tplMapX(map, field.x) * mmToPt;
             if (opts.center || field === config.fields.name) {
-                try { const w = font.widthOfTextAtSize(text, size); x = (pageW - w) / 2; } catch {}
+                try {
+                    const w = font.widthOfTextAtSize(text, size);
+                    const areaW = (map.wMm - map.offXmm * 2) * mmToPt;
+                    x = map.offXmm * mmToPt + (areaW - w) / 2;
+                } catch {}
             }
-            page.drawText(text, { x: x, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
+            page.drawText(text, { x: x, y: tplMapY(map, yTpl) * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
         };
         drawField(displayName, config.fields.name, { center: true });
         drawField(student.admissionNumber || student.id, config.fields.adm);
@@ -15217,7 +15374,8 @@ async function generateCompletionPdf() {
                 if (!sigImg) continue;
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
-                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
+                const sigY = tplYBottom(config, sig.y, map.tplHmm);
+                page.drawImage(sigImg, { x: tplMapX(map, sig.x) * mmToPt - sigW / 2, y: tplMapY(map, sigY) * mmToPt - sigH / 2, width: sigW, height: sigH });
             } catch (e) { console.warn('Signature embed failed for ' + role + ':', e); }
         }
         let outBytes;
@@ -15398,13 +15556,18 @@ async function loadDiplomaPdfConfig() {
     try { localStorage.setItem('nkcms_diplomaPdfConfig_backup', JSON.stringify(config)); } catch (e) {}
     window._diplomaPdfTemplate = config.template;
     window._diplomaSigs = config.sigs || {};
+    // Configs saved before the bottom-left convention measured Y from the top.
+    // Convert them here so the page does not move, and work from the bottom.
+    const pageMm = (await tplPageMmOf(config.template)) || { wMm: 210, hMm: 297 };
+    window._diplomaPageMm = { wMm: pageMm.wMm, hMm: pageMm.hMm };
+    const yOf = (f) => Math.round(tplYBottom(config, f.y, pageMm.hMm));
     const f = config.fields;
-    if (f.name) { document.getElementById('diploma-fx-name').value = f.name.x; document.getElementById('diploma-fy-name').value = f.name.y; document.getElementById('diploma-fs-name').value = f.name.size; }
-    if (f.adm) { document.getElementById('diploma-fx-adm').value = f.adm.x; document.getElementById('diploma-fy-adm').value = f.adm.y; document.getElementById('diploma-fs-adm').value = f.adm.size; }
-    if (f.date) { document.getElementById('diploma-fx-date').value = f.date.x; document.getElementById('diploma-fy-date').value = f.date.y; document.getElementById('diploma-fs-date').value = f.date.size; }
-    if (f.docid) { document.getElementById('diploma-fx-docid').value = f.docid.x; document.getElementById('diploma-fy-docid').value = f.docid.y; document.getElementById('diploma-fs-docid').value = f.docid.size; }
-    if (f.vcode) { document.getElementById('diploma-fx-vcode').value = f.vcode.x; document.getElementById('diploma-fy-vcode').value = f.vcode.y; document.getElementById('diploma-fs-vcode').value = f.vcode.size; }
-    if (f.website) { const wx = document.getElementById('diploma-fx-website'); const wy = document.getElementById('diploma-fy-website'); const ws = document.getElementById('diploma-fs-website'); if (wx) wx.value = f.website.x; if (wy) wy.value = f.website.y; if (ws) ws.value = f.website.size; }
+    if (f.name) { document.getElementById('diploma-fx-name').value = f.name.x; document.getElementById('diploma-fy-name').value = yOf(f.name); document.getElementById('diploma-fs-name').value = f.name.size; }
+    if (f.adm) { document.getElementById('diploma-fx-adm').value = f.adm.x; document.getElementById('diploma-fy-adm').value = yOf(f.adm); document.getElementById('diploma-fs-adm').value = f.adm.size; }
+    if (f.date) { document.getElementById('diploma-fx-date').value = f.date.x; document.getElementById('diploma-fy-date').value = yOf(f.date); document.getElementById('diploma-fs-date').value = f.date.size; }
+    if (f.docid) { document.getElementById('diploma-fx-docid').value = f.docid.x; document.getElementById('diploma-fy-docid').value = yOf(f.docid); document.getElementById('diploma-fs-docid').value = f.docid.size; }
+    if (f.vcode) { document.getElementById('diploma-fx-vcode').value = f.vcode.x; document.getElementById('diploma-fy-vcode').value = yOf(f.vcode); document.getElementById('diploma-fs-vcode').value = f.vcode.size; }
+    if (f.website) { const wx = document.getElementById('diploma-fx-website'); const wy = document.getElementById('diploma-fy-website'); const ws = document.getElementById('diploma-fs-website'); if (wx) wx.value = f.website.x; if (wy) wy.value = yOf(f.website); if (ws) ws.value = f.website.size; }
     if (config.font) document.getElementById('diploma-font').value = config.font;
     if (config.color) document.getElementById('diploma-text-color').value = config.color;
     const showWebsiteEl = document.getElementById('diploma-show-website');
@@ -15420,7 +15583,7 @@ async function loadDiplomaPdfConfig() {
             const s = config.sigs[role];
             if (!s) return;
             document.getElementById('diploma-sig-' + role + '-x').value = s.x;
-            document.getElementById('diploma-sig-' + role + '-y').value = s.y;
+            document.getElementById('diploma-sig-' + role + '-y').value = Math.round(tplYBottom(config, s.y, pageMm.hMm));
             document.getElementById('diploma-sig-' + role + '-w').value = s.w;
             if (s.img) { const p = document.getElementById('diploma-sig-' + role + '-preview'); if (p) { p.src = s.img; p.style.display = 'block'; } }
         });
@@ -15595,17 +15758,8 @@ async function generateDiplomaPdf() {
         const txtColor = rgb(r, g, b);
         const mmToPt = 2.83465;
         const paperMm = resolveDiplomaPaperMm(config.paper);
-        if (paperMm) {
-            const tgtWpt = paperMm.wMm * mmToPt;
-            const tgtHpt = paperMm.hMm * mmToPt;
-            if (Math.abs(page.getWidth() - tgtWpt) > 1 || Math.abs(page.getHeight() - tgtHpt) > 1) {
-                try {
-                    page = await embedTemplateOnPaperPage(pdfDoc, page, tgtWpt, tgtHpt, pdfBytes);
-                } catch (ee) {
-                    console.warn('Paper resize failed, using template page size:', ee);
-                }
-            }
-        }
+        const map = await tplPreparePage(pdfDoc, page, pdfBytes, paperMm);
+        page = map.page;
         const student = await studentP;
         if (!student) throw new Error('Student not found — please refresh and retry.');
         const displayName = nameOverride || student.name;
@@ -15622,11 +15776,17 @@ async function generateDiplomaPdf() {
             if (!field) return;
             const size = field.size || 12;
             const topToBaseline = font.heightAtSize(size) * 0.78;
-            let x = field.x * mmToPt;
+            // Y is measured from the BOTTOM edge of the template.
+            const yTpl = tplYBottom(config, field.y, map.tplHmm);
+            let x = tplMapX(map, field.x) * mmToPt;
             if (opts.center || field === config.fields.name) {
-                try { const w = font.widthOfTextAtSize(text, size); x = (pageW - w) / 2; } catch {}
+                try {
+                    const w = font.widthOfTextAtSize(text, size);
+                    const areaW = (map.wMm - map.offXmm * 2) * mmToPt;
+                    x = map.offXmm * mmToPt + (areaW - w) / 2;
+                } catch {}
             }
-            page.drawText(text, { x: x, y: pageH - field.y * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
+            page.drawText(text, { x: x, y: tplMapY(map, yTpl) * mmToPt - topToBaseline, size: size, font: font, color: txtColor });
         };
         drawField(displayName, config.fields.name, { center: true });
         drawField(student.admissionNumber || student.id, config.fields.adm);
@@ -15645,7 +15805,8 @@ async function generateDiplomaPdf() {
                 if (!sigImg) continue;
                 const sigW = sig.w * mmToPt;
                 const sigH = sigW * (sigImg.height / sigImg.width);
-                page.drawImage(sigImg, { x: sig.x * mmToPt - sigW / 2, y: pageH - sig.y * mmToPt - sigH / 2, width: sigW, height: sigH });
+                const sigY = tplYBottom(config, sig.y, map.tplHmm);
+                page.drawImage(sigImg, { x: tplMapX(map, sig.x) * mmToPt - sigW / 2, y: tplMapY(map, sigY) * mmToPt - sigH / 2, width: sigW, height: sigH });
             } catch (e) { console.warn('Signature embed failed for ' + role + ':', e); }
         }
         let outBytes;
@@ -26912,8 +27073,55 @@ function updateProgramFilter() {
     if (gradProgram) gradProgram.innerHTML = '<option value="">Select Program...</option>' + programs.map(p => `<option value="${p}">${p}</option>`).join('');
 }
 async function saveSMSSettings() {
-    const settings = { key: 'smsSettings', value: { apiKey: document.getElementById('settings-sms-apikey').value.trim(), username: document.getElementById('settings-sms-username').value.trim(), senderId: document.getElementById('settings-sms-senderid').value.trim() } };
+    const apiKey = document.getElementById('settings-sms-apikey').value.trim();
+    const username = document.getElementById('settings-sms-username').value.trim();
+    const senderId = document.getElementById('settings-sms-senderid').value.trim();
+    if (!apiKey || !username) return showToast('Enter both the Africa\'s Talking API key and username.', { type: 'warning' });
+    // The key generated under "External SMS API" is this system's own key. It is
+    // not an Africa's Talking key and the provider answers 401 to it — a very
+    // easy mix-up that otherwise fails silently.
+    try {
+        const own = await dbGet('settings', 'smsApiKey');
+        const ownKey = own && (own.value && (own.value.key || own.value.apiKey) || own.key);
+        if (ownKey && apiKey === ownKey) {
+            return showToast('That is this system\'s External SMS API key, not an Africa\'s Talking API key. Copy the API key from your Africa\'s Talking dashboard (starts with atsk_) into this field.', { type: 'danger' });
+        }
+    } catch (e) {}
+    if (/^sk_live_/i.test(apiKey) && !/^atsk_/i.test(apiKey)) {
+        showToast('Warning: that key does not look like an Africa\'s Talking key (they start with atsk_). Sending will fail with "authentication is invalid".', { type: 'warning' });
+    }
+    if (senderId && (/[\s]/.test(senderId) || senderId.length > 11)) {
+        showToast('Warning: Africa\'s Talking sender IDs are alphanumeric and at most 11 characters. "' + senderId + '" will be rejected until it is approved.', { type: 'warning' });
+    }
+    const settings = { key: 'smsSettings', value: { apiKey: apiKey, username: username, senderId: senderId } };
     await dbPut('settings', settings); showToast('SMS settings saved!'); logAudit('updated', 'sms-settings', { username: settings.value.username, senderId: settings.value.senderId });
+}
+async function sendTestSms() {
+    const phoneEl = document.getElementById('settings-sms-test-phone');
+    const out = document.getElementById('settings-sms-test-result');
+    const phone = (phoneEl && phoneEl.value || '').replace(/[^0-9+]/g, '');
+    if (phone.replace(/\+/g, '').length < 9) return showToast('Enter a valid test phone number (e.g. 0712345678).', { type: 'warning' });
+    const message = 'NET Foundation test SMS — your SMS gateway is working. ' + new Date().toLocaleString();
+    if (out) { out.textContent = 'Sending test SMS…'; out.style.color = 'var(--text-muted)'; }
+    try {
+        const res = await fetch('/api/send-sms', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ recipients: [{ phone: phone, message: message }], logEntries: [{ name: 'Test', phone: phone, message: message }] })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.sent > 0) {
+            if (out) { out.textContent = '✓ Test SMS accepted by the provider and sent to ' + phone + '.'; out.style.color = 'var(--success)'; }
+            showToast('Test SMS sent!', { type: 'success' });
+        } else {
+            const why = (data.errors && data.errors[0]) || data.error || ('HTTP ' + res.status);
+            if (out) { out.textContent = '✗ ' + why; out.style.color = 'var(--danger)'; }
+            showToast('Test SMS failed: ' + why, { type: 'error' });
+        }
+    } catch (e) {
+        if (out) { out.textContent = '✗ ' + (e.message || e); out.style.color = 'var(--danger)'; }
+        showToast('Test SMS failed: ' + (e.message || e), { type: 'error' });
+    }
 }
 async function loadSMSSettings() {
     const settings = await dbGet('settings', 'smsSettings');
@@ -27066,10 +27274,15 @@ async function sendSmsBroadcast(schoolName) {
         const res = await fetch('/api/send-sms', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ recipients, logEntries }) });
         const data = await res.json().catch(() => ({}));
         closeModal();
-        if (data.error) return showToast(data.error, { type: 'error' });
-        showToast(`Sent: ${data.sent || 0}, Failed: ${data.failed || 0}`, { type: data.sent || 0 ? 'success' : 'error' });
+        const sentCount = data.sent || 0;
+        const failedCount = data.failed || 0;
+        const why = (data.errors && data.errors.length) ? data.errors[0] : data.error;
+        if (!sentCount) {
+            return showToast('SMS not sent: ' + (why || 'the provider rejected the message'), { type: 'error' });
+        }
+        showToast(`Sent: ${sentCount}, Failed: ${failedCount}` + (failedCount && why ? ' — ' + why : ''), { type: failedCount ? 'warning' : 'success' });
         renderSMSLog();
-        logAudit('created', 'sms-broadcast', { total: data.total || recipients.length, sent: data.sent || 0, failed: data.failed || 0 });
+        logAudit('created', 'sms-broadcast', { total: data.total || recipients.length, sent: sentCount, failed: failedCount });
     } catch (e) {
         closeModal();
         showToast('SMS send failed: ' + (e.message || e), { type: 'error' });
@@ -27080,7 +27293,10 @@ async function renderSMSLog() {
     if (!container) return;
     let log = [];
     try { log = await dbGetAll('smsLog'); } catch (e) { log = []; }
-    container.innerHTML = log.length ? log.slice().reverse().slice(0, 100).map(e => `<div class="whatsapp-log-entry"><span style="font-weight:600;">${formatDate(e.createdAt || e.date)} ${e.time || ''}</span> <span class="badge badge-success" style="font-size:9px;">SMS</span><br>→ ${escapeHtml(e.phone || e.name || '')}<br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml((e.message || '').substring(0, 120))}</span></div>`).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px;">No SMS sent yet.</div>';
+    container.innerHTML = log.length ? log.slice().reverse().slice(0, 100).map(e => {
+        const state = e.status === 'failed' ? ' <span style="color:var(--danger);font-size:10px;">✗ ' + escapeHtml(e.error || 'failed') + '</span>' : (e.status === 'sent' ? ' <span style="color:var(--success);font-size:10px;">✓ sent</span>' : '');
+        return `<div class="whatsapp-log-entry"><span style="font-weight:600;">${formatDate(e.createdAt || e.date)} ${e.time || ''}</span> <span class="badge badge-success" style="font-size:9px;">SMS</span>${state}<br>→ ${escapeHtml(e.phone || e.name || '')}<br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml((e.message || '').substring(0, 120))}</span></div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px;">No SMS sent yet.</div>';
 }
 async function downloadBackup() {
     return backupData();

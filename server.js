@@ -5061,6 +5061,77 @@ async function sendSmsViaModem(phone, message) {
     }
 }
 
+// Africa's Talking wants an international number. Numbers are commonly stored
+// locally (07XXXXXXXX) or with a plus sign, which the provider rejects.
+function normalizeSmsPhone(phone) {
+    let n = String(phone || '').replace(/[^0-9+]/g, '');
+    if (n.startsWith('+')) n = n.slice(1);
+    if (/^0[17]\d{8}$/.test(n)) n = '254' + n.slice(1);        // 0712345678 / 0112345678
+    else if (/^[17]\d{8}$/.test(n)) n = '254' + n;              // 712345678
+    else if (/^2540[17]\d{8}$/.test(n)) n = '254' + n.slice(4); // 2540712345678
+    return n;
+}
+
+// One message through Africa's Talking. Returns the provider's own verdict so
+// the caller can tell the administrator WHY a send failed (bad key, unapproved
+// sender ID, no credit, ...) instead of a bare "failed".
+async function sendSmsViaAfricasTalking(cfg, phone, message) {
+    const to = normalizeSmsPhone(phone);
+    if (!to) return { ok: false, error: 'No phone number' };
+    const postData = querystring.stringify({
+        username: cfg.username,
+        to: to,
+        message: String(message || ''),
+        from: cfg.senderId || ''
+    });
+    let raw;
+    try {
+        raw = await new Promise((resolve, reject) => {
+            const opts = {
+                hostname: 'api.africastalking.com',
+                port: 443,
+                path: '/version1/messaging',
+                method: 'POST',
+                headers: {
+                    'apiKey': cfg.apiKey,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Content-Length': Buffer.byteLength(postData),
+                    'Accept': 'application/json'
+                }
+            };
+            const req2 = https.request(opts, res2 => {
+                let data = '';
+                res2.on('data', c => data += c);
+                res2.on('end', () => resolve({ httpStatus: res2.statusCode, body: data }));
+            });
+            req2.on('error', reject);
+            req2.write(postData);
+            req2.end();
+        });
+    } catch (e) {
+        return { ok: false, error: "Cannot reach Africa's Talking: " + (e.message || e) };
+    }
+    let result = null;
+    try { result = JSON.parse(raw.body); } catch { result = null; }
+    const topMessage = (result && (result.errorMessage || (result.SMSMessageData && result.SMSMessageData.Message)))
+        || String(raw.body || '').slice(0, 200)
+        || ('Africa\'s Talking HTTP ' + raw.httpStatus);
+    const rcpt = result && result.SMSMessageData && Array.isArray(result.SMSMessageData.Recipients)
+        ? result.SMSMessageData.Recipients[0] : null;
+    if (rcpt) {
+        const ok = rcpt.status === 'Success' || String(rcpt.statusCode) === '101';
+        return {
+            ok: ok,
+            status: rcpt.status,
+            statusCode: rcpt.statusCode,
+            number: rcpt.number || to,
+            cost: rcpt.cost,
+            error: ok ? '' : (rcpt.status || topMessage || 'Rejected by provider')
+        };
+    }
+    return { ok: false, statusCode: raw.httpStatus, error: topMessage };
+}
+
 function checkSmsApiKey(req) {
     try {
         const key = getSmsApiKey();
@@ -9199,43 +9270,46 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 if (!cfg.apiKey || !cfg.username) return json(res, 400, { error: 'SMS API key or username missing.' });
                 if (!db.smsLog) db.smsLog = [];
                 let sent = 0, failed = 0;
+                const results = [];
+                const errorSamples = [];
                 async function sendOne(phone, message) {
-                    if (!phone || !message) { return false; }
+                    if (!phone || !message) return { ok: false, error: 'Missing phone or message' };
                     try {
                         const modem = getModemSmsSettings();
                         if (modem && modem.enabled) {
                             const mres = await sendSmsViaModem(phone, message);
-                            if (mres && mres.ok) return true;
+                            if (mres && mres.ok) return { ok: true, via: 'modem' };
                         }
-                        const postData = querystring.stringify({ username: cfg.username, to: String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, ''), message: message, from: cfg.senderId || '' });
-                        const result = await new Promise((resolve, reject) => {
-                            const opts = { hostname: 'api.africastalking.com', port: 443, path: '/version1/messaging', method: 'POST', headers: { 'apiKey': cfg.apiKey, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData), 'Accept': 'application/json' } };
-                            const req2 = https.request(opts, res2 => {
-                                let data = '';
-                                res2.on('data', c => data += c);
-                                res2.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ SMSMessageData: { Message: data } }); } });
-                            });
-                            req2.on('error', reject);
-                            req2.write(postData);
-                            req2.end();
-                        });
-                        if (result && result.SMSMessageData && result.SMSMessageData.Recipients) {
-                            const r = result.SMSMessageData.Recipients[0];
-                            return !!(r && (r.status === 'Success' || r.statusCode === '101'));
-                        }
-                        return false;
-                    } catch { return false; }
+                        const r = await sendSmsViaAfricasTalking(cfg, phone, message);
+                        if (r.ok) return { ok: true, via: 'africastalking' };
+                        return { ok: false, error: r.error || 'Rejected by provider' };
+                    } catch (e) { return { ok: false, error: e.message || String(e) }; }
                 }
                 for (let i = 0; i < recipients.length; i += 10) {
                     const wave = recipients.slice(i, i + 10).map(({ phone, message }) => sendOne(phone, message));
-                    const results = await Promise.all(wave);
-                    results.forEach(ok => { if (ok) sent++; else failed++; });
+                    const waveResults = await Promise.all(wave);
+                    waveResults.forEach(r => {
+                        results.push(r);
+                        if (r.ok) sent++;
+                        else {
+                            failed++;
+                            const m = String(r.error || '').trim();
+                            if (m && !errorSamples.includes(m) && errorSamples.length < 5) errorSamples.push(m);
+                        }
+                    });
                 }
-                const logEntries = recipients.map(r => ({ name: r.name || '', phone: r.phone, message: r.message, source: 'api' }));
+                const logEntries = recipients.map((r, idx) => {
+                    const res1 = results[idx];
+                    const entry = { name: r.name || '', phone: r.phone, message: r.message, source: 'api', status: res1 && res1.ok ? 'sent' : 'failed' };
+                    if (res1 && !res1.ok && res1.error) entry.error = res1.error;
+                    return entry;
+                });
                 for (const entry of logEntries) { entry.createdAt = new Date().toISOString(); db.smsLog.push(entry); }
                 saveDB();
                 try { broadcastEvent('db-change', { store: 'smsLog' }); } catch (e) {}
-                return json(res, 200, { success: true, sent, failed, total: recipients.length });
+                const payload = { success: sent > 0, sent, failed, total: recipients.length, errors: errorSamples };
+                if (sent === 0 && errorSamples.length) payload.error = errorSamples[0];
+                return json(res, 200, payload);
             } catch (e) { return json(res, 500, { error: e.message || e }); }
         });
         return true;
@@ -9259,70 +9333,52 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
 
                 if (!db.smsLog) db.smsLog = [];
                 let sent = 0, failed = 0;
+                const results = [];
+                const errorSamples = [];
+                const noteError = (msg) => {
+                    const m = String(msg || '').trim();
+                    if (m && !errorSamples.includes(m) && errorSamples.length < 5) errorSamples.push(m);
+                };
 
                 // Send in waves of 10 so a big recipient list doesn't stall the event loop, and
                 // never block the response, but keep ordering of the totals exact.
                 async function sendOne(phone, message) {
-                    if (!phone || !message) { return false; }
+                    if (!phone || !message) return { ok: false, error: 'Missing phone or message' };
                     try {
                         const modem = getModemSmsSettings();
                         if (modem && modem.enabled) {
                             const mres = await sendSmsViaModem(phone, message);
-                            if (mres && mres.ok) return true;
+                            if (mres && mres.ok) return { ok: true, via: 'modem' };
                         }
-                        const postData = querystring.stringify({
-                            username: cfg.username,
-                            to: String(phone).replace(/[^0-9+]/g, '').replace(/^\+/, ''),
-                            message: message,
-                            from: cfg.senderId || ''
-                        });
-                        const result = await new Promise((resolve, reject) => {
-                            const opts = {
-                                hostname: 'api.africastalking.com',
-                                port: 443,
-                                path: '/version1/messaging',
-                                method: 'POST',
-                                headers: {
-                                    'apiKey': cfg.apiKey,
-                                    'Content-Type': 'application/x-www-form-urlencoded',
-                                    'Content-Length': Buffer.byteLength(postData),
-                                    'Accept': 'application/json'
-                                }
-                            };
-                            const req2 = https.request(opts, res2 => {
-                                let data = '';
-                                res2.on('data', c => data += c);
-                                res2.on('end', () => {
-                                    try { resolve(JSON.parse(data)); } catch { resolve({ SMSMessageData: { Message: data } }); }
-                                });
-                            });
-                            req2.on('error', reject);
-                            req2.write(postData);
-                            req2.end();
-                        });
-                        if (result && result.SMSMessageData && result.SMSMessageData.Recipients) {
-                            const r = result.SMSMessageData.Recipients[0];
-                            return !!(r && (r.status === 'Success' || r.statusCode === '101'));
-                        }
-                        return false;
-                    } catch { return false; }
+                        const r = await sendSmsViaAfricasTalking(cfg, phone, message);
+                        if (r.ok) return { ok: true, via: 'africastalking' };
+                        return { ok: false, error: r.error || 'Rejected by provider' };
+                    } catch (e) { return { ok: false, error: e.message || String(e) }; }
                 }
                 for (let i = 0; i < recipients.length; i += 10) {
                     const wave = recipients.slice(i, i + 10).map(({ phone, message }) => sendOne(phone, message));
-                    const results = await Promise.all(wave);
-                    results.forEach(ok => { if (ok) sent++; else failed++; });
+                    const waveResults = await Promise.all(wave);
+                    waveResults.forEach(r => {
+                        results.push(r);
+                        if (r.ok) sent++; else { failed++; noteError(r.error); }
+                    });
                 }
 
-                // Save log entries
+                // Save log entries, each with the true provider outcome.
                 if (logEntries && logEntries.length) {
-                    for (const entry of logEntries) {
+                    logEntries.forEach((entry, idx) => {
+                        const r = results[idx];
                         entry.createdAt = new Date().toISOString();
+                        entry.status = r && r.ok ? 'sent' : 'failed';
+                        if (r && !r.ok && r.error) entry.error = r.error;
                         db.smsLog.push(entry);
-                    }
+                    });
                 }
                 saveDB();
                 broadcastEvent('db-change', { store: 'smsLog' });
-                json(res, 200, { sent, failed, total: recipients.length });
+                const payload = { sent, failed, total: recipients.length, errors: errorSamples };
+                if (sent === 0 && errorSamples.length) payload.error = errorSamples[0];
+                json(res, 200, payload);
             } catch (e) { json(res, 500, { error: e.message || e }); }
         });
         return true;

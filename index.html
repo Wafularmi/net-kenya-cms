@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=497" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=498" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -887,8 +887,8 @@
 </div>
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
-                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from top-left)</div>
-                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning</div>
+                         <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left — 0,0 at bottom-left, like Completion certificate)</div>
+                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning. <b>X</b> runs from the left edge and <b>Y</b> runs up from the bottom edge — the blue X/Y axes on the preview meet at the bottom-left corner of the template.</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                              <div class="form-group">
                                  <label>Name Position</label>
@@ -1054,7 +1054,7 @@
 </div></div>
                          <div style="border-top:1px solid var(--border);margin:12px 0;"></div>
                          <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Field Positions (mm from bottom-left — 0,0 at bottom-left, like Diploma)</div>
-                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning</div>
+                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click on the PDF canvas to set positions, or use sliders below for fine-tuning. <b>X</b> runs from the left edge and <b>Y</b> runs up from the bottom edge — the blue X/Y axes on the preview meet at the bottom-left corner of the template.</div>
                          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                              <div class="form-group">
                                  <label>Name Position</label>
@@ -1562,9 +1562,15 @@
                     </div>
 
                     <div class="card"><h3>SMS Settings (Africa's Talking)</h3>
-                        <div class="form-group"><label>API Key</label><input type="password" id="settings-sms-apikey" placeholder="Your Africa's Talking API key" autocomplete="off"></div>
+                        <div class="form-group"><label>API Key</label><input type="password" id="settings-sms-apikey" placeholder="atsk_… (from your Africa's Talking dashboard)" autocomplete="off"></div>
                         <div class="form-group"><label>Username</label><input type="text" id="settings-sms-username" placeholder="e.g., sandbox or your AT username"></div>
-                        <div class="form-group"><label>Sender ID</label><input type="text" id="settings-sms-senderid" placeholder="e.g., NETCMS (optional)"></div>
+                        <div class="form-group"><label>Sender ID</label><input type="text" id="settings-sms-senderid" placeholder="e.g., NETCMS (max 11 characters, must be approved by AT)"></div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">Use the API key from your <b>Africa's Talking</b> dashboard (it starts with <code>atsk_</code>). The key under "External SMS API" below belongs to this system and will not work here. The sender ID must be an alphanumeric ID approved for your AT account (max 11 characters) — an unapproved sender ID is rejected by the provider.</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+                            <input type="tel" id="settings-sms-test-phone" placeholder="Test number e.g. 0712345678" style="flex:1;min-width:160px;">
+                            <button class="btn btn-outline btn-sm" onclick="sendTestSms()">📲 Send Test SMS</button>
+                        </div>
+                        <div id="settings-sms-test-result" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;"></div>
                         <button class="btn btn-primary" onclick="saveSMSSettings()">Save SMS Settings</button>
                     </div>
                     <div class="card"><h3>SMS via Phone/Modem (Direct Phone SMS)</h3>
@@ -1764,7 +1770,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=497"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=498"></script>
     <script data-cfasync="false" src="js/student-hub.min.js?v=100"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
