@@ -867,6 +867,84 @@ const Q_UI_SW = {
     save: 'Hifadhi', cancel: 'Ghairi', translating: 'Inatumafasi...', translate: 'Tafsiri kwa Kiswahili'
 };
 function tfSelectLabel(label, lang) { return (lang || appLang()) === 'sw' && Q_UI_SW[label] ? Q_UI_SW[label] : label; }
+
+// ---- Bilingual content (English master + optional Swahili) ----------------
+// English is ALWAYS the master copy. The Swahili copy (titleSw / contentSw /
+// descriptionSw / referenceSw) is optional and every display path falls back
+// to English when it is missing, so existing records keep working unchanged.
+function locLang(lang) { return (lang || appLang()) === 'sw' ? 'sw' : 'en'; }
+function videoLangOf(l) { const s = String(l == null ? 'en' : l).toLowerCase(); return (s === 'sw' || s === 'swahili' || s === 'kiswahili') ? 'sw' : 'en'; }
+// Resolve one field for display: { text, lang, missing }.
+function locText(rec, key, lang) {
+    const want = locLang(lang);
+    const en = rec ? String(rec[key] == null ? '' : rec[key]) : '';
+    const sw = rec ? String(rec[key + 'Sw'] == null ? '' : rec[key + 'Sw']) : '';
+    if (want === 'sw' && sw.trim()) return { text: sw, lang: 'sw', missing: false };
+    if (en.trim()) return { text: en, lang: 'en', missing: want === 'sw' };
+    if (sw.trim()) return { text: sw, lang: 'sw', missing: false };
+    return { text: '', lang: want, missing: true };
+}
+function locTitle(rec, lang) { return locText(rec, 'title', lang); }
+function locDesc(rec, lang) { return locText(rec, 'description', lang); }
+function locContent(rec, lang) { return locText(rec, 'content', lang); }
+function locReference(rec, lang) { return locText(rec, 'reference', lang); }
+// Small "not translated yet" hint, shown only when a Swahili reader is missing
+// the Swahili copy. Never blocks the English content.
+function locMissingHintHtml(rec, keys, lang) {
+    const want = locLang(lang);
+    if (want !== 'sw') return '';
+    const missing = (keys || []).some(k => locText(rec, k, want).missing);
+    return missing ? '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;font-style:italic;">Kiswahili version not available yet — showing English.</div>' : '';
+}
+// True when a record carries any Swahili copy (used for the "SW" badge).
+function hasSw(rec, keys) {
+    if (!rec) return false;
+    return (keys || []).some(k => String(rec[k + 'Sw'] == null ? '' : rec[k + 'Sw']).trim());
+}
+function escL(rec, key, lang) { return esc(locText(rec, key, lang).text); }
+
+// A lesson's video SLOTS. Videos may be tagged with a language (en / sw).
+// The English and Swahili versions of the SAME slot are ONE step: the slot's
+// canonical id (the first variant's id) is what watch progress is recorded
+// against, so watching either language completes the step and switching
+// language never restarts it. Mirrors dripLessonVideos() on the server.
+function lessonVideoSlots(lesson, lang) {
+    if (!lesson) return [];
+    const want = locLang(lang);
+    const list = Array.isArray(lesson.videos) ? lesson.videos : [];
+    const rows = [];
+    list.forEach((v, i) => {
+        const url = String((v && (v.url || v.videoUrl || v.link)) || '').trim();
+        if (!url) return;
+        rows.push({
+            id: String((v && v.id) || ('V' + (i + 1))),
+            title: String((v && v.title) || ('Video ' + (i + 1))),
+            url,
+            required: !(v && v.required === false),
+            lang: videoLangOf(v && v.lang),
+            slot: (Number(v && v.slot) > 0) ? Number(v.slot) : (i + 2)
+        });
+    });
+    const legacy = String(lesson.videoUrl || lesson.video || lesson.videoLink || '').trim();
+    if (legacy && !rows.some(v => v.url === legacy)) rows.unshift({ id: 'V1', title: 'Video 1', url: legacy, required: true, lang: videoLangOf(lesson.videoLang), slot: 1 });
+    const groups = [];
+    const bySlot = new Map();
+    rows.forEach(r => {
+        const key = String(r.slot);
+        let g = bySlot.get(key);
+        if (!g) { g = { slot: r.slot, id: r.id, variants: [] }; bySlot.set(key, g); groups.push(g); }
+        g.variants.push(r);
+    });
+    return groups.map((g, i) => {
+        const pick = g.variants.find(v => v.lang === want) || g.variants.find(v => v.lang === 'en') || g.variants[0];
+        return {
+            id: g.id, slot: g.slot, title: pick.title, url: pick.url,
+            required: g.variants.some(v => v.required !== false),
+            lang: pick.lang, index: i + 1, variants: g.variants,
+            fallback: pick.lang !== want
+        };
+    });
+}
 function canManageStudents() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -6443,9 +6521,9 @@ async function viewStudentCourse(courseId) {
                     <div style="flex:1;">
                         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
                             <span style="background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">VIDEO</span>
-                            <b style="font-size:14px;">${lesson.order || ''}. ${lesson.title}</b>
+                            <b style="font-size:14px;">${lesson.order || ''}. ${esc(locTitle(lesson).text)}</b>
                         </div>
-                        ${lesson.description ? `<div style="font-size:12px;color:var(--text-muted);">${lesson.description}</div>` : ''}
+                        ${locDesc(lesson).text ? `<div style="font-size:12px;color:var(--text-muted);">${esc(locDesc(lesson).text)}</div>` : ''}
                         <div style="margin-top:6px;display:flex;gap:12px;font-size:11px;color:var(--text-muted);">
                             ${lessonNotes.length ? `<span>📚 ${lessonNotes.length} note${lessonNotes.length !== 1 ? 's' : ''}</span>` : ''}
                             ${lessonFiles.length ? `<span>📁 ${lessonFiles.length} file${lessonFiles.length !== 1 ? 's' : ''}</span>` : ''}
@@ -6462,8 +6540,8 @@ async function viewStudentCourse(courseId) {
             const lessonNotes = notes.filter(n => n.lessonId === lesson.id);
             const lessonFiles = files.filter(f => f.lessonId === lesson.id);
             html += `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
-                <div><b style="font-size:13px;">${lesson.order || ''}. ${lesson.title}</b>
-                ${lesson.description ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${lesson.description}</div>` : ''}
+                <div><b style="font-size:13px;">${lesson.order || ''}. ${esc(locTitle(lesson).text)}</b>
+                ${locDesc(lesson).text ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${esc(locDesc(lesson).text)}</div>` : ''}
                 <div style="margin-top:4px;font-size:11px;color:var(--text-muted);">${lessonNotes.length ? '📚 ' + lessonNotes.length + ' note' + (lessonNotes.length !== 1 ? 's' : '') : ''}${lessonFiles.length ? (lessonNotes.length ? ' · ' : '') + '📁 ' + lessonFiles.length + ' file' + (lessonFiles.length !== 1 ? 's' : '') : ''}</div></div>
                 <button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${lesson.id}')" style="white-space:nowrap;">📖 Open</button>
             </div>`;
@@ -6495,7 +6573,9 @@ async function viewStudentLesson(lessonId) {
             } else return showToast('⏳ This lesson opens on ' + fmtPublishAt(lesson.publishAt) + ' — please check back then.', { type: 'warning', duration: 5000 });
         }
     }
-    const _videoSrc = lesson.videoUrl || lesson.video || lesson.videoLink || '';
+    // The first video SLOT, in the learner's language (English fallback).
+    const _slotList = (typeof lessonVideoSlots === 'function') ? lessonVideoSlots(lesson) : [];
+    const _videoSrc = _slotList.length ? (_slotList[0].url || '') : (lesson.videoUrl || lesson.video || lesson.videoLink || '');
     const _viewerB = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const _isStudent = _viewerB.role === 'student';
     const _studentId = _viewerB.studentId || _viewerB.username;
@@ -6530,8 +6610,8 @@ async function viewStudentLesson(lessonId) {
     const fileIcons = { 'pdf': '📄', 'doc': '📝', 'docx': '📝', 'xls': '📊', 'xlsx': '📊', 'ppt': '📑', 'pptx': '📑', 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'txt': '📃', 'zip': '📦', 'mp4': '🎬', 'mp3': '🎵' };
     let html = `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;"><b style="font-size:14px;">${course ? course.code + ' — ' + course.name : ''}</b></div>`;
     if (isLessonScheduled(lesson)) html += `<div style="margin-bottom:12px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:13px;color:#1d4ed8;">⏳ <b>Scheduled</b> — auto-publishes to students on ${fmtPublishAt(lesson.publishAt)}. Students cannot see it yet.</div>`;
-    html += `<h3 style="margin:0 0 4px;">${lesson.order ? lesson.order + '. ' : ''}${lesson.title}</h3>`;
-    if (lesson.description) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${lesson.description}</p>`;
+    html += `<h3 style="margin:0 0 4px;">${lesson.order ? lesson.order + '. ' : ''}${esc(locTitle(lesson).text)}</h3>`;
+    if (locDesc(lesson).text) html += `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">${esc(locDesc(lesson).text)}</p>`;
     if (_videoSrc) {
         if (_dripVB && !_dripVDone) html += `<div id="drip-video-slot-b" style="max-width:720px;margin:0 auto 16px;padding:28px 20px;text-align:center;border:1px dashed var(--border);border-radius:10px;background:var(--bg-input);"><div style="font-size:34px;">🔒</div><div style="font-weight:700;margin:6px 0;">Video unlocks after reading</div><div style="font-size:12px;color:var(--text-muted);">Lesson first, then video.</div></div>`;
         else html += `<div style="max-width:720px;margin:0 auto 16px;" id="drip-video-slot-b">${embedVideo(_videoSrc, { track: _isStudent })}</div>`;
@@ -6602,7 +6682,7 @@ async function viewStudentLesson(lessonId) {
             } catch {}
         }, 5000);
     }
-    showModal(lesson.title, html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
+    showModal(locTitle(lesson).text, html, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
     // Video already visible (not gated) -> start watch tracking now.
     if (_isStudent && _videoSrc && !(_dripVB && !_dripVDone) && typeof bindLessonVideoTracking === 'function') {
         try { await bindLessonVideoTracking(lessonId, lesson.courseId); } catch (e) {}
@@ -19565,7 +19645,12 @@ async function renderLessons() {
         const schedBadge = scheduled ? ' <span class="badge badge-info" style="font-size:9px;" title="Auto-publishes">⏳ ' + fmtPublishAt(l.publishAt) + '</span>' : '';
         const lmode = (l.releaseMode || (l.publishAt ? 'date' : 'immediate'));
         const modeBadge = lmode === 'drip' ? ' <span class="badge" style="font-size:9px;background:#e0e7ff;color:#3730a3;" title="Sequenced: unlocks per learner after the previous lesson + course pacing + fees">🔗 SEQUENCED</span>' : '';
-        return `<tr><td>${l.order || idx + 1}</td><td><b>${l.title}</b>${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl || (Array.isArray(l.videos) && l.videos.length) ? ' <span style="font-size:13px;" title="Has video(s)">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${(l.description || '').substring(0, 80)}${(l.description || '').length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${(l.videoUrl || (Array.isArray(l.videos) && l.videos.length)) ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
+        const lTitle = locTitle(l).text;
+        const lDesc = locDesc(l).text;
+        const swBadge = hasSw(l, ['title', 'description', 'reference']) ? ' <span class="badge badge-success" style="font-size:9px;" title="Has a Kiswahili version">SW</span>' : '';
+        const videoLangs = (Array.isArray(l.videos) ? l.videos : []).filter(v => v && v.lang === 'sw').length + (l.videoLang === 'sw' ? 1 : 0);
+        const swVideoBadge = videoLangs ? ' <span class="badge badge-info" style="font-size:9px;" title="Kiswahili video version">🎬SW</span>' : '';
+        return `<tr><td>${l.order || idx + 1}</td><td><b>${esc(lTitle)}</b>${swBadge}${swVideoBadge}${isPublished ? (schedBadge + modeBadge) : ' <span class="badge badge-warning" style="font-size:9px;">DRAFT</span>'}${l.videoUrl || (Array.isArray(l.videos) && l.videos.length) ? ' <span style="font-size:13px;" title="Has video(s)">🎬</span>' : ''}</td><td style="font-size:12px;color:var(--text-muted);">${esc(lDesc.substring(0, 80))}${lDesc.length > 80 ? '...' : ''}</td><td><span class="badge badge-info">${lessonNotes} note${lessonNotes !== 1 ? 's' : ''}</span></td><td><span class="badge badge-warning">${lessonQs} question${lessonQs !== 1 ? 's' : ''}</span></td><td><span class="badge badge-success">${lessonFiles} file${lessonFiles !== 1 ? 's' : ''}</span></td><td>${(l.videoUrl || (Array.isArray(l.videos) && l.videos.length)) ? `<button class="btn btn-outline btn-sm" onclick="viewStudentLesson('${l.id}')">▶ Watch</button> ` : ''}<button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${l.id}')" title="${isPublished ? 'Published — click to hide' : 'Draft — click to publish'}">${isPublished ? '✓ Live' : '🔒 Draft'}</button> <button class="btn btn-primary btn-sm" onclick="manageLesson('${l.id}')">Manage</button> <button class="btn btn-outline btn-sm" onclick="editLesson('${l.id}')">Edit</button> <button class="btn btn-danger btn-sm" onclick="deleteLesson('${l.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">No lessons yet. Click "+ Add Lesson" to create one.</td></tr>';
     courseSelect.addEventListener('change', renderLessons);
     document.getElementById('lesson-status-filter').addEventListener('change', renderLessons);
@@ -19580,6 +19665,67 @@ async function toggleLessonPublish(lessonId) {
     showToast(`Lesson "${lesson.title}" → ${lesson.published ? 'Published ✓' : 'Draft 🔒'}`);
     logAudit(lesson.published ? 'published' : 'unpublished', 'lesson', { id: lessonId });
 }
+// Shared EN/SW language block for the lesson editor. English stays the master
+// copy; the Swahili title / description / reference are optional.
+function lessonLangBlockHtml(lesson) {
+    return `<div class="form-group"><label>Language</label><div style="display:flex;gap:4px;margin-bottom:8px;"><button type="button" class="btn btn-sm btn-primary" id="lesson-lang-en-btn" onclick="setLessonLang('en')" style="font-size:11px;">English</button><button type="button" class="btn btn-sm btn-outline" id="lesson-lang-sw-btn" onclick="setLessonLang('sw')" style="font-size:11px;">Kiswahili</button></div></div>
+    <div id="lesson-lang-en-fields">
+        <div class="form-row"><div class="form-group"><label>Lesson Title (English) *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div>
+        <div class="form-group"><label>Description (English)</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div>
+        <div class="form-group"><label>Reference Notes (English, for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div>
+    </div>
+    <div id="lesson-lang-sw-fields" style="display:none;">
+        <div class="form-group"><label>Jina la Somo (Kiswahili)</label><input type="text" id="lesson-title-sw" value="${lesson ? lesson.titleSw || '' : ''}"></div>
+        <div class="form-group"><label>Maelezo (Kiswahili)</label><textarea id="lesson-desc-sw" rows="3">${lesson ? lesson.descriptionSw || '' : ''}</textarea></div>
+        <div class="form-group"><label>Maelezo ya Kumbukumbu (Kiswahili)</label><textarea id="lesson-reference-sw" rows="5" placeholder="Tafsiri ya maelezo ya kumbukumbu kwa Kiswahili.">${lesson ? lesson.referenceSw || '' : ''}</textarea></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+        <button type="button" class="btn btn-outline btn-sm" id="lesson-translate-btn" onclick="translateLessonToSwahili()">🌐 ${Q_UI_SW.translate}</button>
+        <span id="lesson-translate-status" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">English is the master copy. The Kiswahili title, description and reference notes are optional — learners who select Kiswahili see them, everyone else sees English.</div>`;
+}
+function setLessonLang(lang) {
+    const en = document.getElementById('lesson-lang-en-fields');
+    const sw = document.getElementById('lesson-lang-sw-fields');
+    const enBtn = document.getElementById('lesson-lang-en-btn');
+    const swBtn = document.getElementById('lesson-lang-sw-btn');
+    if (en) en.style.display = lang === 'en' ? 'block' : 'none';
+    if (sw) sw.style.display = lang === 'sw' ? 'block' : 'none';
+    if (enBtn) enBtn.className = 'btn btn-sm ' + (lang === 'en' ? 'btn-primary' : 'btn-outline');
+    if (swBtn) swBtn.className = 'btn btn-sm ' + (lang === 'sw' ? 'btn-primary' : 'btn-outline');
+}
+// Translate the English lesson text (title, description, reference) into
+// Swahili for review. English is never overwritten.
+async function translateLessonToSwahili() {
+    const enTitle = ((document.getElementById('lesson-title') || {}).value || '').trim();
+    const enDesc = ((document.getElementById('lesson-desc') || {}).value || '').trim();
+    const enRef = ((document.getElementById('lesson-reference') || {}).value || '').trim();
+    const sources = [];
+    if (enTitle) sources.push(enTitle);
+    if (enDesc) sources.push(enDesc);
+    if (enRef) sources.push(enRef);
+    if (!sources.length) return showToast('Type the English lesson text first', { type: 'warning' });
+    const btn = document.getElementById('lesson-translate-btn');
+    const statusEl = document.getElementById('lesson-translate-status');
+    if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
+    if (statusEl) statusEl.textContent = Q_UI_SW.translating;
+    const res = await translateToSw(sources);
+    if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
+    if (!res.ok) {
+        if (statusEl) statusEl.textContent = res.reason === 'no_key'
+            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
+            : 'Translation failed — please try again.';
+        return showToast(res.reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+    }
+    let i = 0;
+    if (enTitle) { const el = document.getElementById('lesson-title-sw'); if (el) el.value = res.translations[i++] || ''; }
+    if (enDesc) { const el = document.getElementById('lesson-desc-sw'); if (el) el.value = res.translations[i++] || ''; }
+    if (enRef) { const el = document.getElementById('lesson-reference-sw'); if (el) el.value = res.translations[i++] || ''; }
+    setLessonLang('sw');
+    if (statusEl) statusEl.textContent = '✓ Kiswahili kimefaa. Angalia kisha uhakikishe.';
+    showToast('Translated to Swahili — please review');
+}
 async function showLessonForm(lesson = null) {
     const courses = await dbGetAll('courses');
     const isEdit = !!lesson;
@@ -19587,7 +19733,7 @@ async function showLessonForm(lesson = null) {
     const relMode = lesson ? (lesson.releaseMode || (lesson.publishAt ? 'date' : 'immediate')) : 'immediate';
     // Restore any extra videos saved for this lesson (Video 1 stays on videoUrl).
     try { setTimeout(() => renderLessonVideoRows(lesson), 0); } catch (e) {}
-    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select" onchange="updateLessonDripHint()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-row"><div class="form-group"><label>Lesson Title *</label><input type="text" id="lesson-title" value="${lesson ? lesson.title : ''}" required></div><div class="form-group"><label>Order</label><input type="number" id="lesson-order" value="${lesson ? lesson.order || 1 : 1}" min="1"></div></div><div class="form-group"><label>Description</label><textarea id="lesson-desc" rows="3">${lesson ? lesson.description || '' : ''}</textarea></div><div class="form-group"><label>Reference Notes (for AI essay analysis)</label><textarea id="lesson-reference" rows="5" placeholder="Paste reference material, key concepts, definitions that students should know. This will be used to auto-analyze essay submissions.">${lesson ? lesson.reference || '' : ''}</textarea></div><div class="form-group"><label>🎬 Lesson Videos <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(played one at a time, in this order)</span></label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div><div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><input type="text" id="lesson-video-extra-title" placeholder="Title for Video 2 (optional)" style="flex:1;min-width:170px;"><input type="url" id="lesson-video-extra" placeholder="Add a second video URL (optional)" style="flex:2;min-width:230px;"><button type="button" class="btn btn-outline btn-sm" onclick="addLessonVideoRow(document.getElementById('lesson-video-extra').value, document.getElementById('lesson-video-extra-title').value);document.getElementById('lesson-video-extra').value='';document.getElementById('lesson-video-extra-title').value='';">+ Add video</button></div><div id="lesson-video-rows" style="margin-top:8px;"></div><div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Video 1 is the main URL above. Extra videos play in the order listed, and each opens only after the previous one is watched.</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
+    const content = `<input type="hidden" id="lesson-edit-id" value="${lesson ? lesson.id : ''}"><div class="form-group"><label>Course *</label><select id="lesson-course-select" onchange="updateLessonDripHint()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${lesson && lesson.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div>${lessonLangBlockHtml(lesson)}<div class="form-group"><label>🎬 Lesson Videos <span style="font-weight:400;font-size:11px;color:var(--text-muted);">(played one at a time, in this order)</span></label><input type="url" id="lesson-video" value="${lesson ? lesson.videoUrl || '' : ''}" placeholder="e.g., https://youtube.com/watch?v=... or direct .mp4 link" style="width:100%;" oninput="previewLessonVideo()"><div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);">Video 1 language:</span><select id="lesson-video-lang" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:12px;"><option value="en">English</option><option value="sw">Kiswahili</option></select><span style="font-size:11px;color:var(--text-muted);">Learners get the video in the language they selected.</span></div><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Embed a YouTube link or a direct video file URL. Students will see the video player in the lesson.</div><div id="lesson-video-preview" style="margin-top:8px;display:${lesson && lesson.videoUrl ? 'block' : 'none'};">${lesson && lesson.videoUrl ? embedVideo(lesson.videoUrl) : ''}</div><div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><input type="text" id="lesson-video-extra-title" placeholder="Title for Video 2 (optional)" style="flex:1;min-width:170px;"><input type="url" id="lesson-video-extra" placeholder="Add a second video URL (optional)" style="flex:2;min-width:230px;"><button type="button" class="btn btn-outline btn-sm" onclick="addLessonVideoRow(document.getElementById('lesson-video-extra').value, document.getElementById('lesson-video-extra-title').value);document.getElementById('lesson-video-extra').value='';document.getElementById('lesson-video-extra-title').value='';">+ Add video</button></div><div id="lesson-video-rows" style="margin-top:8px;"></div><div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Video 1 is the main URL above. Extra videos play in the order listed, and each opens only after the previous one is watched. To offer a Kiswahili version of a video, add it with the SAME Slot number as its English original and set its language to Kiswahili — learners then see one video in their own language, and watching either version completes that step.</div></div><div class="form-group"><label><input type="checkbox" id="lesson-virtual-enabled"  style="margin-right:6px;" onchange="toggleVirtualSettings('lesson-')"> <b>Enable Virtual Classroom</b></label></div>
 <div id="lesson-virtual-settings" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-input);">
     <div class="form-row"><div class="form-group"><label>Room Name / URL</label><input type="text" id="lesson-virtual-room" value="${lesson && lesson.virtualRoom ? lesson.virtualRoom : ''}" placeholder="e.g. netcohort or https://meet.jit.si/netcohort" style="width:100%;"></div><div class="form-group"><label>Password</label><input type="text" id="lesson-virtual-password" value="${lesson && lesson.virtualPassword ? lesson.virtualPassword : ''}"></div></div>
     <div class="form-group"><label>Trainer / Instructor</label><input type="text" id="lesson-virtual-trainer" value="${lesson && lesson.virtualTrainer ? lesson.virtualTrainer : ''}" placeholder="e.g. Pastor David" style="width:100%;"></div>
@@ -19596,7 +19742,7 @@ async function showLessonForm(lesson = null) {
 </div>
 <div class="form-group"><label>🚦 Release mode</label><select id="lesson-release" onchange="toggleLessonRelease()" style="width:100%;"><option value="immediate">Immediate — visible at once</option><option value="date">Set date — auto-publish on the date below</option><option value="drip">Sequenced — unlocks per learner (prev complete + course pacing + fees)</option></select><div id="lesson-drip-hint" style="display:none;font-size:11px;color:var(--text-muted);margin-top:4px;"></div></div><div class="form-group" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="lesson-published" ${isPublished ? 'checked' : ''}><label for="lesson-published" style="margin:0;cursor:pointer;font-size:13px;">Published — master switch (Draft hides under every mode)</label></div><div class="form-group" id="lesson-date-row"><label>⏳ Publish on (for Set-date mode)</label><input type="datetime-local" id="lesson-publishAt" value="${lesson && lesson.publishAt ? String(lesson.publishAt).replace(' ', 'T').slice(0,16) : ''}" style="width:100%;"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">A future date hides the lesson from students and auto-publishes it when the time arrives.</div></div>`;
     showModal(isEdit ? 'Edit Lesson' : 'Add Lesson', content, `<button class="btn btn-primary" onclick="saveLesson()">${isEdit ? 'Update' : 'Save'}</button>`);
-    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); const rs = document.getElementById('lesson-release'); if (rs) { rs.value = relMode; toggleLessonRelease(); } updateLessonDripHint(); }, 100);
+    setTimeout(() => { const inp = document.getElementById('lesson-video'); if (inp && inp.value) previewLessonVideo(); const rs = document.getElementById('lesson-release'); if (rs) { rs.value = relMode; toggleLessonRelease(); } const vl = document.getElementById('lesson-video-lang'); if (vl) vl.value = (lesson && lesson.videoLang) ? videoLangOf(lesson.videoLang) : 'en'; setLessonLang('en'); updateLessonDripHint(); }, 100);
 }
 function toggleLessonRelease() {
     const v = document.getElementById('lesson-release') ? document.getElementById('lesson-release').value : 'immediate';
@@ -19633,16 +19779,27 @@ function previewLessonVideo() {
 // existing lessons keep working exactly as before.
 function lessonVideoDrafts() {
     const main = (document.getElementById('lesson-video') || {}).value || '';
+    const mainLang = videoLangOf((document.getElementById('lesson-video-lang') || {}).value || 'en');
     const out = [];
-    if (String(main).trim()) out.push({ id: 'V1', title: 'Video 1', url: String(main).trim(), required: true });
+    if (String(main).trim()) out.push({ id: 'V1', title: 'Video 1', url: String(main).trim(), required: true, lang: mainLang, slot: 1 });
     const host = document.getElementById('lesson-video-rows');
     if (!host) return out;
     Array.from(host.querySelectorAll('.lesson-video-row')).forEach(row => {
         const url = (row.querySelector('.lv-url') || {}).value || '';
         const title = (row.querySelector('.lv-title') || {}).value || '';
         const req = row.querySelector('.lv-required');
+        const langEl = row.querySelector('.lv-lang');
+        const slotEl = row.querySelector('.lv-slot');
         if (!String(url).trim()) return;
-        out.push({ id: 'V' + (out.length + 1), title: String(title).trim() || ('Video ' + (out.length + 1)), url: String(url).trim(), required: !req || req.checked !== false });
+        const slotNum = parseInt((slotEl && slotEl.value) || '', 10);
+        out.push({
+            id: 'V' + (out.length + 1),
+            title: String(title).trim() || ('Video ' + (out.length + 1)),
+            url: String(url).trim(),
+            required: !req || req.checked !== false,
+            lang: videoLangOf((langEl && langEl.value) || 'en'),
+            slot: (Number.isFinite(slotNum) && slotNum > 0) ? slotNum : (out.length + 1)
+        });
     });
     return out;
 }
@@ -19651,16 +19808,20 @@ function collectLessonVideoRows() {
     // Only persist the extras; the first video stays on videoUrl.
     return drafts.slice(1);
 }
-function addLessonVideoRow(url, title) {
+function addLessonVideoRow(url, title, lang, slot) {
     const host = document.getElementById('lesson-video-rows');
     if (!host) return;
     const n = host.querySelectorAll('.lesson-video-row').length + 2;
     const row = document.createElement('div');
     row.className = 'lesson-video-row';
     row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;';
+    const langSel = videoLangOf(lang || 'en');
+    const slotVal = (Number(slot) > 0) ? Number(slot) : n;
     row.innerHTML = '<span style="font-weight:700;width:52px;font-size:12px;">Video ' + n + '</span>'
-        + '<input type="text" class="lv-title" placeholder="Title" value="' + esc(title || '') + '" style="flex:1;min-width:150px;">'
-        + '<input type="url" class="lv-url" placeholder="Video URL" value="' + esc(url || '') + '" style="flex:2;min-width:220px;">'
+        + '<input type="text" class="lv-title" placeholder="Title" value="' + esc(title || '') + '" style="flex:1;min-width:130px;">'
+        + '<input type="url" class="lv-url" placeholder="Video URL" value="' + esc(url || '') + '" style="flex:2;min-width:200px;">'
+        + '<select class="lv-lang" title="Language of this video" style="padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:12px;"><option value="en"' + (langSel === 'en' ? ' selected' : '') + '>English</option><option value="sw"' + (langSel === 'sw' ? ' selected' : '') + '>Kiswahili</option></select>'
+        + '<label style="font-size:11px;display:flex;align-items:center;gap:4px;" title="Slot: give the Kiswahili version of a video the SAME slot number as its English original">Slot <input type="number" class="lv-slot" min="1" value="' + slotVal + '" style="width:54px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text);font-size:12px;"></label>'
         + '<label style="font-size:11px;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="lv-required" checked> Required</label>'
         + '<button type="button" class="btn btn-danger btn-sm" onclick="this.closest(\'.lesson-video-row\').remove()">Remove</button>';
     host.appendChild(row);
@@ -19670,7 +19831,7 @@ function renderLessonVideoRows(lesson) {
     if (!host) return;
     host.innerHTML = '';
     const extras = (lesson && Array.isArray(lesson.videos)) ? lesson.videos : [];
-    extras.forEach(v => addLessonVideoRow(v.url, v.title));
+    extras.forEach((v, i) => addLessonVideoRow(v.url, v.title, v.lang, (Number(v.slot) > 0 ? Number(v.slot) : (i + 2))));
 }
 
 async function saveLesson() {
@@ -19683,10 +19844,14 @@ async function saveLesson() {
     const lesson = {
         id, courseId,
         title,
+        titleSw: ((document.getElementById('lesson-title-sw') || {}).value || '').trim(),
         description: document.getElementById('lesson-desc').value.trim(),
+        descriptionSw: ((document.getElementById('lesson-desc-sw') || {}).value || '').trim(),
         order: parseInt(document.getElementById('lesson-order').value) || 1,
         reference: document.getElementById('lesson-reference').value.trim(),
+        referenceSw: ((document.getElementById('lesson-reference-sw') || {}).value || '').trim(),
         videoUrl: document.getElementById('lesson-video').value.trim(),
+        videoLang: videoLangOf((document.getElementById('lesson-video-lang') || {}).value || 'en'),
         videos: collectLessonVideoRows(),
         published: document.getElementById('lesson-published').checked,
         publishAt: (document.getElementById('lesson-publishAt') && document.getElementById('lesson-publishAt').value) || '',
@@ -19750,7 +19915,7 @@ async function manageLesson(lessonId) {
     const content = `
         <div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;">
             <div style="display:flex;justify-content:space-between;align-items:start;">
-                <div><b>${lesson.title}</b> <span style="color:var(--text-muted);font-size:12px;">— ${courseName}</span>${lesson.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${lesson.description.substring(0, 150)}${lesson.description.length > 150 ? '...' : ''}</div>` : ''}</div>
+                <div><b>${esc(locTitle(lesson).text)}</b> <span style="color:var(--text-muted);font-size:12px;">— ${courseName}</span>${locDesc(lesson).text ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${esc(locDesc(lesson).text.substring(0, 150))}${locDesc(lesson).text.length > 150 ? '...' : ''}</div>` : ''}</div>
                 <button class="btn btn-${isPublished ? 'outline' : 'success'} btn-sm" onclick="toggleLessonPublish('${lessonId}');manageLesson('${lessonId}');">${isPublished ? '✓ Published' : '🔒 Draft'}</button>
             </div>
         </div>
@@ -19764,7 +19929,7 @@ async function manageLesson(lessonId) {
         </div>
         <div id="lesson-tab-content" style="margin-top:12px;"></div>
     `;
-    showModal('Manage Lesson: ' + lesson.title, content, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
+    showModal('Manage Lesson: ' + locTitle(lesson).text, content, `<button class="btn btn-outline" onclick="closeModal()">Close</button>`);
     await switchLessonTab('notes', lessonId);
 }
 async function switchLessonTab(tab, lessonId) {
@@ -19778,16 +19943,19 @@ async function switchLessonTab(tab, lessonId) {
         if (notes.length) {
             html += '<div style="max-height:350px;overflow-y:auto;">';
             notes.forEach(n => {
+                const nT = locTitle(n).text;
+                const nC = locContent(n).text;
+                const nSw = hasSw(n, ['title', 'content']) ? ' <span class="badge badge-success" style="font-size:9px;">SW</span>' : '';
                 html += `<div style="padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <b style="font-size:13px;">${n.title}</b>
+                        <b style="font-size:13px;">${esc(nT)}</b>${nSw}
                         <div style="display:flex;gap:4px;">
                             <button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">View</button>
                             <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇ PDF</button>
                             <button class="btn btn-danger btn-sm" onclick="deleteNoteFromLesson('${n.id}','${lessonId}')">Del</button>
                         </div>
                     </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${(n.content || '').substring(0, 120)}...</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${esc(nC.substring(0, 120))}...</div>
                 </div>`;
             });
             html += '</div>';
@@ -19884,15 +20052,18 @@ async function switchLessonTab(tab, lessonId) {
 async function showNoteForLesson(lessonId) {
     const lesson = await dbGet('lessons', lessonId);
     const courses = await dbGetAll('courses');
-    const content = `<input type="hidden" id="note-lesson-id" value="${lessonId}"><div class="form-group"><label>Course</label><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;">${(await dbGet('courses', lesson.courseId))?.name || 'Unknown'}</div></div><div class="form-group"><label>Title *</label><input type="text" id="note-title" value="Notes: ${lesson.title}" required></div><div class="form-group"><label>Content *</label><textarea id="note-content" rows="10" placeholder="Paste or type your study notes here..."></textarea></div><div style="font-size:11px;color:var(--text-muted);">💡 Notes are visible to students in the portal and can be sent via WhatsApp or downloaded as text files.</div>`;
+    const content = `<input type="hidden" id="note-lesson-id" value="${lessonId}"><div class="form-group"><label>Course</label><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;">${(await dbGet('courses', lesson.courseId))?.name || 'Unknown'}</div></div>${noteLangBlockHtml({ title: 'Notes: ' + (lesson.title || '') })}<div style="font-size:11px;color:var(--text-muted);">💡 Notes are visible to students in the portal and can be sent via WhatsApp or downloaded as text files.</div>`;
     showModal('Add Note to: ' + lesson.title, content, `<button class="btn btn-primary" onclick="saveNoteForLesson('${lessonId}')">Save Note</button>`);
+    setNoteLang('en');
 }
 async function saveNoteForLesson(lessonId) {
     const title = document.getElementById('note-title').value.trim();
     const content = document.getElementById('note-content').value.trim();
+    const titleSw = ((document.getElementById('note-title-sw') || {}).value || '').trim();
+    const contentSw = ((document.getElementById('note-content-sw') || {}).value || '').trim();
     if (!title || !content) return showToast('Title and content required!');
     const lesson = await dbGet('lessons', lessonId);
-    const note = { id: generateId('NOTE'), courseId: lesson.courseId, lessonId, title, content, createdAt: new Date().toISOString() };
+    const note = { id: generateId('NOTE'), courseId: lesson.courseId, lessonId, title, content, titleSw, contentSw, createdAt: new Date().toISOString() };
     await dbPut('notes', note);
     closeModal();
     switchLessonTab('notes', lessonId);
@@ -20926,7 +21097,7 @@ async function renderQuizzes() {
                     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                         <div><b style="font-size:14px;">${typeIcon} ${q.title}</b>
                         <span class="badge badge-info" style="font-size:9px;margin-left:6px;">${typeLabel}</span>
-                        ${lesson ? `<br><span style="font-size:11px;color:var(--text-muted);">Lesson: ${lesson.title}</span>` : ''}
+                        ${lesson ? `<br><span style="font-size:11px;color:var(--text-muted);">Lesson: ${esc(locTitle(lesson).text)}</span>` : ''}
                         ${course ? `<br><span style="font-size:11px;color:var(--text-muted);">${course.name} (${course.code})</span>` : ''}</div>
                         <div style="text-align:right;">
                             ${passed ? '<span class="badge badge-success">Passed</span>' : bestScore !== null ? `<span class="badge badge-${bestScore >= q.passMark ? 'success' : 'danger'}">${bestScore}%</span>` : '<span class="badge badge-info">Not attempted</span>'}
@@ -21546,6 +21717,25 @@ function setAppLang(lang) {
     try { if (typeof applyInterfaceLanguage === 'function') applyInterfaceLanguage(); } catch (e) {}
     try { if (isScreenActive('exams') && typeof renderExams === 'function') renderExams(); } catch (e) {}
     try { if (isScreenActive('quizzes') && typeof renderQuizzes === 'function') renderQuizzes(); } catch (e) {}
+    // Notes, lessons and videos follow the same language, so refresh the
+    // screens that show them.
+    try { if (isScreenActive('student-hub') && typeof renderStudentHub === 'function') renderStudentHub(); } catch (e) {}
+    try { if (isScreenActive('notes') && typeof renderNotes === 'function') renderNotes(); } catch (e) {}
+    try { if (isScreenActive('lessons') && typeof renderLessons === 'function') renderLessons(); } catch (e) {}
+    try { applyLangSwitchState(); } catch (e) {}
+}
+// Highlight the active language on every EN/SW switch on screen.
+function applyLangSwitchState() {
+    try {
+        const cur = appLang();
+        document.querySelectorAll('.lang-switch').forEach(sw => {
+            sw.querySelectorAll('button[data-lang]').forEach(b => {
+                const on = (b.getAttribute('data-lang') === cur);
+                b.style.background = on ? 'var(--accent)' : 'transparent';
+                b.style.color = on ? '#fff' : 'var(--text-secondary)';
+            });
+        });
+    } catch (e) {}
 }
 // Label shown on screen for a True/False answer. The stored value never changes.
 function tfLabel(value, lang) {
@@ -22999,13 +23189,70 @@ async function renderProgressContent(studentId, selectedCourse, data) {
     }
     document.getElementById('progress-content').innerHTML = html;
 }
+// Shared EN/SW language block for the note editors (Study Notes + lesson note).
+// Both modals use the same element ids, and only one modal is open at a time.
+function noteLangBlockHtml(note) {
+    return `<div class="form-group"><label>Language</label><div style="display:flex;gap:4px;margin-bottom:8px;"><button type="button" class="btn btn-sm btn-primary" id="note-lang-en-btn" onclick="setNoteLang('en')" style="font-size:11px;">English</button><button type="button" class="btn btn-sm btn-outline" id="note-lang-sw-btn" onclick="setNoteLang('sw')" style="font-size:11px;">Kiswahili</button></div></div>
+    <div id="note-lang-en-fields">
+        <div class="form-group"><label>Title (English) *</label><input type="text" id="note-title" value="${note ? note.title : ''}" required></div>
+        <div class="form-group"><label>Content (English) *</label><textarea id="note-content" rows="10" placeholder="Paste or type your study notes here. These can be sent to students via WhatsApp.">${note ? note.content || '' : ''}</textarea></div>
+    </div>
+    <div id="note-lang-sw-fields" style="display:none;">
+        <div class="form-group"><label>Kichwa (Kiswahili)</label><input type="text" id="note-title-sw" value="${note ? note.titleSw || '' : ''}"></div>
+        <div class="form-group"><label>Maudhui (Kiswahili)</label><textarea id="note-content-sw" rows="10" placeholder="Ingiza tafsiri ya Kiswahili hapa, au tumia kitufe cha Tafsiri.">${note ? note.contentSw || '' : ''}</textarea></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
+        <button type="button" class="btn btn-outline btn-sm" id="note-translate-btn" onclick="translateNoteToSwahili()">🌐 ${Q_UI_SW.translate}</button>
+        <span id="note-translate-status" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">English is the master copy. The Kiswahili version is optional — learners who select Kiswahili see it, everyone else sees English. If it is missing, they see English instead.</div>`;
+}
+function setNoteLang(lang) {
+    const en = document.getElementById('note-lang-en-fields');
+    const sw = document.getElementById('note-lang-sw-fields');
+    const enBtn = document.getElementById('note-lang-en-btn');
+    const swBtn = document.getElementById('note-lang-sw-btn');
+    if (en) en.style.display = lang === 'en' ? 'block' : 'none';
+    if (sw) sw.style.display = lang === 'sw' ? 'block' : 'none';
+    if (enBtn) enBtn.className = 'btn btn-sm ' + (lang === 'en' ? 'btn-primary' : 'btn-outline');
+    if (swBtn) swBtn.className = 'btn btn-sm ' + (lang === 'sw' ? 'btn-primary' : 'btn-outline');
+}
+// Translate the English note into Swahili for review. English is never
+// overwritten; the Swahili fields are filled and shown for editing.
+async function translateNoteToSwahili() {
+    const enTitle = ((document.getElementById('note-title') || {}).value || '').trim();
+    const enContent = ((document.getElementById('note-content') || {}).value || '').trim();
+    const sources = [];
+    if (enTitle) sources.push(enTitle);
+    if (enContent) sources.push(enContent);
+    if (!sources.length) return showToast('Type the English note first', { type: 'warning' });
+    const btn = document.getElementById('note-translate-btn');
+    const statusEl = document.getElementById('note-translate-status');
+    if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
+    if (statusEl) statusEl.textContent = Q_UI_SW.translating;
+    const res = await translateToSw(sources);
+    if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
+    if (!res.ok) {
+        if (statusEl) statusEl.textContent = res.reason === 'no_key'
+            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
+            : 'Translation failed — please try again.';
+        return showToast(res.reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+    }
+    let i = 0;
+    if (enTitle) { const el = document.getElementById('note-title-sw'); if (el) el.value = res.translations[i++] || ''; }
+    if (enContent) { const el = document.getElementById('note-content-sw'); if (el) el.value = res.translations[i++] || ''; }
+    setNoteLang('sw');
+    if (statusEl) statusEl.textContent = '✓ Kiswahili kimefaa. Angalia kisha uhakikishe.';
+    showToast('Translated to Swahili — please review');
+}
 async function showNoteForm(note = null) {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
     const isEdit = !!note;
-    const content = `<input type="hidden" id="note-edit-id" value="${note ? note.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="note-course-select" onchange="onNoteCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${note && note.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="note-lesson-select"><option value="">General</option></select></div></div><div class="form-group"><label>Title *</label><input type="text" id="note-title" value="${note ? note.title : ''}" required></div><div class="form-group"><label>Content *</label><textarea id="note-content" rows="10" placeholder="Paste or type your study notes here. These can be sent to students via WhatsApp.">${note ? note.content || '' : ''}</textarea></div><div style="font-size:11px;color:var(--text-muted);">💡 Notes are sent as formatted WhatsApp messages. Keep each note under 4000 characters for best results.</div>`;
+    const content = `<input type="hidden" id="note-edit-id" value="${note ? note.id : ''}"><div class="form-row"><div class="form-group"><label>Course *</label><select id="note-course-select" onchange="onNoteCourseChange()"><option value="">Select course...</option>${courses.map(c => `<option value="${c.id}" ${note && note.courseId === c.id ? 'selected' : ''}>${c.name} (${c.code})</option>`).join('')}</select></div><div class="form-group"><label>Lesson</label><select id="note-lesson-select"><option value="">General</option></select></div></div>${noteLangBlockHtml(note)}<div style="font-size:11px;color:var(--text-muted);">💡 Notes are sent as formatted WhatsApp messages. Keep each note under 4000 characters for best results.</div>`;
     showModal(isEdit ? 'Edit Note' : 'Add Study Note', content, `<button class="btn btn-primary" onclick="saveNote()">${isEdit ? 'Update' : 'Save'}</button>`);
     if (note) onNoteCourseChange(note.lessonId);
+    setNoteLang('en');
 }
 async function onNoteCourseChange(selectedLessonId) {
     const courseId = document.getElementById('note-course-select').value;
@@ -23016,14 +23263,16 @@ async function onNoteCourseChange(selectedLessonId) {
 async function saveNote() {
     const title = document.getElementById('note-title').value.trim();
     const content = document.getElementById('note-content').value.trim();
+    const titleSw = ((document.getElementById('note-title-sw') || {}).value || '').trim();
+    const contentSw = ((document.getElementById('note-content-sw') || {}).value || '').trim();
     const courseId = document.getElementById('note-course-select').value;
     if (!title || !content || !courseId) return showToast('Title, content, and course required!');
     const editId = document.getElementById('note-edit-id').value;
     const id = editId || generateId('NOTE');
-    const note = { id, courseId, lessonId: document.getElementById('note-lesson-select').value, title, content, createdAt: editId ? (await dbGet('notes', id)).createdAt : new Date().toISOString() };
+    const note = { id, courseId, lessonId: document.getElementById('note-lesson-select').value, title, content, titleSw, contentSw, createdAt: editId ? (await dbGet('notes', id)).createdAt : new Date().toISOString() };
     await dbPut('notes', note); closeModal(); renderNotes(); showToast(editId ? 'Note updated!' : 'Note created!'); logAudit(editId ? 'updated' : 'created', 'note', { id, courseId, title });
 }
-async function viewNote(id) {
+async function viewNote(id, lang) {
     const note = await dbGet('notes', id);
     if (!note) return;
     const courses = await dbGetAll('courses');
@@ -23035,18 +23284,28 @@ async function viewNote(id) {
     if (__vu.role === 'student' && __nCourseId && typeof checkStudentCourseSequenceAccess === 'function') {
         try { const __sid = await resolveStudentId(__vu).catch(()=>__vu.studentId||__vu.username); const seq = await checkStudentCourseSequenceAccess(__sid, __nCourseId); if (!seq.ok) return studentCourseLockedToast(seq); } catch(e){}
     }
-    const html = `<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Course: ${course ? course.name : '—'} | Lesson: ${lesson ? lesson.title : 'General'}</div><h3 style="color:var(--accent);margin-bottom:12px;">${note.title}</h3><div style="white-space:pre-line;font-size:13px;line-height:1.7;max-height:400px;overflow-y:auto;padding:12px;background:var(--bg-input);border-radius:8px;">${note.content}</div>`;
-    showModal(note.title, html, `<button class="btn btn-success" onclick="sendNoteWhatsApp('${id}')">📱 Send via WhatsApp</button> <button class="btn btn-outline" onclick="copyNote('${id}')">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'doc')">📄 Download (.doc)</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'pdf')">⬇ Download PDF</button>`);
+    const viewLang = lang || window._noteViewLang || appLang();
+    window._noteViewLang = viewLang;
+    const t = locTitle(note, viewLang);
+    const c = locContent(note, viewLang);
+    const toggle = `<div style="display:flex;gap:4px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text-muted);">Language:</span>
+        <button class="btn btn-sm ${viewLang === 'en' ? 'btn-primary' : 'btn-outline'}" onclick="viewNote('${id}','en')">English</button>
+        <button class="btn btn-sm ${viewLang === 'sw' ? 'btn-primary' : 'btn-outline'}" onclick="viewNote('${id}','sw')">Kiswahili</button>
+    </div>`;
+    const html = `<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Course: ${course ? course.name : '—'} | Lesson: ${lesson ? locTitle(lesson, viewLang).text : 'General'}</div><h3 style="color:var(--accent);margin-bottom:12px;">${esc(t.text)}</h3><div style="white-space:pre-line;font-size:13px;line-height:1.7;max-height:400px;overflow-y:auto;padding:12px;background:var(--bg-input);border-radius:8px;">${esc(c.text)}</div>${locMissingHintHtml(note, ['title', 'content'], viewLang)}`;
+    showModal(t.text, html, `<button class="btn btn-success" onclick="sendNoteWhatsApp('${id}')">📱 Send via WhatsApp</button> <button class="btn btn-outline" onclick="copyNote('${id}')">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'doc')">📄 Download (.doc)</button> <button class="btn btn-outline" onclick="downloadNote('${id}', 'pdf')">⬇ Download PDF</button>`);
 }
 async function copyNote(id) {
     const note = await dbGet('notes', id);
     if (!note) return;
+    const text = locContent(note, window._noteViewLang).text;
     try {
-        await navigator.clipboard.writeText(note.content);
+        await navigator.clipboard.writeText(text);
         showToast('Note copied to clipboard!');
     } catch {
         const ta = document.createElement('textarea');
-        ta.value = note.content;
+        ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
@@ -23066,9 +23325,12 @@ async function downloadNote(id, format = 'txt') {
     const initials = branding && branding.initials ? branding.initials : 'CM';
     const accentColor = branding && branding.accentColor ? branding.accentColor : '#2563eb';
     const date = formatDate(note.createdAt);
-    const safeTitle = note.title.replace(/[^a-z0-9]/gi, '_');
+    const nt = locTitle(note, window._noteViewLang).text;
+    const nc = locContent(note, window._noteViewLang).text;
+    const nl = locLang(window._noteViewLang);
+    const safeTitle = nt.replace(/[^a-z0-9]/gi, '_');
     if (format === 'pdf') {
-        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${note.title}</title>
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${nt}</title>
  <style>
  body{font-family:'Segoe UI',Arial,sans-serif;margin:40px;color:#1e293b;}
  .header{text-align:center;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #2563eb;}
@@ -23082,9 +23344,9 @@ async function downloadNote(id, format = 'txt') {
  </style></head><body>
  <div class="header">
  ${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : `<div style="width:60px;height:60px;margin:0 auto 8px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;">${initials}</div>`}
- <h1>${schoolName}</h1><h2>${note.title}</h2></div>
- <div class="meta">${course ? course.name : 'Course'}${lesson ? ' &mdash; ' + lesson.title : ''} &mdash; ${date}</div>
- <div class="content">${note.content}</div>
+ <h1>${schoolName}</h1><h2>${nt}</h2></div>
+ <div class="meta">${course ? course.name : 'Course'}${lesson ? ' &mdash; ' + locTitle(lesson, window._noteViewLang).text : ''} &mdash; ${date}</div>
+ <div class="content">${nc}</div>
  <div class="footer">Generated by ${schoolName} &mdash; ${new Date().toLocaleDateString()}</div>
  </body></html>`;
         const w = window.open('', '_blank');
@@ -23094,7 +23356,7 @@ async function downloadNote(id, format = 'txt') {
         showToast('Opening PDF print dialog...');
     } else if (format === 'doc') {
         const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head><meta charset="UTF-8"><title>${note.title}</title>
+<head><meta charset="UTF-8"><title>${nt}</title>
 <style>
 body{font-family:'Segoe UI',Arial,sans-serif;margin:40px;color:#1e293b;}
 .header{text-align:center;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #2563eb;}
@@ -23107,9 +23369,9 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:40px;color:#1e293b;}
 </style></head><body>
 <div class="header">
 ${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : `<div style="width:60px;height:60px;margin-bottom:8px;border-radius:50%;background:${accentColor};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;">${initials}</div>`}
-<h1>${schoolName}</h1><h2>${note.title}</h2></div>
-<div class="meta">${course ? course.name : 'Course'}${lesson ? ' &mdash; ' + lesson.title : ''} &mdash; ${date}</div>
-<div class="content">${note.content}</div>
+<h1>${schoolName}</h1><h2>${nt}</h2></div>
+<div class="meta">${course ? course.name : 'Course'}${lesson ? ' &mdash; ' + locTitle(lesson, window._noteViewLang).text : ''} &mdash; ${date}</div>
+<div class="content">${nc}</div>
 <div class="footer">Generated by ${schoolName} &mdash; ${new Date().toLocaleDateString()}</div>
 </body></html>`;
         const blob = new Blob([html], { type: 'application/msword' });
@@ -23123,7 +23385,7 @@ ${logoUrl ? `<img class="logo" src="${logoUrl}" alt="Logo">` : `<div style="widt
         URL.revokeObjectURL(url);
         showToast('Note downloaded as .doc');
     } else {
-        const text = `${schoolName}\n${note.title}\n${course ? course.name : 'Course'}${lesson ? ' - ' + lesson.title : ''} - ${date}\n\n${note.content}\n\nGenerated by ${schoolName} - ${new Date().toLocaleDateString()}`;
+        const text = `${schoolName}\n${nt}\n${course ? course.name : 'Course'}${lesson ? ' - ' + locTitle(lesson, window._noteViewLang).text : ''} - ${date}\n\n${nc}\n\nGenerated by ${schoolName} - ${new Date().toLocaleDateString()}`;
         const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -23140,8 +23402,9 @@ async function sendNoteWhatsApp(id) {
     const note = await dbGet('notes', id);
     if (!note) return;
     const students = await dbGetAll('students');
-    const content = `<div class="form-group"><label>Note</label><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;font-weight:600;">${note.title}</div></div><div class="form-group"><label>Recipients</label><select id="note-recipients"><option value="all-active">All Active Students</option><option value="all">All Students</option><option value="selected">Selected Student</option></select></div><div class="form-group" id="note-student-select" style="display:none;"><label>Student</label><select id="note-student">${students.map(s => `<option value="${s.id}">${s.name}${s.admissionNumber ? ' (' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Prefix Message (optional)</label><input type="text" id="note-prefix" placeholder="e.g., Here are your study notes for this week:"></div><div style="font-size:11px;color:var(--text-muted);">Note will be sent as a WhatsApp message</div>`;
-    showModal('Send Note: ' + note.title, content, `<button class="btn btn-success" onclick="doSendNoteWhatsApp('${id}')">📱 Send</button>`);
+    const nt = locTitle(note, window._noteViewLang).text;
+    const content = `<div class="form-group"><label>Note</label><div style="padding:8px;background:var(--bg-input);border-radius:6px;font-size:12px;font-weight:600;">${esc(nt)}</div></div><div class="form-group"><label>Recipients</label><select id="note-recipients"><option value="all-active">All Active Students</option><option value="all">All Students</option><option value="selected">Selected Student</option></select></div><div class="form-group" id="note-student-select" style="display:none;"><label>Student</label><select id="note-student">${students.map(s => `<option value="${s.id}">${s.name}${s.admissionNumber ? ' (' + s.admissionNumber + ')' : ''}</option>`).join('')}</select></div><div class="form-group"><label>Prefix Message (optional)</label><input type="text" id="note-prefix" placeholder="e.g., Here are your study notes for this week:"></div><div style="font-size:11px;color:var(--text-muted);">Note will be sent as a WhatsApp message</div>`;
+    showModal('Send Note: ' + nt, content, `<button class="btn btn-success" onclick="doSendNoteWhatsApp('${id}')">📱 Send</button>`);
     document.getElementById('note-recipients').addEventListener('change', () => {
         document.getElementById('note-student-select').style.display = document.getElementById('note-recipients').value === 'selected' ? 'block' : 'none';
     });
@@ -23163,7 +23426,7 @@ async function doSendNoteWhatsApp(id) {
     if (!targets.length) return showToast('No recipients with phone numbers!');
     const branding = await dbGet('settings', 'branding');
     const schoolName = branding ? branding.schoolName : 'College Management System';
-    const fullMessage = `${prefix ? prefix + '\n\n' : ''}📚 *${note.title}*\n\n${note.content}\n\n— ${schoolName}`;
+    const fullMessage = `${prefix ? prefix + '\n\n' : ''}📚 *${locTitle(note, window._noteViewLang).text}*\n\n${locContent(note, window._noteViewLang).text}\n\n— ${schoolName}`;
     closeModal();
     try {
         const st = await waCloudCall('/api/whatsapp-cloud/status');
@@ -23197,7 +23460,10 @@ async function renderNotes() {
     document.getElementById('notes-body').innerHTML = filtered.map(n => {
         const course = courses.find(c => c.id === n.courseId);
         const lesson = lessons.find(l => l.id === n.lessonId);
-        return `<tr><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? lesson.title : '--'}</td><td><b>${n.title}</b></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">${(n.content || '').substring(0, 60)}...</td><td style="font-size:11px;">${formatDate(n.createdAt)}</td><td><button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button> <button class="btn btn-success btn-sm" onclick="sendNoteWhatsApp('${n.id}')">📱</button> <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">Del</button></td></tr>`;
+        const nt = locTitle(n).text;
+        const nc = locContent(n).text;
+        const swBadge = hasSw(n, ['title', 'content']) ? ' <span class="badge badge-success" style="font-size:9px;">SW</span>' : '';
+        return `<tr><td>${course ? course.name : '--'}</td><td style="font-size:11px;">${lesson ? esc(locTitle(lesson).text) : '--'}</td><td><b>${esc(nt)}</b>${swBadge}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">${esc(nc.substring(0, 60))}...</td><td style="font-size:11px;">${formatDate(n.createdAt)}</td><td><button class="btn btn-outline btn-sm" onclick="viewNote('${n.id}')">View</button> <button class="btn btn-outline btn-sm" onclick="downloadNote('${n.id}')">⬇</button> <button class="btn btn-success btn-sm" onclick="sendNoteWhatsApp('${n.id}')">📱</button> <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">Del</button></td></tr>`;
     }).join('') || '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">No notes yet. Click "+ Add Note" to create one.</td></tr>';
     courseSelect.onchange = renderNotes;
     } catch (e) {
@@ -23546,13 +23812,13 @@ function renderPortalNotesCached(studentId, data) {
     const items = Object.values(grouped);
     if (items.length) {
         container.innerHTML = items.map(g => {
-            const noteItems = g.notes.map(n => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;"><span>${n.title}</span><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="viewNote('${n.id}')">Read</button><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadNote('${n.id}')">⬇</button></div></div>`).join('');
+            const noteItems = g.notes.map(n => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;"><span>${esc(locTitle(n).text)}</span><div style="display:flex;gap:4px;"><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="viewNote('${n.id}')">Read</button><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadNote('${n.id}')">⬇</button></div></div>`).join('');
             const fileItems = g.files.map(f => {
                 const ext = f.fileName.split('.').pop().toLowerCase();
                 const icon = fileIcons[ext] || '📎';
                 return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;margin-top:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;"><span>${icon} ${f.fileName}</span><button class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:10px;" onclick="downloadLessonFile('${f.id}')">⬇</button></div>`;
             }).join('');
-            return `<div style="margin-bottom:10px;"><b style="font-size:12px;">${g.lesson ? g.lesson.title : 'Unknown'}</b><br><span style="font-size:10px;color:var(--text-muted);">${g.course ? g.course.name : ''}</span>${noteItems}${fileItems}</div>`;
+            return `<div style="margin-bottom:10px;"><b style="font-size:12px;">${g.lesson ? esc(locTitle(g.lesson).text) : 'Unknown'}</b><br><span style="font-size:10px;color:var(--text-muted);">${g.course ? g.course.name : ''}</span>${noteItems}${fileItems}</div>`;
         }).join('');
     } else {
         container.innerHTML = '<div style="color:var(--text-muted);text-align: center;padding:20px;">No lesson resources available</div>';
@@ -30807,6 +31073,7 @@ function clearLoginForm() {
 // Login-page initialization
 document.addEventListener('DOMContentLoaded', async () => {
     try { clearLoginForm(); } catch {}
+    try { applyLangSwitchState(); } catch {}
     window.addEventListener('pageshow', () => { try { clearLoginForm(); } catch {} });
     try { startMaintenanceLiveSync(); } catch {}
     try { if (typeof startMaintenanceBanner === 'function') startMaintenanceBanner(); } catch {}

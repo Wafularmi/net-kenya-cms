@@ -990,7 +990,7 @@ function hubDripRoadmap(course, allLessons) {
         }
         const reasonTxt = blockedState.reason === 'fees' ? 'Your weekly fee target is not met yet. Clear the target to unlock the next lesson.' : blockedState.reason === 'pending' ? 'Unlocks as soon as the system processes your enrolment.' : (sameUnitText ? 'Finish the previous part of this lesson (notes or video) and the next one unlocks instantly — only a pause between different lessons.' : ('Complete the previous lesson to unlock this one.' + (paceLabel === 'instant' ? ' This course unlocks lessons instantly after the previous one is done.' : ' Pacing: one new lesson every ' + paceLabel + ' after the previous is done.')));
         nextHtml = '<div style="margin-top:10px;padding:10px 12px;background:rgba(245,245,245,0.6);border-radius:8px;font-size:12px;">' +
-            '<b>Next up: ' + esc(blockedFirst.title) + '</b>' +
+            '<b>Next up: ' + esc(locTitle(blockedFirst).text) + '</b>' +
             '<div style="margin-top:4px;opacity:.85;">' + reasonTxt + '</div></div>';
     }
     return '<div class="hub-drip-roadmap" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:var(--bg-card);">' +
@@ -1077,6 +1077,14 @@ async function renderStudentHub(force) {
         _hubStudent = me;
         _hubData = data;
         const _isAlumniHub = _hubIsAlumni(me, currentUser);
+        // Adopt the language the learner chose on another device: it is stored
+        // on their record (langPref), so the notes, lessons and videos follow
+        // them. Only applied when this device has no choice of its own.
+        try {
+            if (!localStorage.getItem('appLanguage') && me && me.langPref) {
+                localStorage.setItem('appLanguage', me.langPref === 'sw' ? 'sw' : 'en');
+            }
+        } catch (e) {}
         try {
             const titleEl = document.getElementById('student-hub-title');
             if (titleEl) titleEl.textContent = _isAlumniHub ? '🎓 Alumni Learning' : '🎓 My Student Hub';
@@ -1148,7 +1156,7 @@ async function renderStudentHub(force) {
                 <div class="stat-card" style="cursor:pointer;" onclick="switchHubTab('live')"><div class="stat-label">🎥 Live Classes</div><div class="stat-value" style="color:var(--danger);">${c.myLessons.filter(l => l.virtualEnabled && l.virtualRoom).length}</div></div>
             </div>
 
-            <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--border);overflow-x:auto;">
+            <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--border);overflow-x:auto;align-items:center;">
                 <button class="hub-tab active" data-tab="overview" onclick="switchHubTab('overview',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid var(--accent);color:var(--accent);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">Overview</button>
                 <button class="hub-tab" data-tab="courses" onclick="switchHubTab('courses',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📚 Courses</button>
                 <button class="hub-tab" data-tab="exams" onclick="switchHubTab('exams',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📝 Exams</button>
@@ -1157,6 +1165,10 @@ async function renderStudentHub(force) {
                 <button class="hub-tab" data-tab="live" onclick="switchHubTab('live',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">🎥 Live Classes</button>
                 <button class="hub-tab" data-tab="discussions" onclick="switchHubTab('discussions',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">💬 Discussions</button>
                 <button class="hub-tab" data-tab="media" onclick="switchHubTab('media',this)" style="padding:10px 18px;border:none;background:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px;">📸 Media</button>
+                <div title="Lugha / Language" style="margin-left:auto;display:flex;gap:4px;padding:4px 0 4px 12px;flex-shrink:0;align-items:center;">
+                    <button type="button" class="btn btn-sm ${appLang() === 'en' ? 'btn-primary' : 'btn-outline'}" onclick="hubSetLang('en')" style="font-size:11px;font-weight:700;">EN</button>
+                    <button type="button" class="btn btn-sm ${appLang() === 'sw' ? 'btn-primary' : 'btn-outline'}" onclick="hubSetLang('sw')" style="font-size:11px;font-weight:700;">SW</button>
+                </div>
             </div>
 
             <div id="hub-tab-overview">${renderHubOverview(c.me, c.myCourses, c.myUpcomingExams, c.pendingQuizzes, c.completedQuizzes, c.data, c.todoItems, c.upcomingRegisteredExams, c.upcomingAvailableExams)}</div>
@@ -1236,6 +1248,13 @@ async function renderStudentHub(force) {
     }
 }
 
+// Switch the learner's content language (notes, lesson titles, videos).
+// setAppLang() stores the choice on the device AND on the learner's record, so
+// it follows them to another device.
+function hubSetLang(lang) {
+    try { if (typeof setAppLang === 'function') setAppLang(lang === 'sw' ? 'sw' : 'en'); } catch (e) {}
+    try { renderStudentHub(); } catch (e) {}
+}
 async function switchHubTab(tab, btn) {
     _hubActiveTab = tab;
     _hubRememberActiveTab(tab);
@@ -3217,9 +3236,9 @@ function hubLessonFlowOrder(lesson, data) {
         });
         const items = [];
         items.push({ type: 'notes', order: 0, title: 'Lesson Notes' });
-        const vids = (Array.isArray(lesson.videos) ? lesson.videos : []);
-        vids.forEach((v,i)=>{ items.push({ type: 'video', order: 1 + i, title: v.title || ('Video '+(i+1)), id: v.id }); });
-        if (!vids.length && lesson.videoUrl) items.push({ type: 'video', order: 1, title: 'Video 1' });
+        // One step per video SLOT (an English and a Swahili version of the same
+        // slot are one step for the learner).
+        hubLessonVideos(lesson).forEach((v, i) => { items.push({ type: 'video', order: 1 + i, title: v.title || ('Video ' + (i + 1)), id: v.id }); });
         quizzes.forEach((q,qi)=>{ items.push({ type: 'quiz', order: 100 + (Number(q.flowOrder)||qi), title: q.title || 'Lesson Quiz', quizId: q.id }); });
         items.sort((a,b)=>(a.order-b.order));
         return items;
@@ -3290,21 +3309,20 @@ async function submitMediaUpload() {
 }
 
 // ---- Lesson drip: ordered videos + lesson-quiz retry ---------------------
-// Mirrors the server engine (dripLessonVideos / dripVideoStates) so the hub can
-// show Video 1, Video 2 ... with only the first unfinished one playable.
-function hubLessonVideos(lesson) {
-    if (!lesson) return [];
-    const list = Array.isArray(lesson.videos) ? lesson.videos : [];
-    const out = [];
-    list.forEach((v, i) => {
-        const url = String((v && (v.url || v.videoUrl || v.link)) || '').trim();
-        if (!url) return;
-        out.push({ id: String((v && v.id) || ('V' + (i + 1))), title: String((v && v.title) || ('Video ' + (i + 1))), url, required: !(v && v.required === false) });
-    });
-    const legacy = String(lesson.videoUrl || lesson.video || lesson.videoLink || '').trim();
-    if (legacy && !out.some(v => v.url === legacy)) out.unshift({ id: 'V1', title: 'Video 1', url: legacy, required: true });
-    out.forEach((v, i) => { v.index = i + 1; });
-    return out;
+// A lesson's ordered list of videos. Lessons keep working with the single
+// `videoUrl` they already have; staff can add more and they are served in the
+// order shown. Each video gets a stable id so watch progress can be tracked
+// per video rather than per lesson.
+//
+// A video may be tagged with a language. The English and Swahili versions of
+// the SAME slot are ONE step for the learner: the slot's canonical id (the
+// first variant's id) is what watch progress is recorded against, so watching
+// either language completes the step and switching language never restarts it.
+// lessonVideoSlots() lives in bundle.js (loaded first); it mirrors
+// dripLessonVideos() on the server.
+function hubLessonVideos(lesson, lang) {
+    if (typeof lessonVideoSlots === 'function') return lessonVideoSlots(lesson, lang);
+    return [];
 }
 function hubTrackableVideo(url) {
     const s = String(url || '').trim();
@@ -3313,9 +3331,9 @@ function hubTrackableVideo(url) {
         || /youtube\.com\/(?:watch\?|embed\/|shorts\/)|youtu\.be\//i.test(s)
         || /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(s);
 }
-function hubVideoStates(lesson, comp) {
+function hubVideoStates(lesson, comp, lang) {
     const progress = (comp && comp.videoProgress && typeof comp.videoProgress === 'object') ? comp.videoProgress : {};
-    const list = hubLessonVideos(lesson);
+    const list = hubLessonVideos(lesson, lang);
     const states = [];
     let prevDone = true;
     list.forEach(v => {
@@ -3325,15 +3343,18 @@ function hubVideoStates(lesson, comp) {
         const dur = Number(p.durationSecs) || (legacy ? Number(comp && comp.videoDurationSecs) || 0 : 0);
         const seen = Number(p.secs) || (legacy ? Number(comp && comp.videoSecs) || 0 : 0);
         const done = !trackable ? true : (!!p.doneAt || !!(legacy && comp && comp.videoDoneAt) || (dur > 0 && seen > 0 && seen >= dur * 0.9));
-        states.push({ id: v.id, title: v.title, url: v.url, index: v.index, done, trackable, pct: dur > 0 ? Math.min(100, Math.round((seen / dur) * 100)) : (done ? 100 : 0), state: done ? 'done' : (prevDone ? 'open' : 'locked') });
+        states.push({ id: v.id, slot: v.slot, title: v.title, url: v.url, index: v.index, lang: v.lang, fallback: v.fallback, done, trackable, pct: dur > 0 ? Math.min(100, Math.round((seen / dur) * 100)) : (done ? 100 : 0), state: done ? 'done' : (prevDone ? 'open' : 'locked') });
         prevDone = done;
     });
     return states;
 }
 // Render the lesson's videos in order; only the current one gets a player.
 function hubLessonVideosHtml(lesson, comp, opts) {
-    const states = hubVideoStates(lesson, comp);
+    const lang = (opts && opts.lang) || appLang();
+    const states = hubVideoStates(lesson, comp, lang);
     if (!states.length) return '';
+    const langNote = (v) => (v.fallback && v.lang === 'en')
+        ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Kiswahili version not available yet — showing English.</div>' : '';
     const rows = states.map(v => {
         if (v.state === 'open' && v.trackable) {
             return `<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--bg-input);">
@@ -3341,12 +3362,14 @@ function hubLessonVideosHtml(lesson, comp, opts) {
                     <div style="font-weight:700;">🎬 ${esc(v.title || 'Video ' + v.index)}</div>
                     <span style="font-size:11px;color:var(--text-muted);">${v.pct > 0 ? v.pct + '% watched' : 'Watch to continue'}</span>
                 </div>
+                ${langNote(v)}
                 <div style="max-width:720px;margin:0 auto;" data-hub-video-slot="${esc(v.id)}">${typeof embedVideo === 'function' ? embedVideo(v.url, { track: true }) : ''}</div>
             </div>`;
         }
         if (v.state === 'open') {
             return `<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;">
                 <div style="font-weight:700;margin-bottom:8px;">🎬 ${esc(v.title || 'Video ' + v.index)}</div>
+                ${langNote(v)}
                 <a href="${esc(v.url)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Open video link</a>
                 <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">Mark it watched from your lesson list once done.</span>
             </div>`;
@@ -3475,10 +3498,12 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                     ${courseLessons.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">${courseLessons.map(l => {
                         const lessonNote = courseNotes.find(n => n.lessonId === l.id);
                         const generalNotes = courseNotes.filter(n => !n.lessonId);
-                        const content = lessonNote?.content || l.description || l.reference || '';
+                        // Shown in the learner's language, with English as the fallback.
+                        const content = (lessonNote ? locContent(lessonNote).text : '') || locDesc(l).text || locReference(l).text || '';
                         const readTime = estimateReadTime(content);
                         const isRead = readLessons[l.id];
-                        const hasVideo = !!l.videoUrl;
+                        // The server counts every video slot, so the card must agree.
+                        const hasVideo = hubLessonVideos(l).length > 0;
         // The server is the authority: if the notes were read (or the lesson is
         // complete), or the video was already watched, this card must never say
         // "Read notes first" again. The device marker alone used to leave
@@ -3501,26 +3526,30 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
         const lockTxt = st === 'waiting'
             ? 'Finish the previous step first'
             : (st === 'locked' ? 'Opens after the previous lesson' : '');
-        const badge = isDone
-            ? '<span style="background:rgba(22,163,74,.15);color:var(--success);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">DONE</span>'
-            : (isCurrent ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">CONTINUE HERE</span>' : '');
+                        const badge = isDone
+                            ? '<span style="background:rgba(22,163,74,.15);color:var(--success);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">DONE</span>'
+                            : (isCurrent ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">CONTINUE HERE</span>' : '');
+                        // Search finds a note in EITHER language.
+                        const searchBlob = [l.title, l.titleSw, l.description, l.descriptionSw, lessonNote && lessonNote.title, lessonNote && lessonNote.titleSw, lessonNote && lessonNote.content, lessonNote && lessonNote.contentSw].filter(Boolean).join(' ').toLowerCase();
+                        const lTitle = locTitle(l).text;
+                        const lDesc = locDesc(l).text;
                         if (!isOpen) {
                             return `
-                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" style="border:1px dashed var(--border);border-radius:10px;padding:14px;background:var(--bg-input);opacity:.75;cursor:not-allowed;">
+                            <div class="hub-note-card" data-search="${esc(searchBlob)}" style="border:1px dashed var(--border);border-radius:10px;padding:14px;background:var(--bg-input);opacity:.75;cursor:not-allowed;">
                                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px;">
-                                    <div style="font-weight:600;font-size:14px;line-height:1.3;color:var(--text-muted);">🔒 ${esc(l.title)}</div>
+                                    <div style="font-weight:600;font-size:14px;line-height:1.3;color:var(--text-muted);">🔒 ${esc(lTitle)}</div>
                                 </div>
                                 <div style="font-size:11px;color:var(--text-muted);">${lockTxt}</div>
                             </div>
                         `;
                         }
                         return `
-                            <div class="hub-note-card" data-search="${esc((l.title + ' ' + (l.description || '') + ' ' + (lessonNote?.title || '') + ' ' + (lessonNote?.content || '')).toLowerCase())}" onclick="viewHubLessonNote('${l.id}','${esc(course.id)}')" style="border:1px solid ${isDone ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--border)')};${isCurrent ? 'border-left:4px solid var(--accent);' : ''}border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isDone ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--border)')}';this.style.transform='';this.style.boxShadow='';">
+                            <div class="hub-note-card" data-search="${esc(searchBlob)}" onclick="viewHubLessonNote('${l.id}','${esc(course.id)}')" style="border:1px solid ${isDone ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--border)')};${isCurrent ? 'border-left:4px solid var(--accent);' : ''}border-radius:10px;padding:14px;cursor:pointer;transition:all 0.2s;background:var(--bg-card);" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';" onmouseout="this.style.borderColor='${isDone ? 'var(--success)' : (isCurrent ? 'var(--accent)' : 'var(--border)')}';this.style.transform='';this.style.boxShadow='';">
                                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px;">
-                                    <div style="font-weight:600;font-size:14px;line-height:1.3;">${isDone ? '✅' : isCurrent ? '▶' : hasVideo ? '🎬' : '📖'} ${esc(l.title)}</div>
+                                    <div style="font-weight:600;font-size:14px;line-height:1.3;">${isDone ? '✅' : isCurrent ? '▶' : hasVideo ? '🎬' : '📖'} ${esc(lTitle)}</div>
                                     <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">${badge}${hasVideo ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">VIDEO</span>' : ''}</div>
                                 </div>
-                                ${l.description ? `<div style="color:var(--text-muted);font-size:12px;line-height:1.4;margin-bottom:8px;">${esc(l.description.substring(0, 90))}${l.description.length > 90 ? '...' : ''}</div>` : ''}
+                                ${lDesc ? `<div style="color:var(--text-muted);font-size:12px;line-height:1.4;margin-bottom:8px;">${esc(lDesc.substring(0, 90))}${lDesc.length > 90 ? '...' : ''}</div>` : ''}
                                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-muted);">
                                     <span>${hasVideo ? '🎬 Video lesson' : '⏱ ' + readTime + ' min read'}</span>
                                     ${hasVideo ? (serverWatched ? '<span style="color:var(--success);font-size:10px;font-weight:700;">✓ Watched</span>' : (videoLocked ? '<span style="color:var(--text-muted);font-size:10px;">🔒 Read notes first</span>' : '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();viewStudentLesson(\'' + l.id + '\')" style="padding:4px 12px;font-size:11px;font-weight:600;">▶ Watch Now</button>')) : (lessonNote ? '<span style="color:var(--success);">📄 Notes</span>' : '<span>No notes yet</span>')}
@@ -3531,9 +3560,9 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
                     ${courseNotes.filter(n => !n.lessonId).length ? `<div class="hub-note-general" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
                         <h4 style="font-size:12px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">📄 General Notes</h4>
                         ${courseNotes.filter(n => !n.lessonId).map(n => `
-                            <div class="hub-note-card event-item" data-search="${esc((n.title + ' ' + (n.content || '')).toLowerCase())}" onclick="viewHubNote('${n.id}')" style="cursor:pointer;padding:10px;border-radius:6px;margin-bottom:4px;" onmouseover="this.style.background='var(--bg-input)'" onmouseout="this.style.background=''">
+                            <div class="hub-note-card event-item" data-search="${esc([n.title, n.titleSw, n.content, n.contentSw].filter(Boolean).join(' ').toLowerCase())}" onclick="viewHubNote('${n.id}')" style="cursor:pointer;padding:10px;border-radius:6px;margin-bottom:4px;" onmouseover="this.style.background='var(--bg-input)'" onmouseout="this.style.background=''">
                                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                                    <span><b>${esc(n.title)}</b></span>
+                                    <span><b>${esc(locTitle(n).text)}</b></span>
                                     <span style="color:var(--text-muted);font-size:11px;">${formatDate(n.createdAt)}</span>
                                 </div>
                             </div>
@@ -3629,7 +3658,7 @@ async function viewHubLessonNote(lessonId, courseId) {
                         const feeOk = (typeof _hubFeeSnapshotOk === 'function') ? _hubFeeSnapshotOk() !== false : true;
                         const sameUnit = prevL ? hubDripSameUnit(prevL, lesson) : false;
                         if (!feeOk) reason = 'Your weekly fee target is not met yet. Clear the target to unlock this lesson.';
-                        else if (!prevDone) reason = prevL ? 'Complete "' + (prevL.title || 'the previous part') + '" first' + (sameUnit ? ' — the next part unlocks instantly, no waiting.' : ' (timed reading + 50% quiz).') : 'Finish the previous lesson first (timed reading + 50% quiz).';
+                        else if (!prevDone) reason = prevL ? 'Complete "' + (locTitle(prevL).text || 'the previous part') + '" first' + (sameUnit ? ' — the next part unlocks instantly, no waiting.' : ' (timed reading + 50% quiz).') : 'Finish the previous lesson first (timed reading + 50% quiz).';
                         else {
                             const pace = hubDripPace(course);
                             reason = sameUnit ? 'This is the next part of the same lesson — it unlocks instantly once the previous part is done.' : pace.ms === 0 ? 'Unlocks as soon as the previous lesson is completed.' : 'Allow ' + hubDripPaceLabel(course) + ' between lessons — it unlocks after the previous lesson completes and the pacing gap passes.';
@@ -3656,7 +3685,11 @@ async function viewHubLessonNote(lessonId, courseId) {
             } catch (e) {}
         }
 
-        const content = note?.content || lesson.description || lesson.reference || 'No content available for this lesson yet.';
+        // Notes, lesson description and reference are shown in the learner's
+        // language; English is the fallback when no Swahili copy exists.
+        const content = (note ? locContent(note).text : '') || locDesc(lesson).text || locReference(lesson).text || 'No content available for this lesson yet.';
+        const swHintHtml = (appLang() === 'sw' && note && locContent(note, 'sw').missing)
+            ? '<div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">Kiswahili version not available yet — showing English.</div>' : '';
         const readTime = estimateReadTime(content);
         const courseLessons = (data.lessons || []).filter(l => l.courseId === courseId && (typeof lessonVisible === 'function' ? lessonVisible(l) : l.published !== false)).sort((a, b) => (a.order || 0) - (b.order || 0));
         const currentIdx = courseLessons.findIndex(l => l.id === lessonId);
@@ -3718,7 +3751,9 @@ async function viewHubLessonNote(lessonId, courseId) {
 
         const contentEscaped = esc(content);
         const safeContent = contentEscaped.replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
-        const _videoSrcHub = lesson.videoUrl || lesson.video || lesson.videoLink || '';
+        // The first video SLOT in the learner's language (English fallback).
+        const _hubSlots = hubLessonVideos(lesson);
+        const _videoSrcHub = _hubSlots.length ? (_hubSlots[0].url || '') : (lesson.videoUrl || lesson.video || lesson.videoLink || '');
         const _isStudentHub = !!(me && (!currentUser || currentUser.role === 'student' || String(currentUser.studentId || '') === String(me.id)));
         const _comp = (typeof _dripC !== 'undefined' && _dripC && _dripC[lessonId]) ? _dripC[lessonId] : null;
         // Ordered videos: only the first unfinished one gets a player.
@@ -3735,7 +3770,7 @@ async function viewHubLessonNote(lessonId, courseId) {
                 ${flowHtml}
                 ${videoHtml}
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">${esc(course?.code || '')} · ${esc(course?.name || '')}</div>
-                <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(lesson.title)}</h2>
+                <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(locTitle(lesson).text)}</h2>
                 <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:20px;flex-wrap:wrap;align-items:center;">
                     ${_videoSrcHub ? '<span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;font-size:10px;">🎬 VIDEO</span>' : ''}
                     <span>⏱ ${readTime} min read</span>
@@ -3744,16 +3779,17 @@ async function viewHubLessonNote(lessonId, courseId) {
                     ${_isStudentHub ? `<span id="drip-read-label" style="font-weight:700;color:var(--accent);">${dripReadDone ? '✓ Reading complete' : '📖 Reading time: 0m 0s / ' + Math.ceil(dripReqSecs / 60) + ' min required'}</span>` : ''}
                 </div>
                 ${_isStudentHub ? `<div style="margin:0 0 16px;"><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div id="drip-read-bar" style="height:100%;width:${dripReadDone ? 100 : Math.min(100, Math.round(dripStartSecs / Math.max(1, dripReqSecs) * 100))}%;background:linear-gradient(90deg,var(--success),var(--accent));transition:width 0.5s;"></div></div></div>` : ''}
+                ${swHintHtml}
                 <div style="font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.85;color:var(--text);white-space:pre-line;padding:0 0 24px 0;border-bottom:1px solid var(--border);">${contentEscaped}</div>
                 <div style="display:flex;justify-content:space-between;gap:8px;margin-top:20px;flex-wrap:wrap;">
-                    ${prevLesson ? `<button class="btn btn-outline" onclick="closeModal();viewHubLessonNote('${prevLesson.id}','${courseId}')" style="text-align:left;">← <span style="display:block;font-size:11px;opacity:0.7;">Previous</span><span style="font-weight:600;">${esc(prevLesson.title)}</span></button>` : '<div></div>'}
-                    ${nextLesson ? `<button class="btn btn-primary" onclick="closeModal();viewHubLessonNote('${nextLesson.id}','${courseId}')" style="text-align:right;">→ <span style="display:block;font-size:11px;opacity:0.8;">Next</span><span style="font-weight:600;">${esc(nextLesson.title)}</span></button>` : '<div></div>'}
+                    ${prevLesson ? `<button class="btn btn-outline" onclick="closeModal();viewHubLessonNote('${prevLesson.id}','${courseId}')" style="text-align:left;">← <span style="display:block;font-size:11px;opacity:0.7;">Previous</span><span style="font-weight:600;">${esc(locTitle(prevLesson).text)}</span></button>` : '<div></div>'}
+                    ${nextLesson ? `<button class="btn btn-primary" onclick="closeModal();viewHubLessonNote('${nextLesson.id}','${courseId}')" style="text-align:right;">→ <span style="display:block;font-size:11px;opacity:0.8;">Next</span><span style="font-weight:600;">${esc(locTitle(nextLesson).text)}</span></button>` : '<div></div>'}
                 </div>
             </div>
         `;
 
         const noteId = note ? note.id : null;
-        showModal('📖 ' + lesson.title, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> ${noteId ? `<button class="btn btn-outline" onclick="downloadNote('${noteId}','pdf')">⬇ PDF</button>` : `<button class="btn btn-outline" onclick="hubDownloadText(\`${safeContent}\`,'${esc(lesson.title)}')">⬇ PDF</button>`} ${(me && !dripReadDone) ? '<button class="btn btn-outline" onclick="closeModal();">Close (reading timer pauses)</button>' : '<button class="btn btn-success" onclick="closeModal();renderStudentHub();">✓ Marked as Read</button>'}`);
+        showModal('📖 ' + locTitle(lesson).text, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> ${noteId ? `<button class="btn btn-outline" onclick="downloadNote('${noteId}','pdf')">⬇ PDF</button>` : `<button class="btn btn-outline" onclick="hubDownloadText(\`${safeContent}\`,'${esc(locTitle(lesson).text)}')">⬇ PDF</button>`} ${(me && !dripReadDone) ? '<button class="btn btn-outline" onclick="closeModal();">Close (reading timer pauses)</button>' : '<button class="btn btn-success" onclick="closeModal();renderStudentHub();">✓ Marked as Read</button>'}`);
         // Video already visible (not gated behind reading) -> start watch tracking.
         if (_isStudentHub && !(dripMode && !dripReadDone) && typeof bindLessonVideoTracking === 'function') {
             // Track whichever video is currently open (the first unfinished one).
@@ -3813,20 +3849,25 @@ async function viewHubNote(noteId) {
             try { const fullNote = await dbGet('notes', note.id); if (fullNote) note = fullNote; } catch {}
         }
         const course = (data.courses || []).find(c => c.id === note.courseId);
-        const readTime = estimateReadTime(note.content || '');
-        const safeContent = esc(note.content || '').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
+        const nTitle = locTitle(note).text;
+        const nContent = locContent(note).text;
+        const readTime = estimateReadTime(nContent || '');
+        const safeContent = esc(nContent || '').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
+        const swHintHtml = (appLang() === 'sw' && locContent(note, 'sw').missing)
+            ? '<div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:8px;">Kiswahili version not available yet — showing English.</div>' : '';
         const html = `
             <div style="max-width:760px;margin:0 auto;">
                 <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">${esc(course?.code || '')} · ${esc(course?.name || '')}</div>
-                <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(note.title)}</h2>
+                <h2 style="color:var(--accent);margin:0 0 4px 0;font-size:24px;line-height:1.3;">${esc(nTitle)}</h2>
                 <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:20px;flex-wrap:wrap;">
                     <span>⏱ ${readTime} min read</span>
                     <span>📅 ${formatDate(note.createdAt)}</span>
                 </div>
-                <div style="font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.85;color:var(--text);white-space:pre-line;">${esc(note.content || '')}</div>
+                ${swHintHtml}
+                <div style="font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.85;color:var(--text);white-space:pre-line;">${esc(nContent || '')}</div>
             </div>
         `;
-        showModal('📄 ' + note.title, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${note.id}','pdf')">⬇ PDF</button>`);
+        showModal('📄 ' + nTitle, html, `<button class="btn btn-outline" onclick="hubPrintNote()">🖨 Print</button> <button class="btn btn-outline" onclick="hubCopyNote(\`${safeContent}\`)">📋 Copy</button> <button class="btn btn-outline" onclick="downloadNote('${note.id}','pdf')">⬇ PDF</button>`);
     } catch (err) {
         console.error('viewHubNote error:', err);
         showToast('Error opening note', { type: 'danger' });

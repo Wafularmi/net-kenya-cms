@@ -361,30 +361,64 @@ function dripQuizBestForLesson(db, sid, lessonId) {
     return { required: true, best, attemptsUsed, retriesLeft, maxRetries, quizIds: Array.from(qids), passed: best >= DRIP_PASS, skipped, quizzes: quizzes.length };
 }
 
+// The language a video was tagged with (en / sw). Anything unknown is English.
+function dripVideoLang(l) {
+    const s = String(l == null ? 'en' : l).toLowerCase();
+    return (s === 'sw' || s === 'swahili' || s === 'kiswahili') ? 'sw' : 'en';
+}
+
 // A lesson's ordered list of videos. Lessons keep working with the single
 // `videoUrl` they already have; staff can add more and they are served in the
 // order shown. Each video gets a stable id so watch progress can be tracked
 // per video rather than per lesson.
+//
+// A video may be tagged with a language. The English and Swahili versions of
+// the SAME slot are ONE step for the learner: the slot's canonical id (the
+// first variant's id) is what watch progress is recorded against, so watching
+// either language completes the step and switching language never restarts it.
 function dripLessonVideos(lesson) {
     if (!lesson) return [];
     const list = Array.isArray(lesson.videos) ? lesson.videos : [];
-    const out = [];
+    const rows = [];
     list.forEach((v, i) => {
         const url = String((v && (v.url || v.videoUrl || v.link)) || '').trim();
         if (!url) return;
-        out.push({
+        rows.push({
             id: String((v && v.id) || ('V' + (i + 1))),
             title: String((v && v.title) || ('Video ' + (i + 1))),
             url,
-            required: v && v.required === false ? false : true
+            required: v && v.required === false ? false : true,
+            lang: dripVideoLang(v && v.lang),
+            slot: (Number(v && v.slot) > 0) ? Number(v.slot) : (i + 2)
         });
     });
     const legacy = String(lesson.videoUrl || lesson.video || lesson.videoLink || '').trim();
-    if (legacy && !out.some(v => v.url === legacy)) {
-        out.unshift({ id: 'V1', title: 'Video 1', url: legacy, required: true });
+    if (legacy && !rows.some(v => v.url === legacy)) {
+        rows.unshift({ id: 'V1', title: 'Video 1', url: legacy, required: true, lang: dripVideoLang(lesson.videoLang), slot: 1 });
     }
-    out.forEach((v, i) => { v.index = i + 1; });
-    return out;
+    // Collapse the language variants of a slot into one step.
+    const groups = [];
+    const bySlot = new Map();
+    rows.forEach(r => {
+        const key = String(r.slot);
+        let g = bySlot.get(key);
+        if (!g) { g = { slot: r.slot, id: r.id, variants: [] }; bySlot.set(key, g); groups.push(g); }
+        g.variants.push(r);
+    });
+    return groups.map((g, i) => {
+        const en = g.variants.find(v => v.lang === 'en') || g.variants[0];
+        const playable = g.variants.find(v => dripVideoTrackable(v.url)) || en;
+        return {
+            id: g.id,
+            slot: g.slot,
+            title: en.title,
+            url: playable.url,
+            required: g.variants.some(v => v.required !== false),
+            lang: en.lang,
+            index: i + 1,
+            variants: g.variants
+        };
+    });
 }
 
 // Videos that must be watched before the lesson can complete.
@@ -690,6 +724,7 @@ module.exports = {
     dripGroupOfLesson, dripSameLessonUnit,
     dripLessonVideo, dripVideoTrackable, dripVideoRequired, dripVideoDone,
     dripLessonVideos, dripRequiredVideos, dripVideoStates, dripVideosDone, dripRecordVideoProgress,
+    dripVideoLang,
     dripLessonHasMedia, dripLessonMediaDone, dripCourseStep,
     dripStartOfWeek, dripFeeOk, dripQuizBestForLesson, dripEvalCompletion, dripSweep,
     dripMapsFor, dripNextInfo, dripCourseLessonRollup, dripLessonCoverIndex

@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=499" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=500" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -643,6 +643,7 @@
                 <div class="screen-header"><h2>Lessons & Topics</h2><div class="screen-actions">
                     <select id="lesson-course" class="filter-select"><option value="">All Courses...</option></select>
                     <select id="lesson-status-filter" class="filter-select"><option value="all">All Status</option><option value="published">Published Only</option><option value="draft">Draft Only</option><option value="scheduled">Scheduled ⏳</option><option value="drip">Sequenced Only 🔗</option></select>
+                    <div class="lang-switch" title="Content language / Lugha ya maudhui" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;"><button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button><button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button></div>
                     <button class="btn btn-primary" onclick="showLessonForm()">+ Add Lesson</button>
                 </div></div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>#</th><th>Title</th><th>Description</th><th>Notes</th><th>Questions</th><th>Files</th><th>Actions</th></tr></thead><tbody id="lessons-body"></tbody></table></div></div>
@@ -709,6 +710,7 @@
             <section id="screen-notes" class="screen">
                 <div class="screen-header"><h2>Study Notes</h2><div class="screen-actions">
                     <select id="notes-course" class="filter-select"><option value="">All Courses</option></select>
+                    <div class="lang-switch" title="Content language / Lugha ya maudhui" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;"><button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button><button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button></div>
                     <button class="btn btn-outline" onclick="renderNotes()">↻ Refresh</button>
                     <button class="btn btn-primary" onclick="showNoteForm()">+ Add Note</button>
                 </div></div>
@@ -1770,8 +1772,8 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=499"></script>
-    <script data-cfasync="false" src="js/student-hub.min.js?v=100"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=500"></script>
+    <script data-cfasync="false" src="js/student-hub.min.js?v=101"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
     <script>

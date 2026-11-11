@@ -3263,12 +3263,15 @@ const PUBLIC_REGION_FIELDS = ['id', 'name', 'country'];
 // reads omit them and the single-record endpoint still returns the full record
 // when the viewer (or a lazy fetch) asks for it.
 const STUDENT_LESSON_FIELDS = [
-    'id', 'courseId', 'title', 'description', 'order', 'videoUrl', 'videos',
+    'id', 'courseId', 'title', 'titleSw', 'description', 'descriptionSw', 'order',
+    'videoUrl', 'videoLang', 'videos',
     'published', 'publishAt', 'releaseMode', 'virtualEnabled', 'virtualRoom',
     'virtualPassword', 'virtualScheduled', 'virtualRecording', 'virtualLobby',
     'virtualTrainer', 'createdAt', 'updatedAt'
 ];
-const STUDENT_NOTE_FIELDS = ['id', 'courseId', 'lessonId', 'title', 'createdAt', 'updatedAt'];
+// Only short fields travel in the list: the note BODY (content / contentSw) is
+// fetched lazily when the learner opens the note, exactly as before.
+const STUDENT_NOTE_FIELDS = ['id', 'courseId', 'lessonId', 'title', 'titleSw', 'createdAt', 'updatedAt'];
 
 // Copy a record keeping only the listed columns.
 function projectRecord(rec, fields) {
