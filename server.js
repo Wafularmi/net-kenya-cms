@@ -8209,24 +8209,28 @@ function decodeHtmlEntities(s) {
         // administrator can see whether the provider is really reachable from
         // this server (the free provider sometimes refuses a hosting IP). The
         // probe is only run for staff, so it cannot be used to burn the quota.
-        try {
-            const who = getRequestUser(req);
-            if (who && who.user && who.role !== 'student') {
-                const probeUrl = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent('Hello') + '&langpair=en|sw';
-                try {
-                    const pr = await fetch(probeUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' }, signal: AbortSignal.timeout(15000) });
-                    const pj = await pr.json().catch(() => null);
-                    const pt = pj && pj.responseData && pj.responseData.translatedText;
-                    out.live = pt ? String(pt).slice(0, 40) : '';
-                    out.liveOk = !!pt;
-                    if (!pt) out.liveError = 'provider answered without a translation: ' + String(pj && (pj.responseDetails || pj.quotaFinished || 'unknown')).slice(0, 120);
-                } catch (pe) {
-                    out.liveOk = false;
-                    out.liveError = 'cannot reach the provider: ' + String(pe && (pe.message || pe)).slice(0, 120);
+        req._asyncApi = true;
+        (async () => {
+            try {
+                const who = getRequestUser(req);
+                if (who && who.user && who.role !== 'student') {
+                    const probeUrl = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent('Hello') + '&langpair=en|sw';
+                    try {
+                        const pr = await fetch(probeUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' }, signal: AbortSignal.timeout(15000) });
+                        const pj = await pr.json().catch(() => null);
+                        const pt = pj && pj.responseData && pj.responseData.translatedText;
+                        out.live = pt ? String(pt).slice(0, 40) : '';
+                        out.liveOk = !!pt;
+                        if (!pt) out.liveError = 'provider answered without a translation: ' + String(pj && (pj.responseDetails || pj.quotaFinished || 'unknown')).slice(0, 120);
+                    } catch (pe) {
+                        out.liveOk = false;
+                        out.liveError = 'cannot reach the provider: ' + String(pe && (pe.message || pe)).slice(0, 120);
+                    }
                 }
-            }
-        } catch (e) {}
-        return json(res, 200, out);
+            } catch (e) {}
+            json(res, 200, out);
+        })();
+        return;
     }
 
     // POST /api/translate — Swahili translation for the question bank.
