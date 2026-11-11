@@ -1303,7 +1303,10 @@ let cacheSize = 0;
 const renderedPageCache = new Map();
 const PAGE_CACHE_MAX_ENTRIES = 24;
 const PAGE_EDGE_MAX_AGE = 30;
-const PAGE_EDGE_STALE = 300;
+// Keep the stale window short. A long stale-while-revalidate made Railway's
+// edge keep serving the old page for minutes after maintenance mode or branding
+// changed. 30s still absorbs bursts without hiding an emergency switch.
+const PAGE_EDGE_STALE = 30;
 
 function pageCacheEtag(key) {
     return '"' + crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 24) + '"';
@@ -1312,10 +1315,17 @@ function pageCacheEtag(key) {
 function sendInjectedPage(res, req, html, etag, entry) {
     const accept = String((req && req.headers && req.headers['accept-encoding']) || '');
     const inm = String((req && req.headers && req.headers['if-none-match']) || '');
+    const noStore = !!(entry && entry.noStore);
+    const cacheValue = noStore
+        ? 'no-store, max-age=0'
+        : 'public, max-age=' + PAGE_EDGE_MAX_AGE + ', stale-while-revalidate=' + PAGE_EDGE_STALE;
+    const cdnValue = noStore
+        ? 'no-store'
+        : 'public, max-age=' + PAGE_EDGE_MAX_AGE + ', stale-while-revalidate=' + PAGE_EDGE_STALE;
     const headers = {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, max-age=' + PAGE_EDGE_MAX_AGE + ', stale-while-revalidate=' + PAGE_EDGE_STALE,
-        'CDN-Cache-Control': 'public, max-age=' + PAGE_EDGE_MAX_AGE + ', stale-while-revalidate=' + PAGE_EDGE_STALE,
+        'Cache-Control': cacheValue,
+        'CDN-Cache-Control': cdnValue,
         'ETag': etag,
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'SAMEORIGIN',
@@ -10203,8 +10213,8 @@ const LIVE_PUSH_STORES = new Set([
                 // another country's user.
                 if (!user && item && store === 'settings' && key === 'branding' && urlObj.searchParams.get('light') === '1') {
                     res.__etag = '"' + crypto.createHash('sha1').update(JSON.stringify(item)).digest('hex').slice(0, 24) + '"';
-                    res.__cacheControl = 'public, max-age=60, stale-while-revalidate=300';
-                    res.__cdnCacheControl = 'public, max-age=60, stale-while-revalidate=300';
+                    res.__cacheControl = 'public, max-age=60, stale-while-revalidate=60';
+                    res.__cdnCacheControl = 'public, max-age=60, stale-while-revalidate=60';
                 }
             }
             return json(res, 200, item);
@@ -11040,7 +11050,14 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
                        .replace(/\{\{INITIALS_VISIBLE\}\}/g, logoData ? 'none' : 'block')
                        .replace(/\{\{MAINTENANCE_MESSAGE\}\}/g, maintMsg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
             const etag = pageCacheEtag(cacheKey + '\u0002' + html.length);
-            const entry = { key: cacheKey, etag, html };
+            // Maintenance pages must never be left at the edge after the admin
+            // turns maintenance off. A bypassing admin also gets no-store.
+            const entry = {
+                key: cacheKey,
+                etag,
+                html,
+                noStore: !!maintSetting.enabled || filePath.endsWith('maintenance.html')
+            };
             if (renderedPageCache.size >= PAGE_CACHE_MAX_ENTRIES) renderedPageCache.clear();
             renderedPageCache.set(filePath, entry);
             return sendInjectedPage(res, req, html, etag, entry);
