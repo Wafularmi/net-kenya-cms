@@ -1294,9 +1294,67 @@ const fileCache = new Map();
 const MAX_CACHE_SIZE = 10 * 1024 * 1024; // 10MB
 let cacheSize = 0;
 
+// Rendered HTML pages (index and manuals) used to be rebuilt from the 205 KB
+// template for every visitor. That is cheap in CPU but expensive in origin
+// work when a link is shared and thousands of people arrive at once. Keep the
+// rendered page (and its gzipped copy) in memory, keyed by everything that can
+// change it, and let Cloudflare serve it for a short window. A branding or
+// maintenance-message change produces a new key immediately.
+const renderedPageCache = new Map();
+const PAGE_CACHE_MAX_ENTRIES = 24;
+const PAGE_EDGE_MAX_AGE = 30;
+const PAGE_EDGE_STALE = 300;
+
+function pageCacheEtag(key) {
+    return '"' + crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 24) + '"';
+}
+
+function sendInjectedPage(res, req, html, etag, entry) {
+    const accept = String((req && req.headers && req.headers['accept-encoding']) || '');
+    const inm = String((req && req.headers && req.headers['if-none-match']) || '');
+    const headers = {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'public, max-age=' + PAGE_EDGE_MAX_AGE + ', stale-while-revalidate=' + PAGE_EDGE_STALE,
+        'CDN-Cache-Control': 'public, max-age=' + PAGE_EDGE_MAX_AGE + ', stale-while-revalidate=' + PAGE_EDGE_STALE,
+        'ETag': etag,
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'SAMEORIGIN',
+        'Referrer-Policy': 'strict-origin-when-cross-origin'
+    };
+    if (inm && inm.split(',').map(s => s.trim()).indexOf(etag) !== -1) {
+        res.writeHead(304, headers);
+        return res.end();
+    }
+    const gzipWanted = html.length > 2048 && /\bgzip\b/i.test(accept);
+    if (gzipWanted) {
+        headers['Vary'] = 'Accept-Encoding';
+        if (entry && entry.gz) {
+            headers['Content-Encoding'] = 'gzip';
+            headers['Content-Length'] = entry.gz.length;
+            res.writeHead(200, headers);
+            return res.end(entry.gz);
+        }
+        return zlib.gzip(Buffer.from(html, 'utf8'), { level: 9 }, (err, gz) => {
+            if (err || res.headersSent) {
+                headers['Content-Length'] = Buffer.byteLength(html, 'utf8');
+                res.writeHead(200, headers);
+                return res.end(html);
+            }
+            if (entry) entry.gz = gz;
+            headers['Content-Encoding'] = 'gzip';
+            headers['Content-Length'] = gz.length;
+            res.writeHead(200, headers);
+            res.end(gz);
+        });
+    }
+    headers['Content-Length'] = Buffer.byteLength(html, 'utf8');
+    res.writeHead(200, headers);
+    res.end(html);
+}
+
 // A static asset is safe to cache forever only when its URL carries a version
-// (either ?v=... or the /name.123.js form). index.html deliberately does NOT
-// use this: it is generated per request and must stay no-store.
+// (either ?v=... or the /name.123.js form). The generated index/manual pages
+// use their own short edge cache and ETag instead (see sendInjectedPage).
 function isVersionedAssetRequest(req, url) {
     const raw = (req && req.url) || url || '';
     return /[?&]v=[^&]+/.test(raw) || /\.\d+\.(?:css|js)(?:[?#]|$)/i.test(raw);
@@ -1701,6 +1759,7 @@ function allowedOrigin(req) {
     return '';
 }
 function json(res, code, data) {
+    const req = res && res.req;
     const headers = {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
@@ -1710,12 +1769,43 @@ function json(res, code, data) {
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Cache-Control': 'no-store, max-age=0'
     };
+    // A few public, infrequently-changing responses (light branding) opt in to
+    // edge caching and conditional revalidation. Everything else keeps the
+    // conservative no-store default.
+    if (res && res.__cacheControl) headers['Cache-Control'] = res.__cacheControl;
+    if (res && res.__cdnCacheControl) headers['CDN-Cache-Control'] = res.__cdnCacheControl;
+    if (res && res.__etag) headers['ETag'] = res.__etag;
     if (res && res.__corsOrigin) {
         headers['Access-Control-Allow-Origin'] = res.__corsOrigin;
         headers['Vary'] = 'Origin';
     }
+    const inm = String((req && req.headers && req.headers['if-none-match']) || '');
+    if (res && res.__etag && inm && inm.split(',').map(s => s.trim()).indexOf(res.__etag) !== -1) {
+        res.writeHead(304, headers);
+        res.end();
+        return true;
+    }
+    const body = data === undefined ? '' : JSON.stringify(data);
+    const raw = Buffer.from(body, 'utf8');
+    const accept = String((req && req.headers && req.headers['accept-encoding']) || '');
+    if (code !== 204 && raw.length > 2048 && /\bgzip\b/i.test(accept)) {
+        zlib.gzip(raw, { level: 6 }, (err, gz) => {
+            if (err || res.headersSent) {
+                headers['Content-Length'] = raw.length;
+                res.writeHead(code, headers);
+                return res.end(raw);
+            }
+            headers['Content-Encoding'] = 'gzip';
+            headers['Vary'] = headers['Vary'] ? headers['Vary'] + ', Accept-Encoding' : 'Accept-Encoding';
+            headers['Content-Length'] = gz.length;
+            res.writeHead(code, headers);
+            res.end(gz);
+        });
+        return true;
+    }
+    headers['Content-Length'] = raw.length;
     res.writeHead(code, headers);
-    res.end(JSON.stringify(data));
+    res.end(raw);
     return true;
 }
 
@@ -3155,6 +3245,20 @@ const PRIVATE_BRANDING_FIELDS = new Set([
 // server-side by default.
 const PUBLIC_CENTER_FIELDS = ['id', 'name', 'code', 'country', 'regionId', 'address'];
 const PUBLIC_REGION_FIELDS = ['id', 'name', 'country'];
+
+// The Student Hub needs lesson/note metadata to draw courses, search filters
+// and the lesson sequence. It does not need the long lesson reference text or
+// the full note body until the learner opens that lesson or note. Those two
+// fields account for roughly 90% of the Hub's first payload, so student batch
+// reads omit them and the single-record endpoint still returns the full record
+// when the viewer (or a lazy fetch) asks for it.
+const STUDENT_LESSON_FIELDS = [
+    'id', 'courseId', 'title', 'description', 'order', 'videoUrl', 'videos',
+    'published', 'publishAt', 'releaseMode', 'virtualEnabled', 'virtualRoom',
+    'virtualPassword', 'virtualScheduled', 'virtualRecording', 'virtualLobby',
+    'virtualTrainer', 'createdAt', 'updatedAt'
+];
+const STUDENT_NOTE_FIELDS = ['id', 'courseId', 'lessonId', 'title', 'createdAt', 'updatedAt'];
 
 // Copy a record keeping only the listed columns.
 function projectRecord(rec, fields) {
@@ -9735,6 +9839,11 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 else if (name === 'studyCenters') rows = rows.map(r => projectRecord(r, PUBLIC_CENTER_FIELDS));
                 else if (name === 'regions') rows = rows.map(r => projectRecord(r, PUBLIC_REGION_FIELDS));
             }
+            if (user && user.role === 'student' && name === 'lessons') {
+                rows = rows.map(r => projectRecord(r, STUDENT_LESSON_FIELDS));
+            } else if (user && user.role === 'student' && name === 'notes') {
+                rows = rows.map(r => projectRecord(r, STUDENT_NOTE_FIELDS));
+            }
             result[name] = rows;
         }
 return json(res, 200, result);
@@ -10084,6 +10193,18 @@ const LIVE_PUSH_STORES = new Set([
                     const visible = studentSettingsView(user, [item]);
                     if (!visible.length) return json(res, 403, { error: 'Not permitted' });
                     item = visible[0];
+                }
+                // Anonymous light branding is public and changes only when an
+                // admin saves the brand. Let the browser and Cloudflare reuse it
+                // for a short window instead of making every login page load hit
+                // the origin. Signed-in requests are NOT marked public: their
+                // branding can carry a country overlay (name, initials, phone),
+                // so a shared edge cache could show one country's brand to
+                // another country's user.
+                if (!user && item && store === 'settings' && key === 'branding' && urlObj.searchParams.get('light') === '1') {
+                    res.__etag = '"' + crypto.createHash('sha1').update(JSON.stringify(item)).digest('hex').slice(0, 24) + '"';
+                    res.__cacheControl = 'public, max-age=60, stale-while-revalidate=300';
+                    res.__cdnCacheControl = 'public, max-age=60, stale-while-revalidate=300';
                 }
             }
             return json(res, 200, item);
@@ -10861,38 +10982,52 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
         return res.end('403 Forbidden — This file is blocked by security integrity checks. Contact the administrator to rebaseline or restore it.');
     }
 
-    // Inject branding into index.html and manual pages at serve-time
+    // Inject branding into index.html and manual pages at serve-time. The
+    // rendered result is cached in memory and keyed by the template mtime plus
+    // every dynamic value it contains, so a branding or maintenance change is
+    // reflected on the next request while repeat visits do no template work.
     if (filePath.endsWith('index.html') || filePath.endsWith('student-manual.html') || filePath.endsWith('coordinator-manual.html') || filePath.endsWith('admin-manual.html') || filePath.endsWith('assistant-admin-manual.html') || filePath.endsWith('staff-manual.html') || filePath.endsWith('maintenance.html')) {
+        const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
+        const schoolName = branding && branding.schoolName ? branding.schoolName : 'NET Foundation Kenya';
+        const initials = branding && branding.initials ? branding.initials : 'NET';
+        const headerLogoData = publicBrandingImageUrl('logo', branding);
+        const loginLogoData = publicBrandingImageUrl('receiptLogo', branding) || headerLogoData;
+        const logoData = headerLogoData;
+        let logoCss = '';
+        if (headerLogoData || loginLogoData) {
+            logoCss = '<style>';
+            if (loginLogoData) logoCss += '#login-logo{background:transparent url(\'' + loginLogoData + '\') no-repeat center / cover !important;text-indent:-9999px!important;background-color:transparent!important}';
+            if (headerLogoData) logoCss += '#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + headerLogoData + '\') no-repeat center / cover}';
+            logoCss += '</style>';
+        }
+        const maintSetting = getMaintenanceSetting();
+        const maintMsg = maintSetting.message && String(maintSetting.message).trim()
+            ? String(maintSetting.message).trim()
+            : 'We are carrying out scheduled maintenance and improvements. The system will be back shortly. Thank you for your patience.';
+        // The contact number is part of the branding configuration, so it is
+        // rendered into the login screen with the rest of the branding. The
+        // page therefore shows the number immediately, even if the client
+        // cannot reach /api/public-contact.
+        const contactPhone = getContactPhone();
+        const contactPhoneHtml = contactPhone
+            ? '\uD83D\uDCDE <a href="tel:' + contactPhone + '" style="color:var(--accent);font-weight:600;text-decoration:none;">' + contactPhone.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</a>'
+            : '';
+        let templateStat = null;
+        try { templateStat = fs.statSync(filePath); } catch (e) {}
+        const cacheKey = [
+            path.resolve(filePath),
+            templateStat ? templateStat.mtimeMs : 0,
+            templateStat ? templateStat.size : 0,
+            schoolName, initials, headerLogoData, loginLogoData,
+            maintSetting.enabled ? '1' : '0', maintMsg, contactPhone
+        ].join('\u0001');
+        const cached = renderedPageCache.get(filePath);
+        if (cached && cached.key === cacheKey) return sendInjectedPage(res, req, cached.html, cached.etag, cached);
         fs.readFile(filePath, 'utf8', (err, html) => {
             if (err) {
                 res.writeHead(500);
                 return res.end('Server error');
             }
-            const branding = db.settings ? db.settings.find(s => s.key === 'branding') : null;
-            const schoolName = branding && branding.schoolName ? branding.schoolName : 'NET Foundation Kenya';
-            const initials = branding && branding.initials ? branding.initials : 'NET';
-            const headerLogoData = publicBrandingImageUrl('logo', branding);
-            const loginLogoData = publicBrandingImageUrl('receiptLogo', branding) || headerLogoData;
-            const logoData = headerLogoData;
-            let logoCss = '';
-            if (headerLogoData || loginLogoData) {
-                logoCss = '<style>';
-                if (loginLogoData) logoCss += '#login-logo{background:transparent url(\'' + loginLogoData + '\') no-repeat center / cover !important;text-indent:-9999px!important;background-color:transparent!important}';
-                if (headerLogoData) logoCss += '#header-logo-img{display:block}#header-logo-placeholder{display:none}.terms-logo{background:transparent url(\'' + headerLogoData + '\') no-repeat center / cover}';
-                logoCss += '</style>';
-            }
-            const maintSetting = getMaintenanceSetting();
-            const maintMsg = maintSetting.message && String(maintSetting.message).trim()
-                ? String(maintSetting.message).trim()
-                : 'We are carrying out scheduled maintenance and improvements. The system will be back shortly. Thank you for your patience.';
-            // The contact number is part of the branding configuration, so it is
-            // rendered into the login screen with the rest of the branding. The
-            // page therefore shows the number immediately, even if the client
-            // cannot reach /api/public-contact.
-            const contactPhone = getContactPhone();
-            const contactPhoneHtml = contactPhone
-                ? '\uD83D\uDCDE <a href="tel:' + contactPhone + '" style="color:var(--accent);font-weight:600;text-decoration:none;">' + contactPhone.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</a>'
-                : '';
             html = html.replace(/\{\{CONTACT_PHONE_STYLE\}\}/g, contactPhone
                 ? 'display:block;text-align:center;margin-top:10px;font-size:13px;'
                 : 'display:none;text-align:center;margin-top:10px;font-size:13px;')
@@ -10904,15 +11039,11 @@ if (!filePath.startsWith(ROOT) && !filePath.startsWith(DATA_ROOT)) {
                        .replace(/\{\{LOGO_VISIBLE\}\}/g, logoData ? 'block' : 'none')
                        .replace(/\{\{INITIALS_VISIBLE\}\}/g, logoData ? 'none' : 'block')
                        .replace(/\{\{MAINTENANCE_MESSAGE\}\}/g, maintMsg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
-            res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            res.setHeader('CDN-Cache-Control', 'no-store');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-            res.setHeader('X-Content-Type-Options', 'nosniff');
-            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-            res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-            res.end(html);
+            const etag = pageCacheEtag(cacheKey + '\u0002' + html.length);
+            const entry = { key: cacheKey, etag, html };
+            if (renderedPageCache.size >= PAGE_CACHE_MAX_ENTRIES) renderedPageCache.clear();
+            renderedPageCache.set(filePath, entry);
+            return sendInjectedPage(res, req, html, etag, entry);
         });
         return;
     }

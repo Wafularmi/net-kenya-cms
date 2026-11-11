@@ -532,10 +532,25 @@ async function _hubLoadTabData(tab) {
     if (tab === 'overview' || !tab) { if (!studentHubCache.attendance) needed.push('attendance'); if (!studentHubCache.payments) needed.push('payments'); }
     if (tab === 'exams') { if (!studentHubCache.retakeRequests) needed.push('retakeRequests'); if (!studentHubCache.seating) needed.push('seating'); if (!studentHubCache.exams) needed.push('exams'); if (!studentHubCache.examRegistrations) needed.push('examRegistrations'); }
     if (tab === 'quizzes' || tab === 'overview' || !tab) { if (!studentHubCache.submissions) needed.push('submissions'); if (!studentHubCache.grades) needed.push('grades'); if (!studentHubCache.quizRegistrations) needed.push('quizRegistrations'); }
-    if (!needed.length) return;
-    let extra = null;
-    try { extra = await dbGetBatch(needed); } catch (e) { extra = {}; }
-    if (extra && typeof extra === 'object') Object.assign(studentHubCache, extra);
+    // The initial batch deliberately carries note metadata only. When the
+    // learner opens Notes, fetch the bodies once so search and reading work as
+    // before, without slowing the first Hub paint.
+    const needsFullNotes = tab === 'notes' && !studentHubCache._hubNotesFull;
+    if (needed.length) {
+        let extra = null;
+        try { extra = await dbGetBatch(needed); } catch (e) { extra = {}; }
+        if (extra && typeof extra === 'object') Object.assign(studentHubCache, extra);
+    }
+    if (needsFullNotes) {
+        try {
+            const fullNotes = await dbGetAll('notes');
+            if (Array.isArray(fullNotes)) {
+                studentHubCache.notes = fullNotes;
+                studentHubCache._hubNotesFull = true;
+                studentHubCache.loadedAt = Date.now();
+            }
+        } catch (e) {}
+    }
 }
 
 function hubSkeleton() {
@@ -3571,6 +3586,15 @@ async function viewHubLessonNote(lessonId, courseId) {
         if (!course) { try { course = await dbGet('courses', courseId); } catch {} }
         let note = (data.notes || []).find(n => String(n.lessonId) === String(lessonId));
         if (!note) { try { const allN = await dbGetAll('notes'); note = (allN||[]).find(n=>String(n.lessonId)===String(lessonId)); } catch {} }
+        // The Hub batch now ships note metadata and lesson metadata without the
+        // long bodies. Fetch the one the learner actually opened, then keep the
+        // existing fallback chain (note -> lesson description -> reference).
+        if (note && note.content === undefined) {
+            try { const fullNote = await dbGet('notes', note.id); if (fullNote) note = fullNote; } catch {}
+        }
+        if (lesson && !(note && note.content) && lesson.reference === undefined) {
+            try { const fullLesson = await dbGet('lessons', lesson.id); if (fullLesson) lesson = fullLesson; } catch {}
+        }
         if (!lesson) return showToast('Lesson not found — please refresh and try again (ID: ' + lessonId + ')', { type: 'danger' });
         const __viewer2 = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         const __isStu = __viewer2.role === 'student';
@@ -3783,8 +3807,11 @@ async function viewHubLessonNote(lessonId, courseId) {
 async function viewHubNote(noteId) {
     try {
         const data = await loadStudentHubData();
-        const note = (data.notes || []).find(n => n.id === noteId);
+        let note = (data.notes || []).find(n => n.id === noteId);
         if (!note) return showToast('Note not found', { type: 'danger' });
+        if (note.content === undefined) {
+            try { const fullNote = await dbGet('notes', note.id); if (fullNote) note = fullNote; } catch {}
+        }
         const course = (data.courses || []).find(c => c.id === note.courseId);
         const readTime = estimateReadTime(note.content || '');
         const safeContent = esc(note.content || '').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/\\/g, '\\\\');
