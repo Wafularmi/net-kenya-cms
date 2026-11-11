@@ -8295,32 +8295,60 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 } catch (e) { console.error('libretranslate failed, falling back to MyMemory:', e && e.message); }
             }
 
-            // MyMemory: free, no key, reliable. Newlines separate the segments,
-            // so one request covers a whole question (prompt + options + pairs).
+            // MyMemory: free, no key. It accepts at most ~500 characters per
+            // request, so a long note is translated in CHUNKS and stitched back
+            // together. Translating the whole note in one request would either
+            // fail or return only the first lines.
             try {
-                const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texts.join('\n'))}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
-                const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-                if (!r.ok) throw new Error('mymemory http ' + r.status);
-                const out = await r.json();
-                if (out && out.quotaFinished) throw new Error('mymemory daily quota reached');
-                const t = out && out.responseData && out.responseData.translatedText;
-                if (!t) throw new Error('mymemory empty response');
-                let list = decodeHtmlEntities(String(t)).split('\n').map(s => s.trim()).filter(Boolean);
-                if (list.length === texts.length) {
-                    return json(res, 200, { ok: true, provider: 'mymemory', translations: list });
+                const MEM_CHUNK = 450;
+                const chunkText = (txt) => {
+                    const s = String(txt == null ? '' : txt);
+                    if (!s.trim()) return [''];
+                    if (s.length <= MEM_CHUNK) return [s];
+                    const out = [];
+                    let rest = s;
+                    while (rest.length > MEM_CHUNK) {
+                        let cut = rest.lastIndexOf(' ', MEM_CHUNK);
+                        if (cut < MEM_CHUNK * 0.5) cut = rest.lastIndexOf('\n', MEM_CHUNK);
+                        if (cut < MEM_CHUNK * 0.5) cut = MEM_CHUNK;
+                        out.push(rest.slice(0, cut));
+                        rest = rest.slice(cut).replace(/^[ \t]+/, '');
+                    }
+                    if (rest) out.push(rest);
+                    return out;
+                };
+                // Flatten every text into chunks, remembering which text each
+                // chunk belongs to, so the caller still gets one translation
+                // per text it sent.
+                const chunks = [];
+                const owners = [];
+                texts.forEach((t, i) => { chunkText(t).forEach(c => { chunks.push(c); owners.push(i); }); });
+                const pieces = new Array(chunks.length).fill('');
+                let quotaHit = false;
+                for (let k = 0; k < chunks.length; k++) {
+                    const one = chunks[k];
+                    if (!one.trim()) continue;
+                    try {
+                        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
+                        const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+                        if (!r.ok) throw new Error('mymemory http ' + r.status);
+                        const out = await r.json();
+                        if (out && out.quotaFinished) { quotaHit = true; break; }
+                        const t = out && out.responseData && out.responseData.translatedText;
+                        const clean = t ? decodeHtmlEntities(String(t)).trim() : '';
+                        pieces[k] = clean || one;
+                    } catch (e) {
+                        console.error('mymemory chunk failed:', e && e.message);
+                        pieces[k] = one;   // keep the English rather than losing the text
+                    }
+                    if (k < chunks.length - 1) await new Promise(s => setTimeout(s, 120));
                 }
-                // Segment counts can drift on very long strings: fall back to
-                // translating one string per request so nothing is lost.
-                const singles = [];
-                for (const one of texts) {
-                    const rr = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`, { signal: AbortSignal.timeout(30000) });
-                    if (!rr.ok) { singles.push(one); continue; }
-                    const jj = await rr.json();
-                    const tt = jj && jj.responseData && jj.responseData.translatedText;
-                    singles.push(tt ? decodeHtmlEntities(String(tt)).split('\n')[0].trim() || one : one);
-                    await new Promise(s => setTimeout(s, 250));
+                if (quotaHit) {
+                    return json(res, 502, { ok: false, error: 'quota', message: 'The free translation service has reached its daily limit. Add a Google Cloud Translation key, or type the Kiswahili yourself.' });
                 }
-                return json(res, 200, { ok: true, provider: 'mymemory', translations: singles });
+                const result = new Array(texts.length).fill('');
+                owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
+                return json(res, 200, { ok: true, provider: 'mymemory', translations: result });
             } catch (e) {
                 console.error('mymemory failed:', e && e.message);
                 return json(res, 502, { ok: false, error: 'upstream_error', message: 'No translation provider is available right now. Try again shortly.' });
