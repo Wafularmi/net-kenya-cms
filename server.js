@@ -10373,6 +10373,23 @@ const parsed = JSON.parse(body);
                     if (store === 'enrollments' && user && user.role === 'student' && isAlumniAccount(user)) {
                         return json(res, 403, { error: 'Alumni course access is managed through alumni enrolment' });
                     }
+                    // Students may only update their OWN login record, and only
+                    // these self-service fields. The generic path REPLACES the
+                    // record it is given, so a partial body from a learner would
+                    // otherwise strip the password, the role and the student
+                    // link - the account could then never sign in again.
+                    if (store === 'users' && user && user.role === 'student') {
+                        if (String(toStore[keyPath]) !== String(user.username)) return json(res, 403, { error: 'Students may only update their own account' });
+                        const existingUser = (db[store] || []).find(r => r[keyPath] === toStore[keyPath]);
+                        if (!existingUser) return json(res, 404, { error: 'Account not found' });
+                        const selfServiceKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion', 'langPref'];
+                        for (const k of selfServiceKeys) {
+                            if (k in toStore) existingUser[k] = toStore[k];
+                        }
+                        if ('langPref' in toStore) existingUser.langPref = (String(toStore.langPref).toLowerCase() === 'sw') ? 'sw' : 'en';
+                        mutate(existingUser);
+                        return json(res, 200, { ok: true, key: existingUser[keyPath] });
+                    }
                     const pk = toStore[keyPath];
                     if (pk === undefined || pk === null) {
                         console.log('PUT ' + store + ' FAILED - missing ' + keyPath + ' bodyKeys:', Object.keys(toStore));
