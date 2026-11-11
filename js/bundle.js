@@ -19711,7 +19711,7 @@ async function translateLessonToSwahili() {
     const btn = document.getElementById('lesson-translate-btn');
     const statusEl = document.getElementById('lesson-translate-status');
     if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
-    if (statusEl) statusEl.textContent = Q_UI_SW.translating;
+    if (statusEl) statusEl.textContent = Q_UI_SW.translating + ' — a long lesson can take a few seconds…';
     const res = await translateToSw(sources);
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
     if (!res.ok) {
@@ -23245,7 +23245,7 @@ async function translateNoteToSwahili() {
     const btn = document.getElementById('note-translate-btn');
     const statusEl = document.getElementById('note-translate-status');
     if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
-    if (statusEl) statusEl.textContent = Q_UI_SW.translating;
+    if (statusEl) statusEl.textContent = Q_UI_SW.translating + ' — a long note can take a few seconds…';
     const res = await translateToSw(sources);
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
     if (!res.ok) {
