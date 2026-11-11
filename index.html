@@ -87,6 +87,11 @@
                     </div>
                 </div>
                 <div class="header-right">
+                    <div class="lang-switch" id="header-lang-switch" title="Content language / Lugha ya maudhui — notes, lessons and videos" style="display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-card);flex-shrink:0;">
+                        <span style="font-size:10px;font-weight:800;color:var(--text-muted);padding:0 6px 0 9px;white-space:nowrap;">🌐 Language</span>
+                        <button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);white-space:nowrap;">English</button>
+                        <button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);white-space:nowrap;">Kiswahili</button>
+                    </div>
                     <div id="smart-search-container" class="smart-search-container">
                         <input type="text" id="smart-search" class="smart-search-input" placeholder="🔍 Search anything... (Ctrl+K)" autocomplete="off">
                         <div id="smart-search-results" class="smart-search-results"></div>
@@ -646,6 +651,10 @@
                     <div class="lang-switch" title="Content language / Lugha ya maudhui" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;"><button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button><button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button></div>
                     <button class="btn btn-primary" onclick="showLessonForm()">+ Add Lesson</button>
                 </div></div>
+                <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 14px;margin-bottom:12px;border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;background:var(--bg-input);font-size:12px;line-height:1.5;">
+                    <span style="font-size:18px;">🌍</span>
+                    <div><b>Kiswahili lessons:</b> open a lesson and use the <b>English / Kiswahili</b> tabs for the title, description and reference notes, then press <b>🌐 Translate to Kiswahili</b>. Every video also has a <b>Language</b> selector — give the Kiswahili version of a video the <b>same Slot</b> number as its English original and learners will see one video per slot in their own language.</div>
+                </div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>#</th><th>Title</th><th>Description</th><th>Notes</th><th>Questions</th><th>Files</th><th>Actions</th></tr></thead><tbody id="lessons-body"></tbody></table></div></div>
             </section>
 
@@ -714,6 +723,10 @@
                     <button class="btn btn-outline" onclick="renderNotes()">↻ Refresh</button>
                     <button class="btn btn-primary" onclick="showNoteForm()">+ Add Note</button>
                 </div></div>
+                <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 14px;margin-bottom:12px;border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;background:var(--bg-input);font-size:12px;line-height:1.5;">
+                    <span style="font-size:18px;">🌍</span>
+                    <div><b>Kiswahili notes:</b> open a note and use the <b>English / Kiswahili</b> tabs, then press <b>🌐 Translate to Kiswahili</b> to fill the Swahili copy for review (English is never overwritten). Use the <b>EN / SW</b> switch above — or the <b>🌐 Language</b> switch in the top bar — to view everything in Kiswahili. Notes without a Swahili copy stay in English.</div>
+                </div>
                 <div class="card"><div class="table-container"><table class="data-table"><thead><tr><th>Course</th><th>Lesson</th><th>Title</th><th>Preview</th><th>Created</th><th>Actions</th></tr></thead><tbody id="notes-body"></tbody></table></div></div>
             </section>
 
