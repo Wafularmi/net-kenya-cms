@@ -19711,7 +19711,10 @@ async function translateLessonToSwahili() {
     const btn = document.getElementById('lesson-translate-btn');
     const statusEl = document.getElementById('lesson-translate-status');
     if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
-    if (statusEl) statusEl.textContent = Q_UI_SW.translating + ' — a long lesson can take a few seconds…';
+    const totalChars = sources.join('').length;
+    if (statusEl) statusEl.textContent = totalChars > 4000
+        ? Q_UI_SW.translating + ' — this is long text, it can take a minute. The free translation service has a daily limit; for bulk work add a Google Cloud Translation key in Settings → Translation Provider.'
+        : Q_UI_SW.translating + ' — a long lesson can take a few seconds…';
     const res = await translateToSw(sources);
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
     if (!res.ok) {
@@ -23245,7 +23248,10 @@ async function translateNoteToSwahili() {
     const btn = document.getElementById('note-translate-btn');
     const statusEl = document.getElementById('note-translate-status');
     if (btn) { btn.disabled = true; btn.textContent = Q_UI_SW.translating; }
-    if (statusEl) statusEl.textContent = Q_UI_SW.translating + ' — a long note can take a few seconds…';
+    const totalChars = sources.join('').length;
+    if (statusEl) statusEl.textContent = totalChars > 4000
+        ? Q_UI_SW.translating + ' — this is a long note, it can take a minute. The free translation service has a daily limit; for bulk work add a Google Cloud Translation key in Settings → Translation Provider.'
+        : Q_UI_SW.translating + ' — a long note can take a few seconds…';
     const res = await translateToSw(sources);
     if (btn) { btn.disabled = false; btn.textContent = Q_UI_SW.translate; }
     if (!res.ok) {

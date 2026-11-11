@@ -8325,24 +8325,31 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 texts.forEach((t, i) => { chunkText(t).forEach(c => { chunks.push(c); owners.push(i); }); });
                 const pieces = new Array(chunks.length).fill('');
                 let quotaHit = false;
-                for (let k = 0; k < chunks.length; k++) {
-                    const one = chunks[k];
-                    if (!one.trim()) continue;
-                    try {
-                        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
-                        const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-                        if (!r.ok) throw new Error('mymemory http ' + r.status);
-                        const out = await r.json();
-                        if (out && out.quotaFinished) { quotaHit = true; break; }
-                        const t = out && out.responseData && out.responseData.translatedText;
-                        const clean = t ? decodeHtmlEntities(String(t)).trim() : '';
-                        pieces[k] = clean || one;
-                    } catch (e) {
-                        console.error('mymemory chunk failed:', e && e.message);
-                        pieces[k] = one;   // keep the English rather than losing the text
+                // Translate the chunks a few at a time: a long note is many
+                // requests, and one after the other would take minutes.
+                const CONCURRENCY = 5;
+                let cursor = 0;
+                const worker = async () => {
+                    while (cursor < chunks.length && !quotaHit) {
+                        const k = cursor++;
+                        const one = chunks[k];
+                        if (!one.trim()) continue;
+                        try {
+                            const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
+                            const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
+                            if (!r.ok) throw new Error('mymemory http ' + r.status);
+                            const out = await r.json();
+                            if (out && out.quotaFinished) { quotaHit = true; return; }
+                            const t = out && out.responseData && out.responseData.translatedText;
+                            const clean = t ? decodeHtmlEntities(String(t)).trim() : '';
+                            pieces[k] = clean || one;
+                        } catch (e) {
+                            console.error('mymemory chunk failed:', e && e.message);
+                            pieces[k] = one;   // keep the English rather than losing the text
+                        }
                     }
-                    if (k < chunks.length - 1) await new Promise(s => setTimeout(s, 120));
-                }
+                };
+                await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, chunks.length)) }, () => worker()));
                 if (quotaHit) {
                     return json(res, 502, { ok: false, error: 'quota', message: 'The free translation service has reached its daily limit. Add a Google Cloud Translation key, or type the Kiswahili yourself.' });
                 }
