@@ -14010,7 +14010,7 @@ if (typeof pdfjsLib !== 'undefined') {
                 const pdfData = Uint8Array.from(atob(window._diplomaPdfTemplate), c => c.charCodeAt(0));
                 const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
                 const page = await pdf.getPage(1);
-                const viewport = page.getViewport({ scale: window._diplomaCanvasScale });
+                const viewport = page.getViewport({ scale: window._diplomaCanvasScale, rotation: (window._diplomaPageMm && window._diplomaPageMm.rotation) || 0 });
                 const canvas = document.getElementById('diploma-pdf-canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.width = viewport.width;
@@ -14019,7 +14019,8 @@ if (typeof pdfjsLib !== 'undefined') {
                 ctx.fillStyle = '#f0f0f0';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-                // pdf.js applies the page rotation, so the preview is upright.
+                // pdf.js renders with the effective rotation (a stray 180° flag
+                // is ignored), so the preview matches the printed certificate.
                 drawTplAxes(canvas);
             } catch (e) {
                 console.warn('pdf.js render failed, using placeholder:', e);
@@ -14249,9 +14250,14 @@ function tplDisplayedPage(page) {
     let rot = 0;
     try { rot = (page.getRotation && page.getRotation().angle) || 0; } catch (e) { rot = 0; }
     rot = ((rot % 360) + 360) % 360;
+    // A certificate template flagged 180° is almost always an upright design
+    // with a stray "rotate me" marker (some design/scan tools add one). Honouring
+    // that flag is exactly what makes the template - and the printed result -
+    // come out upside down, so a 180° flag is treated as upright.
+    const effective = rot === 180 ? 0 : rot;
     let w = page.getWidth(), h = page.getHeight();
-    if (rot === 90 || rot === 270) { const t = w; w = h; h = t; }
-    return { w: w, h: h, wMm: w / 2.83465, hMm: h / 2.83465, rotation: rot };
+    if (effective === 90 || effective === 270) { const t = w; w = h; h = t; }
+    return { w: w, h: h, wMm: w / 2.83465, hMm: h / 2.83465, rotation: effective, rawRotation: rot };
 }
 // The displayed page size of a template, in millimetres.
 async function tplPageMmOf(base64Pdf) {
@@ -14272,7 +14278,7 @@ async function tplPreparePage(pdfDoc, page, templateBytes, paperMm) {
     const disp = tplDisplayedPage(page);
     let tgtW = disp.w, tgtH = disp.h;
     if (paperMm) { tgtW = paperMm.wMm * mmToPt; tgtH = paperMm.hMm * mmToPt; }
-    const needsRebuild = disp.rotation !== 0
+    const needsRebuild = disp.rotation !== 0 || disp.rawRotation !== 0
         || (paperMm && (Math.abs(page.getWidth() - tgtW) > 1 || Math.abs(page.getHeight() - tgtH) > 1));
     if (!needsRebuild) {
         return { page: page, wMm: disp.wMm, hMm: disp.hMm, tplHmm: disp.hMm, sx: 1, sy: 1, offXmm: 0, offYmm: 0 };
@@ -14331,7 +14337,7 @@ async function embedTemplateOnPaperPage(pdfDoc, srcPage, tgtW, tgtH, templateB64
     const pdfData = src.slice ? src.slice() : src;
     const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
     const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: renderScale });
+    const viewport = page.getViewport({ scale: renderScale, rotation: disp.rotation });
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(viewport.width));
     canvas.height = Math.max(1, Math.round(viewport.height));
@@ -14744,7 +14750,7 @@ async function renderCompletionPdfOnCanvas(base64Pdf) {
                 const pdfData = Uint8Array.from(atob(window._completionPdfTemplate), c => c.charCodeAt(0));
                 const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
                 const rpage = await pdf.getPage(1);
-                const viewport = rpage.getViewport({ scale: window._completionCanvasScale });
+                const viewport = rpage.getViewport({ scale: window._completionCanvasScale, rotation: (window._completionPageMm && window._completionPageMm.rotation) || 0 });
                 const cnv = document.getElementById('completion-pdf-canvas');
                 const ctx = cnv.getContext('2d');
                 cnv.width = viewport.width;
