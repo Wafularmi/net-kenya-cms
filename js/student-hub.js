@@ -3484,8 +3484,8 @@ function renderHubNotes(me, myCourses, myLessons, myNotes, data) {
         const isDone = st === 'done';
         const isOpen = st === 'free' || isCurrent || isDone;
         const lockTxt = st === 'waiting'
-            ? '🔒 Finish the previous step first'
-            : (st === 'locked' ? '🔒 Opens after the previous lesson' : '');
+            ? 'Finish the previous step first'
+            : (st === 'locked' ? 'Opens after the previous lesson' : '');
         const badge = isDone
             ? '<span style="background:rgba(22,163,74,.15);color:var(--success);font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">DONE</span>'
             : (isCurrent ? '<span style="background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;">CONTINUE HERE</span>' : '');
