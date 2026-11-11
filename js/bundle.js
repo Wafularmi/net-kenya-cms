@@ -21669,8 +21669,17 @@ async function showLangSelectionModal(studentId, currentLang, onConfirm) {
     showModal('Language Preference', content, '<button class="btn btn-primary" onclick="window._langConfirm()">Start Assessment</button>');
 }
 async function getStudentPreferredLang(studentId) {
-    const student = await dbGet('students', studentId);
-    return (student && student.langPref) ? student.langPref : 'en';
+    // The learner's own choice (stored on their login record) wins; staff may
+    // also set a default on the student record.
+    try {
+        const student = await dbGet('students', studentId);
+        if (student && student.langPref) return student.langPref;
+    } catch (e) {}
+    try {
+        const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+        if (u && u.langPref) return u.langPref;
+    } catch (e) {}
+    return 'en';
 }
 function getQuestionText(q, lang) {
     if (lang === 'sw' && q.questionSw) return q.questionSw;
@@ -21702,14 +21711,13 @@ function setAppLang(lang) {
         // without rebuilding the whole app.
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
         if (u.role === 'student') {
-            const sid = u.studentId || u.username;
+            const pref = lang === 'sw' ? 'sw' : 'en';
+            // The learner may only write their OWN login record, so the language
+            // preference lives there: it then follows them to another device.
+            try { u.langPref = pref; sessionStorage.setItem('currentUser', JSON.stringify(u)); } catch (e) {}
             (async () => {
                 try {
-                    const stu = await dbGet('students', sid);
-                    if (stu && stu.langPref !== (lang === 'sw' ? 'sw' : 'en')) {
-                        stu.langPref = lang === 'sw' ? 'sw' : 'en';
-                        await dbPut('students', stu);
-                    }
+                    await dbPut('users', { username: u.username, langPref: pref });
                 } catch (e) { console.error('persist langPref from switcher failed:', e); }
             })();
         }

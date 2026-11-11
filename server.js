@@ -10644,15 +10644,20 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                     if (store === 'settings' && value.key === 'owner' && !isOwnerUser(user)) {
                         return json(res, 403, { error: 'Only the owner can change the owner account' });
                     }
-                    // Students updating only their own terms acceptance (allowed past the gate above)
+                    // Students updating only their own terms acceptance and their
+                    // own language preference (allowed past the gate above).
                     if (store === 'users' && user && user.role === 'student') {
                         if (String(toStore[keyPath]) !== String(user.username)) return json(res, 403, { error: 'Students may only update their own account' });
                         const existing = (db[store] || []).find(r => r[keyPath] === toStore[keyPath]);
                         if (!existing) return json(res, 404, { error: 'Account not found' });
-                        const termsKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion'];
+                        const termsKeys = ['username', 'termsAccepted', 'termsAcceptedAt', 'termsVersion', 'langPref'];
                         for (const k of termsKeys) {
                             if (k in toStore) existing[k] = toStore[k];
                         }
+                        // The content language (en / sw) the learner picked for
+                        // notes, lessons and videos. Stored on their own login
+                        // record so it follows them to another device.
+                        if ('langPref' in toStore) existing.langPref = (String(toStore.langPref).toLowerCase() === 'sw') ? 'sw' : 'en';
                         mutate(existing);
                         return json(res, 200, { ok: true, key: existing[keyPath] });
                     }

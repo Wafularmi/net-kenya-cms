@@ -1078,11 +1078,14 @@ async function renderStudentHub(force) {
         _hubData = data;
         const _isAlumniHub = _hubIsAlumni(me, currentUser);
         // Adopt the language the learner chose on another device: it is stored
-        // on their record (langPref), so the notes, lessons and videos follow
-        // them. Only applied when this device has no choice of its own.
+        // on their own login record (langPref), so the notes, lessons and
+        // videos follow them. Only applied when this device has no choice of
+        // its own.
         try {
-            if (!localStorage.getItem('appLanguage') && me && me.langPref) {
-                localStorage.setItem('appLanguage', me.langPref === 'sw' ? 'sw' : 'en');
+            if (!localStorage.getItem('appLanguage')) {
+                const _cu = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+                const _pref = (_cu && _cu.langPref) || (me && me.langPref);
+                if (_pref) localStorage.setItem('appLanguage', _pref === 'sw' ? 'sw' : 'en');
             }
         } catch (e) {}
         try {
