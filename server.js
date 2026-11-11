@@ -8204,7 +8204,29 @@ function decodeHtmlEntities(s) {
     if (parts.length === 2 && parts[1] === 'translate' && req.method === 'GET') {
         const s = db.settings ? (db.settings.find(x => x && x.key === 'translation') || {}) : {};
         const v = s.value && typeof s.value === 'object' ? s.value : s;
-        return json(res, 200, { ok: true, provider: v.provider || 'mymemory', libreUrlConfigured: !!(v.libreUrl || process.env.LIBRETRANSLATE_URL), googleKeyConfigured: !!(v.googleApiKey || process.env.TRANSLATE_API_KEY) });
+        const out = { ok: true, provider: v.provider || 'mymemory', libreUrlConfigured: !!(v.libreUrl || process.env.LIBRETRANSLATE_URL), googleKeyConfigured: !!(v.googleApiKey || process.env.TRANSLATE_API_KEY) };
+        // For a signed-in staff member, also run a tiny LIVE probe so the
+        // administrator can see whether the provider is really reachable from
+        // this server (the free provider sometimes refuses a hosting IP). The
+        // probe is only run for staff, so it cannot be used to burn the quota.
+        try {
+            const who = getRequestUser(req);
+            if (who && who.user && who.role !== 'student') {
+                const probeUrl = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent('Hello') + '&langpair=en|sw';
+                try {
+                    const pr = await fetch(probeUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' }, signal: AbortSignal.timeout(15000) });
+                    const pj = await pr.json().catch(() => null);
+                    const pt = pj && pj.responseData && pj.responseData.translatedText;
+                    out.live = pt ? String(pt).slice(0, 40) : '';
+                    out.liveOk = !!pt;
+                    if (!pt) out.liveError = 'provider answered without a translation: ' + String(pj && (pj.responseDetails || pj.quotaFinished || 'unknown')).slice(0, 120);
+                } catch (pe) {
+                    out.liveOk = false;
+                    out.liveError = 'cannot reach the provider: ' + String(pe && (pe.message || pe)).slice(0, 120);
+                }
+            }
+        } catch (e) {}
+        return json(res, 200, out);
     }
 
     // POST /api/translate — Swahili translation for the question bank.
@@ -8325,6 +8347,8 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                 texts.forEach((t, i) => { chunkText(t).forEach(c => { chunks.push(c); owners.push(i); }); });
                 const pieces = new Array(chunks.length).fill('');
                 let quotaHit = false;
+                let failed = 0;
+                let lastError = '';
                 // Translate the chunks a few at a time: a long note is many
                 // requests, and one after the other would take minutes.
                 const CONCURRENCY = 5;
@@ -8336,26 +8360,44 @@ const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mym
                         if (!one.trim()) continue;
                         try {
                             const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
-                            const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-                            if (!r.ok) throw new Error('mymemory http ' + r.status);
+                            const r = await fetch(url, {
+                                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' },
+                                signal: AbortSignal.timeout(30000)
+                            });
+                            if (!r.ok) throw new Error('provider answered http ' + r.status);
                             const out = await r.json();
                             if (out && out.quotaFinished) { quotaHit = true; return; }
                             const t = out && out.responseData && out.responseData.translatedText;
                             const clean = t ? decodeHtmlEntities(String(t)).trim() : '';
-                            pieces[k] = clean || one;
+                            // The provider answers 200 with an error sentence when
+                            // it refuses a request (quota, blocked host).
+                            if (!clean) throw new Error('provider returned no translation');
+                            if (/MYMEMORY WARNING|INVALID|PLEASE SELECT|NO QUOTA|LIMIT/i.test(clean)) {
+                                throw new Error(clean.slice(0, 90));
+                            }
+                            pieces[k] = clean;
                         } catch (e) {
-                            console.error('mymemory chunk failed:', e && e.message);
+                            failed++;
+                            lastError = String(e && (e.message || e)).slice(0, 160);
+                            console.error('mymemory chunk failed:', lastError);
                             pieces[k] = one;   // keep the English rather than losing the text
                         }
                     }
                 };
                 await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, chunks.length)) }, () => worker()));
                 if (quotaHit) {
-                    return json(res, 502, { ok: false, error: 'quota', message: 'The free translation service has reached its daily limit. Add a Google Cloud Translation key, or type the Kiswahili yourself.' });
+                    return json(res, 502, { ok: false, error: 'quota', message: 'The free translation service has reached its daily limit. Add a Google Cloud Translation key in Settings → Translation Provider, or type the Kiswahili yourself.' });
+                }
+                if (failed && failed === chunks.length) {
+                    // Nothing could be translated: say WHY instead of quietly
+                    // handing back the English text.
+                    return json(res, 502, { ok: false, error: 'provider_unreachable', message: 'The translation service could not be reached from this server (' + lastError + '). Add a Google Cloud Translation key in Settings → Translation Provider, or type the Kiswahili yourself.' });
                 }
                 const result = new Array(texts.length).fill('');
                 owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
-                return json(res, 200, { ok: true, provider: 'mymemory', translations: result });
+                const out2 = { ok: true, provider: 'mymemory', translations: result };
+                if (failed) out2.partial = failed + ' of ' + chunks.length + ' part(s) could not be translated';
+                return json(res, 200, out2);
             } catch (e) {
                 console.error('mymemory failed:', e && e.message);
                 return json(res, 502, { ok: false, error: 'upstream_error', message: 'No translation provider is available right now. Try again shortly.' });
