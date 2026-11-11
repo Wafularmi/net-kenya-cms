@@ -8159,7 +8159,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
     // users-store write is ever reachable from the browser. The value comes
     // back in the login response, so the choice follows the learner to
     // another device without an extra request.
-    if (parts.length === 2 && parts[1] === 'student' && parts[2] === 'lang' && req.method === 'POST') {
+    if (parts.length === 3 && parts[1] === 'student' && parts[2] === 'lang' && req.method === 'POST') {
         let body = '';
         req.on('data', c => body += c);
         req.on('end', () => {
