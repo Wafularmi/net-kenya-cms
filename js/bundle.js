@@ -12188,7 +12188,7 @@ function buildProfessionalTranscript(data) {
         <div class="summary-panel">
             <div class="summary-title">Academic Summary</div>
             <div class="summary-grid">
-                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${displayRows.length}</span></div>
+                <div class="summary-item"><span class="summary-label">Total Courses</span><span class="summary-value">${resultRows.length}</span></div>
                 <div class="summary-item"><span class="summary-label">Total Credits</span><span class="summary-value">${totalCredits}</span></div>
                 <div class="summary-item"><span class="summary-label">Cumulative GPA</span><span class="summary-value cgpa-value">${cgpa.toFixed(2)}</span></div>
                 <div class="summary-item"><span class="summary-label">Classification</span><span class="summary-value class-badge ${classification.cssClass}">${classification.label}</span></div>
