@@ -4197,7 +4197,7 @@ function showScreen(id, options) {
         case 'student-hub': renderStudentHub(); break;
         case 'manuals': initManuals(); break;
         case 'regions': renderRegions(); break;
-        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadSessionSecuritySettings === 'function') loadSessionSecuritySettings(); if (typeof loadMaintenanceAI === 'function') loadMaintenanceAI(); loadDocGenFlags(); if (typeof loadAnnouncementBannerSettings === 'function') loadAnnouncementBannerSettings(); if (typeof renderAnnouncementsList === 'function') renderAnnouncementsList(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
+        case 'settings': { const _lpCard = document.getElementById('settings-lesson-pacing-card'); if (_lpCard) _lpCard.style.display = user.role === 'admin' ? '' : 'none'; } loadBranding(); loadSMSSettings(); renderStudyCenters(); renderUsers(); renderGradRequirements(); renderRegions(); renderCountries(); loadFeeRulesUI(); loadCoordinatorAccess(); loadAssistantAccess(); loadAdminAccess(); loadFeeGate(); loadContentGate(); loadMaintenanceMode(); if (typeof loadSessionSecuritySettings === 'function') loadSessionSecuritySettings(); if (typeof loadMaintenanceAI === 'function') loadMaintenanceAI(); loadDocGenFlags(); if (typeof loadStudentTranscriptSetting === 'function') { try { loadStudentTranscriptSetting(); } catch(e){} } if (typeof loadAnnouncementBannerSettings === 'function') loadAnnouncementBannerSettings(); if (typeof renderAnnouncementsList === 'function') renderAnnouncementsList(); if (typeof loadAdmissionLastSeqSetting === 'function') loadAdmissionLastSeqSetting(); if (typeof loadDiplomaPdfConfig === 'function') loadDiplomaPdfConfig(); if (typeof loadCompletionPdfConfig === 'function') loadCompletionPdfConfig(); if (typeof loadBrochureUploadConfig === 'function') loadBrochureUploadConfig(); if (typeof loadMusicSettings === 'function') loadMusicSettings(); if (typeof loadTranscriptCourseOrderSettings === 'function') loadTranscriptCourseOrderSettings(); if (typeof loadProgramSlotsSettings === 'function') loadProgramSlotsSettings(); if (typeof loadSmsApiKey === 'function') { try { loadSmsApiKey(); } catch(e){} } if (typeof loadSmsModemSettings === 'function') { try { loadSmsModemSettings(); } catch(e){} } if (typeof initCollapsibleCards === 'function') { try { initCollapsibleCards(); } catch(e){} } break;
         case 'media': renderMediaGallery(); break;
         case 'global-viewer': renderGlobalViewer(); break;
         case 'analytics': renderAnalytics(); break;
@@ -5748,7 +5748,7 @@ async function saveStudent() {
                 studentId: student.id,
                 createdAt: new Date().toISOString()
             });
-            showToast('Login account created — username: ' + student.phone + ', password: ' + student.admissionNumber, { type: 'success', duration: 5000 });
+            showToast('Student account created — username: ' + student.phone + '. The student signs in with their phone number and their admission number as the initial password.', { type: 'success', duration: 5000 });
         }
     } catch (e) { /* account creation denied (e.g. country coordinators) — student record itself already saved */ }
     if (installmentPlan && feeAmount > 0 && !editId) await createInstallmentPlan(id, feeAmount, parseInt(installmentPlan));
@@ -11930,6 +11930,9 @@ async function generateTranscript() {
     const year = document.getElementById('transcript-year').value;
     let docType = document.getElementById('transcript-doc-type').value;
     if (isStudent) docType = 'unofficial';
+    if (isStudent && !studentTranscriptAllowed()) {
+        return showToast('Student transcript generation is currently disabled by the administrator.', { type: 'warning' });
+    }
     if (docType === 'official' && !canOfficial) {
         return showToast('Only the owner or an administrator can generate an official transcript.');
     }
@@ -12196,7 +12199,8 @@ function buildProfessionalTranscript(data) {
                 ${academic.attendancePct > 0 ? `<div class="summary-item"><span class="summary-label">Class Attendance</span><span class="summary-value">${academic.attendancePct}%</span></div>` : ''}
             </div>
         </div>`;
-    const officialStamp = isOfficial ? '' : '<div class="watermark-text">UNOFFICIAL COPY — FOR STUDENT REFERENCE ONLY</div>';
+    const unofficialMark = isOfficial ? '' : '<div class="watermark-banner">STUDENT GENERATED — UNOFFICIAL COPY</div>';
+    const officialStamp = isOfficial ? '' : '<div class="watermark-text">Not an official document — not verifiable. For student reference only.</div>';
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
     const workflowChartHTML = `
         <div class="workflow-chart">
@@ -12218,6 +12222,7 @@ function buildProfessionalTranscript(data) {
     return `
     <div class="transcript-document" style="--accent: ${accentColor};">
         <div class="doc-watermark">${schoolName}</div>
+        ${unofficialMark}
         ${officialStamp}
         <div class="transcript-page transcript-page-1">
             <div class="transcript-header">
@@ -12289,8 +12294,8 @@ function buildProfessionalTranscript(data) {
                         <p class="school-tagline">${tagline}</p>
                     </div>
                     <div class="header-right-info">
-                        <div class="doc-id">Doc ID: ${docId}</div>
-                        <div class="verify-code"><span class="vc-label">Verify:</span> ${vCode}</div>
+                        <div class="doc-id">Doc ID: ${docId} ${!isOfficial ? '<span style="color:#b91c1c;font-weight:700;">(UNOFFICIAL)</span>' : ''}</div>
+                        <div class="verify-code">${isOfficial ? `<span class="vc-label">Verify:</span> ${vCode}` : `<span class="vc-label" style="color:#b91c1c;font-weight:700;">UNOFFICIAL — NOT VERIFIABLE</span>`}</div>
                     </div>
                 </div>
                 <div class="header-divider"></div>
@@ -12332,6 +12337,21 @@ function buildProfessionalTranscript(data) {
             pointer-events: none;
             z-index: 0;
             white-space: nowrap;
+        }
+        .transcript-document .watermark-banner {
+            position: relative;
+            width: 100%;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #b91c1c;
+            background: #fecaca;
+            border: 1px dashed #b91c1c;
+            padding: 5px 0;
+            margin-bottom: 8px;
+            z-index: 3;
         }
 .transcript-document .official-stamp {
             position: absolute;
@@ -25130,6 +25150,43 @@ async function refreshDocGenButtons() {
 }
 async function ensureDocGenFlags() {
     if (_docGenFlagsCache === null) { try { await loadDocGenFlags(); } catch {} }
+}
+
+// ---- Student transcript generation setting (owner/admin toggle) -----------
+let _studentTranscriptCache = null;
+function studentTranscriptAllowed() {
+    const s = _studentTranscriptCache;
+    if (!s) return true;                       // default: ON
+    const v = (s.value !== undefined) ? s.value : s;
+    return v && v.allow !== false;
+}
+async function loadStudentTranscriptSetting() {
+    try {
+        const rec = await dbGet('settings', 'studentTranscript').catch(() => null);
+        _studentTranscriptCache = rec ? (rec.value || rec) : null;
+        const cb = document.getElementById('student-transcript-allow');
+        const st = document.getElementById('student-transcript-status');
+        if (cb) cb.checked = studentTranscriptAllowed();
+        if (st) { st.textContent = studentTranscriptAllowed() ? 'ON' : 'OFF'; st.style.color = studentTranscriptAllowed() ? 'var(--success)' : 'var(--danger)'; }
+    } catch (e) {}
+}
+async function saveStudentTranscriptSetting() {
+    const cb = document.getElementById('student-transcript-allow');
+    const st = document.getElementById('student-transcript-status');
+    const msg = document.getElementById('student-transcript-status-msg');
+    const on = cb ? cb.checked : true;
+    const s = { key: 'studentTranscript', value: { allow: on } };
+    try {
+        await dbPut('settings', s);
+        _studentTranscriptCache = s;
+        if (st) { st.textContent = on ? 'ON' : 'OFF'; st.style.color = on ? 'var(--success)' : 'var(--danger)'; }
+        if (msg) { msg.textContent = 'Saved.'; msg.style.color = 'var(--success)'; setTimeout(() => { msg.textContent = ''; }, 2000); }
+        showToast('Student transcript setting saved!', { type: 'success' });
+        try { logAudit('updated', 'student-transcript', { allow: on }); } catch (e) {}
+    } catch (e) {
+        if (msg) { msg.textContent = 'Save failed: ' + e.message; msg.style.color = 'var(--danger)'; }
+        showToast('Failed to save student transcript setting: ' + e.message, { type: 'danger' });
+    }
 }
 async function loadCoordinatorAccess() {
     const s = await dbGet('settings', 'coordinatorAccess');
