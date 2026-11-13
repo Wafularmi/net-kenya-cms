@@ -845,25 +845,119 @@ function translateErrMsg(reason) {
     if (reason === 'deadline') return 'Translation timed out — try a smaller chunk size.';
     return 'Translation failed' + (reason && reason !== 'error' ? ' — ' + reason : ' — please try again.');
 }
+async function translateToSwClientSide(texts) {
+    const list = Array.isArray(texts) ? texts : [texts];
+    const clean = list.map(t => String(t == null ? '' : t));
+    if (!clean.some(t => t.trim())) return { ok: true, translations: clean.map(() => '') };
+    const MEM_CHUNK = 450;
+    const chunkText = (txt) => {
+        const s = String(txt == null ? '' : txt);
+        if (!s.trim()) return [''];
+        if (s.length <= MEM_CHUNK) return [s];
+        const out = [];
+        let rest = s;
+        while (rest.length > MEM_CHUNK) {
+            let cut = rest.lastIndexOf(' ', MEM_CHUNK);
+            if (cut < MEM_CHUNK * 0.5) cut = rest.lastIndexOf('\n', MEM_CHUNK);
+            if (cut < MEM_CHUNK * 0.5) cut = MEM_CHUNK;
+            out.push(rest.slice(0, cut));
+            rest = rest.slice(cut).replace(/^[ \t]+/, '');
+        }
+        if (rest) out.push(rest);
+        return out;
+    };
+    const chunks = [];
+    const owners = [];
+    clean.forEach((t, i) => { chunkText(t).forEach(c => { chunks.push(c); owners.push(i); }); });
+    const pieces = new Array(chunks.length).fill('');
+    const decodeHtml = (s) => { try { const d = document.createElement('textarea'); d.innerHTML = s; return d.value; } catch { return s; } };
+
+    // Try Google GTX first (keyless, CORS-enabled, works from the browser).
+    const tryGoogle = async () => {
+        let ok = true;
+        for (let k = 0; k < chunks.length; k++) {
+            const one = chunks[k];
+            if (!one.trim()) continue;
+            try {
+                const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=sw&dt=t&q=' + encodeURIComponent(one);
+                const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                if (!r.ok) throw new Error('http ' + r.status);
+                const data = await r.json();
+                const piece = (Array.isArray(data) && Array.isArray(data[0])) ? data[0].map(x => (x && x[0]) || '').join('') : '';
+                if (!piece.trim()) throw new Error('empty');
+                pieces[k] = decodeHtml(piece.trim());
+                await new Promise(r => setTimeout(r, 120));
+            } catch (e) {
+                ok = false;
+                break;
+            }
+        }
+        return ok;
+    };
+
+    // Fall back to MyMemory (also CORS-enabled).
+    const tryMyMemory = async () => {
+        let ok = true;
+        const email = 'translation@netfoundation.ke';
+        for (let k = 0; k < chunks.length; k++) {
+            const one = chunks[k];
+            if (!one.trim()) continue;
+            try {
+                const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(one) + '&langpair=en|sw&de=' + encodeURIComponent(email);
+                const r = await fetch(url);
+                if (!r.ok) throw new Error('http ' + r.status);
+                const out = await r.json();
+                if (out && out.quotaFinished) throw new Error('quota');
+                const t = out && out.responseData && out.responseData.translatedText;
+                const clean = t ? decodeHtml(String(t)).trim() : '';
+                if (!clean) throw new Error('empty');
+                if (/MYMEMORY WARNING|INVALID|PLEASE SELECT|NO QUOTA|LIMIT/i.test(clean)) throw new Error('quota');
+                pieces[k] = clean;
+                await new Promise(r => setTimeout(r, 200));
+            } catch (e) {
+                ok = false;
+                break;
+            }
+        }
+        return ok;
+    };
+
+    let translated = await tryGoogle();
+    if (!translated) {
+        // Reset pieces for retry
+        for (let k = 0; k < pieces.length; k++) pieces[k] = '';
+        translated = await tryMyMemory();
+    }
+
+    if (!translated) {
+        return { ok: false, reason: 'provider_unreachable', error: 'provider_unreachable', translations: [] };
+    }
+    const result = new Array(clean.length).fill('');
+    owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
+    return { ok: true, translations: result };
+}
 async function translateToSw(texts) {
     const list = Array.isArray(texts) ? texts : [texts];
     const clean = list.map(t => String(t == null ? '' : t)).filter(t => t.trim());
     if (!clean.length) return { ok: true, translations: [] };
+    // Try the server first (uses a configured Google key if available).
     try {
         const res = await fetch('/api/translate', {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({ texts: clean, target: 'sw' })
         });
-        if (res.status === 501) return { ok: false, reason: 'no_key', translations: [] };
         const data = await res.json().catch(() => null);
-        if (!res.ok || !data || !Array.isArray(data.translations)) {
-            return { ok: false, reason: (data && data.error) || 'error', translations: [] };
+        if (res.ok && data && Array.isArray(data.translations)) {
+            return { ok: true, translations: data.translations };
         }
-        return { ok: true, translations: data.translations };
-    } catch (e) {
-        return { ok: false, reason: 'network', translations: [] };
-    }
+        // Server failed (429/blocked/no_key) — fall through to browser-side.
+    } catch (e) {}
+    // Fall back to translating directly from the browser (uses the learner's
+    // home IP, which is usually not blocked by the free providers).
+    const clientRes = await translateToSwClientSide(clean);
+    if (clientRes.ok) return clientRes;
+    return { ok: false, reason: clientRes.reason || clientRes.error || 'provider_unreachable', error: clientRes.reason || clientRes.error || 'provider_unreachable', translations: [] };
 }
 // Swahili labels for the question-bank UI.
 const Q_UI_SW = {
