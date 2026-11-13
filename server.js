@@ -8334,7 +8334,7 @@ function decodeHtmlEntities(s) {
     // It only ADDS fields; the English master, ids and every other column are
     // left untouched. Runs in time-boxed batches so a long library can be
     // translated across several calls without hitting the proxy timeout.
-    if (parts.length === 4 && parts[1] === 'notes' && parts[2] === 'translate-all' && req.method === 'POST') {
+    if (parts.length === 3 && parts[1] === 'notes' && parts[2] === 'translate-all' && req.method === 'POST') {
         req._asyncApi = true;
         let body = '';
         req.on('data', c => body += c);
