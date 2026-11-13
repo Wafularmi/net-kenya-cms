@@ -8371,6 +8371,7 @@ function decodeHtmlEntities(s) {
                 }
             };
             await Promise.all(Array.from({ length: Math.min(wantConcurrency, Math.max(1, chunks.length)) }, () => worker()));
+            const missing = chunks.reduce((n, c, k) => n + ((c.trim() && !pieces[k]) ? 1 : 0), 0);
             if (quotaHit || missing) {
                 // Try the keyless Google endpoint before giving up — it is
                 // not subject to MyMemory's daily quota and often works from
