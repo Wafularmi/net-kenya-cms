@@ -11980,7 +11980,7 @@ async function _generateTranscriptBody() {
     const generatedTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const cgpa = results.cgpa;
     const html = buildProfessionalTranscript({
-        student, grades, courses, branding: { schoolName, tagline, initials, logo, accentColor, sig_registrar: docType === 'official' ? getRoleSignature('Registrar', branding) : null, sig_dean: docType === 'official' ? getRoleSignature('Academic Dean', branding) : null, sig_director: docType === 'official' ? getRoleSignature('Director / Principal', branding) : null, college_stamp: branding.college_stamp, postalAddress: branding.postalAddress || '', city: branding.city || '', phone: branding.phone || '', email: branding.email || '', website: branding.website || '' },
+        student, courses, branding: { schoolName, tagline, initials, logo, accentColor, sig_registrar: docType === 'official' ? getRoleSignature('Registrar', branding) : null, sig_dean: docType === 'official' ? getRoleSignature('Academic Dean', branding) : null, sig_director: docType === 'official' ? getRoleSignature('Director / Principal', branding) : null, college_stamp: branding.college_stamp, postalAddress: branding.postalAddress || '', city: branding.city || '', phone: branding.phone || '', email: branding.email || '', website: branding.website || '' },
         docType, semester, year, grouping, docId, generatedDate, generatedTime, issueDate: issue.label, center, vCode,
         financial: { totalPaid, feeAmount: getCachedStudentFee(student) },
         academic: { chapel: studentChapel, attendancePct },
