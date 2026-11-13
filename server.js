@@ -8237,7 +8237,11 @@ function decodeHtmlEntities(s) {
     // "translate every note" job both use it, so both speak to the same
     // provider with the same chunking rules.
     // Returns { ok, translations, error, message, failedChunks, totalChunks }.
-    async function translateTextListServer(texts, target) {
+    async function translateTextListServer(texts, target, opts) {
+        const conf = opts || {};
+        const wantConcurrency = Math.max(1, Math.min(6, Number(conf.concurrency) || 4));
+        const wantDelayMs = Math.max(0, Math.min(10000, Number(conf.delayMs) || 0));
+        const wantRetries = Math.max(0, Math.min(6, conf.retries === undefined ? 1 : Number(conf.retries)));
         const setting = db.settings ? (db.settings.find(s => s && s.key === 'translation') || {}) : {};
         const trVal = setting && (setting.value && typeof setting.value === 'object') ? setting.value : setting;
         const key = (trVal && trVal.googleApiKey) || process.env.TRANSLATE_API_KEY || '';
@@ -8287,12 +8291,15 @@ function decodeHtmlEntities(s) {
             let quotaHit = false;
             let failed = 0;
             let lastError = '';
-            const CONCURRENCY = 4;
             let cursor = 0;
             const fetchChunk = async (one) => {
                 const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
                 const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' }, signal: AbortSignal.timeout(30000) });
-                if (!r.ok) throw new Error('provider answered http ' + r.status);
+                if (!r.ok) {
+                    const err = new Error('provider answered http ' + r.status);
+                    err.status = r.status;
+                    throw err;
+                }
                 const out = await r.json();
                 if (out && out.quotaFinished) { const e = new Error('quota'); e.quota = true; throw e; }
                 const t = out && out.responseData && out.responseData.translatedText;
@@ -8307,18 +8314,27 @@ function decodeHtmlEntities(s) {
                     const one = chunks[k];
                     if (!one.trim()) continue;
                     let lastChunkErr = '';
-                    for (let attempt = 0; attempt < 2 && !quotaHit; attempt++) {
-                        try { pieces[k] = await fetchChunk(one); lastChunkErr = ''; break; }
-                        catch (e) {
+                    for (let attempt = 0; attempt <= wantRetries && !quotaHit; attempt++) {
+                        try {
+                            if (wantDelayMs) await new Promise(r => setTimeout(r, wantDelayMs));
+                            pieces[k] = await fetchChunk(one);
+                            lastChunkErr = '';
+                            break;
+                        } catch (e) {
                             lastChunkErr = String(e && (e.message || e)).slice(0, 160);
                             if (e && e.quota) { quotaHit = true; break; }
-                            if (attempt === 0) await new Promise(r => setTimeout(r, 700));
+                            if (attempt < wantRetries) {
+                                // 429 is the provider's rate limit: back off further
+                                // instead of burning the remaining chunks on it.
+                                const wait = (e && e.status === 429) ? (4000 * (attempt + 1)) : (700 * (attempt + 1));
+                                await new Promise(r => setTimeout(r, wait));
+                            }
                         }
                     }
                     if (lastChunkErr && !quotaHit) { failed++; lastError = lastChunkErr; }
                 }
             };
-            await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, chunks.length)) }, () => worker()));
+            await Promise.all(Array.from({ length: Math.min(wantConcurrency, Math.max(1, chunks.length)) }, () => worker()));
             if (quotaHit) return { ok: false, error: 'quota', message: 'The free translation service reached its daily limit. Try again later or add a Google key in Settings → Translation Provider.', failedChunks: failed, totalChunks: chunks.length };
             if (failed) return { ok: false, error: 'partial', message: failed + ' of ' + chunks.length + ' part(s) could not be translated (' + lastError + ')', failedChunks: failed, totalChunks: chunks.length, translations: [] };
             const result = new Array(list.length).fill('');
@@ -8360,7 +8376,13 @@ function decodeHtmlEntities(s) {
                 let lastError = '';
                 for (const n of targets) {
                     if (done.length >= limit || Date.now() - started > maxMs) break;
-                    const tr = await translateTextListServer([n.title || '', n.content || ''], 'sw');
+                    const tr = await translateTextListServer([n.title || '', n.content || ''], 'sw', {
+                        // One chunk at a time with a pause: the free provider
+                        // answers 429 when several long notes are pushed at once.
+                        concurrency: 1,
+                        delayMs: Math.max(0, Math.min(5000, Number(p.paceMs) || 700)),
+                        retries: 4
+                    });
                     if (!tr.ok) {
                         if (tr.error === 'quota') { quota = true; lastError = tr.message || ''; break; }
                         failed.push({ id: n.id, error: tr.message || tr.error || 'failed' });
@@ -10581,7 +10603,13 @@ const parsed = JSON.parse(body);
                         return json(res, 403, { error: 'Generate ' + toStore.type + ' is disabled for your country by the administrator' });
                     }
                     const preserveFields = isDocStore ? ['content'] : (store === 'settings' ? brandingImageKeys(value) : null);
-                    sanitizeBodyFields(toStore, 20000, preserveFields);
+                    // Study notes and lesson text are the teaching content itself,
+                    // and real notes run past 20 000 characters. A 20k slice would
+                    // silently cut the end off an English master (or its Swahili
+                    // translation) on every edit, so teaching stores get a much
+                    // higher ceiling than ordinary text fields.
+                    const bodyCap = (store === 'notes' || store === 'lessons') ? 400000 : 20000;
+                    sanitizeBodyFields(toStore, bodyCap, preserveFields);
                     if (store === 'settings' && value.key === 'maintenance' && (!user || user.role !== 'admin')) {
                         return json(res, 403, { error: 'Only administrators can change maintenance mode' });
                     }
