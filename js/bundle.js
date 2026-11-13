@@ -12212,6 +12212,16 @@ function buildProfessionalTranscript(data) {
             </div>
         </div>`;
     const unofficialMark = isOfficial ? '' : '<div class="watermark-banner">STUDENT GENERATED — UNOFFICIAL COPY</div>';
+    const unofficialTiles = isOfficial ? '' : (() => {
+        let tiles = '';
+        const text = 'UNOFFICIAL — STUDENT COPY';
+        for (let y = -80; y <= 380; y += 130) {
+            for (let x = -180; x <= 560; x += 220) {
+                tiles += `<div class="watermark-tile" style="left:${x}%;top:${y}%;">${text}</div>`;
+            }
+        }
+        return tiles;
+    })();
     const officialStamp = isOfficial ? '' : '<div class="watermark-text">Not an official document — not verifiable. For student reference only.</div>';
     const logoHTML = logo ? `<img src="${logo}" class="transcript-logo" alt="Logo">` : `<div class="transcript-logo-placeholder">${initials}</div>`;
     const workflowChartHTML = `
@@ -12235,6 +12245,7 @@ function buildProfessionalTranscript(data) {
     <div class="transcript-document" style="--accent: ${accentColor};">
         <div class="doc-watermark">${schoolName}</div>
         ${unofficialMark}
+        ${unofficialTiles}
         ${officialStamp}
         <div class="transcript-page transcript-page-1">
             <div class="transcript-header">
@@ -12350,19 +12361,32 @@ function buildProfessionalTranscript(data) {
             z-index: 0;
             white-space: nowrap;
         }
+        .transcript-document .watermark-tile {
+            position: absolute;
+            font-size: 42px;
+            font-weight: 900;
+            color: rgba(100, 116, 139, 0.10);
+            letter-spacing: 8px;
+            text-transform: uppercase;
+            white-space: nowrap;
+            transform: rotate(-35deg);
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.85;
+        }
         .transcript-document .watermark-banner {
             position: relative;
             width: 100%;
             text-align: center;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 900;
-            letter-spacing: 3px;
+            letter-spacing: 4px;
             text-transform: uppercase;
             color: #b91c1c;
-            background: #fecaca;
+            background: rgba(239, 246, 255, 0.6);
             border: 1px dashed #b91c1c;
-            padding: 5px 0;
-            margin-bottom: 8px;
+            padding: 4px 0;
+            margin-bottom: 6px;
             z-index: 3;
         }
 .transcript-document .official-stamp {
@@ -12993,7 +13017,7 @@ function buildProfessionalTranscript(data) {
             .transcript-document .transcript-footer { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .transcript-document .seal-area { display: block; }
             .transcript-page-1 { page-break-after: always; break-after: page; }
-            .transcript-page-2 { page-break-before: always; break-before: page; }
+            .transcript-page-2 { page-break-after: auto; break-after: auto; }
             @page { margin: 0; size: A4; }
         }
     </style>`;
