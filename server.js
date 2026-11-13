@@ -8233,6 +8233,41 @@ function decodeHtmlEntities(s) {
         return;
     }
 
+    // Free fallback: Google's unofficial GTX endpoint needs no key and is not
+    // subject to MyMemory's daily quota. It is undocumented and may be blocked
+    // by some hosting IPs, so it is only used when the primary provider fails.
+    async function translateWithGoogleUnofficial(texts, target) {
+        const want = target === 'en' ? 'en' : 'sw';
+        const sl = want === 'sw' ? 'en' : 'sw';
+        const out = [];
+        for (const t of texts) {
+            const s = String(t == null ? '' : t);
+            if (!s.trim()) { out.push(''); continue; }
+            const chunks = [];
+            let rest = s;
+            while (rest.length > 3000) {
+                let cut = rest.lastIndexOf(' ', 3000);
+                if (cut < 1500) cut = 3000;
+                chunks.push(rest.slice(0, cut));
+                rest = rest.slice(cut).replace(/^[ \t]+/, '');
+            }
+            if (rest) chunks.push(rest);
+            let combined = '';
+            for (const c of chunks) {
+                const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=' + sl + '&tl=' + want + '&dt=t&q=' + encodeURIComponent(c);
+                const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(25000) });
+                if (!r.ok) throw new Error('google-free http ' + r.status);
+                const data = await r.json();
+                const piece = (Array.isArray(data) && Array.isArray(data[0])) ? data[0].map(x => (x && x[0]) || '').join('') : '';
+                if (!piece.trim()) throw new Error('google-free empty');
+                combined += (combined ? ' ' : '') + piece.trim();
+                await new Promise(r => setTimeout(r, 200));
+            }
+            out.push(combined);
+        }
+        return { ok: true, translations: out, failedChunks: 0, totalChunks: texts.length };
+    }
+
     // Shared translation helper. The interactive endpoint and the bulk
     // "translate every note" job both use it, so both speak to the same
     // provider with the same chunking rules.
@@ -8336,16 +8371,29 @@ function decodeHtmlEntities(s) {
                 }
             };
             await Promise.all(Array.from({ length: Math.min(wantConcurrency, Math.max(1, chunks.length)) }, () => worker()));
+            if (quotaHit || missing) {
+                // Try the keyless Google endpoint before giving up — it is
+                // not subject to MyMemory's daily quota and often works from
+                // hosting IPs that MyMemory has blocked.
+                try {
+                    const fb = await translateWithGoogleUnofficial(list, want);
+                    if (fb && fb.ok) return fb;
+                } catch (fe) {}
+            }
             if (quotaHit) return { ok: false, error: 'quota', message: 'The free translation service reached its daily limit. Try again later or add a Google key in Settings → Translation Provider.', failedChunks: failed, totalChunks: chunks.length };
-            const missing = chunks.reduce((n, c, k) => n + ((c.trim() && !pieces[k]) ? 1 : 0), 0);
-            if (missing) {
+            const missing2 = chunks.reduce((n, c, k) => n + ((c.trim() && !pieces[k]) ? 1 : 0), 0);
+            if (missing2) {
                 const outOfTime = deadline && Date.now() >= deadline && cursor < chunks.length;
-                return { ok: false, error: outOfTime ? 'deadline' : 'partial', message: missing + ' of ' + chunks.length + ' part(s) could not be translated' + (lastError ? ' (' + lastError + ')' : ''), failedChunks: missing, totalChunks: chunks.length, translations: [] };
+                return { ok: false, error: outOfTime ? 'deadline' : 'partial', message: missing2 + ' of ' + chunks.length + ' part(s) could not be translated' + (lastError ? ' (' + lastError + ')' : ''), failedChunks: missing2, totalChunks: chunks.length, translations: [] };
             }
             const result = new Array(list.length).fill('');
             owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
             return { ok: true, translations: result, failedChunks: 0, totalChunks: chunks.length };
         } catch (e) {
+            try {
+                const fb = await translateWithGoogleUnofficial(list, want);
+                if (fb && fb.ok) return fb;
+            } catch (fe) {}
             return { ok: false, error: 'upstream_error', message: 'No translation provider is available right now: ' + String(e && e.message || e).slice(0, 120) };
         }
     }
