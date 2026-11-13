@@ -23380,8 +23380,15 @@ async function translateNoteChunk() {
 
     if (!res.ok) {
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        if (statusEl) statusEl.textContent = 'Translation failed — please try again.';
-        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+        const msg = reason === 'no_key'
+            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
+            : (reason === 'quota'
+                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
+                : (reason === 'provider_unreachable'
+                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
+                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        if (statusEl) statusEl.textContent = msg;
+        return showToast(msg, { type: 'warning', duration: 6000 });
     }
 
     let i = 0;
