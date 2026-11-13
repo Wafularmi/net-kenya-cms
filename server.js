@@ -8242,6 +8242,7 @@ function decodeHtmlEntities(s) {
         const wantConcurrency = Math.max(1, Math.min(6, Number(conf.concurrency) || 4));
         const wantDelayMs = Math.max(0, Math.min(10000, Number(conf.delayMs) || 0));
         const wantRetries = Math.max(0, Math.min(6, conf.retries === undefined ? 1 : Number(conf.retries)));
+        const deadline = Number(conf.deadline) || 0;
         const setting = db.settings ? (db.settings.find(s => s && s.key === 'translation') || {}) : {};
         const trVal = setting && (setting.value && typeof setting.value === 'object') ? setting.value : setting;
         const key = (trVal && trVal.googleApiKey) || process.env.TRANSLATE_API_KEY || '';
@@ -8309,7 +8310,7 @@ function decodeHtmlEntities(s) {
                 return clean;
             };
             const worker = async () => {
-                while (cursor < chunks.length && !quotaHit) {
+                while (cursor < chunks.length && !quotaHit && (!deadline || Date.now() < deadline)) {
                     const k = cursor++;
                     const one = chunks[k];
                     if (!one.trim()) continue;
@@ -8336,7 +8337,11 @@ function decodeHtmlEntities(s) {
             };
             await Promise.all(Array.from({ length: Math.min(wantConcurrency, Math.max(1, chunks.length)) }, () => worker()));
             if (quotaHit) return { ok: false, error: 'quota', message: 'The free translation service reached its daily limit. Try again later or add a Google key in Settings → Translation Provider.', failedChunks: failed, totalChunks: chunks.length };
-            if (failed) return { ok: false, error: 'partial', message: failed + ' of ' + chunks.length + ' part(s) could not be translated (' + lastError + ')', failedChunks: failed, totalChunks: chunks.length, translations: [] };
+            const missing = chunks.reduce((n, c, k) => n + ((c.trim() && !pieces[k]) ? 1 : 0), 0);
+            if (missing) {
+                const outOfTime = deadline && Date.now() >= deadline && cursor < chunks.length;
+                return { ok: false, error: outOfTime ? 'deadline' : 'partial', message: missing + ' of ' + chunks.length + ' part(s) could not be translated' + (lastError ? ' (' + lastError + ')' : ''), failedChunks: missing, totalChunks: chunks.length, translations: [] };
+            }
             const result = new Array(list.length).fill('');
             owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
             return { ok: true, translations: result, failedChunks: 0, totalChunks: chunks.length };
@@ -8381,11 +8386,15 @@ function decodeHtmlEntities(s) {
                         // answers 429 when several long notes are pushed at once.
                         concurrency: 1,
                         delayMs: Math.max(0, Math.min(5000, Number(p.paceMs) || 700)),
-                        retries: 4
+                        retries: 4,
+                        // Let the current note finish, then stop before the proxy
+                        // timeout instead of being cut off mid-request.
+                        deadline: started + maxMs + 20000
                     });
                     if (!tr.ok) {
                         if (tr.error === 'quota') { quota = true; lastError = tr.message || ''; break; }
                         failed.push({ id: n.id, error: tr.message || tr.error || 'failed' });
+                        if (tr.error === 'deadline' || Date.now() - started > maxMs) break;
                         continue;
                     }
                     const titleSw = String((tr.translations && tr.translations[0]) || '').trim();
