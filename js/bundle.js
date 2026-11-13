@@ -837,6 +837,14 @@ function countryForRecipient(student) {
 // The Google key lives only on the server (TRANSLATE_API_KEY env var); the
 // browser never sees it. Without a key the server replies 501 and we return
 // null so callers can keep the English text instead of breaking.
+function translateErrMsg(reason) {
+    reason = String(reason || '').trim().toLowerCase();
+    if (reason === 'no_key') return 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.';
+    if (reason === 'quota') return 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".';
+    if (reason === 'provider_unreachable' || reason === 'partial' || reason === 'upstream_error' || reason === 'network') return 'Translation service is rate-limited or unreachable from this server — use "Translate next chunk", or add a Google Cloud Translation key in Settings → Translation Provider.';
+    if (reason === 'deadline') return 'Translation timed out — try a smaller chunk size.';
+    return 'Translation failed' + (reason && reason !== 'error' ? ' — ' + reason : ' — please try again.');
+}
 async function translateToSw(texts) {
     const list = Array.isArray(texts) ? texts : [texts];
     const clean = list.map(t => String(t == null ? '' : t)).filter(t => t.trim());
@@ -19721,13 +19729,7 @@ async function translateLessonToSwahili() {
         // The server may return error in res.error (new format from chunked translation)
         // or res.reason (legacy format). Check both so administrators see the real reason.
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        const msg = reason === 'no_key'
-            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : (reason === 'quota'
-                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
-                : (reason === 'provider_unreachable'
-                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
-                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        const msg = translateErrMsg(reason);
         if (statusEl) statusEl.textContent = msg;
         return showToast(msg, { type: 'warning', duration: 6000 });
     }
@@ -20429,13 +20431,7 @@ async function translateQuestionToSwahili() {
         // The server may return error in res.error (new format from chunked translation)
         // or res.reason (legacy format). Check both so administrators see the real reason.
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        const msg = reason === 'no_key'
-            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : (reason === 'quota'
-                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
-                : (reason === 'provider_unreachable'
-                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
-                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        const msg = translateErrMsg(reason);
         if (statusEl) statusEl.textContent = msg;
         return showToast(msg, { type: 'warning', duration: 6000 });
     }
@@ -23282,13 +23278,7 @@ async function translateNoteToSwahili() {
         // The server may return error in res.error (new format from chunked translation)
         // or res.reason (legacy format). Check both so administrators see the real reason.
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        const msg = reason === 'no_key'
-            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : (reason === 'quota'
-                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
-                : (reason === 'provider_unreachable'
-                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
-                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        const msg = translateErrMsg(reason);
         if (statusEl) statusEl.textContent = msg;
         return showToast(msg, { type: 'warning', duration: 6000 });
     }
@@ -23380,13 +23370,7 @@ async function translateNoteChunk() {
 
     if (!res.ok) {
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        const msg = reason === 'no_key'
-            ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : (reason === 'quota'
-                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
-                : (reason === 'provider_unreachable'
-                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
-                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        const msg = translateErrMsg(reason);
         if (statusEl) statusEl.textContent = msg;
         return showToast(msg, { type: 'warning', duration: 6000 });
     }
