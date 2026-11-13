@@ -8376,10 +8376,17 @@ function decodeHtmlEntities(s) {
                 // Try the keyless Google endpoint before giving up — it is
                 // not subject to MyMemory's daily quota and often works from
                 // hosting IPs that MyMemory has blocked.
+                let fbErr = '';
                 try {
                     const fb = await translateWithGoogleUnofficial(list, want);
                     if (fb && fb.ok) return fb;
-                } catch (fe) {}
+                    fbErr = (fb && (fb.message || fb.error)) || 'no result';
+                } catch (fe) {
+                    fbErr = String(fe && (fe.message || fe)).slice(0, 160);
+                }
+                // Surface the fallback failure so the admin can see WHY neither
+                // provider worked (blocked IP, captcha, etc.).
+                lastError = (lastError ? lastError + ' | ' : '') + 'google-free: ' + (fbErr || 'failed');
             }
             if (quotaHit) return { ok: false, error: 'quota', message: 'The free translation service reached its daily limit. Try again later or add a Google key in Settings → Translation Provider.', failedChunks: failed, totalChunks: chunks.length };
             const missing2 = chunks.reduce((n, c, k) => n + ((c.trim() && !pieces[k]) ? 1 : 0), 0);
