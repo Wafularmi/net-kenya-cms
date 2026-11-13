@@ -23227,7 +23227,15 @@ function noteLangBlockHtml(note) {
         <div class="form-group"><label>Maudhui (Kiswahili)</label><textarea id="note-content-sw" rows="10" placeholder="Ingiza tafsiri ya Kiswahili hapa, au tumia kitufe cha Tafsiri.">${note ? note.contentSw || '' : ''}</textarea></div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">
-        <button type="button" class="btn btn-outline btn-sm" id="note-translate-btn" onclick="translateNoteToSwahili()">🌐 ${Q_UI_SW.translate}</button>
+        <button type="button" class="btn btn-outline btn-sm" id="note-translate-btn" onclick="translateNoteToSwahili()">🌐 ${Q_UI_SW.translate} (all)</button>
+        <select id="note-chunk-size" style="padding:4px 6px;font-size:11px;border-radius:6px;border:1px solid var(--border);background:var(--bg-input);">
+            <option value="10">10%</option>
+            <option value="25" selected>25%</option>
+            <option value="50">50%</option>
+        </select>
+        <button type="button" class="btn btn-outline btn-sm" id="note-translate-chunk-btn" onclick="translateNoteChunk()">🌐 Translate next chunk</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="resetNoteChunks()" style="font-size:10px;">Reset</button>
+        <span id="note-chunk-progress" style="font-size:11px;color:var(--text-muted);"></span>
         <span id="note-translate-status" style="font-size:11px;color:var(--text-muted);"></span>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">English is the master copy. The Kiswahili version is optional — learners who select Kiswahili see it, everyone else sees English. If it is missing, they see English instead.</div>`;
@@ -23276,6 +23284,128 @@ async function translateNoteToSwahili() {
     if (statusEl) statusEl.textContent = '✓ Kiswahili kimefaa. Angalia kisha uhakikishe.';
     showToast('Translated to Swahili — please review');
 }
+// Split a long text into N slices at paragraph/word boundaries so that
+// translating a slice at a time never exceeds the provider's per-request
+// limit and the original formatting survives stitching.
+function splitIntoChunks(text, n) {
+    n = Math.max(1, Math.min(20, parseInt(n, 10) || 1));
+    const s = String(text == null ? '' : text).trim();
+    if (!s) return [];
+    const blocks = s.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+    let slices = [];
+    if (blocks.length >= n) {
+        const target = Math.ceil(s.length / n);
+        let current = '';
+        for (const b of blocks) {
+            if (current && current.length + b.length + 2 > target && slices.length < n - 1) {
+                slices.push(current.trim());
+                current = b;
+            } else {
+                current = current ? current + '\n\n' + b : b;
+            }
+        }
+        if (current.trim()) slices.push(current.trim());
+    } else {
+        const words = s.split(/\s+/);
+        const perChunk = Math.ceil(words.length / n);
+        for (let i = 0; i < n; i++) {
+            const slice = words.slice(i * perChunk, (i + 1) * perChunk).join(' ');
+            if (slice.trim()) slices.push(slice.trim());
+        }
+    }
+    if (slices.length > 1 && slices[slices.length - 1].length < Math.max(40, (s.length / n) * 0.2)) {
+        slices[slices.length - 2] += '\n\n' + slices.pop();
+    }
+    return slices;
+}
+
+async function translateNoteChunk() {
+    const enTitle = ((document.getElementById('note-title') || {}).value || '').trim();
+    const enContent = ((document.getElementById('note-content') || {}).value || '').trim();
+    if (!enContent) return showToast('Type the English note first', { type: 'warning' });
+    const sizePct = parseInt((document.getElementById('note-chunk-size') || {}).value || '25', 10) || 25;
+    const n = Math.max(1, Math.round(100 / sizePct));
+    const editId = ((document.getElementById('note-edit-id') || {}).value || '').trim();
+    const cursorKey = 'nkcms_note_chunk_cursor_' + (editId || 'new');
+    let cursor = 0;
+    try { cursor = parseInt(localStorage.getItem(cursorKey) || '0', 10) || 0; } catch {}
+
+    if (!window._noteChunkPlan || window._noteChunkPlanEditId !== editId || window._noteChunkPlanPct !== sizePct) {
+        window._noteChunkPlan = splitIntoChunks(enContent, n);
+        window._noteChunkCursor = cursor;
+        window._noteChunkPlanEditId = editId;
+        window._noteChunkPlanPct = sizePct;
+        if (window._noteChunkCursor > window._noteChunkPlan.length) window._noteChunkCursor = 0;
+    }
+    const plan = window._noteChunkPlan;
+    const total = plan.length;
+    let cur = window._noteChunkCursor;
+    const progressEl = document.getElementById('note-chunk-progress');
+    const statusEl = document.getElementById('note-translate-status');
+    const btn = document.getElementById('note-translate-chunk-btn');
+
+    if (cur >= total) {
+        if (progressEl) progressEl.textContent = 'All chunks translated. Clear Kiswahili to restart.';
+        return showToast('All chunks already translated. Clear the Kiswahili field to start over.', { type: 'info' });
+    }
+
+    const chunkText = plan[cur];
+    const titleSwEl = document.getElementById('note-title-sw');
+    const titleSwExisting = ((titleSwEl || {}).value || '').trim();
+    const translateTitle = !titleSwExisting && !!enTitle;
+    const sources = [];
+    if (translateTitle) sources.push(enTitle);
+    sources.push(chunkText);
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Translating…'; }
+    if (statusEl) statusEl.textContent = `Translating chunk ${cur + 1} of ${total}…`;
+
+    const res = await translateToSw(sources);
+    if (btn) { btn.disabled = false; btn.textContent = '🌐 Translate next chunk'; }
+
+    if (!res.ok) {
+        const reason = (res.error || '').trim() || (res.reason || '').trim();
+        if (statusEl) statusEl.textContent = 'Translation failed — please try again.';
+        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+    }
+
+    let i = 0;
+    if (translateTitle) {
+        const t = res.translations[i++] || '';
+        if (titleSwEl) titleSwEl.value = t;
+    }
+    const swChunk = res.translations[i++] || '';
+    const contentSwEl = document.getElementById('note-content-sw');
+    const existing = ((contentSwEl || {}).value || '').trim();
+    if (contentSwEl) {
+        contentSwEl.value = existing ? existing + '\\n\\n' + swChunk : swChunk;
+    }
+
+    cur++;
+    window._noteChunkCursor = cur;
+    try { localStorage.setItem(cursorKey, String(cur)); } catch {}
+    if (progressEl) progressEl.textContent = `Chunk ${cur} of ${total} done (${Math.round(cur / total * 100)}%)`;
+    if (statusEl) statusEl.textContent = cur >= total ? '✓ All chunks translated. Review, then Update.' : `Chunk ${cur} of ${total} translated.`;
+    setNoteLang('sw');
+    showToast(cur >= total ? 'All chunks translated — review and click Update' : `Chunk ${cur} of ${total} translated`);
+}
+
+function resetNoteChunks() {
+    const editId = ((document.getElementById('note-edit-id') || {}).value || '').trim();
+    const cursorKey = 'nkcms_note_chunk_cursor_' + (editId || 'new');
+    try { localStorage.removeItem(cursorKey); } catch {}
+    window._noteChunkPlan = null;
+    window._noteChunkCursor = 0;
+    const el = document.getElementById('note-content-sw');
+    if (el) el.value = '';
+    const t = document.getElementById('note-title-sw');
+    if (t) t.value = '';
+    const p = document.getElementById('note-chunk-progress');
+    if (p) p.textContent = 'Reset. Ready to translate.';
+    const s = document.getElementById('note-translate-status');
+    if (s) s.textContent = '';
+}
+
 async function showNoteForm(note = null) {
     const courses = await dbGetAll('courses');
     const lessons = await dbGetAll('lessons');
@@ -23284,6 +23414,14 @@ async function showNoteForm(note = null) {
     showModal(isEdit ? 'Edit Note' : 'Add Study Note', content, `<button class="btn btn-primary" onclick="saveNote()">${isEdit ? 'Update' : 'Save'}</button>`);
     if (note) onNoteCourseChange(note.lessonId);
     setNoteLang('en');
+    // Show chunk progress if a previous session left a cursor.
+    try {
+        const editId = note ? note.id : '';
+        const cursorKey = 'nkcms_note_chunk_cursor_' + (editId || 'new');
+        const c = parseInt(localStorage.getItem(cursorKey) || '0', 10) || 0;
+        const pe = document.getElementById('note-chunk-progress');
+        if (pe && c > 0) pe.textContent = `Resuming: ${c} chunk(s) already translated.`;
+    } catch {}
 }
 async function onNoteCourseChange(selectedLessonId) {
     const courseId = document.getElementById('note-course-select').value;
