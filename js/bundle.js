@@ -11916,6 +11916,14 @@ async function showTranscriptForm(preselectedId) {
     }, 300);
 }
 async function generateTranscript() {
+    try {
+        return await _generateTranscriptBody();
+    } catch (err) {
+        console.error('generateTranscript error:', err);
+        showToast('Failed to generate transcript: ' + (err && err.message ? err.message : err), { type: 'danger' });
+    }
+}
+async function _generateTranscriptBody() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const role = String(currentUser.role || '').toLowerCase();
     const isStudent = role === 'student';
