@@ -8471,6 +8471,19 @@ function decodeHtmlEntities(s) {
                     if (contentSw) n.contentSw = contentSw;
                     n.translatedAt = new Date().toISOString();
                     done.push(n.id);
+                    // Keep the lesson title in sync so the hub heading is Kiswahili too.
+                    try {
+                        if (n.lessonId && titleSw) {
+                            const lesson = (db.lessons || []).find(l => String(l.id) === String(n.lessonId));
+                            if (lesson && lesson.title && !lesson.titleSw) {
+                                // Translate the lesson title via the same helper.
+                                const lr = await translateTextListServer([lesson.title], 'sw');
+                                if (lr.ok && lr.translations && lr.translations[0]) {
+                                    lesson.titleSw = lr.translations[0];
+                                }
+                            }
+                        }
+                    } catch (e) {}
                     try { saveDB(); } catch {}
                 }
                 if (done.length) {

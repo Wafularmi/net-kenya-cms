@@ -23379,6 +23379,20 @@ async function translateNoteToSwahili() {
     let i = 0;
     if (enTitle) { const el = document.getElementById('note-title-sw'); if (el) el.value = res.translations[i++] || ''; }
     if (enContent) { const el = document.getElementById('note-content-sw'); if (el) el.value = res.translations[i++] || ''; }
+    // Keep the lesson title in sync so the student hub heading is also Kiswahili.
+    try {
+        const lessonId = ((document.getElementById('note-lesson-select') || {}).value || '').trim();
+        if (lessonId && enTitle) {
+            const lesson = await dbGet('lessons', lessonId);
+            if (lesson && lesson.title && !lesson.titleSw) {
+                const lr = await translateToSw([lesson.title]);
+                if (lr.ok && lr.translations && lr.translations[0]) {
+                    lesson.titleSw = lr.translations[0];
+                    await dbPut('lessons', lesson);
+                }
+            }
+        }
+    } catch (e) {}
     setNoteLang('sw');
     if (statusEl) statusEl.textContent = '✓ Kiswahili kimefaa. Angalia kisha uhakikishe.';
     showToast('Translated to Swahili — please review');
@@ -23473,6 +23487,22 @@ async function translateNoteChunk() {
     if (translateTitle) {
         const t = res.translations[i++] || '';
         if (titleSwEl) titleSwEl.value = t;
+        // Keep the lesson title in sync so the student hub heading is also Kiswahili.
+        try {
+            const lessonId = ((document.getElementById('note-lesson-select') || {}).value || '').trim() || editId && null;
+            // For lesson notes, the lesson id comes from the hidden field.
+            const lid = ((document.getElementById('note-lesson-id') || {}).value || '').trim() || lessonId;
+            if (lid) {
+                const lesson = await dbGet('lessons', lid);
+                if (lesson && lesson.title && !lesson.titleSw) {
+                    const lr = await translateToSw([lesson.title]);
+                    if (lr.ok && lr.translations && lr.translations[0]) {
+                        lesson.titleSw = lr.translations[0];
+                        await dbPut('lessons', lesson);
+                    }
+                }
+            }
+        } catch (e) {}
     }
     const swChunk = res.translations[i++] || '';
     const contentSwEl = document.getElementById('note-content-sw');
