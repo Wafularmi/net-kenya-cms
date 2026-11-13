@@ -8233,6 +8233,167 @@ function decodeHtmlEntities(s) {
         return;
     }
 
+    // Shared translation helper. The interactive endpoint and the bulk
+    // "translate every note" job both use it, so both speak to the same
+    // provider with the same chunking rules.
+    // Returns { ok, translations, error, message, failedChunks, totalChunks }.
+    async function translateTextListServer(texts, target) {
+        const setting = db.settings ? (db.settings.find(s => s && s.key === 'translation') || {}) : {};
+        const trVal = setting && (setting.value && typeof setting.value === 'object') ? setting.value : setting;
+        const key = (trVal && trVal.googleApiKey) || process.env.TRANSLATE_API_KEY || '';
+        const provider = String((trVal && trVal.provider) || process.env.TRANSLATE_PROVIDER || 'mymemory').toLowerCase();
+        const want = target === 'en' ? 'en' : 'sw';
+        const list = (texts || []).map(t => String(t == null ? '' : t));
+        if (!list.some(t => t.trim())) return { ok: true, translations: list.map(() => ''), failedChunks: 0, totalChunks: 0 };
+        if (provider === 'google' && key) {
+            try {
+                const r = await fetch('https://translation.googleapis.com/language/translate/v2?key=' + encodeURIComponent(key), {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ q: list, target: want, source: want === 'sw' ? 'en' : 'sw', format: 'text' }),
+                    signal: AbortSignal.timeout(25000)
+                });
+                if (!r.ok) return { ok: false, error: 'upstream_error', message: 'Google rejected the request (http ' + r.status + ').' };
+                const out = await r.json();
+                const data = (out && out.data && out.data.translations) || [];
+                return { ok: true, translations: data.map(d => decodeHtmlEntities(String(d.translatedText || ''))), failedChunks: 0, totalChunks: list.length };
+            } catch (e) {
+                return { ok: false, error: 'network_error', message: 'Could not reach Google Translate: ' + String(e && e.message || e).slice(0, 120) };
+            }
+        }
+        try {
+            const pair = want === 'sw' ? 'en|sw' : 'sw|en';
+            const MEM_CHUNK = 450;
+            const chunkText = (txt) => {
+                const s = String(txt == null ? '' : txt);
+                if (!s.trim()) return [''];
+                if (s.length <= MEM_CHUNK) return [s];
+                const out = [];
+                let rest = s;
+                while (rest.length > MEM_CHUNK) {
+                    let cut = rest.lastIndexOf(' ', MEM_CHUNK);
+                    if (cut < MEM_CHUNK * 0.5) cut = rest.lastIndexOf('\n', MEM_CHUNK);
+                    if (cut < MEM_CHUNK * 0.5) cut = MEM_CHUNK;
+                    out.push(rest.slice(0, cut));
+                    rest = rest.slice(cut).replace(/^[ \t]+/, '');
+                }
+                if (rest) out.push(rest);
+                return out;
+            };
+            const chunks = [];
+            const owners = [];
+            list.forEach((t, i) => { chunkText(t).forEach(c => { chunks.push(c); owners.push(i); }); });
+            const pieces = new Array(chunks.length).fill('');
+            const myMemoryEmail = (trVal && trVal.contactEmail) || process.env.TRANSLATE_CONTACT_EMAIL || 'translation@netfoundation.ke';
+            let quotaHit = false;
+            let failed = 0;
+            let lastError = '';
+            const CONCURRENCY = 4;
+            let cursor = 0;
+            const fetchChunk = async (one) => {
+                const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
+                const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' }, signal: AbortSignal.timeout(30000) });
+                if (!r.ok) throw new Error('provider answered http ' + r.status);
+                const out = await r.json();
+                if (out && out.quotaFinished) { const e = new Error('quota'); e.quota = true; throw e; }
+                const t = out && out.responseData && out.responseData.translatedText;
+                const clean = t ? decodeHtmlEntities(String(t)).trim() : '';
+                if (!clean) throw new Error('provider returned no translation');
+                if (/MYMEMORY WARNING|INVALID|PLEASE SELECT|NO QUOTA|LIMIT/i.test(clean)) throw new Error(clean.slice(0, 90));
+                return clean;
+            };
+            const worker = async () => {
+                while (cursor < chunks.length && !quotaHit) {
+                    const k = cursor++;
+                    const one = chunks[k];
+                    if (!one.trim()) continue;
+                    let lastChunkErr = '';
+                    for (let attempt = 0; attempt < 2 && !quotaHit; attempt++) {
+                        try { pieces[k] = await fetchChunk(one); lastChunkErr = ''; break; }
+                        catch (e) {
+                            lastChunkErr = String(e && (e.message || e)).slice(0, 160);
+                            if (e && e.quota) { quotaHit = true; break; }
+                            if (attempt === 0) await new Promise(r => setTimeout(r, 700));
+                        }
+                    }
+                    if (lastChunkErr && !quotaHit) { failed++; lastError = lastChunkErr; }
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, chunks.length)) }, () => worker()));
+            if (quotaHit) return { ok: false, error: 'quota', message: 'The free translation service reached its daily limit. Try again later or add a Google key in Settings → Translation Provider.', failedChunks: failed, totalChunks: chunks.length };
+            if (failed) return { ok: false, error: 'partial', message: failed + ' of ' + chunks.length + ' part(s) could not be translated (' + lastError + ')', failedChunks: failed, totalChunks: chunks.length, translations: [] };
+            const result = new Array(list.length).fill('');
+            owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
+            return { ok: true, translations: result, failedChunks: 0, totalChunks: chunks.length };
+        } catch (e) {
+            return { ok: false, error: 'upstream_error', message: 'No translation provider is available right now: ' + String(e && e.message || e).slice(0, 120) };
+        }
+    }
+
+    // POST /api/notes/translate-all — administrator batch job.
+    // Fills titleSw / contentSw for notes that have no Kiswahili copy yet.
+    // It only ADDS fields; the English master, ids and every other column are
+    // left untouched. Runs in time-boxed batches so a long library can be
+    // translated across several calls without hitting the proxy timeout.
+    if (parts.length === 4 && parts[1] === 'notes' && parts[2] === 'translate-all' && req.method === 'POST') {
+        req._asyncApi = true;
+        let body = '';
+        req.on('data', c => body += c);
+        req.on('end', async () => {
+            try {
+                const u = getRequestUser(req);
+                if (!u || (u.role !== 'admin' && u.role !== 'owner')) {
+                    return json(res, 403, { ok: false, error: 'Only an administrator can run the bulk translation.' });
+                }
+                let p = {};
+                try { p = JSON.parse(body || '{}') || {}; } catch { p = {}; }
+                const overwrite = p.overwrite === true;
+                const maxMs = Math.max(15000, Math.min(110000, Number(p.maxMs) || 55000));
+                const limit = Math.max(1, Math.min(25, Number(p.limit) || 10));
+                const onlyIds = Array.isArray(p.ids) && p.ids.length ? new Set(p.ids.map(String)) : null;
+                const notes = db.notes || [];
+                const pending = (n) => n && (!onlyIds || onlyIds.has(String(n.id))) && (overwrite || !String(n.contentSw || '').trim()) && String(n.content || '').trim();
+                const targets = notes.filter(pending);
+                const started = Date.now();
+                const done = [];
+                const failed = [];
+                let quota = false;
+                let lastError = '';
+                for (const n of targets) {
+                    if (done.length >= limit || Date.now() - started > maxMs) break;
+                    const tr = await translateTextListServer([n.title || '', n.content || ''], 'sw');
+                    if (!tr.ok) {
+                        if (tr.error === 'quota') { quota = true; lastError = tr.message || ''; break; }
+                        failed.push({ id: n.id, error: tr.message || tr.error || 'failed' });
+                        continue;
+                    }
+                    const titleSw = String((tr.translations && tr.translations[0]) || '').trim();
+                    const contentSw = String((tr.translations && tr.translations[1]) || '').trim();
+                    if (titleSw) n.titleSw = titleSw;
+                    if (contentSw) n.contentSw = contentSw;
+                    n.translatedAt = new Date().toISOString();
+                    done.push(n.id);
+                    try { saveDB(); } catch {}
+                }
+                if (done.length) {
+                    try { broadcastEvent('db-change', { store: 'notes' }); } catch {}
+                    try { auditLog('bulk-translated', 'note', { count: done.length, quota: !!quota }, u.username); } catch {}
+                }
+                return json(res, 200, {
+                    ok: true,
+                    translated: done.length,
+                    ids: done,
+                    failed,
+                    quota,
+                    message: lastError,
+                    remaining: notes.filter(pending).length
+                });
+            } catch (e) {
+                return json(res, 500, { ok: false, error: String(e && e.message || e) });
+            }
+        });
+        return;
+    }
+
     // POST /api/translate — Swahili translation for the question bank.
     //
     // Uses the Google Cloud Translation v2 API. The key is read from the

@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=510" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=511" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -86,22 +86,22 @@
                         <p id="school-tagline" class="tagline">Academic Excellence</p>
                     </div>
                 </div>
-                <div class="header-right">
-                    <div class="lang-switch" id="header-lang-switch" title="Content language / Lugha ya maudhui — notes, lessons and videos" style="display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-card);flex-shrink:0;">
-                        <span style="font-size:10px;font-weight:800;color:var(--text-muted);padding:0 6px 0 9px;white-space:nowrap;">🌐 Language</span>
-                        <button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);white-space:nowrap;">English</button>
-                        <button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);white-space:nowrap;">Kiswahili</button>
-                    </div>
+                <div class="header-right" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0;">
                     <div id="smart-search-container" class="smart-search-container">
                         <input type="text" id="smart-search" class="smart-search-input" placeholder="🔍 Search anything... (Ctrl+K)" autocomplete="off">
                         <div id="smart-search-results" class="smart-search-results"></div>
+                    </div>
+                    <div class="lang-switch" style="display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-card);padding:6px 10px;font-size:10px;white-space:nowrap;flex-shrink:0;order:1;">
+                        <span style="color:var(--text-muted);padding:0 5px 0 7px;">🌐 Language</span>
+                        <button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:3px 6px;font-size:10px;font-weight:700;cursor:pointer;color:var(--text-secondary);white-space:nowrap;">English</button>
+                        <button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:3px 6px;font-size:10px;font-weight:700;cursor:pointer;color:var(--text-secondary);white-space:nowrap;">Kiswahili</button>
                     </div>
                     <div class="header-date" id="header-date"></div>
                     
                     <button class="btn-icon" id="notif-bell" title="Notifications" style="position:relative;"><span id="notif-badge" class="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;">0</span></button>
                     <button class="btn-icon" onclick="showScreen('messages')" title="Internal Messages" style="position:relative;"><span id="msg-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:8px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;"></span></button>
                     <button class="btn-icon" id="btn-help" title="Help Mode - click to learn about any feature" style="font-weight:800;font-size:16px;">Help</button>
-                    <button id="header-close-btn" class="btn btn-danger" onclick="logout()" title="Close / Exit - Log out" style="margin-left:6px; padding:7px 16px; font-weight:800; border-radius:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(220,38,38,0.25); font-size:13px; letter-spacing:0.3px;">Exit</button>
+                    <button id="header-close-btn" class="btn btn-danger" onclick="logout()" title="Close / Exit - Log out" style="padding:6px 12px; font-weight:800; border-radius:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(220,38,38,0.25); font-size:13px; letter-spacing:0.3px;">Exit</button>
                 </div>
             </div>
             <div class="header-credit">Developed by Eternal Ministries Africa</div>
@@ -1785,7 +1785,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=510"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=511"></script>
     <script data-cfasync="false" src="js/student-hub.min.js?v=104"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>
