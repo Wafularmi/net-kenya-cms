@@ -385,6 +385,7 @@
         <li><a href="#settings">Settings — Full Configuration Reference</a></li>
         <li><a href="#backup">Backup / Restore &amp; Audit Log</a></li>
         <li><a href="#troubleshooting">Troubleshooting — Common Problems</a></li>
+        <li><a href="#bilingual">Bilingual / Kiswahili Content</a></li>
         <li><a href="#acknowledgments">Acknowledgments</a></li>
     </ol>
 </div>
@@ -821,6 +822,54 @@
     </ol>
     <h3>Need More Help?</h3>
     <p>Check the Audit Log for what changed, take a backup before fixing, then file a support ticket with screenshots, admission numbers, and timestamps — or contact the developer.</p>
+</section>
+
+<section id="bilingual">
+    <h2>19. Bilingual / Kiswahili Content (Notes, Lessons &amp; Student View)</h2>
+    <p>The portal is fully bilingual: <strong>English is the master copy</strong> and <strong>Kiswahili is optional</strong>. Every display path falls back to English when no Kiswahili copy exists, so existing records keep working unchanged. Learners choose their language with the <strong>🌐 Language</strong> switch in the top bar (or the EN/SW switch on the Notes screen); the choice is saved to their own login record and follows them across devices.</p>
+
+    <h3>How Notes Are Stored</h3>
+    <ul>
+        <li>Each note has <strong>content</strong> (English, required) and <strong>contentSw</strong> (Kiswahili, optional) — plus <strong>title</strong> / <strong>titleSw</strong>.</li>
+        <li>Lessons have <strong>title</strong> / <strong>titleSw</strong>, <strong>description</strong> / <strong>descriptionSw</strong>, <strong>reference</strong> / <strong>referenceSw</strong>.</li>
+        <li>Videos can be tagged with a language (en/sw) per slot; watching either language completes the step.</li>
+        <li>Badges: <strong>SW</strong> (has Kiswahili copy) / <strong>EN</strong> (English only) appear on every note and lesson.</li>
+    </ul>
+
+    <h3>How to Translate a Note (Admin)</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Study Notes</strong> → click <strong>Edit</strong> on a note (or <strong>+ Add Note</strong> in a lesson).</div>
+    <div class="step"><b>Step 2:</b> In the edit modal, click <strong>🌐 Tafsiri kwa Kiswahili (all)</strong> to translate the whole note at once. Or use <strong>🌐 Translate next chunk</strong> with the <strong>10% / 25% / 50%</strong> dropdown to translate one slice at a time (recommended when the free provider is rate-limited).</div>
+    <div class="step"><b>Step 3:</b> Review the Kiswahili text in the <strong>Maudhui (Kiswahili)</strong> box. Edit if needed.</div>
+    <div class="step"><b>Step 4:</b> Click <strong>Update</strong> (or Save). Both English and Kiswahili are saved. English is never overwritten.</div>
+    <div class="step"><b>Step 5:</b> The <strong>SW</strong> badge now appears on that note. Students who select Kiswahili see the Kiswahili copy.</div>
+    <div class="note"><b>Important:</b> You must click <strong>Update</strong> after translating — the Swahili text only fills the form field until you save.</div>
+
+    <h3>Bulk Translation (All Notes at Once)</h3>
+    <div class="step"><b>Step 1:</b> Go to <strong>Study Notes</strong> → click <strong>🌐 Translate all notes</strong> (admin only). A live counter shows progress.</div>
+    <div class="step"><b>Step 2:</b> The job translates notes that have no Kiswahili copy yet, in time-boxed batches. It stops automatically on provider quota.</div>
+    <div class="step"><b>Step 3:</b> If it stops with "quota reached", either wait for the daily reset or add a <strong>Google Cloud Translation API key</strong> in Settings → Translation Provider → Google, then re-run.</div>
+    <div class="tip">Free providers (MyMemory + Google keyless) are rate-limited from the server IP. For bulk work, a Google key is the reliable path (~$8 for 33 notes; new GCP accounts get $300 free credit).</div>
+
+    <h3>Translation Provider Settings</h3>
+    <div class="step"><b>Step 1:</b> Open <strong>Settings → Translation Provider</strong>.</div>
+    <div class="step"><b>Step 2:</b> Choose provider: <strong>Free (Google + MyMemory, no key)</strong> (default), <strong>MyMemory only</strong>, <strong>LibreTranslate</strong> (self-hosted URL), or <strong>Google Cloud Translation</strong> (key required).</div>
+    <div class="step"><b>Step 3:</b> Enter the Google API key / LibreTranslate URL / contact email as needed. Click <strong>Save Translation Settings</strong>.</div>
+
+    <h3>Lessons Without Notes</h3>
+    <p>For lessons that have no study note, the student sees the lesson's <strong>description / reference</strong> text. To get Kiswahili there:</p>
+    <ul>
+        <li>Add a note to the lesson (<strong>+ Add Note</strong> in the lesson manager) and translate it — the note becomes the Kiswahili content.</li>
+        <li>Lesson titles are translated automatically when you translate a linked note (or set <strong>titleSw</strong> directly in the lesson editor).</li>
+        <li>Lesson description/reference can be translated by setting <strong>descriptionSw</strong> / <strong>referenceSw</strong> (editable in the lesson form).</li>
+    </ul>
+
+    <h3>Language Preference &amp; Student View</h3>
+    <ul>
+        <li>Students choose language with the <strong>🌐 Language</strong> switch (top bar) or the EN/SW switch on the Notes screen.</li>
+        <li>The choice is saved to their own login record (<code>POST /api/student/lang</code>) and follows them across devices.</li>
+        <li>English is the default; Kiswahili is opt-in. If a Kiswahili copy is missing, the student sees English (with a "Kiswahili version not available yet" hint).</li>
+        <li>Students never choose which notes/videos/quizzes to do — one step at a time, server-authoritative.</li>
+    </ul>
 </section>
 
 <section id="acknowledgments">

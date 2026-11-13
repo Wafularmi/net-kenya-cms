@@ -11956,9 +11956,8 @@ async function generateTranscript() {
     const logo = branding ? branding.logo : null;
     const accentColor = branding ? branding.accentColor : '#f59e0b';
     const center = student.studyCenterId ? centers.find(c => c.id === student.studyCenterId) : null;
-    const allGradesFresh = (await dbGetAll('grades')).filter(g => g.studentId === studentId);
     // Resolve all course results; builder groups by 3-per-semester in settings order.
-    const results = resolveStudentResults(allGradesFresh, studentId, { semester: 'all', courses: courses });
+    const results = resolveStudentResults(allGrades, studentId, { semester: 'all', courses: courses });
     const totalPaid = tuitionPaid(payments, studentId);
     const studentChapel = chapel.filter(c => c.studentId === studentId && (c.status === 'present' || c.status === 'late')).length;
     const studentAttendance = attendance.filter(a => a.studentId === studentId);
