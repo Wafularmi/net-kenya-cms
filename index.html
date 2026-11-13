@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=512" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=513" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -722,6 +722,8 @@
                     <div class="lang-switch" title="Content language / Lugha ya maudhui" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:8px;"><button type="button" data-lang="en" onclick="setAppLang('en')" style="border:none;background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">EN</button><button type="button" data-lang="sw" onclick="setAppLang('sw')" style="border:none;border-left:1px solid var(--border);background:transparent;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--text-secondary);">SW</button></div>
                     <button class="btn btn-outline" onclick="renderNotes()">↻ Refresh</button>
                     <button class="btn btn-primary" onclick="showNoteForm()">+ Add Note</button>
+                    <button class="btn btn-outline" onclick="translateAllNotes()" title="Translate every note that has no Kiswahili copy yet (admin)">🌐 Translate all notes</button>
+                    <span id="notes-bulk-status" style="font-size:11px;color:var(--text-muted);margin-left:8px;"></span>
                 </div></div>
                 <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 14px;margin-bottom:12px;border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;background:var(--bg-input);font-size:12px;line-height:1.5;">
                     <span style="font-size:18px;">🌍</span>
@@ -1785,7 +1787,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=512"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=513"></script>
     <script data-cfasync="false" src="js/student-hub.min.js?v=104"></script>
     <script data-cfasync="false" src="js/discussions.js?v=5"></script>
     <script data-cfasync="false" src="js/help.js?v=3"></script>

@@ -19721,10 +19721,15 @@ async function translateLessonToSwahili() {
         // The server may return error in res.error (new format from chunked translation)
         // or res.reason (legacy format). Check both so administrators see the real reason.
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        if (statusEl) statusEl.textContent = reason === 'no_key'
+        const msg = reason === 'no_key'
             ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : 'Translation failed — please try again.';
-        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+            : (reason === 'quota'
+                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
+                : (reason === 'provider_unreachable'
+                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
+                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        if (statusEl) statusEl.textContent = msg;
+        return showToast(msg, { type: 'warning', duration: 6000 });
     }
     let i = 0;
     if (enTitle) { const el = document.getElementById('lesson-title-sw'); if (el) el.value = res.translations[i++] || ''; }
@@ -20424,10 +20429,15 @@ async function translateQuestionToSwahili() {
         // The server may return error in res.error (new format from chunked translation)
         // or res.reason (legacy format). Check both so administrators see the real reason.
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        if (statusEl) statusEl.textContent = reason === 'no_key'
+        const msg = reason === 'no_key'
             ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : 'Translation failed — please try again.';
-        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+            : (reason === 'quota'
+                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
+                : (reason === 'provider_unreachable'
+                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
+                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        if (statusEl) statusEl.textContent = msg;
+        return showToast(msg, { type: 'warning', duration: 6000 });
     }
     let i = 0;
     if (enText) swEl.value = res.translations[i++] || '';
@@ -23272,10 +23282,15 @@ async function translateNoteToSwahili() {
         // The server may return error in res.error (new format from chunked translation)
         // or res.reason (legacy format). Check both so administrators see the real reason.
         const reason = (res.error || '').trim() || (res.reason || '').trim();
-        if (statusEl) statusEl.textContent = reason === 'no_key'
+        const msg = reason === 'no_key'
             ? 'Translation is not configured on this server yet — add a Google Cloud Translation key, or type the Swahili yourself.'
-            : 'Translation failed — please try again.';
-        return showToast(reason === 'no_key' ? 'Translation not configured on this server' : 'Translation failed', { type: 'warning', duration: 5000 });
+            : (reason === 'quota'
+                ? 'Free translation quota reached — add a Google Cloud Translation key in Settings → Translation Provider, or use "Translate next chunk".'
+                : (reason === 'provider_unreachable'
+                    ? 'Translation service unreachable from this server — use "Translate next chunk" or add a Google key.'
+                    : 'Translation failed — ' + (reason || 'please try again.') ));
+        if (statusEl) statusEl.textContent = msg;
+        return showToast(msg, { type: 'warning', duration: 6000 });
     }
     let i = 0;
     if (enTitle) { const el = document.getElementById('note-title-sw'); if (el) el.value = res.translations[i++] || ''; }
@@ -23642,6 +23657,50 @@ async function renderNotes() {
         console.error('renderNotes failed:', e);
         if (body) body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--danger);">Could not load notes (' + String(e && e.message || e) + '). <button class="btn btn-outline btn-sm" onclick="renderNotes()" style="margin-left:8px;">Retry</button></td></tr>';
     }
+}
+
+async function translateAllNotes() {
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    if (currentUser.role !== 'admin' && currentUser.role !== 'owner') {
+        return showToast('Only an administrator can run the bulk translation.', { type: 'warning' });
+    }
+    if (!confirm('Translate every note that has no Kiswahili copy yet? This runs in the background and may take a few minutes. Existing Kiswahili copies are kept.')) return;
+    const statusEl = document.getElementById('notes-bulk-status');
+    let total = 0;
+    let rounds = 0;
+    while (rounds < 60) {
+        rounds++;
+        if (statusEl) statusEl.textContent = `Translating… ${total} done so far (round ${rounds})`;
+        let res;
+        try {
+            res = await fetch('/api/notes/translate-all', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ limit: 3, maxMs: 50000, paceMs: 700 })
+            }).then(r => r.json());
+        } catch (e) {
+            showToast('Network error during bulk translation', { type: 'danger' });
+            break;
+        }
+        if (!res || !res.ok) {
+            const msg = (res && (res.error || res.message)) || 'failed';
+            showToast('Bulk translation stopped: ' + msg, { type: 'warning', duration: 6000 });
+            break;
+        }
+        total += (res.translated || 0);
+        if (statusEl) statusEl.textContent = `${total} translated, ${res.remaining || 0} remaining` + (res.quota ? ' (quota reached)' : '');
+        if (res.quota) {
+            showToast('Provider quota reached — ' + total + ' notes translated. Add a Google Cloud Translation key in Settings to continue.', { type: 'warning', duration: 8000 });
+            break;
+        }
+        if (!res.remaining) {
+            showToast(`Done — ${total} notes translated to Kiswahili.`, { type: 'success', duration: 6000 });
+            break;
+        }
+        await new Promise(r => setTimeout(r, 1500));
+    }
+    if (statusEl) statusEl.textContent = '';
+    renderNotes();
 }
 
 let portalDataCache = null;
