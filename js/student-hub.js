@@ -3621,7 +3621,7 @@ async function viewHubLessonNote(lessonId, courseId) {
         // The Hub batch now ships note metadata and lesson metadata without the
         // long bodies. Fetch the one the learner actually opened, then keep the
         // existing fallback chain (note -> lesson description -> reference).
-        if (note && note.content === undefined) {
+        if (note && (note.content === undefined || note.contentSw === undefined)) {
             try { const fullNote = await dbGet('notes', note.id); if (fullNote) note = fullNote; } catch {}
         }
         if (lesson && !(note && note.content) && lesson.reference === undefined) {
