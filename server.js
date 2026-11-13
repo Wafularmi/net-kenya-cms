@@ -8497,10 +8497,6 @@ function decodeHtmlEntities(s) {
         req.on('data', c => body += c);
         req.on('end', async () => {
             const translateUser = getRequestUser(req);
-            const translationSetting = db.settings ? (db.settings.find(s => s && s.key === 'translation') || {}) : {};
-            const trVal = translationSetting && (translationSetting.value && typeof translationSetting.value === 'object') ? translationSetting.value : translationSetting;
-            const key = trVal.googleApiKey || process.env.TRANSLATE_API_KEY || '';
-            // No hard Google-only check now: fall back to free providers below.
             if (!translateUser || translateUser.role === 'student') {
                 return json(res, 403, { ok: false, error: 'Only staff can translate questions.' });
             }
@@ -8512,148 +8508,16 @@ function decodeHtmlEntities(s) {
             if (!texts.length) return json(res, 200, { ok: true, translations: [] });
             if (texts.length > 60) return json(res, 400, { ok: false, error: 'Too many strings in one request (max 60).' });
             const target = parsed.target === 'en' ? 'en' : 'sw';
-const provider = String(trVal.provider || process.env.TRANSLATE_PROVIDER || 'mymemory').toLowerCase();
-            const pair = target === 'sw' ? 'en|sw' : 'sw|en';
-            // Public LibreTranslate instances now answer with an HTML error page
-            // (they require an API key), so it is only ever called when the admin
-            // has explicitly supplied their own URL. MyMemory is the free default.
-            const libreUrl = trVal.libreUrl || process.env.LIBRETRANSLATE_URL || '';
-            const libreKey = trVal.libreApiKey || process.env.LIBRETRANSLATE_API_KEY || '';
-            const myMemoryEmail = trVal.contactEmail || process.env.TRANSLATE_CONTACT_EMAIL || 'translation@netfoundation.ke';
-
-            if (provider === 'google') {
-                if (!key) return json(res, 400, { ok: false, error: 'missing_key', message: 'Google mode is selected but no Google API key is saved. Switch the provider to MyMemory or add the key.' });
-                try {
-                    const r = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(key)}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ q: texts, target, format: 'text', source: 'en' }),
-                        signal: AbortSignal.timeout(20000)
-                    });
-                    if (!r.ok) {
-                        console.error('translate API error', r.status, (await r.text().catch(() => '')).slice(0, 200));
-                        return json(res, 502, { ok: false, error: 'upstream_error', message: 'Google rejected the request.' });
-                    }
-                    const out = await r.json();
-                    const data = (out && out.data && out.data.translations) || [];
-                    let list = data.map(d => String((d.translatedText || '')).split('\u0001')[0]);
-                    if (texts.length > 1 && list.length === 1) list = list[0].split('\u0001');
-                    return json(res, 200, { ok: true, provider: 'google', translations: list.map(t => decodeHtmlEntities(t)) });
-                } catch (e) {
-                    console.error('google translate failed:', e && e.message);
-                    return json(res, 502, { ok: false, error: 'network_error', message: 'Could not reach Google Translate.' });
-                }
+            // Use the shared helper (MyMemory + keyless Google fallback) so the
+            // interactive button and the bulk job speak to the same providers.
+            // Return 200 even on provider failure: Cloudflare replaces origin
+            // 5xx responses with its own "error code: 502" page, which would
+            // hide the real reason from the browser.
+            const tr = await translateTextListServer(texts, target, { concurrency: 1, delayMs: 400, retries: 2 });
+            if (!tr.ok) {
+                return json(res, 200, { ok: false, error: tr.error || 'error', reason: tr.error || 'error', message: tr.message || '' });
             }
-
-            if (provider === 'libretranslate' && libreUrl) {
-                try {
-                    const r = await fetch(libreUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ q: texts, source: 'en', target, format: 'text', api_key: libreKey || undefined }),
-                        signal: AbortSignal.timeout(20000)
-                    });
-                    if (!r.ok) {
-                        console.error('libretranslate error', r.status, (await r.text().catch(() => '')).slice(0, 200));
-                        throw new Error('libretranslate http ' + r.status);
-                    }
-                    const out = await r.json();
-                    let list = [];
-                    if (Array.isArray(out.translatedText)) list = out.translatedText;
-                    else if (Array.isArray(out.translations)) list = out.translations.map(t => t.translatedText || '');
-                    else list = [out.translatedText || ''];
-                    if (list.length === texts.length) {
-                        return json(res, 200, { ok: true, provider: 'libretranslate', translations: list.map(t => decodeHtmlEntities(String(t))) });
-                    }
-                    throw new Error('libretranslate returned ' + list.length + ' of ' + texts.length);
-                } catch (e) { console.error('libretranslate failed, falling back to MyMemory:', e && e.message); }
-            }
-
-            // MyMemory: free, no key. It accepts at most ~500 characters per
-            // request, so a long note is translated in CHUNKS and stitched back
-            // together. Translating the whole note in one request would either
-            // fail or return only the first lines.
-            try {
-                const MEM_CHUNK = 450;
-                const chunkText = (txt) => {
-                    const s = String(txt == null ? '' : txt);
-                    if (!s.trim()) return [''];
-                    if (s.length <= MEM_CHUNK) return [s];
-                    const out = [];
-                    let rest = s;
-                    while (rest.length > MEM_CHUNK) {
-                        let cut = rest.lastIndexOf(' ', MEM_CHUNK);
-                        if (cut < MEM_CHUNK * 0.5) cut = rest.lastIndexOf('\n', MEM_CHUNK);
-                        if (cut < MEM_CHUNK * 0.5) cut = MEM_CHUNK;
-                        out.push(rest.slice(0, cut));
-                        rest = rest.slice(cut).replace(/^[ \t]+/, '');
-                    }
-                    if (rest) out.push(rest);
-                    return out;
-                };
-                // Flatten every text into chunks, remembering which text each
-                // chunk belongs to, so the caller still gets one translation
-                // per text it sent.
-                const chunks = [];
-                const owners = [];
-                texts.forEach((t, i) => { chunkText(t).forEach(c => { chunks.push(c); owners.push(i); }); });
-                const pieces = new Array(chunks.length).fill('');
-                let quotaHit = false;
-                let failed = 0;
-                let lastError = '';
-                // Translate the chunks a few at a time: a long note is many
-                // requests, and one after the other would take minutes.
-                const CONCURRENCY = 5;
-                let cursor = 0;
-                const worker = async () => {
-                    while (cursor < chunks.length && !quotaHit) {
-                        const k = cursor++;
-                        const one = chunks[k];
-                        if (!one.trim()) continue;
-                        try {
-                            const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
-                            const r = await fetch(url, {
-                                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NETFoundation/1.0)' },
-                                signal: AbortSignal.timeout(30000)
-                            });
-                            if (!r.ok) throw new Error('provider answered http ' + r.status);
-                            const out = await r.json();
-                            if (out && out.quotaFinished) { quotaHit = true; return; }
-                            const t = out && out.responseData && out.responseData.translatedText;
-                            const clean = t ? decodeHtmlEntities(String(t)).trim() : '';
-                            // The provider answers 200 with an error sentence when
-                            // it refuses a request (quota, blocked host).
-                            if (!clean) throw new Error('provider returned no translation');
-                            if (/MYMEMORY WARNING|INVALID|PLEASE SELECT|NO QUOTA|LIMIT/i.test(clean)) {
-                                throw new Error(clean.slice(0, 90));
-                            }
-                            pieces[k] = clean;
-                        } catch (e) {
-                            failed++;
-                            lastError = String(e && (e.message || e)).slice(0, 160);
-                            console.error('mymemory chunk failed:', lastError);
-                            pieces[k] = one;   // keep the English rather than losing the text
-                        }
-                    }
-                };
-                await Promise.all(Array.from({ length: Math.min(CONCURRENCY, Math.max(1, chunks.length)) }, () => worker()));
-                if (quotaHit) {
-                    return json(res, 502, { ok: false, error: 'quota', message: 'The free translation service has reached its daily limit. Add a Google Cloud Translation key in Settings → Translation Provider, or type the Kiswahili yourself.' });
-                }
-                if (failed && failed === chunks.length) {
-                    // Nothing could be translated: say WHY instead of quietly
-                    // handing back the English text.
-                    return json(res, 502, { ok: false, error: 'provider_unreachable', message: 'The translation service could not be reached from this server (' + lastError + '). Add a Google Cloud Translation key in Settings → Translation Provider, or type the Kiswahili yourself.' });
-                }
-                const result = new Array(texts.length).fill('');
-                owners.forEach((owner, k) => { if (pieces[k]) result[owner] += (result[owner] ? ' ' : '') + pieces[k]; });
-                const out2 = { ok: true, provider: 'mymemory', translations: result };
-                if (failed) out2.partial = failed + ' of ' + chunks.length + ' part(s) could not be translated';
-                return json(res, 200, out2);
-            } catch (e) {
-                console.error('mymemory failed:', e && e.message);
-                return json(res, 502, { ok: false, error: 'upstream_error', message: 'No translation provider is available right now. Try again shortly.' });
-            }
+            return json(res, 200, { ok: true, provider: 'mymemory', translations: tr.translations });
         });
         return;
     }
