@@ -8281,7 +8281,7 @@ function decodeHtmlEntities(s) {
         const setting = db.settings ? (db.settings.find(s => s && s.key === 'translation') || {}) : {};
         const trVal = setting && (setting.value && typeof setting.value === 'object') ? setting.value : setting;
         const key = (trVal && trVal.googleApiKey) || process.env.TRANSLATE_API_KEY || '';
-        const provider = String((trVal && trVal.provider) || process.env.TRANSLATE_PROVIDER || 'mymemory').toLowerCase();
+        const provider = String((trVal && trVal.provider) || process.env.TRANSLATE_PROVIDER || 'free').toLowerCase();
         const want = target === 'en' ? 'en' : 'sw';
         const list = (texts || []).map(t => String(t == null ? '' : t));
         if (!list.some(t => t.trim())) return { ok: true, translations: list.map(() => ''), failedChunks: 0, totalChunks: 0 };
@@ -8300,6 +8300,19 @@ function decodeHtmlEntities(s) {
                 return { ok: false, error: 'network_error', message: 'Could not reach Google Translate: ' + String(e && e.message || e).slice(0, 120) };
             }
         }
+        // Free providers: try the keyless Google endpoint first (it is not
+        // subject to MyMemory's daily quota and is the default), then fall
+        // back to MyMemory.
+        let lastError = '';
+        let freeErr = '';
+        try {
+            const fb = await translateWithGoogleUnofficial(list, want);
+            if (fb && fb.ok) return fb;
+            freeErr = (fb && (fb.message || fb.error)) || 'no result';
+        } catch (fe) {
+            freeErr = String(fe && (fe.message || fe)).slice(0, 160);
+        }
+        if (freeErr) lastError = (lastError ? lastError + ' | ' : '') + 'google-free: ' + freeErr;
         try {
             const pair = want === 'sw' ? 'en|sw' : 'sw|en';
             const MEM_CHUNK = 450;
@@ -8326,7 +8339,6 @@ function decodeHtmlEntities(s) {
             const myMemoryEmail = (trVal && trVal.contactEmail) || process.env.TRANSLATE_CONTACT_EMAIL || 'translation@netfoundation.ke';
             let quotaHit = false;
             let failed = 0;
-            let lastError = '';
             let cursor = 0;
             const fetchChunk = async (one) => {
                 const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(one)}&langpair=${pair}&de=${encodeURIComponent(myMemoryEmail)}`;
