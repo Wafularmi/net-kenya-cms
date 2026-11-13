@@ -12137,6 +12137,11 @@ function buildProfessionalTranscript(data) {
         return keys.map(k => ({ sem: k, rows: sortRowsByCourseOrder(groups[k]) }));
     };
     const noGroup = String(grouping || 'group').toLowerCase() === 'nogroup' || String(grouping || 'group').toLowerCase() === 'none';
+    // CGPA computed up-front from resolved rows so it is available inside the
+    // table-building blocks below (avoids a temporal-dead-zone reference).
+    const cgpa = resultRows.length > 0
+        ? resultRows.reduce((s, r) => s + (Number(r.gpa || 0) * (r.credits || 3)), 0) / resultRows.reduce((s, r) => s + (r.credits || 3), 0)
+        : 0;
     let totalPoints = 0, totalCredits = 0;
     const renderRow = (r, idx) => {
         const c = getRowCourse(r);
@@ -12188,9 +12193,8 @@ function buildProfessionalTranscript(data) {
         }
     }
     if (semester && String(semester) !== 'all') {
-        // cgpa already computed above
+        // cgpa already computed above from resultRows
     }
-    const cgpa = totalCredits > 0 ? (totalPoints / totalCredits) : 0;
     const classification = getClassification(cgpa);
     const balance = (financial.feeAmount || 0) - financial.totalPaid;
     const feeStatus = balance <= 0 ? 'CLEARED' : 'OUTSTANDING';
