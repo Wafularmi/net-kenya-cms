@@ -5734,7 +5734,7 @@ async function saveStudent() {
     let hasUser = false;
     try {
         const allExisting = await dbGetAll('users').catch(() => []);
-        hasUser = allExisting.some(u => u.studentId === student.id || u.username === student.phone || u.username === student.id || u.name === student.name);
+        hasUser = allExisting.some(u => String(u.studentId) === String(student.id) || String(u.username || '').toLowerCase() === String(student.phone || '').toLowerCase() || String(u.username || '') === String(student.id));
     } catch (e) { hasUser = true; }
     try {
         if (!hasUser && student.status === 'active' && student.phone && student.admissionNumber && !student.testAccount) {
@@ -23535,7 +23535,10 @@ async function finalizeApproval() {
             studentId: id,
             createdAt: new Date().toISOString()
         };
-        await dbPut('users', user);
+        // The server already created (or repaired) this account when the
+        // student record above was saved, so a coordinator's approval must not
+        // fail here if the users-store write itself is not permitted.
+        try { await dbPut('users', user); } catch (e) { console.warn('approval user write skipped (server owns the account):', e && e.message); }
         let waOpened = false;
         let finalMessage = message;
         const leftoverPlaceholders = (finalMessage.match(/\{\{[^}]+\}\}/g) || []);

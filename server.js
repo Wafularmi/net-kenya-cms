@@ -743,6 +743,7 @@ function markStoreDirty(store) {
 // created lazily - only for the records that are actually read.
 const _recordProxyCache = new WeakMap();   // raw record -> proxy
 const _recordRaw = new WeakMap();          // proxy -> raw record
+const _storeRaw = new WeakMap();           // store-array proxy -> raw array
 function wrapRecord(rec, store) {
     if (!rec || typeof rec !== 'object') return rec;
     if (_recordRaw.has(rec)) return rec;                 // already a proxy
@@ -758,7 +759,12 @@ function wrapRecord(rec, store) {
 }
 function wrapStoreValue(store, value) {
     if (!Array.isArray(value)) return value;
-    return new Proxy(value, {
+    // Never wrap an array that is already a tracked store array. A handler that
+    // reassigns a store to itself (e.g. `db.x = db.x || []`) would otherwise
+    // stack one proxy on top of another on every pass, until Reflect.get blew
+    // the call stack and the store could no longer be read or saved at all.
+    if (_storeRaw.has(value)) return value;
+    const proxy = new Proxy(value, {
         get(target, prop) {
             const v = Reflect.get(target, prop);
             // Element access hands out the tracked record.
@@ -773,6 +779,8 @@ function wrapStoreValue(store, value) {
         },
         deleteProperty(target, prop) { markStoreDirty(store); return Reflect.deleteProperty(target, prop); }
     });
+    _storeRaw.set(proxy, value);
+    return proxy;
 }
 function wrapDBObject(raw) {
     const target = {};
@@ -1686,6 +1694,62 @@ process.on('exit', flushDB);
 // this handler the last few hundred milliseconds of writes would be lost.
 process.on('SIGTERM', () => { try { flushDB(); } catch {} process.exit(0); });
 process.on('SIGINT', () => { flushDB(); process.exit(); });
+
+// ---- Guarantee every learner has a working login -------------------------
+// A student must ALWAYS have an online account: username = the registered
+// phone number, password = the admission number. The browser tries to create
+// it when a student is enrolled or approved, but that path can silently be
+// skipped or blocked (a country coordinator may not write the users store, a
+// name clash used to suppress creation, a dropped request, an approval that
+// half-completed). This runs on the SERVER at the moment the student record
+// is written, so registration reliably yields a login no matter who registered
+// the student or how the browser behaved. It is idempotent and only ever
+// repairs what is safe: an existing, deliberately set password is never reset.
+const LOGIN_STUDENT_STATUSES = new Set(['active', 'admitted', 'enrolled', 'graduated', 'alumni']);
+function ensureStudentLoginAccount(student) {
+    try {
+        if (!student || typeof student !== 'object') return null;
+        if (student.testAccount) return null;
+        const status = String(student.status || '').toLowerCase();
+        if (!LOGIN_STUDENT_STATUSES.has(status)) return null;
+        const phone = String(student.phone || '').trim();
+        const adm = String(student.admissionNumber || '').trim();
+        if (!phone || !adm) return null;
+        if (!Array.isArray(db.users)) db.users = [];
+        const users = db.users;
+        const phoneLower = phone.toLowerCase();
+        let user = users.find(u => u && student.id != null && String(u.studentId) === String(student.id))
+            || users.find(u => u && String(u.username || '').toLowerCase() === phoneLower);
+        if (!user) {
+            user = {
+                username: phone,
+                password: hashPassword(adm),
+                name: student.name || '',
+                role: 'student',
+                status: 'active',
+                studentId: student.id,
+                createdAt: new Date().toISOString()
+            };
+            users.push(user);
+            auditLog('account-auto-created', 'user', { username: phone, studentId: student.id }, 'system');
+            saveDB();
+            return user;
+        }
+        // An account already exists. Repair only what is unambiguously broken;
+        // never touch a password the learner or an admin has set on purpose.
+        if (user.role === 'student') {
+            let changed = false;
+            if (student.id != null && !user.studentId) { user.studentId = student.id; changed = true; }
+            if (!user.password) { user.password = hashPassword(adm); changed = true; }
+            if (user.status === 'pending' || !user.status) { user.status = 'active'; changed = true; }
+            if (changed) saveDB();
+        }
+        return user;
+    } catch (e) {
+        try { console.error('ensureStudentLoginAccount failed:', e && e.message); } catch {}
+        return null;
+    }
+}
 
 // One-time boot stamp: every stored document record must already carry its
 // immutable docId/vCode so a later read can never invent new identifiers and
@@ -7582,7 +7646,7 @@ let { input, password, country } = JSON.parse(body);
                     if (student) user = users.find(u => u.role === 'student' && u.name && student.name && u.name.toLowerCase() === student.name.toLowerCase());
                 }
                 if (!user) {
-                    const candidate = students.find(s => (s.phone === input || s.admissionNumber === input || s.id === input) && s.status === 'active' && s.phone && s.admissionNumber);
+                    const candidate = students.find(s => (s.phone === input || s.admissionNumber === input || s.id === input) && LOGIN_STUDENT_STATUSES.has(String(s.status || '').toLowerCase()) && s.phone && s.admissionNumber);
                     if (candidate) {
                         const pwHash = hash(candidate.admissionNumber);
                         if (pwHash === hash(password) || candidate.admissionNumber === password) {
@@ -8093,11 +8157,29 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 const resetToAdmission = !!(parsed && parsed.resetToAdmission);
                 if (!username) return json(res, 400, { error: 'Enter the account username' });
                 if (!resetToAdmission && newPassword.length < 8) return json(res, 400, { error: 'New password must be at least 8 characters' });
-                const target = (db.users || []).find(u => u.username === username || u.studentId === username || u.phone === username);
-                if (!target) return json(res, 404, { error: 'Account not found' });
                 const isAdmin = authUser.role === 'admin';
                 const scope = countryScopeOf(authUser);
                 if (!isAdmin && !scope) return json(res, 403, { error: 'Only admins and country administrators may reset passwords' });
+                let target = (db.users || []).find(u => u.username === username || u.studentId === username || u.phone === username);
+                if (!target) {
+                    // The learner's account was never created (a registration or
+                    // approval that did not complete). Create it now so the
+                    // reset succeeds and the student can sign in afterwards.
+                    const st = (db.students || []).find(s => s && (String(s.phone) === username || String(s.admissionNumber) === username || String(s.id) === username));
+                    const stStatus = st ? String(st.status || '').toLowerCase() : '';
+                    if (st && st.phone && st.admissionNumber && !st.testAccount && LOGIN_STUDENT_STATUSES.has(stStatus)) {
+                        if (!isAdmin) {
+                            const tCountry = recordCountryOf('students', st);
+                            if (tCountry !== scope) return json(res, 403, { error: 'You may only reset passwords for students of your own country' });
+                        }
+                        target = ensureStudentLoginAccount(st);
+                        if (!target) {
+                            target = { username: String(st.phone).trim(), password: '', name: st.name || '', role: 'student', status: 'active', studentId: st.id, createdAt: new Date().toISOString() };
+                            db.users.push(target);
+                        }
+                    }
+                }
+                if (!target) return json(res, 404, { error: 'Account not found' });
                 if (!isAdmin && target.username !== authUser.username) {
                     // Coordinator resetting someone else: they may ONLY reset a
                     // student of their OWN country, and only via country-scoping.
@@ -10831,6 +10913,12 @@ const parsed = JSON.parse(body);
                     if (idx >= 0) db[store][idx] = toStore;
                     else db[store].push(toStore);
                     mutate(toStore, idx >= 0 ? 'update' : 'insert');
+                    // Registration/approval must yield a working login. The
+                    // server (not the browser) is the authority here, so a
+                    // student written as active always gets their account.
+                    if (store === 'students') {
+                        try { ensureStudentLoginAccount(toStore); } catch (e) { console.error('student account provisioning failed:', e && e.message); }
+                    }
                     if (store === 'settings' && toStore.key === 'contentGate') {
                         auditContentGateChange(_exPut, toStore, user);
                     }
@@ -10974,6 +11062,9 @@ if (store === 'settings' && value.key === 'assistantAccess' && (!user || user.ro
                         }
                     }
                     mutate(toStore, 'insert');
+                    if (store === 'students') {
+                        try { ensureStudentLoginAccount(toStore); } catch (e) { console.error('student account provisioning failed:', e && e.message); }
+                    }
                     if (store === 'settings' && toStore.key === 'contentGate') {
                         auditContentGateChange(null, toStore, user);
                     }

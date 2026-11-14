@@ -291,7 +291,11 @@ module.exports = function createWaAuto(ctx) {
         try {
             if (S.sock && S.connected && !S.busy) {
                 const db = getDb();
-                db.whatsappOutbox = db.whatsappOutbox || [];
+                // Only create the store when it is genuinely absent. Reassigning
+                // it to itself (`= db.whatsappOutbox || []`) would hand the
+                // already-tracked array back to the setter and wrap it again on
+                // every tick, eventually exhausting the call stack.
+                if (!Array.isArray(db.whatsappOutbox)) db.whatsappOutbox = [];
                 const job = db.whatsappOutbox
                     .filter(function (j) { return j && j.status === 'queued'; })
                     .sort(function (a, b) { return String(a.createdAt) < String(b.createdAt) ? -1 : 1; })[0];
