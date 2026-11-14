@@ -587,6 +587,10 @@ const LOG_STORES = {
     alerts:          { window: 1000, archive: 'alerts' },
     whatsappLog:     { window: 500,  archive: 'whatsapp-log' },
     analyticsEvents: { window: 500,  archive: 'analytics-events' },
+    // Every sign-in attempt (success, failure, or refused by the single-device
+    // rule) with the country the request came from - kept even when that country
+    // is not one of the configured ones. Read by the Analytics screen.
+    loginEvents:     { window: 3000, archive: 'login-events' },
     smsLog:          { window: 500,  archive: 'sms-log' }
 };
 // Runtime-only keys are rebuilt on boot and must never reach the disk.
@@ -1957,7 +1961,7 @@ const STUDENT_DENY_STORES = new Set([
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
     'invoices', 'installments', 'whatsappTemplates', 'whatsappLog', 'whatsappOutbox', 'whatsappRuns',
     'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents',
-    'maintenanceReports', 'maintenanceAIState'
+    'loginEvents', 'maintenanceReports', 'maintenanceAIState'
 ]);
 
 // Stores a student is allowed to write to (their own activity records)
@@ -3506,8 +3510,10 @@ function studentSettingsView(user, rows) {
 // Check if user can access a store
 function canAccessStore(user, store, method) {
     if (user && (user.isOwner || user.role === 'owner')) return true;
-    // Sensitive internal stores - admin only, never via API
-    if (store === 'sessions' || store === 'maintenanceBypassTokens') {
+    // Sensitive internal stores - admin only, never via API.
+    // loginEvents carries sign-in IPs and account names, so it is admin-only
+    // too (the Analytics screen that shows it is admin-only).
+    if (store === 'sessions' || store === 'maintenanceBypassTokens' || store === 'loginEvents') {
         return user && (user.role === 'admin' || user.isOwner || user.role === 'owner');
     }
     // Allow unauthenticated reads for login screen / registration.
@@ -3946,7 +3952,7 @@ function filterStoreForUser(user, store, rows) {
 // Server-verified session tokens. A tab that stays open remains active: each
 // authenticated request slides the 12h expiry forward, and the refreshed expiry
 // is persisted at most once a minute so a server restart does not lose it.
-const sessions = new Map(); // token -> { username, expires, createdAt }
+const sessions = new Map(); // token -> { username, expires, createdAt, deviceId, ip, country }
 const SESSION_TTL = 12 * 3600 * 1000;
 const SESSION_FILE = path.join(DATA_ROOT, 'sessions.json');
 let _lastSessionSaveAt = 0;
@@ -3958,7 +3964,7 @@ function loadSessions() {
         const now = Date.now();
         for (const e of arr) {
             if (e && e.token && e.username && e.expires && e.expires > now) {
-                sessions.set(e.token, { username: e.username, expires: e.expires, createdAt: e.createdAt || now });
+                sessions.set(e.token, { username: e.username, expires: e.expires, createdAt: e.createdAt || now, deviceId: e.deviceId || '', ip: e.ip || '', country: e.country || '' });
             }
         }
     } catch (e) { console.error('loadSessions failed:', e.message); }
@@ -3967,7 +3973,7 @@ function saveSessions() {
     try {
         _lastSessionSaveAt = Date.now();
         const arr = [];
-        for (const [token, s] of sessions) arr.push({ token, username: s.username, expires: s.expires, createdAt: s.createdAt });
+        for (const [token, s] of sessions) arr.push({ token, username: s.username, expires: s.expires, createdAt: s.createdAt, deviceId: s.deviceId || '', ip: s.ip || '', country: s.country || '' });
         fs.writeFileSync(SESSION_FILE, JSON.stringify(arr), 'utf8');
         try { if (fs.existsSync(SESSION_FILE) && DATA_ROOT !== '/data') fs.copyFileSync(SESSION_FILE, '/data/sessions.json'); } catch {}
         try { if (fs.existsSync('/data/sessions.json') && !fs.existsSync(SESSION_FILE)) fs.copyFileSync('/data/sessions.json', SESSION_FILE); } catch {}
@@ -3980,9 +3986,19 @@ setInterval(() => {
     if (changed) saveSessions();
 }, 10 * 60 * 1000);
 
-function issueSession(username) {
+function issueSession(username, meta) {
     const token = crypto.randomBytes(32).toString('hex');
-    sessions.set(token, { username, expires: Date.now() + SESSION_TTL, createdAt: Date.now() });
+    const m = meta || {};
+    sessions.set(token, {
+        username,
+        expires: Date.now() + SESSION_TTL,
+        createdAt: Date.now(),
+        // The device that signed in, so the single-device rule can tell this
+        // account's other devices apart (and release them when they go idle).
+        deviceId: String(m.deviceId || '').slice(0, 64),
+        ip: String(m.ip || '').slice(0, 64),
+        country: String(m.country || '').slice(0, 40)
+    });
     saveSessions();
     return token;
 }
@@ -4004,6 +4020,123 @@ function revokeUserSessions(username, keepToken) {
     if (revoked) { try { saveSessions(); } catch (e) { console.error('saveSessions failed:', e.message); } }
     return revoked;
 }
+// ---- Student single-device lock -------------------------------------------
+// A student may be signed in on exactly ONE device at a time, and a device may
+// hold exactly ONE signed-in student account. "Device" is the stable id the
+// browser keeps in localStorage and sends as X-Device-Id (or `deviceId` on the
+// login body). Only sessions that carry a device id take part, so the rollout
+// never blocks a pre-existing session. A session counts as ACTIVE while it has
+// been seen within the idle window; a closed tab stops heart-beating, so a
+// lost or closed browser frees the device shortly after instead of holding the
+// student out for the full 12h session life.
+function deviceLockConfig() {
+    let v = null;
+    try { v = settingValue('deviceLock'); } catch (e) {}
+    const obj = (v && typeof v === 'object') ? v : {};
+    const idleMin = Number(obj.idleMinutes);
+    return {
+        enabled: obj.enabled !== false,                   // ON for students by default
+        mode: obj.mode === 'force' ? 'force' : 'block',   // 'block' unless told otherwise
+        // 0 means "strictest": a device is only freed by an explicit sign-out,
+        // so the idle window is effectively infinite. Otherwise the device is
+        // freed once it has been quiet for that many minutes.
+        idleMs: (isFinite(idleMin) && idleMin >= 0)
+            ? (idleMin === 0 ? Infinity : idleMin * 60 * 1000)
+            : 10 * 60 * 1000
+    };
+}
+function sessionLastSeen(s) {
+    if (!s) return 0;
+    // `expires` slides forward on activity, so lastSeen = expires - TTL.
+    return Math.max((Number(s.expires) || 0) - SESSION_TTL, Number(s.createdAt) || 0);
+}
+// Live, device-tagged STUDENT sessions that collide with this (account, device).
+// Staff, coordinators and admins are deliberately excluded: the rule is a
+// student anti-sharing rule, so a staff sign-in on the same device must never
+// block a student (or be blocked by one).
+function deviceLockConflicts(username, deviceId, idleMs) {
+    const uname = String(username || '').toLowerCase();
+    const did = String(deviceId || '');
+    const now = Date.now();
+    const cutoff = now - (Number(idleMs) || 0);
+    const studentNames = new Set(
+        (db.users || []).filter(u => u && u.role === 'student').map(u => String(u.username || '').toLowerCase())
+    );
+    const accountElsewhere = [];   // this account is live on a different device
+    const deviceElsewhere = [];    // another student account is live on this device
+    for (const [token, s] of sessions) {
+        if (!s || !s.deviceId || s.expires < now) continue;
+        if (sessionLastSeen(s) < cutoff) continue;        // stale -> treat as gone
+        if (!studentNames.has(String(s.username || '').toLowerCase())) continue;
+        const sameAccount = String(s.username || '').toLowerCase() === uname;
+        const sameDevice = String(s.deviceId) === did;
+        if (sameAccount && !sameDevice) accountElsewhere.push(token);
+        else if (!sameAccount && sameDevice) deviceElsewhere.push(token);
+    }
+    return { accountElsewhere, deviceElsewhere };
+}
+function revokeSessionTokens(tokens) {
+    let n = 0;
+    for (const t of (tokens || [])) { if (sessions.delete(t)) n++; }
+    if (n) { try { saveSessions(); } catch (e) { console.error('saveSessions failed:', e.message); } }
+    return n;
+}
+// Tell a pushed-out device to sign out at once. It would also notice on its
+// next API call, so a dropped stream can never leave a stale tab signed in.
+function pushSessionRevoked(username) {
+    try {
+        broadcastEvent('session-revoked', { username: username, at: Date.now() }, function (c) {
+            return !!(c && c.user && String(c.user.username || '').toLowerCase() === String(username || '').toLowerCase());
+        });
+    } catch (e) {}
+}
+
+// ---- Sign-in audit (who visited / signed in, and from where) ---------------
+// The country comes from the edge header (Cloudflare's cf-ipcountry), so it
+// costs no lookup and no latency. The RAW code is stored even when it is not a
+// configured country, and a friendly name is added when it matches one.
+function requestCountryCode(req) {
+    const edge = String(
+        (req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || req.headers['x-country-code'] || '')
+    ).toUpperCase().slice(0, 2);
+    return (edge && edge !== 'XX') ? edge : '';
+}
+function countryNameForCode(code) {
+    if (!code) return '';
+    try {
+        const list = settingValue('countries');
+        const arr = Array.isArray(list) ? list : [];
+        const hit = arr.find(c => c && (
+            (typeof c === 'object' && (String(c.code || '').toUpperCase() === code || String(c.name || '').toUpperCase() === code)) ||
+            (typeof c === 'string' && String(c).toUpperCase() === code)
+        ));
+        if (hit) return typeof hit === 'string' ? hit : (hit.name || code);
+    } catch (e) {}
+    return '';
+}
+function recordLoginEvent(req, opts) {
+    try {
+        const o = opts || {};
+        const ua = String(req.headers['user-agent'] || '');
+        const code = requestCountryCode(req);
+        if (!Array.isArray(db.loginEvents)) db.loginEvents = [];
+        db.loginEvents.push({
+            id: 'LE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+            at: new Date().toISOString(),
+            username: String(o.username || '').slice(0, 80),
+            role: String(o.role || 'anonymous').slice(0, 20),
+            outcome: String(o.outcome || 'success').slice(0, 24),
+            ip: clientIp(req),
+            country: countryNameForCode(code) || code || 'Unknown',
+            countryCode: code,
+            device: /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop',
+            deviceId: String(o.deviceId || '').slice(0, 12),
+            reason: String(o.reason || '').slice(0, 60)
+        });
+        saveDB();
+    } catch (e) { console.error('recordLoginEvent failed:', e.message); }
+}
+
 function requestToken(req) {
     const auth = (req && req.headers && req.headers['authorization']) || '';
     let token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
@@ -6555,6 +6688,27 @@ function handleAPI(req, res) {
         } });
     }
 
+    // POST /api/logout — revoke THIS browser tab's session token server-side.
+    // Without this a signed-out device would keep its slot in the single-device
+    // rule until the 12h session expired, locking the student out elsewhere.
+    // The token is accepted from the Authorization header/cookie or the body,
+    // so a beacon that cannot set headers still works.
+    if (parts.length === 2 && parts[1] === 'logout' && req.method === 'POST') {
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 4096) body = body.slice(0, 4096); });
+        req.on('end', () => {
+            try {
+                let token = requestToken(req);
+                if (!token) { try { const p = JSON.parse(body || '{}'); if (p && p.token) token = String(p.token); } catch (e) {} }
+                const su = token ? sessionUserForToken(token) : null;
+                if (token && sessions.delete(token)) { try { saveSessions(); } catch (e) {} }
+                if (su) { try { auditLog('logout', 'user', { username: su.username }, su.username); } catch (e) {} }
+                json(res, 200, { ok: true });
+            } catch (e) { json(res, 200, { ok: true }); }
+        });
+        return true;
+    }
+
     // GET /api/branding/image/:key — public, cacheable login/header logo.
     // The record still stores the image as a data URL (documents and Settings
     // need that), but the page only references this content-addressed URL.
@@ -7613,7 +7767,12 @@ ${verified ? `<a class="btn sec" href="/#verify">✓ Verify this document</a>` :
                 if (loginRateBlocked(req)) {
                     return json(res, 429, { error: 'Too many failed attempts. Please try again in 15 minutes.' });
                 }
-let { input, password, country } = JSON.parse(body);
+const parsedBody = JSON.parse(body);
+let { input, password, country } = parsedBody;
+                // Stable per-browser id (localStorage) used by the student
+                // single-device rule. Sent as a header on API calls and in the
+                // login body; either is accepted.
+                const deviceId = String((req.headers['x-device-id'] || (parsedBody && parsedBody.deviceId) || '')).trim().slice(0, 64);
                 if (country === undefined || country === null || country === 'undefined' || country === 'null') country = '';
                 process.stderr.write('LOGIN_TRY input=' + String(input).slice(0, 40) + ' country=' + String(country).slice(0, 20) + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n');
                 if (!input || !password) return json(res, 400, { error: 'Enter username and password' });
@@ -7657,7 +7816,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                     }
                 }
 
-                if (!user) { loginRateFail(req, input); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
+                if (!user) { loginRateFail(req, input); auditLog('login-failed', 'user', { username: input }, 'anonymous'); recordLoginEvent(req, { username: input, outcome: 'failed', reason: 'no-account', deviceId }); return json(res, 401, { error: 'Invalid username or password' }); }
 
                 // The owner is authorised as an admin; the stored record keeps role 'owner'.
                 if (user.role === 'owner') user = Object.assign({}, user, { role: 'admin', isOwner: true });
@@ -7670,7 +7829,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                     if (s && s.admissionNumber) pwMatch = verifyPassword(s.admissionNumber, user.password) || s.admissionNumber === password;
                 }
 
-                if (!pwMatch) { process.stderr.write('LOGIN_FAIL_PW input=' + String(input).slice(0, 40) + '\n'); loginRateFail(req, input); auditLog('login-failed', 'user', { username: input }, 'anonymous'); return json(res, 401, { error: 'Invalid username or password' }); }
+                if (!pwMatch) { process.stderr.write('LOGIN_FAIL_PW input=' + String(input).slice(0, 40) + '\n'); loginRateFail(req, input); auditLog('login-failed', 'user', { username: input }, 'anonymous'); recordLoginEvent(req, { username: input, outcome: 'failed', reason: 'bad-password', deviceId }); return json(res, 401, { error: 'Invalid username or password' }); }
 
                 // Lifelong learners keep their original student id as the link
                 // to academic history, but the login is marked as alumni so the
@@ -7720,6 +7879,42 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                             }
                         }
 
+                // ---- Student single-device lock ------------------------------
+                // One account on one device at a time, and one account per
+                // device, so a student's credentials cannot be handed around.
+                // Runs only for students, and only once the password is known
+                // good. Sessions without a device id (pre-rollout) are ignored.
+                if (user.role === 'student' && deviceId) {
+                    const lock = deviceLockConfig();
+                    if (lock.enabled) {
+                        const conflicts = deviceLockConflicts(user.username, deviceId, lock.idleMs);
+                        const accountHit = conflicts.accountElsewhere.length > 0;
+                        const deviceHit = conflicts.deviceElsewhere.length > 0;
+                        if (accountHit || deviceHit) {
+                            const scope = accountHit ? 'account' : 'device';
+                            const msg = accountHit
+                                ? 'This account is already signed in on another device. Please sign out there first, then sign in here.'
+                                : 'This device is already signed in with another student account. Please sign out on this device first, then sign in here.';
+                            if (lock.mode === 'force') {
+                                // Release the other device(s) first, then let
+                                // this one in. Tell them so their tab clears at
+                                // once instead of on the next request.
+                                const otherUsers = new Set();
+                                for (const t of conflicts.deviceElsewhere) { const s = sessions.get(t); if (s) otherUsers.add(s.username); }
+                                const removed = revokeSessionTokens(conflicts.accountElsewhere.concat(conflicts.deviceElsewhere));
+                                if (conflicts.accountElsewhere.length) pushSessionRevoked(user.username);
+                                for (const u of otherUsers) pushSessionRevoked(u);
+                                auditLog('login-device-replaced', 'user', { username: user.username, deviceId: deviceId.slice(0, 12), scope, removed }, user.username);
+                                recordLoginEvent(req, { username: user.username, role: user.role, outcome: 'success', reason: 'replaced-' + scope, deviceId });
+                            } else {
+                                auditLog('login-blocked', 'user', { username: user.username, deviceId: deviceId.slice(0, 12), scope }, user.username);
+                                recordLoginEvent(req, { username: user.username, role: user.role, outcome: 'blocked', reason: scope, deviceId });
+                                return json(res, 409, { error: msg, code: 'SESSION_CONFLICT', scope });
+                            }
+                        }
+                    }
+                }
+
                 user.lastLogin = new Date().toISOString();
                 storedUser.lastLogin = user.lastLogin;
                 // Main admin stays global — never set/overwrite country. Others get country from login.
@@ -7746,10 +7941,11 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 if (user.role === 'admin') safeUser.mt_bypass = issueMaintenanceBypass(user.username);
 
                 // Server-verified session token for ALL authenticated API calls.
-                safeUser.session_token = issueSession(user.username);
+                safeUser.session_token = issueSession(user.username, { deviceId, ip: clientIp(req), country: requestCountryCode(req) });
 
                 loginRateSuccess(req, input);
                 auditLog('login', 'user', { username: user.username, role: user.role }, user.username);
+                recordLoginEvent(req, { username: user.username, role: user.role, outcome: 'success', deviceId });
 
                 // Include the live terms version so the client can decide whether
                 // the terms modal is needed without downloading the full (1+ MB)
@@ -8656,7 +8852,8 @@ function decodeHtmlEntities(s) {
                 }
                 const device = /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop';
                 const edgeCountry = String(req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || req.headers['x-country-code'] || '').toUpperCase().slice(0, 2);
-                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : (edgeCountry && edgeCountry !== 'XX' ? edgeCountry : 'Unknown');
+                const ipCountry = (edgeCountry && edgeCountry !== 'XX') ? edgeCountry : '';
+                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : (ipCountry || 'Unknown');
                 const role = user && user.role ? String(user.role) : 'public';
                 const rec = {
                     id: 'AE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
@@ -8666,6 +8863,8 @@ function decodeHtmlEntities(s) {
                     referrer: String(event.referrer || req.headers.referer || '').slice(0, 140),
                     source: String(event.source || '').slice(0, 80),
                     country,
+                    ipCountry,
+                    ip: clientIp(req),
                     role,
                     browser: classifyBrowser(),
                     os: classifyOS(),

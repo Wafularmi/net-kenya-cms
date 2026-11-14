@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=525" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=526" as="script">
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -1315,6 +1315,27 @@
                         </div>
                         <button class="btn btn-primary" onclick="saveBranding()">Save Protection Setting</button>
                     </div>
+                    <div class="card"><h3>📵 Student Single-Device Lock</h3>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">When ON, a student can be signed in on only <b>one device at a time</b>, and one device can hold only one student account — so a student's login cannot be shared with someone else. This applies to students only; admins, coordinators and staff are never affected.</div>
+                        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+                            <label class="toggle-switch" style="position:relative;display:inline-block;width:48px;height:26px;">
+                                <input type="checkbox" id="settings-device-lock" onchange="applyDeviceLockUI()" style="opacity:0;width:0;height:0;">
+                                <span class="toggle-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;"></span>
+                            </label>
+                            <span id="device-lock-status" style="font-size:13px;font-weight:600;color:var(--success);">ON</span>
+                        </div>
+                        <div class="form-group"><label>When a second device tries to sign in</label>
+                            <select id="settings-device-lock-mode">
+                                <option value="block">Block it and ask the student to sign out on the other device first</option>
+                                <option value="force">Sign the other device out automatically</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Release a device after inactivity (minutes)</label>
+                            <input type="number" id="settings-device-lock-idle" min="0" max="720" value="10" style="max-width:120px;">
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">A closed tab stops heart-beating, so the device frees itself after this many minutes. Set 0 for the strictest rule — only an explicit sign-out frees the device.</div>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveDeviceLock()">Save Device Lock</button>
+                    </div>
                     </div>
                     <div class="card"><h3>📋 Audit Log</h3>
                         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.4;">Manage the system audit trail. View all activities, export to CSV, prune old entries, or clear the entire log.</div>
@@ -1800,7 +1821,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=525"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=526"></script>
     <script data-cfasync="false" src="js/admin-pdf.min.js?v=1"></script>
     <script data-cfasync="false" defer src="js/student-hub.min.js?v=108"></script>
     <script data-cfasync="false" defer src="js/discussions.js?v=5"></script>

@@ -1,9 +1,37 @@
 /* CMS Bundle v175 2026-07-06T17:00:00.000Z */
 const API_BASE = '/api/db';
+// Stable per-browser id, kept in localStorage so it survives tabs, refreshes
+// and the per-tab sessionStorage. It is what the server uses to tell one
+// device from another for the student single-device rule. Not a fingerprint:
+// just a random id this browser owns.
+const DEVICE_ID_KEY = 'nf_device_id';
+let _deviceIdCache = null;
+function getDeviceId() {
+    // Read localStorage once, then reuse it: this is called on every request,
+    // so a slow device must not pay for a storage read each time.
+    if (_deviceIdCache !== null) return _deviceIdCache;
+    try {
+        let id = localStorage.getItem(DEVICE_ID_KEY);
+        if (!id || id.length < 16) {
+            id = '';
+            try {
+                const a = new Uint8Array(16);
+                if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(a);
+                id = Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+            } catch (e) { id = ''; }
+            if (!id || id.length < 16) id = 'dev' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+            localStorage.setItem(DEVICE_ID_KEY, id);
+        }
+        _deviceIdCache = id;
+        return id;
+    } catch (e) { return ''; }
+}
 function getAuthHeaders() {
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const headers = { 'Content-Type': 'application/json' };
     if (user.session_token) headers['Authorization'] = 'Bearer ' + user.session_token;
+    const did = getDeviceId();
+    if (did) headers['X-Device-Id'] = did;
     return headers;
 }
 function storedToken() {
@@ -42,6 +70,15 @@ function beginSessionReauth() {
     try { sessionStorage.setItem('loginNotice', 'Session expired — please sign in again. Your last screen will be restored.'); } catch {}
     try { sessionStorage.removeItem('currentUser'); } catch {}
     try { location.reload(); } catch {}
+}
+// A device was pushed out because the same account signed in elsewhere, or
+// because this device was taken by another account. This is not a dead session
+// the user can renew here: clear the tab and show the reason on the login screen.
+function forceSignOut(message) {
+    try { sessionStorage.setItem('loginNotice', message || 'You were signed out because this account signed in on another device.'); } catch {}
+    try { sessionStorage.removeItem('currentUser'); } catch {}
+    try { netSSEDisconnect(); } catch (e) {}
+    try { location.reload(); } catch (e) {}
 }
 function noteAuthFailure(res) {
     try {
@@ -1756,6 +1793,50 @@ async function setProtection() {
     showToast('Protection ' + (enabled ? 'ON' : 'OFF'));
 }
 
+// ---- Student single-device lock (Settings) --------------------------------
+function applyDeviceLockUI() {
+    const box = document.getElementById('settings-device-lock');
+    if (!box) return;
+    const on = box.checked;
+    const st = document.getElementById('device-lock-status');
+    if (st) { st.textContent = on ? 'ON' : 'OFF'; st.style.color = on ? 'var(--success)' : 'var(--danger)'; }
+    const mode = document.getElementById('settings-device-lock-mode');
+    if (mode) mode.disabled = !on;
+    const idle = document.getElementById('settings-device-lock-idle');
+    if (idle) idle.disabled = !on;
+}
+async function loadDeviceLock() {
+    try {
+        const rec = await dbGet('settings', 'deviceLock');
+        const cfg = rec && rec.value !== undefined ? rec.value : rec;
+        const obj = (cfg && typeof cfg === 'object') ? cfg : {};
+        const box = document.getElementById('settings-device-lock');
+        if (box) box.checked = obj.enabled !== false;
+        const mode = document.getElementById('settings-device-lock-mode');
+        if (mode) mode.value = obj.mode === 'force' ? 'force' : 'block';
+        const idle = document.getElementById('settings-device-lock-idle');
+        if (idle) { const m = Number(obj.idleMinutes); idle.value = (isFinite(m) && m >= 0) ? m : 10; }
+        applyDeviceLockUI();
+    } catch (e) {}
+}
+async function saveDeviceLock() {
+    const box = document.getElementById('settings-device-lock');
+    const on = !!(box && box.checked);
+    const modeEl = document.getElementById('settings-device-lock-mode');
+    const mode = (modeEl && modeEl.value === 'force') ? 'force' : 'block';
+    const idleEl = document.getElementById('settings-device-lock-idle');
+    let idle = Number(idleEl && idleEl.value);
+    if (!isFinite(idle) || idle < 0) idle = 0;
+    if (idle > 720) idle = 720;
+    try {
+        await dbPut('settings', { key: 'deviceLock', enabled: on, mode: mode, idleMinutes: idle });
+        applyDeviceLockUI();
+        showToast('Single-device lock ' + (on ? 'ON' : 'OFF') + (on ? ' — ' + (mode === 'force' ? 'other device signs out automatically' : 'second device is blocked') : ''));
+    } catch (e) {
+        showToast('Could not save device lock: ' + (e && e.message || e), { type: 'danger' });
+    }
+}
+
 function toLocalDateTimeInputValue(d) {
     if (!d) return '';
     try {
@@ -2952,13 +3033,23 @@ async function login() {
         }
         if (!input || !password) return showLoginError('Enter username and password');
         // Country is required for non-admin users (enforced server-side); main admin is global and may log in without a country
+        const deviceId = getDeviceId();
         const res = await fetch('/api/login', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input, password, country })
+            headers: { 'Content-Type': 'application/json', 'X-Device-Id': deviceId },
+            body: JSON.stringify({ input, password, country, deviceId })
         });
         const data = await res.json();
         if (!res.ok) {
+            // The student single-device rule refused this sign-in. Say exactly
+            // which device to sign out of, and do not treat it as bad details.
+            if (res.status === 409 && data && data.code === 'SESSION_CONFLICT') {
+                const msg = data.error || (data.scope === 'account'
+                    ? 'This account is already signed in on another device. Please sign out there first, then sign in here.'
+                    : 'This device is already signed in with another student account. Please sign out on this device first, then sign in here.');
+                try { showToast(msg, { type: 'warning', duration: 15000 }); } catch (e) {}
+                return showLoginError(msg);
+            }
             if (res.status === 401) return showLoginError('Invalid username or password');
             if (res.status === 403) return showLoginError(data.error || 'Access denied');
             if (res.status === 503) return showLoginError(data.error || 'System under maintenance — only admins can log in right now.');
@@ -3576,6 +3667,20 @@ async function logout(options) {
         if (!ok) return false;
     }
     const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+    // Release this device's slot on the server BEFORE the tab is cleared, so
+    // signing out frees the account for another device at once instead of
+    // waiting for the session to go idle. keepalive/beacon survives the reload.
+    try {
+        const token = user.session_token || storedToken();
+        const payload = JSON.stringify({ token: token });
+        let sent = false;
+        if (navigator.sendBeacon) {
+            try { sent = navigator.sendBeacon('/api/logout', new Blob([payload], { type: 'application/json' })); } catch (e) { sent = false; }
+        }
+        if (!sent) {
+            await fetch('/api/logout', { method: 'POST', headers: getAuthHeaders(), body: payload, keepalive: true });
+        }
+    } catch (e) {}
     try { logAudit('logout', 'user', { username: user.username }); } catch (e) {}
     try { sessionStorage.removeItem('currentUser'); } catch {}
     try { sessionStorage.removeItem('lastScreen'); } catch {}
@@ -4349,7 +4454,7 @@ function netSSEconnect(force) {
             __netSSE.timer = setTimeout(() => { __netSSE.timer = null; netSSEconnect(true); }, delay);
         });
 
-        ['db-change', 'maintenance', 'cleanup-candidates', 'security-push'].forEach((evt) => {
+        ['db-change', 'maintenance', 'cleanup-candidates', 'security-push', 'session-revoked'].forEach((evt) => {
             es.addEventListener(evt, (e) => {
                 __netSSE.delivered++;
                 const list = __netSSE.subs[evt] || [];
@@ -4444,6 +4549,16 @@ const pollIfNoSSE = (fn, ms) => setInterval(() => { if (!_sseConnected) fn(); },
                         sendWhatsApp(d.phone, '🔐 SECURITY ALERT ' + d.title + ': ' + (d.details || '') + ' — NET Kenya CMS');
                     }
                 }
+            } catch {}
+        });
+        netSSESubscribe('session-revoked', (e) => {
+            try {
+                const d = JSON.parse(e.data || '{}');
+                const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
+                if (!u || !u.username) return;
+                // Only this account's tabs care about this push.
+                if (d && d.username && String(d.username).toLowerCase() !== String(u.username).toLowerCase()) return;
+                forceSignOut('You were signed out because this account signed in on another device.');
             } catch {}
         });
         _sseConnection.onerror = () => {
@@ -24170,7 +24285,10 @@ async function dismissAlert(id) {
 async function renderAnalytics() {
     const el = document.getElementById('analytics-content');
     if (!el) return;
-    const rows = await dbGetAll('analyticsEvents').catch(() => []);
+    const [rows, loginRows] = await Promise.all([
+        dbGetAll('analyticsEvents').catch(() => []),
+        dbGetAll('loginEvents').catch(() => [])
+    ]);
     function count(key) {
         const m = {};
         rows.forEach(r => { m[r[key] || 'Unknown'] = (m[r[key] || 'Unknown'] || 0) + 1; });
@@ -24179,13 +24297,54 @@ async function renderAnalytics() {
     function table(title, entries) {
         return `<div class="card" style="margin-bottom:12px;overflow-x:auto;"><h3>${title}</h3><div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:240px;"><tbody>${entries.map(([k, v]) => `<tr><td>${escapeHtml(String(k))}</td><td style="text-align:right;font-weight:700;">${v}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--text-muted);">No data yet</td></tr>'}</tbody></table></div></div>`;
     }
+    // ---- Visitors & Logins (newest first) ---------------------------------
+    const lrows = (Array.isArray(loginRows) ? loginRows.slice() : [])
+        .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    function lcount(key) {
+        const m = {};
+        lrows.forEach(r => { const k = r[key] || 'Unknown'; m[k] = (m[k] || 0) + 1; });
+        return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    }
+    const okCount = lrows.filter(r => r.outcome === 'success').length;
+    const blockedCount = lrows.filter(r => r.outcome === 'blocked').length;
+    const failedCount = lrows.filter(r => r.outcome === 'failed').length;
+    const uniqueAccounts = new Set(lrows.map(r => String(r.username || '').toLowerCase()).filter(Boolean)).size;
+    function outcomeCell(o) {
+        const map = { success: ['var(--success)', 'Signed in'], blocked: ['var(--danger)', 'Blocked'], failed: ['var(--warning)', 'Failed'] };
+        const hit = map[o] || ['var(--text-muted)', o || '—'];
+        return `<span style="color:${hit[0]};font-weight:700;">${hit[1]}</span>`;
+    }
+    function whenCell(s) {
+        try { return escapeHtml(new Date(s).toLocaleString()); } catch (e) { return escapeHtml(String(s || '')); }
+    }
+    const recent = lrows.slice(0, 60).map(r => `<tr>
+        <td style="white-space:nowrap;">${whenCell(r.at)}</td>
+        <td>${escapeHtml(r.username || '—')}</td>
+        <td>${escapeHtml(r.role || '')}</td>
+        <td>${outcomeCell(r.outcome)}</td>
+        <td>${escapeHtml(r.country || 'Unknown')}${r.countryCode ? ' (' + escapeHtml(r.countryCode) + ')' : ''}</td>
+        <td>${escapeHtml(r.ip || '—')}</td>
+        <td>${escapeHtml(r.device || '')}</td>
+    </tr>`).join('') || '<tr><td colspan="7" style="color:var(--text-muted);">No sign-ins recorded yet</td></tr>';
     el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px;">
         <div class="card"><div style="font-size:28px;font-weight:800;">${rows.length}</div><div style="font-size:12px;color:var(--text-muted);">Recorded events</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${new Set(rows.map(r => r.at && r.at.slice(0, 10))).size}</div><div style="font-size:12px;color:var(--text-muted);">Days with activity</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${count('country').length}</div><div style="font-size:12px;color:var(--text-muted);">Countries tracked</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${count('source').length}</div><div style="font-size:12px;color:var(--text-muted);">Source types</div></div>
     </div>
+    <div class="card" style="margin-bottom:12px;">
+        <h3>🔐 Visitors &amp; Logins</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:8px 0 12px;">
+            <div><div style="font-size:22px;font-weight:800;">${lrows.length}</div><div style="font-size:11px;color:var(--text-muted);">Sign-in records</div></div>
+            <div><div style="font-size:22px;font-weight:800;color:var(--success);">${okCount}</div><div style="font-size:11px;color:var(--text-muted);">Signed in</div></div>
+            <div><div style="font-size:22px;font-weight:800;color:var(--danger);">${blockedCount}</div><div style="font-size:11px;color:var(--text-muted);">Blocked (other device)</div></div>
+            <div><div style="font-size:22px;font-weight:800;color:var(--warning);">${failedCount}</div><div style="font-size:11px;color:var(--text-muted);">Failed attempts</div></div>
+            <div><div style="font-size:22px;font-weight:800;">${uniqueAccounts}</div><div style="font-size:11px;color:var(--text-muted);">Accounts seen</div></div>
+        </div>
+        <div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:620px;"><thead><tr><th>When</th><th>Account</th><th>Role</th><th>Outcome</th><th>Country</th><th>IP</th><th>Device</th></tr></thead><tbody>${recent}</tbody></table></div>
+    </div>
     <div style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:100%;">
+        ${table('Sign-in Countries (incl. unlisted)', lcount('country'))}
         ${table('Top Countries', count('country'))}
         ${table('Browsers', count('browser'))}
         ${table('Operating Systems', count('os'))}
@@ -24194,7 +24353,7 @@ async function renderAnalytics() {
         ${table('Sources', count('source'))}
         ${table('Roles', count('role'))}
     </div>
-    <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Analytics are aggregate usage counts only. No raw IPs or student identifiers are stored.</p>`;
+    <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Page-visit analytics are aggregate counts. Visitors &amp; Logins keeps the account, IP, device type and country of each sign-in attempt — including countries not in your configured list — so you can see who signed in from where.</p>`;
 }
 async function renderGlobalViewer() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
@@ -24752,6 +24911,7 @@ async function loadBranding(light) {
         if (settings.protectionEnabled !== undefined) {
             applyProtection(settings.protectionEnabled);
         }
+        try { loadDeviceLock(); } catch (e) {}
     }
 }
 async function saveBranding() {
