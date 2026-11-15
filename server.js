@@ -4171,6 +4171,73 @@ function canonicalCountryName(value) {
     if (code) return countryDisplayName(code) || raw;
     return raw;
 }
+// English-speaking countries of Africa - the curated set offered on the public
+// registration form. ONLY these may ever be auto-added to settings.countries
+// when a registrant picks one that is not configured yet; nothing else is ever
+// created from a public form. name is the canonical stored value, code is the
+// ISO 3166-1 alpha-2 code.
+const AFRICA_ENGLISH_COUNTRIES = [
+    { name: 'Botswana', code: 'BW' },
+    { name: 'Cameroon', code: 'CM' },
+    { name: 'Eritrea', code: 'ER' },
+    { name: 'Eswatini', code: 'SZ' },
+    { name: 'Ethiopia', code: 'ET' },
+    { name: 'Gambia', code: 'GM' },
+    { name: 'Ghana', code: 'GH' },
+    { name: 'Kenya', code: 'KE' },
+    { name: 'Lesotho', code: 'LS' },
+    { name: 'Liberia', code: 'LR' },
+    { name: 'Malawi', code: 'MW' },
+    { name: 'Mauritius', code: 'MU' },
+    { name: 'Namibia', code: 'NA' },
+    { name: 'Nigeria', code: 'NG' },
+    { name: 'Rwanda', code: 'RW' },
+    { name: 'Seychelles', code: 'SC' },
+    { name: 'Sierra Leone', code: 'SL' },
+    { name: 'Somalia', code: 'SO' },
+    { name: 'South Africa', code: 'ZA' },
+    { name: 'South Sudan', code: 'SS' },
+    { name: 'Sudan', code: 'SD' },
+    { name: 'Tanzania', code: 'TZ' },
+    { name: 'Uganda', code: 'UG' },
+    { name: 'Zambia', code: 'ZM' },
+    { name: 'Zimbabwe', code: 'ZW' }
+];
+function findCuratedCountry(value) {
+    const v = String(value || '').trim().toLowerCase();
+    if (!v) return null;
+    return AFRICA_ENGLISH_COUNTRIES.find(c => c.name.toLowerCase() === v || c.code.toLowerCase() === v) || null;
+}
+// Ensure a curated country exists in settings.countries. Returns the configured
+// (canonical) name. Never edits or renames an existing country - it only ever
+// appends a brand-new curated one, and does nothing if it is already present.
+function ensureCuratedCountry(curated) {
+    if (!curated) return '';
+    try {
+        const setting = (db.settings || []).find(s => s && s.key === 'countries');
+        const list = setting ? (setting.value || setting) : [];
+        const arr = Array.isArray(list) ? list : [];
+        const existing = arr.find(c => c && (
+            String(c.name || '').trim().toLowerCase() === curated.name.toLowerCase() ||
+            String(c.code || '').toUpperCase() === curated.code
+        ));
+        if (existing) return String(existing.name || curated.name);
+        const entry = {
+            name: curated.name, code: curated.code, brandName: curated.name,
+            initials: curated.code, phone: '', postalAddress: '',
+            currencyCode: '', currencySymbol: '', currencyDecimals: 2
+        };
+        db.settings = db.settings || [];
+        if (!setting) db.settings.push({ key: 'countries', value: [entry] });
+        else setting.value = arr.concat([entry]);
+        invalidateSettingsCache();
+        auditLog('created', 'country', { name: curated.name, source: 'signup' });
+        return entry.name;
+    } catch (e) {
+        console.error('ensureCuratedCountry failed:', e.message);
+        return '';
+    }
+}
 // A tiny, permanently-kept daily summary (one small record per day) so the
 // long-term view survives after the raw sign-in rows are cleaned. Counters only:
 // no IPs, no account names - so it costs almost no space and stays cheap.
@@ -7244,6 +7311,14 @@ function handleAPI(req, res) {
         return json(res, 200, { countries: Array.isArray(countries) ? countries : [] });
     }
 
+    // GET /api/countries/curated — the public registration form's curated list
+    // of English-speaking African countries (name + code). Read-only and
+    // unauthenticated: it is the same public information the country list
+    // already exposes to the login screen.
+    if (parts.length === 3 && parts[1] === 'countries' && parts[2] === 'curated' && req.method === 'GET') {
+        return json(res, 200, { countries: AFRICA_ENGLISH_COUNTRIES });
+    }
+
     // POST /api/countries — add a country (admin only)
     if (parts.length === 2 && parts[1] === 'countries' && req.method === 'POST') {
         const user = getRequestUser(req);
@@ -10111,7 +10186,14 @@ function decodeHtmlEntities(s) {
                     const data = JSON.parse(body);
                     const { name, email, phone, program: prog, country, studyCenterId, regionId } = data;
                     if (!name || !phone || !prog) return json(res, 400, { error: 'Name, phone, and program are required' });
-                    const postedCountry = typeof country === 'string' ? country.trim().slice(0, 120) : '';
+                    let postedCountry = typeof country === 'string' ? country.trim().slice(0, 120) : '';
+                    // A registrant may pick a curated English-speaking African
+                    // country that is not configured yet: add it (and only a
+                    // curated one) so it exists everywhere, then use its
+                    // canonical configured name. A country that is neither
+                    // curated nor configured is left exactly as before.
+                    const curatedCountry = findCuratedCountry(postedCountry);
+                    if (curatedCountry) postedCountry = ensureCuratedCountry(curatedCountry) || curatedCountry.name;
                     // Check duplicate phone
                     if (!db.students) db.students = [];
                     const existing = db.students.find(s => s.phone && s.phone.replace(/[^0-9]/g,'') === phone.replace(/[^0-9]/g,'') && s.status !== 'rejected');

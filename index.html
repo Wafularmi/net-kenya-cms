@@ -13,7 +13,16 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=529" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=531" as="script">
+    <style id="nf-combo-styles">
+        .nf-combo { position: relative; }
+        .nf-combo-native { display: none !important; }
+        .nf-combo-input { width: 100%; }
+        .nf-combo-list { position: absolute; z-index: 60; left: 0; right: 0; top: calc(100% + 3px); max-height: 240px; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius, 8px); box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.14)); }
+        .nf-combo-item { padding: 9px 12px; font-size: 13px; cursor: pointer; color: var(--text); }
+        .nf-combo-item:hover, .nf-combo-item.active { background: var(--accent); color: #fff; }
+        .nf-combo-empty { padding: 9px 12px; font-size: 12px; color: var(--text-muted); }
+    </style>
     <style id="report-print-styles">
         #report-print-root { display: none; }
         @media print {
@@ -1821,7 +1830,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=529"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=531"></script>
     <script data-cfasync="false" src="js/admin-pdf.min.js?v=1"></script>
     <script data-cfasync="false" defer src="js/student-hub.min.js?v=108"></script>
     <script data-cfasync="false" defer src="js/discussions.js?v=5"></script>

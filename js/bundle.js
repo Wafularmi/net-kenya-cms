@@ -3848,6 +3848,7 @@ function signupFilterCenters() {
         const countrySel = document.getElementById('signup-country');
         if (countrySel && regOpt && regOpt.dataset.country && !countrySel.value) {
             countrySel.value = regOpt.dataset.country;
+            if (countrySel._nfComboSync) countrySel._nfComboSync();
             signupFilterByCountry();
         }
     }
@@ -3864,16 +3865,134 @@ function signupFilterByCountry() {
     document.getElementById('signup-region').value = '';
     signupFilterCenters();
 }
+// ---- Searchable country combobox (public registration form) ----------------
+// A tiny, dependency-free combobox: a text input filters the country list as you
+// type, and a click or keyboard pick sets the underlying <select>. The native
+// <select> stays the single source of truth, so every existing reader of its
+// .value (and its onchange) keeps working. If the enhancement fails for any
+// reason the native <select> is simply left untouched and fully usable.
+async function fetchCuratedCountries() {
+    const res = await fetch('/api/countries/curated', { headers: (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}) });
+    if (!res.ok) throw new Error('Failed to load countries: ' + res.status);
+    const data = await res.json();
+    return Array.isArray(data.countries) ? data.countries : [];
+}
+// Configured countries first (they carry the real brand/currency), then the
+// curated African list, de-duplicated by code and by name so nothing repeats.
+function mergeCountryOptions(configured, curated) {
+    const seen = new Set();
+    const out = [];
+    const add = (name, label, code) => {
+        const n = String(name || '').trim();
+        if (!n) return;
+        const nk = 'n:' + n.toLowerCase();
+        const ck = code ? 'c:' + String(code).trim().toUpperCase() : '';
+        if (seen.has(nk) || (ck && seen.has(ck))) return;
+        seen.add(nk); if (ck) seen.add(ck);
+        out.push({ name: n, label: String(label || n).trim() || n });
+    };
+    (Array.isArray(configured) ? configured : []).forEach(c => add(c && c.name, c && (c.brandName || c.name), c && c.code));
+    (Array.isArray(curated) ? curated : []).forEach(c => add(c && c.name, c && c.name, c && c.code));
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+}
+function enhanceCountrySelect(selectEl, opts) {
+    if (!selectEl || selectEl.dataset.nfCombo === '1') return;
+    const o = opts || {};
+    const wrap = document.createElement('div');
+    wrap.className = 'nf-combo';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-control nf-combo-input';
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocapitalize', 'off');
+    input.setAttribute('spellcheck', 'false');
+    input.placeholder = o.placeholder || 'Search country...';
+    input.setAttribute('aria-label', o.placeholder || 'Search country');
+    const list = document.createElement('div');
+    list.className = 'nf-combo-list';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    wrap.appendChild(input);
+    wrap.appendChild(list);
+    selectEl.parentNode.insertBefore(wrap, selectEl);
+    wrap.appendChild(selectEl);
+    selectEl.classList.add('nf-combo-native');
+    selectEl.dataset.nfCombo = '1';
+
+    let active = -1;
+    const labelFor = (value) => {
+        const opt = Array.from(selectEl.options || []).find(x => x.value === value);
+        return opt ? String(opt.textContent || value).trim() : '';
+    };
+    const syncFromSelect = () => { input.value = labelFor(selectEl.value); };
+    const close = () => { list.hidden = true; active = -1; };
+    const open = (filter) => {
+        const q = String(filter || '').trim().toLowerCase();
+        const items = Array.from(selectEl.options || [])
+            .filter(opt => opt.value)
+            .map(opt => ({ value: opt.value, label: String(opt.textContent || opt.value).trim() }))
+            .filter(it => !q || it.label.toLowerCase().includes(q) || it.value.toLowerCase().includes(q));
+        list.innerHTML = items.length
+            ? items.map(it => `<div class="nf-combo-item" role="option" data-value="${escapeHtml(it.value)}">${escapeHtml(it.label)}</div>`).join('')
+            : '<div class="nf-combo-empty">No match</div>';
+        active = -1;
+        list.hidden = false;
+    };
+    const pick = (value) => {
+        if (selectEl.value !== value) {
+            selectEl.value = value;
+            try { selectEl.dispatchEvent(new Event('change', { bubbles: true })); }
+            catch (e) { if (typeof selectEl.onchange === 'function') { try { selectEl.onchange(); } catch (e2) {} } }
+        }
+        input.value = labelFor(value);
+        close();
+    };
+    input.addEventListener('focus', () => open(''));
+    input.addEventListener('input', () => open(input.value));
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            if (list.hidden) open(input.value);
+            const nodes = Array.from(list.querySelectorAll('.nf-combo-item'));
+            if (!nodes.length) return;
+            e.preventDefault();
+            active = e.key === 'ArrowDown' ? Math.min(active + 1, nodes.length - 1) : Math.max(active - 1, 0);
+            nodes.forEach((n, i) => n.classList.toggle('active', i === active));
+            if (nodes[active] && nodes[active].scrollIntoView) nodes[active].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            const nodes = Array.from(list.querySelectorAll('.nf-combo-item'));
+            const target = (active >= 0 && nodes[active]) ? nodes[active] : (nodes.length === 1 ? nodes[0] : null);
+            if (!list.hidden && target) { e.preventDefault(); pick(target.dataset.value); }
+            else { close(); syncFromSelect(); }
+        } else if (e.key === 'Escape') {
+            close(); syncFromSelect();
+        }
+    });
+    list.addEventListener('mousedown', (e) => {
+        const item = e.target && e.target.closest ? e.target.closest('.nf-combo-item') : null;
+        if (!item) return;
+        e.preventDefault();
+        pick(item.dataset.value);
+    });
+    input.addEventListener('blur', () => { setTimeout(() => { close(); syncFromSelect(); }, 120); });
+    selectEl.addEventListener('change', syncFromSelect);
+    syncFromSelect();
+    // Re-sync after the <select> is repopulated or set in code (region -> country).
+    selectEl._nfComboSync = syncFromSelect;
+}
 async function showSignupForm() {
     try {
-        const [centers, programs, regions, countries] = await Promise.all([
+        const [centers, programs, regions, countries, curated] = await Promise.all([
             getCenters().catch(() => []),
             getProgramsList().catch(() => []),
             dbGetAll('regions').catch(() => []),
-            fetchCountries().catch(() => [])
+            fetchCountries().catch(() => []),
+            fetchCuratedCountries().catch(() => [])
         ]);
-        const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Country *</label><select id="signup-country" onchange="signupFilterByCountry()"><option value="">Select country...</option>${countries.map(c => `<option value="${escapeHtml(c && c.name || '')}">${escapeHtml(c && (c.brandName || c.name) || '')}</option>`).join('')}</select></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Region</label><select id="signup-region" onchange="signupFilterCenters()"><option value="">Select region...</option>${regions.map(r => `<option value="${r.id}" data-country="${escapeHtml(r.country || '')}">${escapeHtml(r.name)}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}" data-region="${c.regionId || ''}" data-country="${escapeHtml(c.country || '')}">${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
+        const countryOptions = mergeCountryOptions(countries, curated);
+        const content = `<div class="form-group"><label>Full Name *</label><input type="text" id="signup-name" placeholder="Enter your full name" required></div><div class="form-row"><div class="form-group"><label>Email</label><input type="email" id="signup-email" placeholder="your@email.com"></div><div class="form-group"><label>Phone *</label><input type="text" id="signup-phone" placeholder="e.g., 254712345678" required></div></div><div class="form-group"><label>Country *</label><select id="signup-country" onchange="signupFilterByCountry()"><option value="">Select country...</option>${countryOptions.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.label)}</option>`).join('')}</select></div><div class="form-group"><label>Program *</label><select id="signup-program"><option value="">Select program...</option>${programs.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div><div class="form-group"><label>Region</label><select id="signup-region" onchange="signupFilterCenters()"><option value="">Select region...</option>${regions.map(r => `<option value="${r.id}" data-country="${escapeHtml(r.country || '')}">${escapeHtml(r.name)}</option>`).join('')}</select></div><div class="form-group"><label>Study Center</label><select id="signup-center"><option value="">Select center...</option>${centers.map(c => `<option value="${c.id}" data-region="${c.regionId || ''}" data-country="${escapeHtml(c.country || '')}">${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:10px;background:#fef3c7;border-radius:6px;">⏳ Your request will be reviewed by the administration. You'll receive your login credentials via WhatsApp once approved.</div><div class="signup-footer">Already have an account? <a href="#" onclick="closeModal()">Sign In</a></div>`;
         showModal('Request Registration', content, `<button class="btn btn-primary" onclick="registerStudent()">Submit Request</button>`);
+        enhanceCountrySelect(document.getElementById('signup-country'), { placeholder: 'Search country...' });
     } catch (e) {
         console.error('showSignupForm error:', e);
         showToast('Error loading registration form: ' + e.message, { type: 'danger' });
