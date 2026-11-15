@@ -4120,17 +4120,56 @@ function countryNameForCode(code) {
 // so the visitor log and analytics read as names ("Zimbabwe"), not codes ("ZW"),
 // including countries that are not in the configured list.
 let _regionNames = null;
+let _regionCodesByName = null;
+function regionDisplayNames() {
+    if (_regionNames === null) {
+        try { _regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); }
+        catch (e) { _regionNames = false; }
+    }
+    return _regionNames || null;
+}
 function countryDisplayName(code) {
     const c = String(code || '').toUpperCase();
     if (!/^[A-Z]{2}$/.test(c) || c === 'XX') return '';
     const configured = countryNameForCode(c);
     if (configured) return configured;
-    try {
-        if (!_regionNames) _regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
-        const name = _regionNames.of(c);
-        if (name && name !== c) return name;
-    } catch (e) {}
+    const dn = regionDisplayNames();
+    if (!dn) return '';
+    try { const name = dn.of(c); if (name && name !== c) return name; } catch (e) {}
     return '';
+}
+// Resolve a country written in ANY form - a code ("KE"), a name ("Kenya"), or
+// the same in any case ("KENYA") - to one ISO alpha-2 code. This is what makes
+// "KE", "Kenya" and "KENYA" count as the same country everywhere. Built from the
+// ICU region names Node already ships: no external data, no network calls, and
+// the reverse map is built once and cached.
+function countryCodeOf(value) {
+    const v = String(value || '').trim();
+    if (!v) return '';
+    const up = v.toUpperCase();
+    if (/^[A-Z]{2}$/.test(up) && countryDisplayName(up)) return up;
+    if (_regionCodesByName === null) {
+        _regionCodesByName = {};
+        const dn = regionDisplayNames();
+        if (dn) {
+            for (let a = 65; a <= 90; a++) {
+                for (let b = 65; b <= 90; b++) {
+                    const code = String.fromCharCode(a) + String.fromCharCode(b);
+                    let nm; try { nm = dn.of(code); } catch (e) { continue; }
+                    if (nm && nm !== code) _regionCodesByName[nm.toLowerCase()] = code;
+                }
+            }
+        }
+    }
+    return _regionCodesByName[v.toLowerCase()] || '';
+}
+// The one canonical name for any country written in any form, so stored data
+// and exports never carry "KENYA" and "Kenya" as two different countries.
+function canonicalCountryName(value) {
+    const raw = String(value || '').trim();
+    const code = countryCodeOf(raw);
+    if (code) return countryDisplayName(code) || raw;
+    return raw;
 }
 // A tiny, permanently-kept daily summary (one small record per day) so the
 // long-term view survives after the raw sign-in rows are cleaned. Counters only:
@@ -9000,7 +9039,7 @@ function decodeHtmlEntities(s) {
                 const device = /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop';
                 const edgeCountry = String(req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || req.headers['x-country-code'] || '').toUpperCase().slice(0, 2);
                 const ipCountry = (edgeCountry && edgeCountry !== 'XX') ? edgeCountry : '';
-                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : (countryDisplayName(ipCountry) || ipCountry || 'Unknown');
+                const country = user && user.user && user.user.country ? canonicalCountryName(user.user.country).slice(0, 80) : (countryDisplayName(ipCountry) || ipCountry || 'Unknown');
                 const role = user && user.role ? String(user.role) : 'public';
                 const rec = {
                     id: 'AE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),

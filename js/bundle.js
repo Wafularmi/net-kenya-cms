@@ -24282,22 +24282,67 @@ async function dismissAlert(id) {
     renderAlertDashboard();
     refreshCleanupStatus();
 }
-// Show a full country name, not a bare code. A stored name (e.g. "Kenya") is
-// kept as-is; a bare 2-letter code ("ZW") is expanded via the browser's own
-// region names, falling back to the code when unsupported. No network calls.
+// Country identity: "KE", "Kenya" and "KENYA" are ONE country. We resolve any
+// form to a single ISO alpha-2 key for counting, and show one canonical name.
+// Uses the browser's built-in region names - no network calls, cached once.
 let _regionNames = null;
-function expandCountry(code, name) {
-    const c = String(code || '').toUpperCase();
-    const n = String(name || '').trim();
-    if (n && !(c && n.toUpperCase() === c)) return n;   // a real name already
-    if (/^[A-Z]{2}$/.test(c) && c !== 'XX') {
-        try {
-            if (!_regionNames) _regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
-            const out = _regionNames.of(c);
-            if (out && out !== c) return out;
-        } catch (e) {}
+let _regionCodes = null;
+function regionDisplayNames() {
+    if (_regionNames === null) {
+        try { _regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); }
+        catch (e) { _regionNames = false; }
     }
-    return n || c || 'Unknown';
+    return _regionNames || null;
+}
+function regionName(code) {
+    const c = String(code || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(c) || c === 'XX') return '';
+    const dn = regionDisplayNames();
+    if (!dn) return '';
+    try { const out = dn.of(c); return (out && out !== c) ? out : ''; } catch (e) { return ''; }
+}
+function regionCode(name) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return '';
+    if (_regionCodes === null) {
+        _regionCodes = {};
+        const dn = regionDisplayNames();
+        if (dn) {
+            for (let a = 65; a <= 90; a++) {
+                for (let b = 65; b <= 90; b++) {
+                    const code = String.fromCharCode(a) + String.fromCharCode(b);
+                    let nm; try { nm = dn.of(code); } catch (e) { continue; }
+                    if (nm && nm !== code) _regionCodes[nm.toLowerCase()] = code;
+                }
+            }
+        }
+    }
+    return _regionCodes[n] || '';
+}
+// One canonical key for grouping (a code when we can resolve one).
+function countryKey(code, name) {
+    const c = String(code || '').trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(c) && c !== 'XX' && regionName(c)) return c;
+    const n = String(name || '').trim();
+    if (!n || n.toUpperCase() === 'UNKNOWN') return '';
+    if (/^[A-Za-z]{2}$/.test(n) && regionName(n)) return n.toUpperCase();
+    return regionCode(n) || n;
+}
+// One canonical display name for any country written in any form.
+function countryLabel(code, name) {
+    const c = String(code || '').trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(c) && c !== 'XX') {
+        const nm = regionName(c);
+        if (nm) return nm;
+    }
+    const n = String(name || '').trim();
+    if (n && n.toUpperCase() !== 'UNKNOWN') {
+        if (/^[A-Za-z]{2}$/.test(n)) { const nm = regionName(n); if (nm) return nm; }
+        const mapped = regionCode(n);
+        if (mapped) { const nm = regionName(mapped); if (nm) return nm; }
+        return n;
+    }
+    return 'Unknown';
 }
 async function renderAnalytics() {
     const el = document.getElementById('analytics-content');
@@ -24312,12 +24357,20 @@ async function renderAnalytics() {
         rows.forEach(r => { m[r[key] || 'Unknown'] = (m[r[key] || 'Unknown'] || 0) + 1; });
         return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 12);
     }
-    // Country counts grouped by the full name (expanding any bare code), so
-    // "Zimbabwe" and "ZW" never show up as two separate countries.
+    // Country counts grouped by canonical identity, so "KE", "Kenya" and
+    // "KENYA" are one country, not three.
     function countCountries(list, codeKey, nameKey) {
-        const m = {};
-        list.forEach(r => { const k = expandCountry(r[codeKey], r[nameKey]); m[k] = (m[k] || 0) + 1; });
-        return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 12);
+        const byKey = {};
+        list.forEach(r => {
+            const k = countryKey(r[codeKey], r[nameKey]) || 'Unknown';
+            byKey[k] = (byKey[k] || 0) + 1;
+        });
+        const byLabel = {};
+        Object.entries(byKey).forEach(([k, v]) => {
+            const label = countryLabel(k, k);
+            byLabel[label] = (byLabel[label] || 0) + v;
+        });
+        return Object.entries(byLabel).sort((a, b) => b[1] - a[1]).slice(0, 12);
     }
     function table(title, entries) {
         return `<div class="card" style="margin-bottom:12px;overflow-x:auto;"><h3>${title}</h3><div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:240px;"><tbody>${entries.map(([k, v]) => `<tr><td>${escapeHtml(String(k))}</td><td style="text-align:right;font-weight:700;">${v}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--text-muted);">No data yet</td></tr>'}</tbody></table></div></div>`;
@@ -24344,7 +24397,7 @@ async function renderAnalytics() {
         <td>${escapeHtml(r.username || '—')}</td>
         <td>${escapeHtml(r.role || '')}</td>
         <td>${outcomeCell(r.outcome)}</td>
-        <td>${escapeHtml(expandCountry(r.countryCode, r.country))}${r.countryCode ? ' (' + escapeHtml(r.countryCode) + ')' : ''}</td>
+        <td>${escapeHtml(countryLabel(r.countryCode, r.country))}${r.countryCode ? ' (' + escapeHtml(r.countryCode) + ')' : ''}</td>
         <td>${escapeHtml(r.ip || '—')}</td>
         <td>${escapeHtml(r.device || '')}</td>
     </tr>`).join('') || '<tr><td colspan="7" style="color:var(--text-muted);">No sign-ins recorded yet</td></tr>';
@@ -24354,7 +24407,7 @@ async function renderAnalytics() {
         .sort((a, b) => String(b.day || '').localeCompare(String(a.day || ''))).slice(0, 30);
     const summaryRows = srows.map(r => {
         const top = Object.entries(r.countries || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
-            .map(([k, v]) => escapeHtml(expandCountry(k, '')) + ' ' + v).join(', ');
+            .map(([k, v]) => escapeHtml(countryLabel(k, k)) + ' ' + v).join(', ');
         return `<tr><td style="white-space:nowrap;">${escapeHtml(r.day || '')}</td>
             <td style="text-align:right;font-weight:700;">${r.total || 0}</td>
             <td style="text-align:right;">${r.success || 0}</td>
