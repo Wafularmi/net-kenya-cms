@@ -4115,6 +4115,23 @@ function countryNameForCode(code) {
     } catch (e) {}
     return '';
 }
+// A full display name for ANY country code: the configured name when we have
+// one, otherwise the ICU region name (Node ships full ICU), otherwise ''. Used
+// so the visitor log and analytics read as names ("Zimbabwe"), not codes ("ZW"),
+// including countries that are not in the configured list.
+let _regionNames = null;
+function countryDisplayName(code) {
+    const c = String(code || '').toUpperCase();
+    if (!/^[A-Z]{2}$/.test(c) || c === 'XX') return '';
+    const configured = countryNameForCode(c);
+    if (configured) return configured;
+    try {
+        if (!_regionNames) _regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+        const name = _regionNames.of(c);
+        if (name && name !== c) return name;
+    } catch (e) {}
+    return '';
+}
 // A tiny, permanently-kept daily summary (one small record per day) so the
 // long-term view survives after the raw sign-in rows are cleaned. Counters only:
 // no IPs, no account names - so it costs almost no space and stays cheap.
@@ -4147,7 +4164,7 @@ function recordLoginEvent(req, opts) {
         const ua = String(req.headers['user-agent'] || '');
         const code = requestCountryCode(req);
         const outcome = String(o.outcome || 'success').slice(0, 24);
-        const country = countryNameForCode(code) || code || 'Unknown';
+        const country = countryDisplayName(code) || code || 'Unknown';
         if (!Array.isArray(db.loginEvents)) db.loginEvents = [];
         db.loginEvents.push({
             id: 'LE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
@@ -8983,7 +9000,7 @@ function decodeHtmlEntities(s) {
                 const device = /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop';
                 const edgeCountry = String(req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || req.headers['x-country-code'] || '').toUpperCase().slice(0, 2);
                 const ipCountry = (edgeCountry && edgeCountry !== 'XX') ? edgeCountry : '';
-                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : (ipCountry || 'Unknown');
+                const country = user && user.user && user.user.country ? String(user.user.country).slice(0, 80) : (countryDisplayName(ipCountry) || ipCountry || 'Unknown');
                 const role = user && user.role ? String(user.role) : 'public';
                 const rec = {
                     id: 'AE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),

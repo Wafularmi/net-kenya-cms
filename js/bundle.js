@@ -24282,6 +24282,23 @@ async function dismissAlert(id) {
     renderAlertDashboard();
     refreshCleanupStatus();
 }
+// Show a full country name, not a bare code. A stored name (e.g. "Kenya") is
+// kept as-is; a bare 2-letter code ("ZW") is expanded via the browser's own
+// region names, falling back to the code when unsupported. No network calls.
+let _regionNames = null;
+function expandCountry(code, name) {
+    const c = String(code || '').toUpperCase();
+    const n = String(name || '').trim();
+    if (n && !(c && n.toUpperCase() === c)) return n;   // a real name already
+    if (/^[A-Z]{2}$/.test(c) && c !== 'XX') {
+        try {
+            if (!_regionNames) _regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+            const out = _regionNames.of(c);
+            if (out && out !== c) return out;
+        } catch (e) {}
+    }
+    return n || c || 'Unknown';
+}
 async function renderAnalytics() {
     const el = document.getElementById('analytics-content');
     if (!el) return;
@@ -24295,17 +24312,21 @@ async function renderAnalytics() {
         rows.forEach(r => { m[r[key] || 'Unknown'] = (m[r[key] || 'Unknown'] || 0) + 1; });
         return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 12);
     }
+    // Country counts grouped by the full name (expanding any bare code), so
+    // "Zimbabwe" and "ZW" never show up as two separate countries.
+    function countCountries(list, codeKey, nameKey) {
+        const m = {};
+        list.forEach(r => { const k = expandCountry(r[codeKey], r[nameKey]); m[k] = (m[k] || 0) + 1; });
+        return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    }
     function table(title, entries) {
         return `<div class="card" style="margin-bottom:12px;overflow-x:auto;"><h3>${title}</h3><div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:240px;"><tbody>${entries.map(([k, v]) => `<tr><td>${escapeHtml(String(k))}</td><td style="text-align:right;font-weight:700;">${v}</td></tr>`).join('') || '<tr><td colspan="2" style="color:var(--text-muted);">No data yet</td></tr>'}</tbody></table></div></div>`;
     }
     // ---- Visitors & Logins (newest first) ---------------------------------
     const lrows = (Array.isArray(loginRows) ? loginRows.slice() : [])
         .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
-    function lcount(key) {
-        const m = {};
-        lrows.forEach(r => { const k = r[key] || 'Unknown'; m[k] = (m[k] || 0) + 1; });
-        return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 15);
-    }
+    const loginCountries = countCountries(lrows, 'countryCode', 'country');
+    const topCountries = countCountries(rows, 'ipCountry', 'country');
     const okCount = lrows.filter(r => r.outcome === 'success').length;
     const blockedCount = lrows.filter(r => r.outcome === 'blocked').length;
     const failedCount = lrows.filter(r => r.outcome === 'failed').length;
@@ -24323,7 +24344,7 @@ async function renderAnalytics() {
         <td>${escapeHtml(r.username || '—')}</td>
         <td>${escapeHtml(r.role || '')}</td>
         <td>${outcomeCell(r.outcome)}</td>
-        <td>${escapeHtml(r.country || 'Unknown')}${r.countryCode ? ' (' + escapeHtml(r.countryCode) + ')' : ''}</td>
+        <td>${escapeHtml(expandCountry(r.countryCode, r.country))}${r.countryCode ? ' (' + escapeHtml(r.countryCode) + ')' : ''}</td>
         <td>${escapeHtml(r.ip || '—')}</td>
         <td>${escapeHtml(r.device || '')}</td>
     </tr>`).join('') || '<tr><td colspan="7" style="color:var(--text-muted);">No sign-ins recorded yet</td></tr>';
@@ -24333,7 +24354,7 @@ async function renderAnalytics() {
         .sort((a, b) => String(b.day || '').localeCompare(String(a.day || ''))).slice(0, 30);
     const summaryRows = srows.map(r => {
         const top = Object.entries(r.countries || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
-            .map(([k, v]) => escapeHtml(String(k)) + ' ' + v).join(', ');
+            .map(([k, v]) => escapeHtml(expandCountry(k, '')) + ' ' + v).join(', ');
         return `<tr><td style="white-space:nowrap;">${escapeHtml(r.day || '')}</td>
             <td style="text-align:right;font-weight:700;">${r.total || 0}</td>
             <td style="text-align:right;">${r.success || 0}</td>
@@ -24344,7 +24365,7 @@ async function renderAnalytics() {
     el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px;">
         <div class="card"><div style="font-size:28px;font-weight:800;">${rows.length}</div><div style="font-size:12px;color:var(--text-muted);">Recorded events</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${new Set(rows.map(r => r.at && r.at.slice(0, 10))).size}</div><div style="font-size:12px;color:var(--text-muted);">Days with activity</div></div>
-        <div class="card"><div style="font-size:28px;font-weight:800;">${count('country').length}</div><div style="font-size:12px;color:var(--text-muted);">Countries tracked</div></div>
+        <div class="card"><div style="font-size:28px;font-weight:800;">${topCountries.length}</div><div style="font-size:12px;color:var(--text-muted);">Countries tracked</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${count('source').length}</div><div style="font-size:12px;color:var(--text-muted);">Source types</div></div>
     </div>
     <div class="card" style="margin-bottom:12px;">
@@ -24370,8 +24391,8 @@ async function renderAnalytics() {
         <div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:480px;"><thead><tr><th>Day</th><th style="text-align:right;">Total</th><th style="text-align:right;">Signed in</th><th style="text-align:right;">Blocked</th><th style="text-align:right;">Failed</th><th>Top countries</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:100%;">
-        ${table('Sign-in Countries (incl. unlisted)', lcount('country'))}
-        ${table('Top Countries', count('country'))}
+        ${table('Sign-in Countries (incl. unlisted)', loginCountries)}
+        ${table('Top Countries', topCountries)}
         ${table('Browsers', count('browser'))}
         ${table('Operating Systems', count('os'))}
         ${table('Devices', count('device'))}
