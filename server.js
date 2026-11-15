@@ -1961,7 +1961,7 @@ const STUDENT_DENY_STORES = new Set([
     'mpesaSettings', 'mpesaTransactions', 'income', 'expenses', 'fees',
     'invoices', 'installments', 'whatsappTemplates', 'whatsappLog', 'whatsappOutbox', 'whatsappRuns',
     'expenseCategories', 'gradRequirements', 'sessions', 'submissionResets', 'analyticsEvents',
-    'loginEvents', 'maintenanceReports', 'maintenanceAIState'
+    'loginEvents', 'loginStats', 'maintenanceReports', 'maintenanceAIState'
 ]);
 
 // Stores a student is allowed to write to (their own activity records)
@@ -3512,8 +3512,9 @@ function canAccessStore(user, store, method) {
     if (user && (user.isOwner || user.role === 'owner')) return true;
     // Sensitive internal stores - admin only, never via API.
     // loginEvents carries sign-in IPs and account names, so it is admin-only
-    // too (the Analytics screen that shows it is admin-only).
-    if (store === 'sessions' || store === 'maintenanceBypassTokens' || store === 'loginEvents') {
+    // too (the Analytics screen that shows it is admin-only). loginStats is the
+    // compact daily summary derived from it.
+    if (store === 'sessions' || store === 'maintenanceBypassTokens' || store === 'loginEvents' || store === 'loginStats') {
         return user && (user.role === 'admin' || user.isOwner || user.role === 'owner');
     }
     // Allow unauthenticated reads for login screen / registration.
@@ -4114,27 +4115,156 @@ function countryNameForCode(code) {
     } catch (e) {}
     return '';
 }
+// A tiny, permanently-kept daily summary (one small record per day) so the
+// long-term view survives after the raw sign-in rows are cleaned. Counters only:
+// no IPs, no account names - so it costs almost no space and stays cheap.
+function bumpLoginStats(code, outcome) {
+    try {
+        const day = new Date().toISOString().slice(0, 10);
+        if (!Array.isArray(db.loginStats)) db.loginStats = [];
+        let rec = null;
+        for (let i = db.loginStats.length - 1; i >= 0; i--) {
+            const r = db.loginStats[i];
+            if (r && r.day === day) { rec = r; break; }
+        }
+        if (!rec) {
+            rec = { day: day, total: 0, success: 0, blocked: 0, failed: 0, countries: {} };
+            db.loginStats.push(rec);
+            if (db.loginStats.length > 730) db.loginStats.splice(0, db.loginStats.length - 730);
+        }
+        rec.total++;
+        if (outcome === 'success') rec.success++;
+        else if (outcome === 'blocked') rec.blocked++;
+        else if (outcome === 'failed') rec.failed++;
+        const key = code || 'Unknown';
+        if (!rec.countries) rec.countries = {};
+        rec.countries[key] = (rec.countries[key] || 0) + 1;
+    } catch (e) {}
+}
 function recordLoginEvent(req, opts) {
     try {
         const o = opts || {};
         const ua = String(req.headers['user-agent'] || '');
         const code = requestCountryCode(req);
+        const outcome = String(o.outcome || 'success').slice(0, 24);
+        const country = countryNameForCode(code) || code || 'Unknown';
         if (!Array.isArray(db.loginEvents)) db.loginEvents = [];
         db.loginEvents.push({
             id: 'LE-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
             at: new Date().toISOString(),
             username: String(o.username || '').slice(0, 80),
             role: String(o.role || 'anonymous').slice(0, 20),
-            outcome: String(o.outcome || 'success').slice(0, 24),
+            outcome: outcome,
             ip: clientIp(req),
-            country: countryNameForCode(code) || code || 'Unknown',
+            country: country,
             countryCode: code,
             device: /Mobi|Android/i.test(ua) ? (/iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile') : 'Desktop',
             deviceId: String(o.deviceId || '').slice(0, 12),
             reason: String(o.reason || '').slice(0, 60)
         });
+        bumpLoginStats(code, outcome);
         saveDB();
     } catch (e) { console.error('recordLoginEvent failed:', e.message); }
+}
+
+// ---- Cleaning the raw sign-in log -----------------------------------------
+// The daily summary above is always kept; these controls only touch the raw
+// rows (and their archive), so cleaning the log frees space without losing the
+// long-term numbers. An explicit admin action, so the archive rewrite cost is
+// acceptable - it never runs on the request path otherwise.
+function pruneLogArchive(store, cutoff, keepNewest) {
+    if (DB_STORAGE_MODE !== 'files') return 0;
+    const dir = logArchiveDir(store);
+    const segs = logArchiveSegments(store);
+    if (!segs.length) return 0;
+    const tombstones = [];
+    let entries = [];
+    for (const seg of segs) {
+        let raw = '';
+        try { raw = fs.readFileSync(path.join(dir, seg), 'utf8'); } catch { continue; }
+        for (const line of raw.split('\n')) {
+            const t = line.trim();
+            if (!t) continue;
+            let rec = null;
+            try { rec = JSON.parse(t); } catch { continue; }
+            if (!rec || typeof rec !== 'object') continue;
+            if (rec.__tombstone) { tombstones.push(rec); continue; }
+            entries.push(rec);
+        }
+    }
+    const before = entries.length;
+    if (cutoff) entries = entries.filter(r => { const ts = r.at ? Date.parse(r.at) : 0; return !ts || ts >= cutoff; });
+    // keepNewest: null/undefined = no cap, 0 = keep none, N>0 = keep newest N.
+    if (keepNewest !== null && keepNewest !== undefined && entries.length > keepNewest) {
+        entries = keepNewest > 0 ? entries.slice(entries.length - keepNewest) : [];
+    }
+    const removed = before - entries.length;
+    if (!removed) return 0;
+    for (const seg of segs) {
+        try { fs.unlinkSync(path.join(dir, seg)); } catch {}
+        try { fs.unlinkSync(path.join(VOLUME_LOG_DIR, LOG_STORES[store].archive, seg)); } catch {}
+    }
+    // Write the survivors back oldest -> newest, in chunks so no single segment
+    // grows without bound.
+    const out = tombstones.concat(entries);
+    for (let i = 0; i < out.length; i += 5000) appendLogArchive(store, out.slice(i, i + 5000));
+    return removed;
+}
+function pruneLoginEvents(opts) {
+    const o = opts || {};
+    const days = Number(o.days) || 0;
+    const keep = Number(o.keep) || 0;
+    const clearAll = !!o.clearAll;
+    const cutoff = days > 0 ? Date.now() - days * 86400000 : 0;
+    let removed = 0;
+    if (!Array.isArray(db.loginEvents)) db.loginEvents = [];
+    if (clearAll) {
+        removed = db.loginEvents.length;
+        db.loginEvents = [];
+        clearLogArchive('loginEvents');
+    } else {
+        if (cutoff) {
+            for (let i = db.loginEvents.length - 1; i >= 0; i--) {
+                const r = db.loginEvents[i];
+                const ts = r && r.at ? Date.parse(r.at) : 0;
+                if (ts && ts < cutoff) { db.loginEvents.splice(i, 1); removed++; }   // never guess at an unparseable row
+            }
+        }
+        if (keep > 0 && db.loginEvents.length > keep) {
+            removed += db.loginEvents.length - keep;
+            db.loginEvents.splice(0, db.loginEvents.length - keep);
+        }
+        // The archive is the durable copy; prune it too or the space is not freed
+        // and the rows come back on the next boot. `keep` is a hard cap on the
+        // TOTAL raw rows, so the archive keeps whatever budget is left after the
+        // recent window.
+        if (keep > 0) {
+            const budget = Math.max(0, keep - db.loginEvents.length);
+            removed += pruneLogArchive('loginEvents', cutoff, budget);
+        } else if (cutoff) {
+            removed += pruneLogArchive('loginEvents', cutoff, null);
+        }
+    }
+    saveDB();
+    broadcastEvent('db-change', { store: 'loginEvents' });
+    return { removed: removed, remaining: db.loginEvents.length };
+}
+// Automatic retention: run the same clean once a day (and at boot) using the
+// saved policy, so the log can never grow without bound unattended. With no
+// policy saved yet, a conservative default keeps the raw log bounded (older
+// rows are still counted forever in the compact daily summary).
+const DEFAULT_LOGIN_RETENTION_DAYS = 180;
+function runLoginLogRetention() {
+    try {
+        const cfg = settingValue('visitorLog');
+        const hasPolicy = !!(cfg && typeof cfg === 'object');
+        const obj = hasPolicy ? cfg : { retainDays: DEFAULT_LOGIN_RETENTION_DAYS, maxEntries: 0 };
+        const days = Number(obj.retainDays);
+        const keep = Number(obj.maxEntries);
+        if (!(days > 0) && !(keep > 0)) return;
+        const res = pruneLoginEvents({ days: days > 0 ? days : 0, keep: keep > 0 ? keep : 0 });
+        if (res.removed) auditLog('login-log-retention', 'system', res, 'system');
+    } catch (e) { console.error('runLoginLogRetention failed:', e.message); }
 }
 
 function requestToken(req) {
@@ -10550,6 +10680,24 @@ return json(res, 200, result);
         return json(res, 200, { ok: true, remaining: db.audit.length });
     }
 
+    // DELETE /api/db/settings/prune-login-events?days=D&keep=N   (or &clear=1)
+    // Admin only. Cleans the RAW sign-in log (window + archive); the compact
+    // daily summary is always kept.
+    if (parts.length >= 3 && parts[1] === 'db' && parts[2] === 'settings' && parts[3] === 'prune-login-events' && req.method === 'DELETE') {
+        if (isMaintenanceActive() && !isAdminRequest(req)) return maintenanceBlocked(res);
+        const user = getRequestUser(req);
+        if (!canAccessStore(user, 'settings', req.method) || user.role !== 'admin') {
+            return json(res, 403, { error: 'Admin only' });
+        }
+        const result = pruneLoginEvents({
+            clearAll: urlObj.searchParams.get('clear') === '1',
+            days: parseInt(urlObj.searchParams.get('days')) || 0,
+            keep: parseInt(urlObj.searchParams.get('keep')) || 0
+        });
+        auditLog('login-log-clean', 'system', result, (user && user.username) || 'admin');
+        return json(res, 200, Object.assign({ ok: true }, result));
+    }
+
     if (parts.length >= 2 && parts[1] === 'db') {
         const store = decodeURIComponent(parts[2]);
         const key = parts[3] ? decodeURIComponent(parts[3]) : null;
@@ -11856,6 +12004,11 @@ server.listen(PORT, '0.0.0.0', () => {
     } catch (e) {
         console.log('[HTTPS] Not started:', e.message);
     }
+    // Visitor-log retention: apply the saved policy once shortly after boot,
+    // then daily. Delayed so it never slows startup or the first requests.
+    setTimeout(() => { runLoginLogRetention(); }, 60 * 1000);
+    const _loginRetentionTimer = setInterval(() => { runLoginLogRetention(); }, 24 * 3600 * 1000);
+    if (_loginRetentionTimer && _loginRetentionTimer.unref) _loginRetentionTimer.unref();
     // auto-open browser after 1.5s
     setTimeout(() => {
         try {

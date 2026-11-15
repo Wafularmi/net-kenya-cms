@@ -24285,9 +24285,10 @@ async function dismissAlert(id) {
 async function renderAnalytics() {
     const el = document.getElementById('analytics-content');
     if (!el) return;
-    const [rows, loginRows] = await Promise.all([
+    const [rows, loginRows, statRows] = await Promise.all([
         dbGetAll('analyticsEvents').catch(() => []),
-        dbGetAll('loginEvents').catch(() => [])
+        dbGetAll('loginEvents').catch(() => []),
+        dbGetAll('loginStats').catch(() => [])
     ]);
     function count(key) {
         const m = {};
@@ -24326,6 +24327,20 @@ async function renderAnalytics() {
         <td>${escapeHtml(r.ip || '—')}</td>
         <td>${escapeHtml(r.device || '')}</td>
     </tr>`).join('') || '<tr><td colspan="7" style="color:var(--text-muted);">No sign-ins recorded yet</td></tr>';
+    // Compact daily summary - kept even after the raw rows are cleaned, so the
+    // long-term numbers survive a "Clean" or "Clear".
+    const srows = (Array.isArray(statRows) ? statRows.slice() : [])
+        .sort((a, b) => String(b.day || '').localeCompare(String(a.day || ''))).slice(0, 30);
+    const summaryRows = srows.map(r => {
+        const top = Object.entries(r.countries || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+            .map(([k, v]) => escapeHtml(String(k)) + ' ' + v).join(', ');
+        return `<tr><td style="white-space:nowrap;">${escapeHtml(r.day || '')}</td>
+            <td style="text-align:right;font-weight:700;">${r.total || 0}</td>
+            <td style="text-align:right;">${r.success || 0}</td>
+            <td style="text-align:right;">${r.blocked || 0}</td>
+            <td style="text-align:right;">${r.failed || 0}</td>
+            <td>${top || '—'}</td></tr>`;
+    }).join('') || '<tr><td colspan="6" style="color:var(--text-muted);">No summary yet</td></tr>';
     el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px;">
         <div class="card"><div style="font-size:28px;font-weight:800;">${rows.length}</div><div style="font-size:12px;color:var(--text-muted);">Recorded events</div></div>
         <div class="card"><div style="font-size:28px;font-weight:800;">${new Set(rows.map(r => r.at && r.at.slice(0, 10))).size}</div><div style="font-size:12px;color:var(--text-muted);">Days with activity</div></div>
@@ -24333,7 +24348,14 @@ async function renderAnalytics() {
         <div class="card"><div style="font-size:28px;font-weight:800;">${count('source').length}</div><div style="font-size:12px;color:var(--text-muted);">Source types</div></div>
     </div>
     <div class="card" style="margin-bottom:12px;">
-        <h3>🔐 Visitors &amp; Logins</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <h3 style="margin:0;">🔐 Visitors &amp; Logins</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-outline btn-sm" onclick="exportLoginEvents()">Export CSV</button>
+                <button class="btn btn-outline btn-sm" onclick="cleanLoginEvents()">Clean…</button>
+                <button class="btn btn-danger btn-sm" onclick="clearLoginEvents()">Clear log</button>
+            </div>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:8px 0 12px;">
             <div><div style="font-size:22px;font-weight:800;">${lrows.length}</div><div style="font-size:11px;color:var(--text-muted);">Sign-in records</div></div>
             <div><div style="font-size:22px;font-weight:800;color:var(--success);">${okCount}</div><div style="font-size:11px;color:var(--text-muted);">Signed in</div></div>
@@ -24342,6 +24364,10 @@ async function renderAnalytics() {
             <div><div style="font-size:22px;font-weight:800;">${uniqueAccounts}</div><div style="font-size:11px;color:var(--text-muted);">Accounts seen</div></div>
         </div>
         <div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:620px;"><thead><tr><th>When</th><th>Account</th><th>Role</th><th>Outcome</th><th>Country</th><th>IP</th><th>Device</th></tr></thead><tbody>${recent}</tbody></table></div>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+        <h3>📈 Sign-in Summary <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">(daily counts, kept even after cleaning)</span></h3>
+        <div style="overflow-x:auto;"><table class="data-table" style="width:100%;min-width:480px;"><thead><tr><th>Day</th><th style="text-align:right;">Total</th><th style="text-align:right;">Signed in</th><th style="text-align:right;">Blocked</th><th style="text-align:right;">Failed</th><th>Top countries</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:100%;">
         ${table('Sign-in Countries (incl. unlisted)', lcount('country'))}
@@ -24354,6 +24380,77 @@ async function renderAnalytics() {
         ${table('Roles', count('role'))}
     </div>
     <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">Page-visit analytics are aggregate counts. Visitors &amp; Logins keeps the account, IP, device type and country of each sign-in attempt — including countries not in your configured list — so you can see who signed in from where.</p>`;
+}
+// ---- Visitor log housekeeping ---------------------------------------------
+// Cleaning touches only the RAW sign-in rows (and their archive). The compact
+// daily summary is always kept, so long-term numbers are never lost.
+async function exportLoginEvents() {
+    const rows = await dbGetAll('loginEvents').catch(() => []);
+    let csv = 'When,Account,Role,Outcome,Country,Code,IP,Device,Reason\n';
+    rows.forEach(r => {
+        csv += `"${r.at || ''}","${r.username || ''}","${r.role || ''}","${r.outcome || ''}","${r.country || ''}","${r.countryCode || ''}","${r.ip || ''}","${r.device || ''}","${r.reason || ''}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'visitor_log_' + new Date().toISOString().split('T')[0] + '.csv';
+    a.click();
+    showToast('Visitor log exported!');
+}
+async function cleanLoginEvents() {
+    const rec = await dbGet('settings', 'visitorLog').catch(() => null);
+    const settings = (rec && rec.value !== undefined) ? rec.value : (rec || {});
+    const days = settings.retainDays !== undefined ? settings.retainDays : 180;
+    const keep = settings.maxEntries !== undefined ? settings.maxEntries : 0;
+    const rows = await dbGetAll('loginEvents').catch(() => []);
+    const content = `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.5;">Cleaning removes raw sign-in rows only. The daily summary on this screen is always kept, so long-term numbers are never lost. Automatic retention runs daily and at boot (default 180 days) unless changed here.</div>
+        <div class="form-group"><label>Keep raw entries for (days, 0 = keep forever)</label><input type="number" id="le-days" value="${days}" min="0" style="width:100%;"></div>
+        <div class="form-group"><label>Keep at most (entries in total, 0 = no limit)</label><input type="number" id="le-keep" value="${keep}" min="0" style="width:100%;"></div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="applyCleanLoginEvents(false)">Clean now</button>
+            <button class="btn btn-outline" onclick="applyCleanLoginEvents(true)">Save automatic retention</button>
+            <button class="btn btn-danger" onclick="clearLoginEvents()">Clear all raw entries</button>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.5;">"Save automatic retention" applies the settings above to the daily background clean without deleting anything now. Set both to 0 to keep everything.</div>`;
+    showModal('Clean Visitor Log <span style="font-size:11px;color:var(--text-muted);font-weight:normal;">(' + rows.length + ' raw entries)</span>', content, '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>');
+}
+async function applyCleanLoginEvents(saveOnly) {
+    const daysEl = document.getElementById('le-days');
+    const keepEl = document.getElementById('le-keep');
+    const days = Math.max(0, parseInt(daysEl && daysEl.value) || 0);
+    const keep = Math.max(0, parseInt(keepEl && keepEl.value) || 0);
+    try {
+        await dbPut('settings', { key: 'visitorLog', retainDays: days, maxEntries: keep, lastCleaned: Date.now() });
+    } catch (e) { return showToast('Could not save retention: ' + ((e && e.message) || e), { type: 'danger' }); }
+    if (saveOnly) {
+        closeModal();
+        showToast('Automatic retention saved: ' + (days ? 'keep ' + days + ' days' : 'no age limit') + (keep ? ', max ' + keep + ' entries' : '') + '.');
+        return;
+    }
+    if (!days && !keep) {
+        closeModal();
+        showToast('Saved: keeping everything. Nothing to clean.');
+        return;
+    }
+    try {
+        const res = await fetch('/api/db/settings/prune-login-events?days=' + days + '&keep=' + keep, { method: 'DELETE', headers: getAuthHeaders() });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        closeModal();
+        renderAnalytics();
+        showToast('Removed ' + (data.removed || 0) + ' entr' + (data.removed === 1 ? 'y' : 'ies') + '; ' + (data.remaining || 0) + ' kept.');
+    } catch (e) { showToast('Could not clean: ' + ((e && e.message) || e), { type: 'danger' }); }
+}
+async function clearLoginEvents() {
+    if (!await showConfirm('⚠️ Clear Visitor Log', 'Delete EVERY raw sign-in entry (and its archive)? The daily summary is kept. This cannot be undone.')) return;
+    try {
+        const res = await fetch('/api/db/settings/prune-login-events?clear=1', { method: 'DELETE', headers: getAuthHeaders() });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        closeModal();
+        renderAnalytics();
+        showToast('Visitor log cleared.');
+    } catch (e) { showToast('Could not clear: ' + ((e && e.message) || e), { type: 'danger' }); }
 }
 async function renderGlobalViewer() {
     const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
