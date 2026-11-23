@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=532" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=533" as="script">
     <style id="nf-combo-styles">
         .nf-combo { position: relative; }
         .nf-combo-native { display: none !important; }
@@ -1550,6 +1550,7 @@
                             <button class="btn btn-outline btn-sm" onclick="ownerRevokeSessions()">Sign out all sessions</button>
                             <button class="btn btn-outline btn-sm" onclick="ownerRequirePasswordReset('students')">Require new passwords — students</button>
                             <button class="btn btn-outline btn-sm" onclick="ownerRequirePasswordReset('staff')">Require new passwords — staff</button>
+                            <button class="btn btn-outline btn-sm" onclick="ownerResetAdminPassword()">Reset admin password</button>
                             <button class="btn btn-outline btn-sm" onclick="ownerEncryptSecrets()">Encrypt stored secrets</button>
                         </div>
                         <div id="owner-security-status" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
@@ -1830,7 +1831,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=532"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=533"></script>
     <script data-cfasync="false" src="js/admin-pdf.min.js?v=1"></script>
     <script data-cfasync="false" defer src="js/student-hub.min.js?v=108"></script>
     <script data-cfasync="false" defer src="js/discussions.js?v=5"></script>

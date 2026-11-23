@@ -25734,7 +25734,7 @@ const ADMIN_ACCESS_TABS = ADMIN_TABS;
 function isOwnerUser() {
     try {
         const u = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-        return !!u.isOwner;
+        return !!(u.isOwner || u.role === 'owner');
     } catch (e) { return false; }
 }
 function renderAdminAccessToggles() {
@@ -25826,6 +25826,33 @@ async function ownerRequirePasswordReset(scope) {
         showToast('Password reset required for ' + (data.count || 0) + ' account(s)');
     } catch (e) {
         ownerSecurityStatus((e && e.message) || 'Could not set the password requirement', false);
+    }
+}
+async function ownerResetAdminPassword() {
+    if (!isOwnerUser()) {
+        ownerSecurityStatus('Only the owner can reset the admin password', false);
+        return showToast('Only the owner can reset the admin password', { type: 'danger' });
+    }
+    const newPw = await showPrompt('Reset Admin Password', 'Enter a new password for the admin account (min 8 characters):');
+    if (!newPw) return;
+    if (String(newPw).length < 8) {
+        ownerSecurityStatus('Password must be at least 8 characters', false);
+        return showToast('Password must be at least 8 characters!', { type: 'danger' });
+    }
+    const ok = await showConfirm('Reset Admin Password', 'Set this new password for the admin account? All current admin sessions will be signed out.');
+    if (!ok) return;
+    try {
+        const res = await fetch('/api/reset-password', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ username: 'admin', newPassword: String(newPw) })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not reset the admin password');
+        ownerSecurityStatus('✓ Admin password reset. ' + (data.revoked || 0) + ' admin session(s) signed out.', true);
+        showToast('Admin password reset!', { type: 'success' });
+    } catch (e) {
+        ownerSecurityStatus((e && e.message) || 'Could not reset the admin password', false);
     }
 }
 async function ownerEncryptSecrets() {
