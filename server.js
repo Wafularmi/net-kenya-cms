@@ -1567,6 +1567,12 @@ function isOwnerUser(user) {
     const name = ownerUsername();
     return !!name && String(u.username || '').toLowerCase() === name.toLowerCase();
 }
+// The primary admin account is recoverable only by the owner. The Users screen
+// hides its reset button from everyone else; this helper lets the API enforce
+// the same rule even when the button is bypassed.
+function isPrimaryAdminUsername(username) {
+    return String(username || '').trim().toLowerCase() === 'admin';
+}
 // Only the owner and the overall administrator may issue OFFICIAL / FINAL
 // documents. Coordinators and assistants may still issue their own letters.
 function isOwnerOrAdminUser(user) {
@@ -8637,6 +8643,12 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                     }
                 }
                 if (!target) return json(res, 404, { error: 'Account not found' });
+                // The main admin account is the recovery key to the whole CMS.
+                // Only the owner may reset it; other admins keep their existing
+                // powers over ordinary accounts.
+                if (isPrimaryAdminUsername(target.username) && !isOwnerUser(authUser)) {
+                    return json(res, 403, { error: 'Only the owner can reset the admin password' });
+                }
                 if (!isAdmin && target.username !== authUser.username) {
                     // Coordinator resetting someone else: they may ONLY reset a
                     // student of their OWN country, and only via country-scoping.
@@ -8660,7 +8672,7 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                 // password keeps the session they are using.
                 const self = String(target.username).toLowerCase() === String(authUser.username).toLowerCase();
                 const revoked = revokeUserSessions(target.username, self ? requestToken(req) : '');
-                auditLog('reset-password', 'user', { username: target.username, method: resetToAdmission ? 'to-admission' : 'custom', revoked }, authUser.username);
+                auditLog('reset-password', 'user', { username: target.username, method: resetToAdmission ? 'to-admission' : 'custom', revoked, owner: isOwnerUser(authUser) }, authUser.username);
                 return json(res, 200, { ok: true, resetToAdmission, revoked });
             } catch { return json(res, 400, { error: 'Invalid request' }); }
         });

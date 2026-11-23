@@ -27188,6 +27188,9 @@ function generateCenterCode(country, existingCenters) {
 }
 async function editStudyCenter(id) { const c = await dbGet('studyCenters', id); if (!c) return; showStudyCenterForm(c); }
 async function deleteStudyCenter(id) { if (!await showConfirm('Confirm', 'Delete study center?')) return; await dbDelete('studyCenters', id); __admCcMap = null; renderStudyCenters(); showToast('Study center deleted'); logAudit('deleted', 'study-center', { id }); }
+function isPrimaryAdminUsername(username) {
+    return String(username || '').trim().toLowerCase() === 'admin';
+}
 async function renderUsers() {
     const users = await dbGetAll('users');
     const auditFilter = document.getElementById('audit-user');
@@ -27203,6 +27206,7 @@ async function renderUsers() {
     ) : users;
     const activeUsers = filtered.filter(u => u.status !== 'locked');
     const lockedUsers = filtered.filter(u => u.status === 'locked');
+    const ownerUser = isOwnerUser();
     let html = '';
     if (lockedUsers.length) {
         html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--danger);letter-spacing:1px;margin-bottom:6px;">🔒 Locked Accounts (${lockedUsers.length})</div>`;
@@ -27234,7 +27238,12 @@ async function renderUsers() {
             const r = window._regionsCache ? window._regionsCache.find(rr => rr.id === u.regionId) : null;
             regionInfo = `<br><span style="font-size:10px;color:var(--warning);">Region: ${r ? r.name : u.regionId}</span>`;
         }
-        return `<div class="event-item"><div><b>${u.username}</b> ${statusBadge}${u.country ? ` <span class="badge badge-info">${escapeHtml(u.country)}</span>` : ''}${regionInfo}${extraInfo}</div>${u.username === 'admin' ? '' : `<button class="btn btn-outline btn-sm" onclick="resetUserPassword('${u.username}')">🔑 Pwd</button> <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.username}')">Del</button>`}</div>`;
+        const primaryAdmin = isPrimaryAdminUsername(u.username);
+        const resetBtn = (!primaryAdmin || ownerUser)
+            ? `<button class="btn btn-outline btn-sm" onclick="resetUserPassword('${u.username}')" title="${primaryAdmin ? 'Reset admin password (owner only)' : 'Reset password'}">🔑 Pwd</button>`
+            : '';
+        const deleteBtn = primaryAdmin ? '' : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.username}')">Del</button>`;
+        return `<div class="event-item"><div><b>${u.username}</b> ${statusBadge}${u.country ? ` <span class="badge badge-info">${escapeHtml(u.country)}</span>` : ''}${regionInfo}${extraInfo}</div>${resetBtn}${resetBtn && deleteBtn ? ' ' : ''}${deleteBtn}</div>`;
     }).join('');
     document.getElementById('users-list').innerHTML = html || `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">${q ? 'No users match "' + q + '"' : 'No users'}</div>`;
     if (auditFilter) auditFilter.innerHTML = '<option value="">All Users</option>' + users.map(u => `<option value="${u.username}">${u.username}</option>`).join('');
@@ -27276,6 +27285,7 @@ async function saveUser() {
     await dbPut('users', user); closeModal(); renderUsers(); showToast(`User created! ${role === 'assistant' ? 'They can log in with username "' + username + '".' : ''}`, { type: 'success' }); logAudit('created', 'user', { username, role });
 }
 async function resetUserPassword(username) {
+    if (isPrimaryAdminUsername(username) && !isOwnerUser()) return showToast('Only the owner can reset the admin password', { type: 'danger' });
     const newPw = await showPrompt('Reset Password', 'Enter new password for "' + username + '":');
     if (!newPw || newPw.length < 8) return showToast('Password must be at least 8 characters!');
     if (!await showConfirm('Confirm Reset', 'Set new password for "' + username + '"?')) return;
