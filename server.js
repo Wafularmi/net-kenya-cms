@@ -8041,7 +8041,12 @@ let { input, password, country } = parsedBody;
                 // login body; either is accepted.
                 const deviceId = String((req.headers['x-device-id'] || (parsedBody && parsedBody.deviceId) || '')).trim().slice(0, 64);
                 if (country === undefined || country === null || country === 'undefined' || country === 'null') country = '';
-                process.stderr.write('LOGIN_TRY input=' + String(input).slice(0, 40) + ' country=' + String(country).slice(0, 20) + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n');
+                // Login attempts are already visible in Railway HTTP logs and
+                // the audit store. The synchronous stderr write is optional
+                // debug noise, not part of a fast login response.
+                if (process.env.LOGIN_DEBUG) {
+                    process.stderr.write('LOGIN_TRY input=' + String(input).slice(0, 40) + ' country=' + String(country).slice(0, 20) + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n');
+                }
                 if (!input || !password) return json(res, 400, { error: 'Enter username and password' });
                 if (loginRateBlocked(req, input)) {
                     return json(res, 429, { error: 'Too many failed attempts. Please try again in 15 minutes.' });
@@ -8127,7 +8132,13 @@ user = { username: candidate.phone, password: hashPassword(candidate.admissionNu
                         const countryNames = (Array.isArray(countriesList) ? countriesList : []).map(c => (typeof c === 'string' ? c : c && c.name)).filter(Boolean);
                         const countryNamesLower = countryNames.map(c => String(c).toLowerCase());
                         let countryLower = country ? String(country).toLowerCase() : '';
-                        try { process.stderr.write('LOGIN_DUMP input=' + String(input).slice(0, 30) + ' country=' + JSON.stringify(country) + ' countryLen=' + String(country || '').length + ' names=' + JSON.stringify(countryNames) + ' role=' + (user.role || '?') + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n'); } catch {}
+                        // Verbose login dump was written to stderr on every successful
+                // student sign-in. That is a synchronous log write on the login
+                // hot path; keep it available for debugging but off by default
+                // (LOGIN_DEBUG=1) now that HTTP logs carry status and duration.
+                if (process.env.LOGIN_DEBUG) {
+                    try { process.stderr.write('LOGIN_DUMP input=' + String(input).slice(0, 30) + ' country=' + JSON.stringify(country) + ' countryLen=' + String(country || '').length + ' names=' + JSON.stringify(countryNames) + ' role=' + (user.role || '?') + ' ip=' + (req.socket && req.socket.remoteAddress || '') + ' maint=' + isMaintenanceActive() + '\n'); } catch {}
+                }
                         if (user.role !== 'admin') {
                             if (countryNames.length > 0) {
                                 if (!country || !countryNamesLower.includes(countryLower)) {

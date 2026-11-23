@@ -30458,7 +30458,9 @@ async function checkMaintenanceNow() {
         if (!r.ok) return;
         const d = await r.json();
         handleMaintenancePush(d.active);
-        if (typeof updateMaintenanceBanner === 'function') updateMaintenanceBanner();
+        // Reuse the response we already fetched: the banner used to fetch the
+        // same tiny status endpoint a second time on every poll.
+        if (typeof updateMaintenanceBanner === 'function') updateMaintenanceBanner(d);
     } catch {}
 }
 function startMaintenanceLiveSync() {
@@ -30475,9 +30477,12 @@ function startMaintenanceLiveSync() {
         _maintSSE.onerror = () => {
             try { if (_maintSSE && _maintSSE.readyState === EventSource.CLOSED) setTimeout(startMaintenanceLiveSync, 3000); } catch {}
         };
-        // Fallback: tiny flag poll every 5s + immediate check on focus/return.
+        // Fallback: SSE pushes maintenance changes instantly. This poll is only
+        // a safety net for a dropped stream, so 2s was 30 needless requests a
+        // minute per tab. 30s is still quick, and focus/return checks stay
+        // immediate below.
         if (!_maintPoll) {
-            _maintPoll = setInterval(checkMaintenanceNow, 2000);
+            _maintPoll = setInterval(checkMaintenanceNow, 30000);
             document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkMaintenanceNow(); });
             window.addEventListener('focus', checkMaintenanceNow);
             window.addEventListener('pageshow', checkMaintenanceNow);
@@ -31169,7 +31174,7 @@ function initCollapsibleCards() {
 }
 
 
-function updateMaintenanceBanner() {
+function updateMaintenanceBanner(dataOpt) {
     try {
         const banners = [];
         const b1 = document.getElementById('maintenance-banner');
@@ -31177,9 +31182,7 @@ function updateMaintenanceBanner() {
         const b2 = document.getElementById('app-maintenance-banner');
         if (b2) banners.push(b2);
         if (banners.length === 0) return;
-        fetch('/api/maintenance-status', { cache: 'no-store' })
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
+        const apply = (data) => {
                 if (!data) { banners.forEach(b => { b.style.display = 'none'; }); return; }
                 const now = Date.now();
                 const recurringSchedule = !!(data.recurrence && data.recurrence !== 'one-time');
@@ -31232,7 +31235,11 @@ function updateMaintenanceBanner() {
                     return;
                 }
                 banners.forEach(b => { b.style.display = 'none'; });
-            })
+        };
+        if (dataOpt) { apply(dataOpt); return; }
+        fetch('/api/maintenance-status', { cache: 'no-store' })
+            .then(r => r.ok ? r.json() : null)
+            .then(apply)
             .catch(() => { banners.forEach(b => { b.style.display = 'none'; }); });
     } catch (e) {}
 }

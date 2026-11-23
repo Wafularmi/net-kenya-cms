@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="css/main.146.css?v=151">
     {{LOGO_CSS}}
     <link rel="stylesheet" href="css/components.css?v=128">
-    <link rel="preload" href="js/bundle.min.js?v=533" as="script">
+    <link rel="preload" href="js/bundle.min.js?v=534" as="script" fetchpriority="high">
     <style id="nf-combo-styles">
         .nf-combo { position: relative; }
         .nf-combo-native { display: none !important; }
@@ -37,9 +37,9 @@
         .card.collapsed .card-header-toggle .toggle-icon{transform:rotate(-90deg)}
         .card.collapsed .card-body{display:none}
     </style>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
     (function initPdfWorker(){
         function setWorker(){
@@ -1831,7 +1831,7 @@
     </div>
 </div>
 
-    <script data-cfasync="false" src="js/bundle.min.js?v=533"></script>
+    <script data-cfasync="false" src="js/bundle.min.js?v=534"></script>
     <script data-cfasync="false" src="js/admin-pdf.min.js?v=1"></script>
     <script data-cfasync="false" defer src="js/student-hub.min.js?v=108"></script>
     <script data-cfasync="false" defer src="js/discussions.js?v=5"></script>
