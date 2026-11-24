@@ -325,6 +325,48 @@ function maybeReinjectArchived(rec) {
     } catch (e) { console.error('reinject html failed:', rec.id, e); }
     return rec;
 }
+// ---- Certificate document archive / restore (owner only) ------------------
+// Certificate document files live on disk under DOC_STORE_DIR as
+//   cert-html-<key>.html   (archived HTML letters)
+//   <key>.pdf              (PDF certificates)
+// This lets the owner download every certificate document as a single base64
+// NDJSON archive, store it off-volume (e.g. on a Pinnacle server), and later
+// restore the certificate files only - without touching users, grades,
+// sessions, audit logs, or WhatsApp state.
+function isCertDocFilename(filename) {
+    return certKeyFromFilename(filename) !== null;
+}
+function certKeyFromFilename(filename) {
+    if (filename.startsWith('cert-html-') && filename.endsWith('.html')) return filename.slice(10, -5);
+    if (filename.endsWith('.pdf')) return filename.slice(0, -4);
+    return null;
+}
+function buildCertDocIndex() {
+    const byKey = new Map();
+    const consider = [...(db.certificates || []), ...(db.idCards || []), ...(db.idcards || [])];
+    for (const rec of consider) {
+        if (!rec || typeof rec !== 'object') continue;
+        const keys = [String(rec.id || ''), String(rec.docId || ''), String(rec.vCode || ''), String(rec.contentArchived || '')].filter(Boolean);
+        for (const k of keys) { if (!byKey.has(k)) byKey.set(k, rec); }
+    }
+    return byKey;
+}
+// List every certificate document file currently on disk under DOC_STORE_DIR.
+function listCertDocFiles() {
+    const out = [];
+    try {
+        if (!fs.existsSync(DOC_STORE_DIR)) return out;
+        const files = fs.readdirSync(DOC_STORE_DIR).filter(f => isCertDocFilename(f)).sort();
+        for (const f of files) {
+            try {
+                const full = path.join(DOC_STORE_DIR, f);
+                const st = fs.statSync(full);
+                out.push({ filename: f, key: certKeyFromFilename(f), mime: f.endsWith('.html') ? 'text/html' : 'application/pdf', size: st.size, path: full });
+            } catch {}
+        }
+    } catch {}
+    return out;
+}
 // Lazily externalize the inline PDF of every certificate/idCard record on read,
 // so legacy records get a disk copy + contentPath without a full migration job.
 // Returns records safe to serialize back to the client. Triggers a saveDB only
@@ -7843,6 +7885,132 @@ function handleAPI(req, res) {
                 broadcastEvent('db-restored', { stores: count });
                 json(res, 200, { ok: true, stores: count });
             } catch { json(res, 400, { error: 'Invalid JSON in backup file' }); }
+        });
+        return true;
+    }
+
+    // Owner-only certificate document archive / restore.
+    // All three require the owner account (not just admin), are audited, and
+    // never touch the login, exam, session, or WhatsApp paths.
+
+    // GET /api/certificates/archive/meta — preview of what would be archived
+    if (parts.length === 4 && parts[1] === 'certificates' && parts[2] === 'archive' && parts[3] === 'meta' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser || !authUser.isOwner) return json(res, 403, { error: 'Owner access required' });
+        const files = listCertDocFiles();
+        const total = files.reduce((a, f) => a + f.size, 0);
+        return json(res, 200, {
+            ok: true, fileCount: files.length, totalBytes: total,
+            generatedAt: new Date().toISOString(), generatedBy: authUser.username,
+            files: files.map(f => ({ filename: f.filename, key: f.key, mime: f.mime, size: f.size }))
+        });
+    }
+
+    // GET /api/certificates/archive — stream every certificate document as
+    // base64 NDJSON, for download and off-volume storage (e.g. Pinnacle).
+    if (parts.length === 3 && parts[1] === 'certificates' && parts[2] === 'archive' && req.method === 'GET') {
+        const authUser = getRequestUser(req);
+        if (!authUser || !authUser.isOwner) return json(res, 403, { error: 'Owner access required' });
+        const files = listCertDocFiles();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const downloadName = `certificates-archive-${ts}.ndjson`;
+        res.writeHead(200, {
+            'Content-Type': 'application/x-ndjson; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${downloadName}"`,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff'
+        });
+        let fileCount = 0, totalBytes = 0;
+        res.write(JSON.stringify({ type: 'header', version: 1, generatedAt: new Date().toISOString(), generatedBy: authUser.username, fileCount: files.length }) + '\n');
+        const certIndex = buildCertDocIndex();
+        for (const f of files) {
+            try {
+                const buf = fs.readFileSync(f.path);
+                const sha = crypto.createHash('sha256').update(buf).digest('hex');
+                const cert = certIndex.get(f.key) || null;
+                const line = {
+                    type: 'certificate', filename: f.filename, key: f.key, mime: f.mime,
+                    size: f.size, sha256: sha, base64: buf.toString('base64'),
+                    cert: cert ? {
+                        id: cert.id, docId: cert.docId, studentId: cert.studentId, studentName: cert.studentName,
+                        type: cert.type, docTitle: cert.docTitle, generatedAt: cert.generatedAt, vCode: cert.vCode,
+                        contentPath: cert.contentPath
+                    } : null
+                };
+                res.write(JSON.stringify(line) + '\n');
+                fileCount++; totalBytes += f.size;
+            } catch (e) {
+                res.write(JSON.stringify({ type: 'error', filename: f.filename, error: String(e.message || e) }) + '\n');
+            }
+        }
+        res.write(JSON.stringify({ type: 'footer', fileCount, totalBytes, generatedAt: new Date().toISOString() }) + '\n');
+        res.end();
+        auditLog('certificates-archive', 'certificates', { fileCount, totalBytes }, authUser.username);
+        return true;
+    }
+
+    // POST /api/certificates/restore — write certificate document files back
+    // from a previously downloaded archive NDJSON body, and reattach them to
+    // their DB records. Certificates only - nothing else is touched.
+    if (parts.length === 3 && parts[1] === 'certificates' && parts[2] === 'restore' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!authUser || !authUser.isOwner) return json(res, 403, { error: 'Owner access required' });
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 600 * 1024 * 1024) { try { req.socket.destroy(); } catch {} } });
+        req.on('end', () => {
+            let restored = 0, skipped = 0;
+            const errors = [];
+            try {
+                const lines = body.split('\n').filter(l => l.trim());
+                const certIndex = buildCertDocIndex();
+                ensureDocStore();
+                try { fs.mkdirSync(DOC_VOLUME_DIR, { recursive: true }); } catch {}
+                const storeDirty = {};
+                function touchStore(name) { storeDirty[name] = true; }
+                for (let i = 0; i < lines.length; i++) {
+                    let rec;
+                    try { rec = JSON.parse(lines[i]); } catch { skipped++; continue; }
+                    if (rec.type !== 'certificate' || !rec.filename || !rec.base64 || !rec.sha256) { skipped++; continue; }
+                    const key = certKeyFromFilename(rec.filename);
+                    if (!key) { skipped++; continue; }
+                    let buf;
+                    try { buf = Buffer.from(rec.base64, 'base64'); } catch { errors.push({ file: rec.filename, error: 'invalid base64' }); skipped++; continue; }
+                    if (crypto.createHash('sha256').update(buf).digest('hex') !== rec.sha256) { errors.push({ file: rec.filename, error: 'sha256 mismatch' }); skipped++; continue; }
+                    try {
+                        const dest = rec.filename.startsWith('cert-html-') ? htmlContentPath(key) : docPath(key);
+                        fs.writeFileSync(dest, buf);
+                        try { syncDocFileToVolume(rec.filename); } catch {}
+                        // Reattach to the matching DB record, stripping inline
+                        // content now that the authoritative bytes are on disk.
+                        const cert = certIndex.get(key);
+                        if (cert) {
+                            const toStore = Object.assign({}, cert);
+                            toStore.contentArchived = key;
+                            toStore.contentPath = '/api/doc-content/' + encodeURIComponent(key);
+                            delete toStore.content;
+                            const targetStores = ['certificates', 'idCards', 'idcards'];
+                            for (const sname of targetStores) {
+                                const store = db[sname];
+                                if (!Array.isArray(store)) continue;
+                                const idx = store.findIndex(x => x && (
+                                    String(x.id || '') === key ||
+                                    String(x.docId || '') === key ||
+                                    String(x.vCode || '') === key ||
+                                    String(x.contentArchived || '') === key
+                                ));
+                                if (idx >= 0) { store[idx] = toStore; touchStore(sname); break; }
+                            }
+                        }
+                        restored++;
+                    } catch (e) { errors.push({ file: rec.filename, error: String(e.message || e) }); skipped++; continue; }
+                }
+                for (const sname of Object.keys(storeDirty)) markStoreDirty(sname);
+                saveDB();
+                auditLog('certificates-restore', 'certificates', { restored, skipped, errors: errors.length }, authUser.username);
+                return json(res, 200, { ok: true, restored, skipped, errors });
+            } catch (e) {
+                return json(res, 500, { error: e.message || 'restore failed' });
+            }
         });
         return true;
     }
