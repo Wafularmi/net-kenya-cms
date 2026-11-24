@@ -8015,6 +8015,60 @@ function handleAPI(req, res) {
         return true;
     }
 
+    // POST /api/voucher/pdf - render voucher HTML to a real, downloadable PDF.
+    // The client renders the voucher (branding, signatures, chosen template)
+    // and posts the markup here; Puppeteer converts it with the selected paper
+    // size (A6 / A5 / A4) and the response is an attachment, not a print dialog.
+    if (parts.length === 3 && parts[1] === 'voucher' && parts[2] === 'pdf' && req.method === 'POST') {
+        const authUser = getRequestUser(req);
+        if (!authUser) return json(res, 401, { error: 'Not authenticated' });
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 12 * 1024 * 1024) { try { req.socket.destroy(); } catch {} } });
+        req.on('end', async () => {
+            let parsed;
+            try { parsed = JSON.parse(body); } catch { return json(res, 400, { error: 'Invalid body' }); }
+            const html = parsed && typeof parsed.html === 'string' ? parsed.html : '';
+            if (!html.trim()) return json(res, 400, { error: 'Missing voucher HTML' });
+            const wanted = String((parsed && parsed.paperSize) || 'A6').toUpperCase();
+            const format = wanted === 'A5' ? 'A5' : wanted === 'A4' ? 'A4' : 'A6';
+            const voucherNo = String((parsed && parsed.voucherNo) || 'voucher').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'voucher';
+            const margin = format === 'A6' ? '5mm' : format === 'A5' ? '7mm' : '10mm';
+            try {
+                const puppeteer = require('puppeteer-core');
+                const browser = await puppeteer.launch({
+                    headless: 'new',
+                    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+                    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                });
+                try {
+                    const page = await browser.newPage();
+                    const doc = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'
+                        + '@page{size:' + format + ';margin:' + margin + ';}'
+                        + 'html,body{margin:0;padding:0;background:#fff;}'
+                        + '*{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important;}'
+                        + 'img{max-width:100%;}'
+                        + '</style></head><body>' + html + '</body></html>';
+                    await page.setContent(doc, { waitUntil: 'networkidle0', timeout: 60000 });
+                    const pdf = await page.pdf({ format, printBackground: true, preferCSSPageSize: true });
+                    res.writeHead(200, {
+                        'Content-Type': 'application/pdf',
+                        'Content-Length': pdf.length,
+                        'Content-Disposition': 'attachment; filename="voucher-' + voucherNo + '.pdf"',
+                        'X-Content-Type-Options': 'nosniff',
+                        'Cache-Control': 'no-store'
+                    });
+                    res.end(pdf);
+                    try { auditLog('voucher-pdf-download', 'expense', { voucherNo, format, bytes: pdf.length }, authUser.username); } catch (e) {}
+                } finally { await browser.close(); }
+            } catch (e) {
+                console.error('voucher pdf error:', e && e.message);
+                return json(res, 500, { error: 'Could not generate PDF: ' + (e && e.message ? e.message : 'unknown error') });
+            }
+            return true;
+        });
+        return true;
+    }
+
 // GET /api/db-size â€” report database stats
     if (parts.length === 2 && parts[1] === 'db-size' && req.method === 'GET') {
         const authUser = getRequestUser(req);

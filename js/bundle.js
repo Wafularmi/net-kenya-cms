@@ -11330,8 +11330,9 @@ async function showExpenseVoucher(expenseId) {
             </div>
             <div style="font-size:9px;color:var(--text-muted);margin-top:6px;">Signatures are saved per-voucher. Changes take effect immediately.</div>
         </div>`;
-    const paperSize = window._voucherPaperSize || 'A4';
-    const paperOptions = ['A4','A5','A6'].map(s =>
+    let paperSize = window._voucherPaperSize || 'A5';
+    if (paperSize !== 'A5' && paperSize !== 'A6') paperSize = 'A5';
+    const paperOptions = ['A5','A6'].map(s =>
         `<option value="${s}"${s === paperSize ? ' selected' : ''}>${s}</option>`
     ).join('');
     showModal('Voucher - ' + expense.id,
@@ -11399,7 +11400,8 @@ async function handleEditSigRemove(type) {
     if (el) el.innerHTML = '<div style="height:32px;border:1px dashed var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--text-muted);">None</div>';
 }
 function printExpenseVoucher(expenseId) {
-    const paperSize = window._voucherPaperSize || 'A4';
+    let paperSize = window._voucherPaperSize || 'A5';
+    if (paperSize !== 'A5' && paperSize !== 'A6') paperSize = 'A5';
     dbGetAll('expenses').then(async expenses => {
         const expense = expenses.find(e => e.id === expenseId);
         if (!expense) return showToast('Expense not found!');
@@ -11441,10 +11443,9 @@ function voucherImagesReady(node) {
 // window, which is known to render correctly, instead of saving an empty file.
 
 function openVoucherPrintWindow(html, paperSize) {
-    const pageCss = paperSize === 'A5' ? '@page{size:A5;margin:8mm;}'
-        : paperSize === 'A6' ? '@page{size:A6;margin:6mm;}'
-        : '@page{size:A4;margin:10mm;}';
-    const bodyFontSize = paperSize === 'A6' ? '7px' : paperSize === 'A5' ? '8px' : '10px';
+    const pageCss = paperSize === 'A6' ? '@page{size:A6;margin:5mm;}'
+        : '@page{size:A5;margin:7mm;}';
+    const bodyFontSize = paperSize === 'A6' ? '7px' : '8px';
     const w = window.open('', '_blank', 'width=800,height=600');
     if (!w) { showToast('Allow pop-ups to print the voucher', { type: 'danger' }); return null; }
     w.document.write('<html><head><title>Petty Cash Voucher</title><style>'
@@ -11456,7 +11457,8 @@ function openVoucherPrintWindow(html, paperSize) {
     return w;
 }
 async function downloadVoucherPdf(expenseId) {
-    const paperSize = window._voucherPaperSize || 'A4';
+    let paperSize = window._voucherPaperSize || 'A5';
+    if (paperSize !== 'A5' && paperSize !== 'A6') paperSize = 'A5';
     const expenses = await dbGetAll('expenses');
     const expense = expenses.find(e => e.id === expenseId);
     if (!expense) return showToast('Expense not found!');
@@ -11471,20 +11473,32 @@ async function downloadVoucherPdf(expenseId) {
         accentColor: branding?.accentColor || '#1e293b'
     };
     const html = renderVoucherHtml(expense, template, sigs);
-    // The old download used html2pdf, which asks html2canvas for a bitmap of an
-    // element parked off-screen. html2canvas does not reliably rasterise
-    // anything outside the viewport, so the saved PDF came out BLANK even though
-    // the on-screen preview was perfect — and html2pdf 0.10.1 keeps
-    // html2canvas/jsPDF internal, so there is no hook to even detect that.
-    //
-    // Instead we render the voucher into a real, on-screen print window and let
-    // the browser do the PDF conversion. It prints exactly what the preview
-    // shows: details, logo and both signatures, with no rasteriser in between.
-    const w = openVoucherPrintWindow(html, paperSize);
-    if (!w) return;
-    await voucherImagesReady(w.document);
-    showToast('Choose "Save as PDF" as the destination');
-    setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 250);
+    // Server-side Puppeteer render: returns a real PDF as an attachment at the
+    // selected paper size (A6/A5). No print dialog, no blank html2canvas output.
+    try {
+        const headers = getAuthHeaders();
+        const res = await fetch('/api/voucher/pdf', {
+            method: 'POST', headers,
+            body: JSON.stringify({ html, paperSize, voucherNo: expense.voucherNo || expense.id })
+        });
+        if (!res.ok) {
+            let msg = 'Could not download PDF';
+            try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
+            return showToast(msg, { type: 'danger' });
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `voucher-${expense.voucherNo || expense.id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        showToast(`Voucher PDF downloaded (${paperSize})`, { type: 'success' });
+    } catch (e) {
+        showToast('Could not download PDF: ' + (e && e.message ? e.message : 'network error'), { type: 'danger' });
+    }
 }
 function showCashBook() {
     const content = `
